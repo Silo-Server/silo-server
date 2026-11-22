@@ -1,5 +1,10 @@
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  QueryObserver,
+  onlineManager,
+} from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
@@ -7,6 +12,7 @@ import { afterEach, describe, expect, it, vi, beforeEach } from "vitest";
 import { setAccessToken, setProfileId } from "@/api/client";
 import { installPolicyStorageMocks, jsonResponse } from "@/pages/admin-policy/policyTestUtils";
 import type { FileVersion, ItemDetail, Season } from "@/api/types";
+import type { PrePlaySubtitleSelection } from "@/player/types";
 import { catalogKeys } from "@/hooks/queries/keys";
 import EpisodeContent from "./EpisodeContent";
 import { makeFileVersion, makeItemDetail } from "./itemDetail.test-support";
@@ -92,11 +98,6 @@ vi.mock("@/hooks/queries/ratings", () => ({
   useRating: mocks.useRating,
   useSetRating: mocks.useSetRating,
   useDeleteRating: mocks.useDeleteRating,
-}));
-
-vi.mock("@/hooks/queries/subtitles", () => ({
-  useDeleteSubtitlePreference: () => ({ mutate: vi.fn() }),
-  useSetSubtitlePreference: () => ({ mutate: vi.fn() }),
 }));
 
 vi.mock("@/components/CastCarousel", () => ({
@@ -436,7 +437,7 @@ describe("EpisodeContent", () => {
     },
   );
 
-  describe("pre-play audio choice", () => {
+  describe("pre-play track choices", () => {
     const tracks = [
       {
         language: "en",
@@ -455,6 +456,10 @@ describe("EpisodeContent", () => {
       onSelectAudioTrack: (index: number) => void;
       onResetAudioSelection: () => void;
       onSelectVersion: (version: FileVersion) => void;
+      prePlaySubtitleMode: string;
+      explicitSubtitleSelection: PrePlaySubtitleSelection | null;
+      onSelectSubtitle: (selection: PrePlaySubtitleSelection) => void;
+      onSelectSubtitleOff: () => void;
     };
     const actionBar = () => mocks.capturedActionBarProps.value as unknown as AudioProps;
 
@@ -472,16 +477,18 @@ describe("EpisodeContent", () => {
       return requests;
     }
 
-    function renderWithTracks(versions = [makeFileVersion({ audio_tracks: tracks })]) {
+    function renderWithTracks(
+      versions = [makeFileVersion({ audio_tracks: tracks })],
+      client = new QueryClient({ defaultOptions: { mutations: { retry: false } } }),
+    ) {
       render(
-        <QueryClientProvider
-          client={new QueryClient({ defaultOptions: { mutations: { retry: false } } })}
-        >
+        <QueryClientProvider client={client}>
           <MemoryRouter initialEntries={["/item/episode-1"]}>
             <EpisodeContent item={makeEpisodeItem({ versions })} />
           </MemoryRouter>
         </QueryClientProvider>,
       );
+      return client;
     }
 
     beforeEach(() => {
@@ -491,6 +498,7 @@ describe("EpisodeContent", () => {
     });
     afterEach(() => {
       cleanup();
+      onlineManager.setOnline(true);
       vi.unstubAllGlobals();
     });
 
@@ -604,6 +612,103 @@ describe("EpisodeContent", () => {
           explicitAudioTrackIndex: 1,
         }),
       );
+    });
+
+    it("keeps a saved pick when a later pick fails while the detail still refetches", async () => {
+      stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      const client = new QueryClient({ defaultOptions: { mutations: { retry: false } } });
+      // An open detail page: the save's invalidation refetches it, and that
+      // refetch never finishes here.
+      let detailFetches = 0;
+      const detail = new QueryObserver(client, {
+        queryKey: catalogKeys.itemDetail("episode-1"),
+        queryFn: () => (++detailFetches === 1 ? Promise.resolve({}) : new Promise(() => {})),
+      });
+      const unsubscribe = detail.subscribe(() => {});
+      await waitFor(() => expect(detail.getCurrentResult().isSuccess).toBe(true));
+      renderWithTracks(undefined, client);
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      await waitFor(() => expect(detailFetches).toBe(2));
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "explicit",
+          explicitAudioTrackIndex: 1,
+        }),
+      );
+      unsubscribe();
+    });
+
+    it("shows an earlier pick that lands after a later offline pick was refused", async () => {
+      let releaseFirst!: () => void;
+      const firstHeld = new Promise<void>((resolve) => (releaseFirst = resolve));
+      const requests = stubWrites(async () => {
+        await firstHeld;
+        return new Response(null, { status: 204 });
+      });
+      renderWithTracks();
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      await waitFor(() => expect(requests).toHaveLength(1));
+      onlineManager.setOnline(false);
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "auto",
+          explicitAudioTrackIndex: null,
+        }),
+      );
+      onlineManager.setOnline(true);
+      releaseFirst();
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "explicit",
+          explicitAudioTrackIndex: 1,
+        }),
+      );
+      expect(requests).toHaveLength(1);
+    });
+
+    it("puts the subtitle selector back to the saved pick when Off is not saved", async () => {
+      const requests = stubWrites(async (call) =>
+        call === 1
+          ? new Response(null, { status: 204 })
+          : jsonResponse({ type: "about:blank", title: "Bad Request", status: 400 }, 400),
+      );
+      const client = renderWithTracks();
+      const english: PrePlaySubtitleSelection = {
+        source: "embedded",
+        language: "en",
+        codec: "subrip",
+        track_index: 3,
+      };
+
+      act(() => actionBar().onSelectSubtitle(english));
+      await waitFor(() =>
+        expect(
+          client
+            .getMutationCache()
+            .getAll()
+            .map((m) => m.state.status),
+        ).toEqual(["success"]),
+      );
+      act(() => actionBar().onSelectSubtitleOff());
+      expect(actionBar()).toMatchObject({ prePlaySubtitleMode: "off" });
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          prePlaySubtitleMode: "explicit",
+          explicitSubtitleSelection: english,
+        }),
+      );
+      expect(requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
+        "PUT /api/v2/subtitle-prefs/series-1",
+        "PUT /api/v2/subtitle-prefs/series-1",
+      ]);
     });
 
     it("puts the selector back to the last saved choice when quick picks all fail", async () => {

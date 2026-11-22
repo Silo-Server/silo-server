@@ -26,7 +26,12 @@ type candidateV3 struct {
 type candidateRouteV3 int
 
 const (
-	candidateOriginalV3 candidateRouteV3 = iota
+	// candidateSurroundBitstreamV3 is a copy-video HLS remux that converts a
+	// surround track the client would decode to PCM into E-AC-3 or AC-3 5.1
+	// its sink passes through (see surround_conversion_v3.go). It improves on
+	// the original file, so it comes first.
+	candidateSurroundBitstreamV3 candidateRouteV3 = iota
+	candidateOriginalV3
 	candidateRemuxV3
 	candidateTranscodeV3
 )
@@ -73,7 +78,8 @@ const (
 // candidatePreferenceV3 orders candidates; each rule breaks the ties the rules
 // before it leave.
 var candidatePreferenceV3 = []func(a, b candidateV3) int{
-	// The original file, then a copy remux, then an encode.
+	// A surround bitstream remux, then the original file, then a copy remux,
+	// then an encode.
 	func(a, b candidateV3) int { return cmp.Compare(a.route, b.route) },
 	// Dolby Vision conversions before the copy, the copy before the strip,
 	// HEVC before H.264.
@@ -200,7 +206,7 @@ func (p *candidatePlannerV3) selectCandidateV3(candidates []candidateV3, enter f
 	evaluate func(candidateV3) (*PlannerResultV3, *PlannerResultV3), exhausted PlannerResultV3) PlannerResultV3 {
 	output := p.input.Request.ClientPlaybackContext.Output.OutputContextID
 	end := candidateTranscodeV3 + 1
-	next := candidateOriginalV3
+	next := candidateSurroundBitstreamV3
 	for _, candidate := range append(candidates, candidateV3{route: end}) {
 		for ; next <= candidate.route && next < end; next++ {
 			if stop := enter(next); stop != nil {

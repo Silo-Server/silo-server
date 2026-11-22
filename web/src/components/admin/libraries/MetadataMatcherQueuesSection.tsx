@@ -6,6 +6,7 @@ import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDia
 import {
   CARD_ACTION_CLASS,
   CardActions,
+  CardPath,
   DiagnosticsCard,
   DiagnosticsCardList,
 } from "@/components/admin/libraries/DiagnosticsListParts";
@@ -25,7 +26,7 @@ import {
   useLibraryMetadataMatchQueues,
   useRetryLibraryMetadataMatchQueue,
 } from "@/hooks/queries/admin/libraries";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
 import { joinList } from "@/lib/appLocale";
 import { formatDecimal } from "@/lib/numberFormat";
 import { cn } from "@/lib/utils";
@@ -67,7 +68,7 @@ function describeRejection(decision: MatchDecision, t: Translate): string | unde
 
 /** A candidate's title with its year, as the provider gave them. */
 function candidateTitle(candidate: { title: string; year?: number | null }): string {
-  return candidate.year ? `${candidate.title} (${candidate.year})` : candidate.title;
+  return candidate.year ? `${candidate.title} (${numberText(candidate.year)})` : candidate.title;
 }
 
 /** A queue entry's state badge; a state this build does not know shows as sent. */
@@ -85,15 +86,28 @@ function scoreBar(decision: MatchDecision): number | undefined {
   return decision.rejection ? undefined : decision.threshold;
 }
 
-export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library[] }) {
+export function MetadataMatcherQueuesSection({
+  libraries,
+  embedded = false,
+}: {
+  libraries: Library[];
+  embedded?: boolean;
+}) {
   const t = useT();
   const showTable = useLibrariesTableLayout();
   const [open, setOpen] = useState(false);
+  const isOpen = embedded || open;
   const [selectedLibraryID, setSelectedLibraryID] = useState<number | null>(null);
   // Index into the loaded pages of the detail query; the query retains every
   // page's cursor so the periodic refetch refreshes them in place.
   const [detailPageIndex, setDetailPageIndex] = useState(0);
-  const { data: queues = [] } = useLibraryMetadataMatchQueues();
+  const {
+    data: rawQueues,
+    isPending: queuesPending,
+    isError: queuesError,
+    refetch: refetchQueues,
+  } = useLibraryMetadataMatchQueues();
+  const queues = rawQueues ?? [];
   // Passing null while collapsed disables the detail query entirely so a
   // hidden expansion does not keep polling the per-library endpoint.
   const {
@@ -101,7 +115,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
     isFetching: detailFetching,
     hasNextPage,
     fetchNextPage,
-  } = useLibraryMetadataMatchQueueDetail(open ? selectedLibraryID : null);
+  } = useLibraryMetadataMatchQueueDetail(isOpen ? selectedLibraryID : null);
   const retry = useRetryLibraryMetadataMatchQueue();
   const total = queues.reduce((sum, queue) => sum + queue.total_count, 0);
   const loadedPages = detailPages?.pages ?? [];
@@ -130,7 +144,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
         ...detail.raw_files.map((entry) => {
           const identity = [
             entry.base_title,
-            entry.base_year ? `(${entry.base_year})` : "",
+            entry.base_year ? `(${numberText(entry.base_year)})` : "",
             entry.base_type ? `[${entry.base_type}]` : "",
           ]
             .filter(Boolean)
@@ -149,7 +163,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
       ]
     : [];
 
-  if (total === 0) return null;
+  if (!embedded && total === 0) return null;
 
   const libraryName = (libraryID: number) =>
     libraries.find((entry) => entry.id === libraryID)?.name ??
@@ -175,10 +189,10 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
   const parkedCount = (count: number) =>
     count > 0 ? (
       <Badge variant="outline" className="border-amber-500/30 text-amber-600">
-        {count}
+        {numberText(count)}
       </Badge>
     ) : (
-      0
+      numberText(0)
     );
   // The selected library's entries and pager, under its table row or in its card.
   const queueDetail = (touch: boolean) => (
@@ -206,6 +220,137 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
     />
   );
 
+  const body =
+    rawQueues === undefined && queuesError ? (
+      <div
+        role="alert"
+        className="border-border/40 bg-background/40 text-destructive flex flex-col items-center gap-3 rounded-xl border px-4 py-8 text-center text-sm"
+      >
+        <span>{t("web.admin.common.diagnosticsSection.countError")}</span>
+        <Button variant="outline" size="sm" onClick={() => void refetchQueues()}>
+          {t("common.retry")}
+        </Button>
+      </div>
+    ) : rawQueues === undefined && queuesPending ? (
+      <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
+        {t("common.loading")}
+      </div>
+    ) : queues.length === 0 ? (
+      <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
+        {t("web.admin.libraries.health.matcherEmpty")}
+      </div>
+    ) : showTable ? (
+      <div className="overflow-hidden rounded-xl border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>{t("web.admin.common.libraryEditor.matcher.library")}</TableHead>
+              <TableHead className="text-end">
+                {t("web.admin.common.libraryEditor.matcher.pending")}
+              </TableHead>
+              <TableHead className="text-end">
+                {t("web.admin.common.libraryEditor.matcher.parked")}
+              </TableHead>
+              <TableHead className="w-28" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {queues.map((queue) => {
+              const selected = selectedLibraryID === queue.library_id;
+              return (
+                <Fragment key={queue.library_id}>
+                  <TableRow
+                    className="cursor-pointer"
+                    onClick={() => toggleLibrary(queue.library_id)}
+                  >
+                    <TableCell className="font-medium">{libraryName(queue.library_id)}</TableCell>
+                    <TableCell className="text-end tabular-nums">
+                      {numberText(queue.pending_count)}
+                    </TableCell>
+                    <TableCell className="text-end tabular-nums">
+                      {parkedCount(queue.parked_count)}
+                    </TableCell>
+                    <TableCell className="text-end">{retryButton(queue.library_id)}</TableCell>
+                  </TableRow>
+                  {selected ? (
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={4} className="bg-muted/30 p-3">
+                        {queueDetail(false)}
+                      </TableCell>
+                    </TableRow>
+                  ) : null}
+                </Fragment>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    ) : (
+      <DiagnosticsCardList>
+        {queues.map((queue) => {
+          const selected = selectedLibraryID === queue.library_id;
+          return (
+            <DiagnosticsCard key={queue.library_id}>
+              {/* The card's heading opens the library's entries, as a table row click does. */}
+              <button
+                type="button"
+                className="hover:bg-surface-hover/40 -m-2 flex min-h-11 w-[calc(100%+1rem)] items-center gap-3 rounded-xl p-2 text-start transition-colors"
+                aria-expanded={selected}
+                onClick={() => toggleLibrary(queue.library_id)}
+              >
+                <span className="min-w-0 flex-1 space-y-1">
+                  <span className="block font-medium break-words">
+                    {libraryName(queue.library_id)}
+                  </span>
+                  <span className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+                    <span className="inline-flex items-center gap-1.5">
+                      {t("web.admin.common.libraryEditor.matcher.pending")}
+                      <span className="text-foreground tabular-nums">
+                        {numberText(queue.pending_count)}
+                      </span>
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      {t("web.admin.common.libraryEditor.matcher.parked")}
+                      <span className="text-foreground tabular-nums">
+                        {parkedCount(queue.parked_count)}
+                      </span>
+                    </span>
+                  </span>
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "text-muted-foreground h-4 w-4 shrink-0 transition-transform",
+                    !selected && "-rotate-90 rtl:rotate-90",
+                  )}
+                  aria-hidden="true"
+                />
+              </button>
+              {selected ? (
+                <div className="bg-muted/30 rounded-xl p-3">{queueDetail(true)}</div>
+              ) : null}
+              <CardActions>{retryButton(queue.library_id, CARD_ACTION_CLASS)}</CardActions>
+            </DiagnosticsCard>
+          );
+        })}
+      </DiagnosticsCardList>
+    );
+
+  if (embedded) {
+    return (
+      <section className="surface-panel space-y-3 rounded-2xl border-0 p-4 sm:p-5">
+        <div className="space-y-0.5">
+          <h2 className="text-sm font-semibold">
+            {t("web.admin.common.libraryEditor.matcher.title")}
+          </h2>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.common.libraryEditor.matcher.description")}
+          </p>
+        </div>
+        {body}
+      </section>
+    );
+  }
+
   return (
     <CollapsibleDiagnosticsSection
       title={t("web.admin.common.libraryEditor.matcher.title")}
@@ -221,97 +366,7 @@ export function MetadataMatcherQueuesSection({ libraries }: { libraries: Library
         }
       }}
     >
-      {showTable ? (
-        <div className="overflow-hidden rounded-xl border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>{t("web.admin.common.libraryEditor.matcher.library")}</TableHead>
-                <TableHead className="text-end">
-                  {t("web.admin.common.libraryEditor.matcher.pending")}
-                </TableHead>
-                <TableHead className="text-end">
-                  {t("web.admin.common.libraryEditor.matcher.parked")}
-                </TableHead>
-                <TableHead className="w-28" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {queues.map((queue) => {
-                const selected = selectedLibraryID === queue.library_id;
-                return (
-                  <Fragment key={queue.library_id}>
-                    <TableRow
-                      className="cursor-pointer"
-                      onClick={() => toggleLibrary(queue.library_id)}
-                    >
-                      <TableCell className="font-medium">{libraryName(queue.library_id)}</TableCell>
-                      <TableCell className="text-end tabular-nums">{queue.pending_count}</TableCell>
-                      <TableCell className="text-end tabular-nums">
-                        {parkedCount(queue.parked_count)}
-                      </TableCell>
-                      <TableCell className="text-end">{retryButton(queue.library_id)}</TableCell>
-                    </TableRow>
-                    {selected ? (
-                      <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={4} className="bg-muted/30 p-3">
-                          {queueDetail(false)}
-                        </TableCell>
-                      </TableRow>
-                    ) : null}
-                  </Fragment>
-                );
-              })}
-            </TableBody>
-          </Table>
-        </div>
-      ) : (
-        <DiagnosticsCardList>
-          {queues.map((queue) => {
-            const selected = selectedLibraryID === queue.library_id;
-            return (
-              <DiagnosticsCard key={queue.library_id}>
-                {/* The card's heading opens the library's entries, as a table row click does. */}
-                <button
-                  type="button"
-                  className="hover:bg-surface-hover/40 -m-2 flex min-h-11 w-[calc(100%+1rem)] items-center gap-3 rounded-xl p-2 text-start transition-colors"
-                  aria-expanded={selected}
-                  onClick={() => toggleLibrary(queue.library_id)}
-                >
-                  <span className="min-w-0 flex-1 space-y-1">
-                    <span className="block font-medium break-words">
-                      {libraryName(queue.library_id)}
-                    </span>
-                    <span className="text-muted-foreground flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
-                      <span className="inline-flex items-center gap-1.5">
-                        {t("web.admin.common.libraryEditor.matcher.pending")}
-                        <span className="text-foreground tabular-nums">{queue.pending_count}</span>
-                      </span>
-                      <span className="inline-flex items-center gap-1.5">
-                        {t("web.admin.common.libraryEditor.matcher.parked")}
-                        <span className="text-foreground tabular-nums">
-                          {parkedCount(queue.parked_count)}
-                        </span>
-                      </span>
-                    </span>
-                  </span>
-                  <ChevronDown
-                    className={cn(
-                      "text-muted-foreground h-4 w-4 shrink-0 transition-transform",
-                      !selected && "-rotate-90 rtl:rotate-90",
-                    )}
-                    aria-hidden="true"
-                  />
-                </button>
-                {selected ? (
-                  <div className="bg-muted/30 rounded-xl p-3">{queueDetail(true)}</div>
-                ) : null}
-                <CardActions>{retryButton(queue.library_id, CARD_ACTION_CLASS)}</CardActions>
-              </DiagnosticsCard>
-            );
-          })}
-        </DiagnosticsCardList>
-      )}
+      {body}
     </CollapsibleDiagnosticsSection>
   );
 }
@@ -354,12 +409,13 @@ function MatcherQueueDetail({
                 touch ? "flex-col items-start" : "items-center justify-between",
               )}
             >
-              <code
-                className={cn("min-w-0 font-mono", touch ? "max-w-full break-all" : "truncate")}
-                dir={touch ? "ltr" : undefined}
-              >
-                {path}
-              </code>
+              {touch ? (
+                <CardPath path={path} className="max-w-full min-w-0 text-inherit" />
+              ) : (
+                <code className="min-w-0 truncate font-mono" dir="ltr">
+                  {path}
+                </code>
+              )}
               <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                 {failureKind ? (
                   <Badge variant="outline">{formatFailureKind(failureKind)}</Badge>
@@ -384,7 +440,9 @@ function MatcherQueueDetail({
                       touch && "break-words",
                     )}
                   >
-                    <span className="text-foreground font-medium">{candidateTitle(candidate)}</span>
+                    <span dir="auto" className="text-foreground font-medium">
+                      {candidateTitle(candidate)}
+                    </span>
                     <span className="tabular-nums">
                       {bar === undefined
                         ? t("web.admin.common.libraryEditor.matcher.score", {

@@ -9,24 +9,46 @@ no-store responses:
   defaults applied, using the same redaction policy as stored settings.
 - `GET /api/v2/admin/settings/restart-keys`: the compiled `keys` and `prefixes`
   whose changes need a server restart.
-- `GET /api/v2/admin/settings/sensitive-status`: configured secret key names and
-  `managed_by_env` names. Values are never returned. Both fields are arrays,
-  including when empty. `configured` leaves out machine-managed keys, such as
-  the JWT signing keys the server generates itself.
+- `GET /api/v2/admin/settings/sensitive-status`: configured secret key names,
+  `managed_by_env` names, and `managed_by_env_vars`. Values are never returned.
+  `configured` and `managed_by_env` are arrays and `managed_by_env_vars` is an
+  object, all present when empty. `configured` leaves out machine-managed
+  keys, such as the JWT signing keys the server generates itself.
 
-`managed_by_env` lists the keys the server's environment sets on every start:
-`redis.url` and `redis.db` (`REDIS_URL`), `clientip.trusted_proxies`
-(`SILO_TRUSTED_PROXIES`), `catalog.search.provider` (`SILO_SEARCH_PROVIDER`),
-`catalog.search.meilisearch.url` (`SILO_MEILISEARCH_URL`), and
-`catalog.search.meilisearch.api_key` (`SILO_MEILISEARCH_API_KEY`). The
-environment variables are read by the server answering the request, so the list
-can differ between API servers that were started differently. A write of one of
-these keys is refused with the detail `<key> is managed by an environment
-variable`; `redis.db` has one exception, described below. The values of
-`SILO_TRUSTED_PROXIES` and the search variables are also stored at startup, so
-stored settings show the trusted proxies, the search provider and the
-Meilisearch URL in effect; the API key is stored encrypted and, like every
-secret, only appears in `configured`. `REDIS_URL` is never stored.
+`managed_by_env` lists the keys the server's environment sets on every start,
+and `managed_by_env_vars` maps each of them to the variable that sets it, such
+as `{"server.public_url": "SILO_PUBLIC_URL", "redis.db": "REDIS_URL"}`. The web
+settings pages show that name on a read-only field instead of keeping their own
+list. The variables are `REDIS_URL` (for `redis.url` and `redis.db`) and the
+table in `internal/config/env_settings.go`, which gives each variable a scope.
+`REDIS_URL` and each secret in the table (a key stored encrypted) can instead
+be read from the file its `_FILE` variant names, such as `REDIS_URL_FILE` or
+`SILO_SMTP_PASSWORD_FILE`; the map then names that variable.
+
+- Stored: an API server that starts with the variable set checks the value the
+  way an admin save does (per-key normalization, the cross-field validation
+  over the settings it will run on, the artwork root check, and the recorded
+  storage location guard), writes the values that differ to `server_settings`
+  in one batch, and publishes a settings-changed event for each. Stored
+  and effective settings then show the value; secrets are stored encrypted and,
+  like every secret, only appear in `configured`. An invalid value stops
+  startup with an error naming the variable.
+- Process: the value overlays this server's settings at startup and on every
+  reload and is never stored, so effective settings show it on this server
+  only.
+
+The environment variables are read by the server answering the request, so the
+lists can differ between API servers that were started differently. A write of
+one of these keys is refused with the detail `<key> is managed by an
+environment variable`; `redis.db` has one exception, described below.
+`REDIS_URL` is never stored. While any storage key (`artwork.*`, `s3.public_*`,
+`s3.private_*`) is set by the environment, `POST /api/v2/admin/storage-transitions`
+is refused with a validation problem naming the variables, because the
+environment would put its values back on the next start. A transition staged
+before a restart that added such a variable fails when its job runs, for the
+same reason. Both checks look at the environment of the API server that
+handles the request or runs the job, so every API server has to be restarted
+without the storage variables before a transition.
 
 Stored and effective settings are string dictionaries keyed by the server
 settings registry. An empty dictionary is `{}`. Inspection copies stored values
@@ -105,6 +127,23 @@ converted, because provider addresses are shown to administrators and the AI
 clients never handled a query; that job stays unconfigured and startup logs a
 warning naming the legacy setting. HTTP Basic authentication through the URL
 is not supported; such a proxy needs to accept the provider's API key.
+
+The deployment can also declare providers, in the `ai_providers` section of
+its deployment document (`SILO_CONFIG` or `SILO_CONFIG_FILE`, or the older
+names `SILO_PLUGINS` and `SILO_PLUGINS_FILE`). Each API server
+that reads the document stores them when it starts, in the same transaction as
+the settings its environment sets, so the last server to start wins, as for
+those settings: give every API server that reads the document the same one. A
+declared provider carries `managed_by_env_var`, the document's variable, and
+the update and delete operations below refuse it with `422` and code
+`managed_by_environment`. A provider stays declared until an API server starts
+with a document whose `ai_providers` section leaves it out, and
+`ai_providers: {}` releases them all; a server that starts without the
+document, or with one that has no `ai_providers` section, changes nothing, so
+removing the variable leaves the providers locked. At startup the provider
+bindings are checked only where the start can change them: those the
+environment sets and those naming a provider the document declares. The user
+manual covers writing the document.
 
 The following operations require an acting administrator:
 

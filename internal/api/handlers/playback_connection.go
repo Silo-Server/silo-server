@@ -176,13 +176,14 @@ func withoutObservedEstimateV3(req playback.StartRequestV3) playback.StartReques
 // video, including HDR, audio and subtitle constraints; a matching bitrate
 // alone is insufficient.
 func (h *PlaybackHandler) lowerBufferedVersion(r *http.Request, req playback.StartRequestV3, base *models.MediaFile, audio int, settings playback.PlannerSettingsV3) (*models.MediaFile, playback.StartRequestV3, int) {
-	return h.lowerBufferedVersionForIntent(r, req, base, audio, settings, nil)
+	return h.lowerBufferedVersionForIntent(r, req, base, base, audio, settings, nil)
 }
 
 // lowerBufferedVersionForIntent is lowerBufferedVersion for a replan with the
 // attempt's desired tracks: a candidate gets the viewer's chosen audio and
-// subtitle, not a remap of what base happens to be playing.
-func (h *PlaybackHandler) lowerBufferedVersionForIntent(r *http.Request, req playback.StartRequestV3, base *models.MediaFile, audio int, settings playback.PlannerSettingsV3, desired *playback.DesiredTracksV3) (*models.MediaFile, playback.StartRequestV3, int) {
+// subtitle. The mounted file supplies the bitrate and track context, and the
+// requested edition anchors discovery if playback is already on an alias.
+func (h *PlaybackHandler) lowerBufferedVersionForIntent(r *http.Request, req playback.StartRequestV3, base, edition *models.MediaFile, audio int, settings playback.PlannerSettingsV3, desired *playback.DesiredTracksV3) (*models.MediaFile, playback.StartRequestV3, int) {
 	if req.QualityPreference != playback.QualityAutoV3 || req.BandwidthEstimateKbps == nil || !req.AllowsAlternateVersions() {
 		return base, req, audio
 	}
@@ -198,8 +199,12 @@ func (h *PlaybackHandler) lowerBufferedVersionForIntent(r *http.Request, req pla
 		return base, req, audio
 	}
 	filter := requestAccessFilter(r)
-	alternates, err := h.findAlternateFiles(r.Context(), base, filter)
+	alternates, err := h.findAlternateFiles(r.Context(), edition, filter)
 	if err != nil {
+		return base, req, audio
+	}
+	if edition.ID != base.ID && !slices.ContainsFunc(alternates, func(candidate *models.MediaFile) bool { return candidate.ID == base.ID }) {
+		// The mounted alias no longer shares the requested timeline.
 		return base, req, audio
 	}
 	type fittingVersion struct {

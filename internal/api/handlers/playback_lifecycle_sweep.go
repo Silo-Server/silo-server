@@ -271,7 +271,7 @@ func (h *PlaybackHandler) finishInterruptedNativeEnd(ctx context.Context, sessio
 	if err != nil {
 		return
 	}
-	historyID, err := h.finishStop(ctx, record, sessionID, receipt.Accepted, endReasonForStop(sessionID, receipt.StopID))
+	historyID, err := h.finishStop(ctx, record, sessionID, receipt)
 	if err != nil {
 		// Left unfinalized: the lease lapses and a later sweep retries.
 		slog.WarnContext(ctx, "lifecycle sweep could not finish a session's end", "component", "api", "session", sessionID, "error", err)
@@ -377,11 +377,23 @@ func (h *PlaybackHandler) endLifecycleWith(ctx context.Context, pool *pgxpool.Po
 	}
 	// The attempt's last accepted sample is the play's position, including a
 	// seek back past where the shared row last saw it.
-	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record.LastSample != nil {
-		session.Position = record.LastSample.Position
+	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record != nil {
+		if record.LastSample != nil {
+			session.Position = record.LastSample.Position
+		}
+		// The start row holds the subtitle the play began with; the attempt
+		// holds the one its last replan committed, which history keeps.
+		if record.CurrentPlanID != "" {
+			session.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
+		}
 	}
 	if fill != nil {
 		fill(session)
+	} else if watch, ok := h.savedWatch(ctx, sessionID); ok {
+		// The shared row carries no measurement; the lifecycle row holds
+		// the one the play's last live copy saved. A reported play's fill
+		// credits its own listening instead.
+		session.Watch.Restore(watch)
 	}
 	if err := h.recordAdminStopHistory(ctx, session, reason); err != nil {
 		recordLifecycleActivity(ctx, pool, sessionID, now)

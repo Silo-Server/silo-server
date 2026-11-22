@@ -287,6 +287,12 @@
       "value": "Bu e-posta adresi zaten kullanılıyor."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Bu zaten kullanılıyor."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -327,6 +333,12 @@
     {
       "type": 0,
       "value": "İstek okunamadı."
+    }
+  ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Ortam tarafından ayarlanır. Orada değiştirip ilgili hizmeti yeniden başlatın."
     }
   ],
   "error.field.out_of_range": [
@@ -435,6 +447,12 @@
     {
       "type": 0,
       "value": "Devam etmek için ağınızın oturum açma sayfası üzerinden oturum açın."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Bu düğüm, sunucunun dağıtım yapılandırması tarafından ayarlanır. Düğümü burada yönetmek için oradan kaldırıp API sunucularını yeniden başlatın."
     }
   ],
   "error.not_acceptable": [
@@ -1261,6 +1279,18 @@
       "value": "Popüler diziler"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Size önerilen filmler"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Size önerilen diziler"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -2005,6 +2035,104 @@
     {
       "type": 0,
       "value": "Uygulama dili"
+    }
+  ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "Bölüm sonunda"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bitişten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dakika önce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bitişten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dakika önce"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bitişten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " saniye önce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bitişten "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " saniye önce"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Sıradaki bölümleri göster"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Kapalı"
     }
   ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
@@ -13230,7 +13358,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — gösterdikleri koleksiyon ne burada ne de yedekte var"
+              "value": " geri yüklenemiyor — gösterdiği koleksiyon ne burada ne de yedekte var"
             }
           ]
         },
@@ -13298,7 +13426,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — bu sunucu bunları kabul edemiyor"
+              "value": " geri yüklenemiyor — bu sunucu bunu kabul edemiyor"
             }
           ]
         },
@@ -13434,7 +13562,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — erişim grupları bu sunucuda yok"
+              "value": " geri yüklenemiyor — erişim grubu bu sunucuda yok"
             }
           ]
         },
@@ -13468,7 +13596,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — içerikleri bu sunucunun kataloğunda yok"
+              "value": " geri yüklenemiyor — içeriği bu sunucunun kataloğunda yok"
             }
           ]
         },
@@ -13502,7 +13630,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — erişimi genişletecekleri için bu sunucu daha sıkı değerlerini koruyor"
+              "value": " geri yüklenemiyor — erişimi genişleteceği için bu sunucu kendi daha sıkı değerlerini koruyor"
             }
           ]
         },
@@ -13514,7 +13642,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — erişimi genişletecekleri için bu sunucu daha sıkı değerlerini koruyor"
+              "value": " geri yüklenemiyor — erişimi genişletecekleri için bu sunucu kendi daha sıkı değerlerini koruyor"
             }
           ]
         }
@@ -13536,7 +13664,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — kitaplıkları bu sunucuda yok"
+              "value": " geri yüklenemiyor — kitaplığı bu sunucuda yok"
             }
           ]
         },
@@ -13570,7 +13698,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — kitaplıkları burada geri yüklenemiyor"
+              "value": " geri yüklenemiyor — kitaplığı burada geri yüklenemiyor"
             }
           ]
         },
@@ -13625,6 +13753,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " geri yüklenemiyor — farklı olan ayarları veya bağlantılarının bir kısmını bu sunucunun ortamı belirliyor"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " geri yüklenemiyor — farklı olan ayarları veya bağlantılarının bir kısmını bu sunucunun ortamı belirliyor"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13638,7 +13800,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — farklı bir SECRET_KEY ile şifrelenmişler"
+              "value": " geri yüklenemiyor — farklı bir SECRET_KEY ile şifrelenmiş"
             }
           ]
         },
@@ -13672,7 +13834,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — önce bir eklenti kataloğundan yüklenmeleri gerekiyor"
+              "value": " geri yüklenemiyor — önce bir eklenti kataloğundan yüklenmesi gerekiyor"
             }
           ]
         },
@@ -13706,7 +13868,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — birincil profillerinin de birlikte geri yüklenmesi gerekiyor"
+              "value": " geri yüklenemiyor — birincil profilinin de birlikte geri yüklenmesi gerekiyor"
             }
           ]
         },
@@ -13740,7 +13902,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — yedekte bulunmuyorlar"
+              "value": " geri yüklenemiyor — yedekte bulunmuyor"
             }
           ]
         },
@@ -13876,7 +14038,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — bu sunucu onlara yedektekinden daha fazla erişim verirdi"
+              "value": " geri yüklenemiyor — bu sunucu buna yedektekinden daha fazla erişim verirdi"
             }
           ]
         },
@@ -13888,7 +14050,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — bu sunucu onlara yedektekinden daha fazla erişim verirdi"
+              "value": " geri yüklenemiyor — bu sunucu bunlara yedektekinden daha fazla erişim verirdi"
             }
           ]
         }
@@ -13944,7 +14106,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — burada zaten aynılar"
+              "value": " geri yüklenemiyor — burada zaten aynı"
             }
           ]
         },
@@ -14012,7 +14174,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — yedekteki kopyaları okunamıyor"
+              "value": " geri yüklenemiyor — yedekteki kopyası okunamıyor"
             }
           ]
         },
@@ -14046,7 +14208,7 @@
             },
             {
               "type": 0,
-              "value": " geri yüklenemiyor — dış hizmetlere bağlanıyorlar ve bu sunucu yedeği doğrulayamıyor"
+              "value": " geri yüklenemiyor — dış hizmetlere bağlanıyor ve bu sunucu yedeği doğrulayamıyor"
             }
           ]
         },
@@ -14147,6 +14309,40 @@
     {
       "type": 0,
       "value": "Bir hizmetin adresi, yedekte kimlik bilgileri olmadan değişiyor; bu nedenle geri yükleme buradaki kimlik bilgilerini temizler ve bunlar yeniden girilene kadar hizmeti kapatır."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ayar mevcut değerini koruyor: bu ayarı veya ait olduğu bağlantının bir kısmını bu sunucunun ortamı belirliyor."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ayar mevcut değerlerini koruyor: bu ayarları veya ait oldukları bağlantının bir kısmını bu sunucunun ortamı belirliyor."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14617,8 +14813,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Gizle"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gizle"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gizle"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gizle"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14775,8 +14997,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Göster"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Göster"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Göster"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Göster"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15493,14 +15741,30 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Seçtikleriniz için gerekli olduğundan bu da seçildi: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Seçtikleriniz için gerekli olduklarından bunlar da seçildi: "
             },
             {
               "type": 1,
@@ -15528,21 +15792,35 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Seçimini kaldırdıklarınıza ihtiyaç duyduğundan bunun da seçimi kaldırıldı: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Seçimini kaldırdıklarınıza ihtiyaç duyduklarından bunların da seçimi kaldırıldı: "
             },
             {
               "type": 1,
@@ -15570,9 +15848,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -16935,6 +17211,12 @@
       "value": "Buradaki başka bir hesap, bunun kullanıcı adı veya e-postasıyla oturum açıyor."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Farklı olan ayarları veya bunların bağlantısının bir kısmını bu sunucunun ortamı belirlediğinden bu sunucu mevcut değerlerini korur."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -17459,6 +17741,154 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Arka plan görseli"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon öğesi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon öğesi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Koleksiyon değiştirildi"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Yapılandırma"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Açıklama"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Etkin"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Öne çıkan"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Öğe sınırı"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Öğe sıralaması"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Kitaplıklar"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Konum"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Poster"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Sıralama düzeni"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Kaynak"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Eşitleme zamanlaması"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Başlık"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Başlık çevirisi"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Tür"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Görünürlük"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Yalnızca web"
     }
   ],
   "web.admin.backups.restore.rows.changes": [
@@ -18009,6 +18439,16 @@
     {
       "type": 0,
       "value": " (korundu: daha katı)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (korundu: ortam)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -19081,6 +19521,20 @@
       "value": "Sunucunun saat diliminde."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Sunucunun saat dilimine göre. Sizin saat diliminizde: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -19973,10 +20427,18 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "verileri okunamadı"
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -19992,9 +20454,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -20041,20 +20501,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Hesapları gizle"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hesabı gizle"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hesapları gizle"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hesapları gizle"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Dosyaları gizle"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosyayı gizle"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosyaları gizle"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosyaları gizle"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Dosyaları gizle"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosyayı gizle"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosyaları gizle"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosyaları gizle"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20117,6 +20655,346 @@
     {
       "type": 0,
       "value": "Bu dosyalara veritabanında başvuruluyor ancak depolama alanında bulunamadılar; geri yüklemeler bunları dışarıda bırakır."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " marka öğesi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " marka öğesi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon arka planı"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon arka planı"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon posteri"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon posteri"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " indirilen altyazı"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " indirilen altyazı"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kitaplık posteri"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kitaplık posteri"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kaplama görseli"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kaplama görseli"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kişisel koleksiyon posteri"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kişisel koleksiyon posteri"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profil avatarı"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profil avatarı"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " yüklenen görsel dosyası"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " yüklenen görsel dosyası"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " yüklenen altyazı"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " yüklenen altyazı"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -20383,10 +21261,22 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "şu kısım okunamadı: "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -20410,9 +21300,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -20427,8 +21315,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Hesapları göster"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hesabı göster"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hesapları göster"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hesapları göster"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20475,22 +21389,82 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Dosyaları göster"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosyayı göster"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosyaları göster"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosyaları göster"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Dosyaları göster"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosyayı göster"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosyaları göster"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dosyaları göster"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "verileri geri yükleme seti için çok büyük"
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -20506,9 +21480,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -28169,6 +29141,12 @@
       "value": "başarısız"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Görev başarısız oldu. Ayrıntılar için yönetici tanılamalarını inceleyin."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -30152,7 +31130,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Yakın zamanda başlatılan oynatma oturumlarının listesi"
+      "value": "Tüm hesaplardaki en son oynatmalar"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -31769,6 +32747,80 @@
     {
       "type": 0,
       "value": "Etkinlik yüklenemedi."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " içeriğini oynattı"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " içeriğini oynattı"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -44592,6 +45644,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Taramalar ve meta veri yenilemeleri çalışırken burada görünür."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Etkin tarama veya yenileme yok"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Tümü ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Kuyruğu gizle"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " diğer kitaplık"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " diğer kitaplık"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Meta veri yenilemeleri"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Meta veriler yenileniyor"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Kuyruğu görüntüle"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Yüksek"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Düşük"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Orta"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -45022,6 +46182,30 @@
       "value": "Boş kök temizliğini onayla"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "İncele"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Meta veri eşleştirici kuyruğunda bekleyen öğe yok."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Kaydedilmiş atlanan kök yok."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Kaydedilmiş geçersiz harici kimlik yok."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -45058,6 +46242,18 @@
     {
       "type": 0,
       "value": " kitaplığını düzenle"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Düzenle"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Henüz yapılandırılmış kitaplık yok."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -45110,6 +46306,12 @@
       "value": "Yolları gizle"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Boşta"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -45144,6 +46346,12 @@
       "value": "Kısmi tarama"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Eksik meta verileri doldur veya tümünü değiştir"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -45156,6 +46364,12 @@
       "value": "Köke erişilemiyor"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Tara"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -45166,6 +46380,12 @@
     {
       "type": 0,
       "value": "Yolları göster"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Durdur"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -45184,6 +46404,22 @@
     {
       "type": 0,
       "value": "Bağlama noktalarını doğrula"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Tüm kitaplık klasörlerine erişilebildiğini denetle"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kitaplığının etkin taramalarını görüntüle"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -45287,7 +46523,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Kitaplık köklerini ve taramalarını yönetin. Katalog içe/dışa aktarma artık Bakım altında."
+      "value": "Medya klasörlerini yönetin, taramaları izleyin ve eşleştirme sorunlarını çözün."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -45762,6 +46998,56 @@
       "value": "Geçersiz harici kimlikler"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktif"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktif"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Tarama etkinliği"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Katalog durumu"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Kitaplıklar"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -46204,6 +47490,24 @@
     {
       "type": 0,
       "value": "Yok sayılan öğelerde başlığa, kitaplığa veya türe göre ara…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Belirsiz"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Beklemede"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Eşleşmedi"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -48050,6 +49354,12 @@
       "value": " render yoluyla değil CUDA kimliğiyle adresler, bu yüzden cihaz seçici bunun için geçerli değildir. Boş bırakılırsa küme genelindeki cihaz ayarı devralınır; NVENC tarafından kullanılabilmesi için bu ayarın da bir CUDA kimliği olması gerekir — küme render yollarıyla yapılandırılmışsa burada bir kimlik belirleyin."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Bu düğümün ortamı tarafından ayarlanır. Orada değiştirip düğümü yeniden başlatın."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -48798,6 +50108,12 @@
     {
       "type": 0,
       "value": "Ayarları tamamlamak için sunucu adresini girin."
+    }
+  ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Anahtar, sunucunun dağıtım yapılandırması tarafından ayarlanır"
     }
   ],
   "web.admin.nodes.key.dialogTitle": [
@@ -49704,6 +51020,12 @@
     {
       "type": 0,
       "value": " düğümünü sil"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Sunucunun dağıtım yapılandırması tarafından ayarlanır. Burada silmek için oradan kaldırıp API sunucularını yeniden başlatın."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -51475,6 +52797,68 @@
       "value": "Eklentiler"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Uygulandı"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Bekletildi"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Eklenti hazırlama durumu yüklenemedi."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Ortam tarafından yönetiliyor"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Bekliyor"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Reddedildi"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Paket kaynağını ve kaldırma işlemini dağıtım yönetiyor."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Hazırlama durumu"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Dağıtım bu eklentiyi şu sürüme sabitliyor: "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -51770,7 +53154,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Görevler sunucu başlatılırken kaydedilir, bu nedenle bir görevi açmak veya kapatmak yeniden başlatmadan sonra etkili olur. Bir görev oluşturulduktan sonra zamanlamasını görev sayfasından değiştirin."
+      "value": "Bir görevi açmak veya kapatmak yeniden başlatma gerektirmeden uygulanır, ancak diğer sunucuların değişikliği algılaması biraz zaman alabilir. Bir görev açıldıktan sonra zamanlamasını görev sayfasından değiştirin."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -52175,6 +53559,268 @@
       "value": "Model"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Tek çalıştırmanın sınırına ulaşıldı; sonraki çalıştırma devam edecek."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Bilgisi alınan içerikler: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Oluşturulan gömme: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB istekleri: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Kapalı. Çalıştırmalar yalnızca eski içerikleri temizler."
+    }
+  ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Oluşturma durduruldu. Depolanan öneriler, sunucu yeniden başlatılana kadar Keşfet’te görünmeye devam eder."
+    }
+  ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Profiller sıralanıyor ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB listeleri getiriliyor ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "İçerik bilgileri alınıyor ve gömmeler oluşturuluyor ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Süresi dolmuş "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " içerik temizlendi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Süresi dolmuş "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " içerik temizlendi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " satır oluşturuldu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " satır oluşturuldu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Keşfet önerilerini oluşturmadan önce aşağıdaki gömme kilidi çakışmasını çözün."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Silo’nun karşılaştırma yapacağı kitaplık vektörleri olması için önce “Gömmeler” işini çalıştırın."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Keşfet önerilerini oluşturmadan önce “Yapay zekâ hizmetleri” sayfasında bir gömme sağlayıcısı bağlayın."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Henüz hiçbir profilin zevk profili yok. Biri içerik izledikten veya puanladıktan sonra “Zevk profilleri” işini çalıştırın."
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Önerilebilecek "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " içerik"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Önerilebilecek "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " içerik"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Gömme oluşturulmadı: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -52233,6 +53879,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Keşfet önerileri"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -52521,6 +54173,12 @@
       "value": "Gömmeler başlatılamadı"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Keşfet önerileri başlatılamadı"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -52639,6 +54297,44 @@
       "value": " temizlendi."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Gömmeler sıfırlandı: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " ve "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " silindi, "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": " temizlendi."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -52665,6 +54361,74 @@
             {
               "type": 0,
               "value": " gömme"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Keşfet gömmesi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Keşfet gömmesi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Keşfet satırı"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Keşfet satırı"
             }
           ]
         }
@@ -53499,6 +55263,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Her izleyici için önerilen diziler"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Her izleyici için önerilen filmler"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -53547,6 +55335,18 @@
     {
       "type": 0,
       "value": "Her biri o kanalın dizilerini açan kanal kartları."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Öneriler"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Kitaplıkta henüz olmayan, her izleyici için izlediklerine göre seçilen içerikler."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -53869,6 +55669,38 @@
     {
       "type": 0,
       "value": "Akış hizmetlerinin bulunduğu bölgeyi seçin."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Keşfet önerileri Yönetim → Öneriler kısmında açılana kadar boş kalır."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Öneri satırları, Keşfet önerileri "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Yönetim → Öneriler"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " kısmında açılana kadar boş kalır."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Öneriler’de kapalı"
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -55273,6 +57105,12 @@
       "value": "Listenin canlı önizlemesi"
     }
   ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Kendi önerilerinizin önizlemesi"
+    }
+  ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
     {
       "type": 0,
@@ -55335,6 +57173,12 @@
       "value": "Yeni satırlar Keşfet’in en altına eklenir"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Öneriler ayarlarını aç"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -55347,6 +57191,12 @@
       "value": "MDBList akışı, listenin sayfasında kaydedilen sıralama düzenini içermez. Sayfada görünen düzeni seçin."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profilinizin henüz Keşfet önerisi yok. Bu satırı önizlemek için “Keşfet önerileri” işini çalıştırın veya birkaç içerik izleyip puanlayın."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -55357,6 +57207,12 @@
     {
       "type": 0,
       "value": "İçeriklerini görmek için bir liste seçin veya bağlantısını yapıştırın."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Bu satırı önizlemek için Keşfet önerilerini Yönetim → Öneriler kısmında açın."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -56135,6 +57991,12 @@
     {
       "type": 0,
       "value": "Mesaj gönderildi"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Oynatıcı mesajı onaylamadı. Mesaj geç gösterilebilir veya hiç gösterilmeyebilir."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -58989,6 +60851,12 @@
       "value": "Bağlantı denetimi başarısız oldu."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Sunucu ortamının bu ayarı belirleyip belirlemediği kontrol edilemedi. Düzenlemek için sayfayı yeniden yükleyin."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -58999,6 +60867,20 @@
     {
       "type": 0,
       "value": "Ayarlar yükleniyor"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Sunucunun ortamındaki "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " değişkeni tarafından ayarlanır."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [
@@ -59135,12 +61017,6 @@
     {
       "type": 0,
       "value": "Güvenilen proxy’ler"
-    }
-  ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "SILO_TRUSTED_PROXIES tarafından yönetiliyor."
     }
   ],
   "web.admin.settings.general.title": [
@@ -59535,6 +61411,30 @@
     {
       "type": 0,
       "value": "Kanal güncellenemedi"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Güncel değerleri görmek için yeniden yükleyin. Bu sayfada bir şey değiştiyse ya da kayıtlı bir parolayı veya anahtarı düzenlediyseniz tüm düzenlemeleriniz geri alınır; aksi takdirde korunur."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Yeniden yükle"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Ayarlar yeniden yüklenemedi. Tekrar deneyin."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Ayarlar başka bir yerde değiştirildi"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -62597,136 +64497,10 @@
       "value": "Bildirim ayarları yüklenemedi"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Yeni içerik kaydedilmiyor, bu nedenle hiçbir şey gönderilemez. İşleme altından yeniden açın."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Gönderme duraklatıldı; yeni içerik kuyrukta bekliyor. İşleme altından yeniden açın."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Kapalı olduğunda bunun yerine günlük özet gönderilir."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Silo’nun yeni içeriği nasıl fark ettiği, mesajlarda nasıl grupladığı ve bunları ne kadar süre sakladığı."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Kimin istediğini belirle"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Her öğeyi herkesin tercihleriyle eşleştirir."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Gruplama ve yoğunluk denetimi"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "İşleme"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "En fazla içerik yaşı"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Daha eski öğeler, eskimiş haber olarak gelmek yerine atılır."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Dizi başına en fazla mesaj"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Bunu aşan her şey o grup için atlanır."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Yeni içeriği fark et"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Kitaplık taramaları sırasında yeni öğeleri kaydeder."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "İşlem hattı"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Okunmuş bildirimler"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Saklama"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Gönderim geçmişi"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Silo’nun daha önce bildirdiği şeylerin kaydı."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Birleştirme aralığı"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Taraması birlikte biten öğeler tek bir bildirim olarak gelir."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Okunmamış bildirimler"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -63631,18 +65405,6 @@
     {
       "type": 0,
       "value": "Bildirimler"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "gün"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "saat"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -65099,6 +66861,92 @@
       "value": "Başka bir modele geçmek gömmelerin sıfırlanmasını gerektirir; bu işlem tüm gömmeleri siler. Aynı modeli sunan başka bir sağlayıcı ise yeniden başlatmadan sonra uygulanır."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Keşfet’e ekle"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Öneri satırları Keşfet sayfasına eklenemedi."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Öneri satırları Keşfet sayfasına eklendi."
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Keşfet önerilerini etkinleştir"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "İsteklerdeki Keşfet sayfasına kitaplıkta henüz olmayan içeriklerle kişisel satırlar ekler. Gömme sağlayıcısını ve TMDB’yi kullanır."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Önerilerin seçileceği en fazla içerik"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Sunucunun öneri yapmak için tuttuğu, kitaplıkta olmayan içerik sayısı. Her biri TMDB’de aranır ve gömmesi oluşturulur. Gömme genellikle ucuzdur, ancak daha yüksek bir sayı gömme sağlayıcınıza bağlı olarak daha pahalıya mal olabilir veya daha uzun sürebilir; ayrıca daha fazla depolama alanı kullanır."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Keşfet sayfanızda henüz hiçbir Öneriler satırı gösterilmiyor."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Keşfet önerilerinin çalışabilmesi için yukarıdaki “Önerileri etkinleştir” seçeneğini açın ve sunucuyu yeniden başlatın."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "İstekler şu anda kapalı. İzleyicilerin Keşfet sayfasını görebilmesi için bunları "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "İstek ayarları"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " kısmında açın."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Keşfet sayfasını aç"
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Keşfet önerileri"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -65127,6 +66975,12 @@
     {
       "type": 0,
       "value": "Gömme zamanlaması (cron)"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Keşfet önerileri cron zamanlaması"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -65171,12 +67025,6 @@
       "value": "Redis kullan"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "REDIS_URL tarafından ayarlandı"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -65193,12 +67041,6 @@
     {
       "type": 0,
       "value": "Bağlantı URL’si"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Değer REDIS_URL tarafından sağlanıyor"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70063,16 +71905,6 @@
       "value": "Sunucu günlüğü"
     }
   ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": " tarafından yönetiliyor."
-    }
-  ],
   "web.admin.settings.search.meili.apiKey.hint": [
     {
       "type": 0,
@@ -70190,7 +72022,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Teslim kanalları, sunucu kanalları ve yeni içeriğin nasıl bildirime dönüştüğü."
+      "value": "Teslim kanalları ve sunucu kanalları."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -70289,12 +72121,6 @@
       "value": "E-posta"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Gruplama ve yoğunluk denetimi"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -70313,28 +72139,10 @@
       "value": "Kişilerin bölüm başına e-posta seçmesine izin ver"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "En fazla içerik yaşı"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Dizi başına en fazla mesaj"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "İstek sahibini Discord’da etiketle"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Yeni içeriği algıla"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -70343,46 +72151,16 @@
       "value": "Kişisel Webhook’lar"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "İşleme"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Okunmuş bildirimler"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Aktarma URL’si"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Saklama"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Gönderim geçmişi"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Sunucu Kanalları"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Bekleme aralığı"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -70397,12 +72175,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Okunmamış bildirimler"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -70413,12 +72185,6 @@
     {
       "type": 0,
       "value": "Kişi başına webhook"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Kimin istediğini belirle"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -71829,6 +73595,12 @@
     {
       "type": 0,
       "value": "TV oturum açma: başlatma"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Poster istekleri"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -74285,6 +76057,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Ortam değişkenleri depolama ayarlarını belirlediği sürece ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": ") depolama buraya taşınamaz. Önce bu değişkenlerin ayarını kaldırın ve tüm API sunucularını yeniden başlatın."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -75425,6 +77211,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Bu zamanlama yedekleme ayarlarından gelir. "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Sunucu › Yedekler"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " sayfasından değiştirin."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -75735,10 +77541,66 @@
       "value": "Son hatalar"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Yenileme başarısız oldu. Ayrıntılar için yönetici tanılamalarını inceleyin."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Geçerli zamanlamayı incele"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -76171,6 +78033,18 @@
     {
       "type": 0,
       "value": "Autoscan webhook yeniden denemesi"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Silo gömülü yazı tiplerini bit hızına katmamaya başlamadan önce taranmış, ASS altyazılı MKV dosyalarının üst bilgisini yeniden okur; böylece bu dosyaların kodu, akışta kullanılmayan bir bit hızı yüzünden dönüştürülmez."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Gömülü yazı tipli dosyaların bit hızını düzelt"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -85622,25 +87496,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "TV’de oturum açılamadı. Tekrar deneyin."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Uygulamanızın şunu gösterdiğini kontrol edin"
+      "value": "Oturum açma onaylanamadı. Tekrar deneyin."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "TV’nizin şunu gösterdiğini kontrol edin"
+      "value": "Bu kodun eşleştiğinden emin olun"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "TV’nizdeki veya uygulamanızdaki kodu girin"
+      "value": "Cihazınızda gösterilen kodu girin"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -85652,13 +87520,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Hesabınızla bir TV’de veya başka bir cihazda oturum açın."
+      "value": "Bir TV’de, uygulamada veya başka bir cihazda oturum açın."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "TV’de oturum aç"
+      "value": "Oturum açmayı onayla"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -85670,7 +87538,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "Bir TV’yi onaylamak için "
+      "value": "Bu oturum açmayı onaylamak için "
     },
     {
       "type": 1,
@@ -85678,13 +87546,13 @@
     },
     {
       "type": 0,
-      "value": " kullanıcısı olarak görüntülemeyi bırakın. TV’de yalnızca hesabın kendisi oturum açabilir."
+      "value": " kullanıcısı olarak görüntülemeyi bırakın. Cihazları yalnızca hesabın kendisi onaylayabilir."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Bir TV’yi onaylamak için bu kullanıcı olarak görüntülemeyi bırakın. TV’de yalnızca hesabın kendisi oturum açabilir."
+      "value": "Bu oturum açmayı onaylamak için bu kullanıcı olarak görüntülemeyi bırakın. Cihazları yalnızca hesabın kendisi onaylayabilir."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -85702,39 +87570,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Bu kod bulunamadı. TV’nizdeki kodu kontrol edin."
+      "value": "Bu kod bulunamadı. Kodu kontrol edip tekrar deneyin."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Şimdi değil"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Eski TV uygulamaları bunun yerine şunu gösterir: "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Yalnızca şu anda önünüzde olan bir cihazı onaylayın."
+      "value": "Reddet"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Yalnızca şu anda önünüzde olan bir TV’yi onaylayın."
+      "value": "Bunu yalnızca oturum açma işlemini kendiniz başlattıysanız onaylayın."
     }
   ],
   "web.auth.activate.playOn": [
@@ -85756,7 +87604,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Bu TV’yi kullanan herkes profillerinizden birini seçebilir. PIN’li profiller kilitli kalır."
+      "value": "Bu, cihaza profillerinize erişim izni verir. PIN korumalı profiller kilitli kalır."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -85803,6 +87651,16 @@
       "value": " istendi"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "İstendi: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -85816,7 +87674,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Bu TV beklemeyi bıraktı. TV’de yeniden başlayın."
+      "value": "Bu cihaz beklemeyi bıraktı. Cihazda oturum açmayı yeniden başlatın."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -85825,10 +87683,34 @@
       "value": "Bu oturum açma isteği reddedildi."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Tamamlandı. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " oturum açıyor."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " oturum açtı."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Bu kodun süresi doldu. TV’niz yeni bir kod gösteriyor. Bunun yerine o kodu kullanın."
+      "value": "Bu kodun süresi doldu. Cihazdan yeni bir kod alıp tekrar deneyin."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -85912,25 +87794,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Bu TV’de zaten oturum açılmış."
+      "value": "Bu cihazda zaten oturum açık."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Bu TV onaylandı ve oturum açma işlemini tamamlıyor."
+      "value": "Bu cihaz onaylandı ve oturum açma işlemini tamamlıyor."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Tamamlandı. TV’nizde oturum açılıyor."
+      "value": "Tamamlandı. Cihazınızda oturum açılıyor."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV’nizde oturum açıldı."
+      "value": "Cihazınızda oturum açıldı."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -85978,13 +87860,13 @@
     },
     {
       "type": 0,
-      "value": " cihazında oturum açılsın mı?"
+      "value": " için oturum açmaya izin verilsin mi?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Bu cihazda oturum açılsın mı?"
+      "value": "Bu cihazın oturum açmasına izin verilsin mi?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -85996,7 +87878,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "Bu TV’yi onaylamak için "
+      "value": "Bu oturum açmayı onaylamak için "
     },
     {
       "type": 1,
@@ -86010,7 +87892,7 @@
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "TV’de oturum aç"
+      "value": "Oturum açmayı onayla"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87044,7 +88926,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Cihazda oturum açılamadı. Tekrar deneyin."
+      "value": "Oturum açma onaylanamadı. Tekrar deneyin."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -94060,6 +95942,12 @@
       "value": "kitaplıklarınız"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Sayı kullanılamıyor"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -96032,6 +97920,24 @@
       "value": "Ekle"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "İçerik eklenip eklenemeyeceği denetlenemedi."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Yeniden yüklemeyi dene"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "İçerik eklenip eklenemeyeceği denetleniyor…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 1,
@@ -96044,6 +97950,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Bu sunucu, koleksiyonun yalnızca bir kısmı yüklüyken güvenli bir şekilde içerik ekleyemez. Yine de içerik kaldırabilir ve koleksiyonu düzenleyebilirsiniz."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Daha fazla içerik eklemeden önce içerikleri yeniden yükleyin."
     }
   ],
   "web.collections.manual.addTitle": [
@@ -96060,6 +97978,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Daha fazla içerik eklemeden önce içerikler yükleniyor…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -104618,6 +106542,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Şu koleksiyonlarda da var"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,
@@ -107532,6 +109462,12 @@
       "value": "Gösterilen"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Bu sunucu tarafından yönetilir. Satırın gösterdikleri burada değiştirilemez; ne gösterileceğini seçmek için kendi satırınızı ekleyin."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -107842,6 +109778,12 @@
       "value": "Çevriliyor…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Bu dışa aktarımdan sonra eklenen sunucu satırlarını gizle:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -107860,6 +109802,12 @@
     {
       "type": 0,
       "value": " ve daha önce burada eklediğiniz kısımların yerini alır. Bu sunucunun kısımlarında yaptığınız değişiklikler korunur."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Bu dosya dışa aktarıldıktan sonra bu sunucunun satırları değişti. Gizlemek istediğiniz satırları aşağıdan seçin."
     }
   ],
   "web.home.layout.checking": [
@@ -107910,6 +109858,26 @@
     {
       "type": 0,
       "value": "İzlenen öğeleri gizle ayarını açar."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Seçili satırları şu sayfalarda gizler: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ". Oradaki diğer satırlarınız değişmez."
     }
   ],
   "web.home.layout.import": [
@@ -108014,6 +109982,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -108230,6 +110216,12 @@
     {
       "type": 0,
       "value": "Adsız kısım"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Bu dosyada olmayan sunucu satırlarını gizle:"
     }
   ],
   "web.home.page.customize": [
@@ -110578,13 +112570,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Koleksiyonlar ve kurallar"
+      "value": "Koleksiyonlar ve akıllı satırlar"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Koleksiyonlarınız veya kurallarla oluşturulan satırlar"
+      "value": "Koleksiyonlarınız veya kurallarla oluşturulan akıllı satırlar"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -110698,7 +112690,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Tür ve on yıl gibi kurallarla bir satır oluşturun."
+      "value": "Akıllı koleksiyon gibidir ama yalnızca bir satırdır. İçerikleri tür ve on yıl gibi kurallarla seçin."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -110908,7 +112900,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Kurallara uyan içerikler"
+      "value": "Akıllı satır"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -111117,6 +113109,12 @@
     {
       "type": 0,
       "value": "Ana afiş · Yalnızca web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Sunucu"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -116507,6 +118505,12 @@
       "value": " gün önce"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "Bir bildirim hedefi çalışmayı durdurdu"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -116649,6 +118653,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "Sorunu gidermek için bildirim ayarlarını açın."
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -116939,6 +118949,12 @@
     {
       "type": 0,
       "value": "İzleme listenizdeki bir içerik artık izlenebilir"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "Bir webhook çalışmayı durdurdu"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -123719,6 +125735,34 @@
       "value": "title"
     }
   ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Benzer: "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Benzer: "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " ve "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
   "web.requests.discoverSection.empty": [
     {
       "type": 0,
@@ -124531,6 +126575,20 @@
       "value": "1. sayfaya dön"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Sayfa "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " öğesine git"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -124621,6 +126679,20 @@
     {
       "type": 0,
       "value": "Eklenmesini iste sayfaları"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Sayfa "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ", bu sonuçların sonundan sonra geliyor."
     }
   ],
   "web.requests.toAdd.series": [
@@ -126161,6 +128233,12 @@
     {
       "type": 0,
       "value": "Profilin bildirimlerini geldikçe okuma ve okundu olarak işaretleme."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Profilde şu anda neyin oynatıldığını görme; anahtar bir profil belirtmiyorsa hesaptaki tüm profillerde: içerik, konum, duraklatılma durumu, cihaz ve oynatma yöntemi. Oynatma denetimi veya ağ ayrıntıları içermez."
     }
   ],
   "web.settings.apiKeys.scope.requests": [
@@ -129973,6 +132051,290 @@
       "value": "İlgilenmiyorum"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "Hedef ekle"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "Ekle"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "Bildirim hedefi ekle"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "“"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "” eklendi"
+    }
+  ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Kayıtlı gizli değeri temizle"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "Hedef zaten oluşturuluyor."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "Bildirimler artık bu hedefe gönderilmeyecek. Bu işlem geri alınamaz."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "Hedef silinemedi"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "Hedef silindi"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "Bu profilin bildirimlerini sunucunuzdaki eklentilerin desteklediği hizmetlere gönderin."
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "Bu profilin bildirimlerinin nereye gideceğini seçin."
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "Henüz hedef yok."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Kayıtlı gizli değeri koru"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "Tür"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "Son hata: "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "Son hata ("
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "): "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "Son hata ("
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": "): eklenti gönderemedi"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "Son hata: eklenti gönderemedi"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " hedef sınırına ulaşıldı"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " hedef sınırına ulaşıldı"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "Bu hedefi silmeden önce hedef listesini yeniden yükleyin."
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "Bu hedefi düzenlemeden önce hedef listesini yeniden yükleyin."
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "Hedef kaydedilemedi"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "Boş bıraktığınız gizli alanlar kayıtlı değerlerini korur."
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "Bir test mesajı zaten gönderiliyor."
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Test gönderildi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Test başarısız"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Test gönderildi: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Test başarısız: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "Diğer hedefler"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "Kullanılamıyor"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "Bu hedefi sağlayan eklenti kapalı veya kaldırılmış, bu yüzden hiçbir şey gönderilmiyor."
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "Güncellenemedi"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -130909,6 +133271,12 @@
     {
       "type": 0,
       "value": "Webhook URL’si gereklidir"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Çevrimdışı olduğunuz için bu değişiklik kaydedilmedi"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -137799,12 +140167,6 @@
       "value": "Güvenilir proxy’ler"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Ortamdaki SILO_TRUSTED_PROXIES tarafından ayarlanır."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -138055,12 +140417,6 @@
     {
       "type": 0,
       "value": "Veritabanı numarası"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "REDIS_URL tarafından ayarlandı"
     }
   ],
   "web.setup.storage.redisDescription": [

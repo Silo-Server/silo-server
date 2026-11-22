@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ChevronRight } from "lucide-react";
 
 import type { LibrarySkippedRoot } from "@/api/types";
@@ -6,6 +6,7 @@ import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDia
 import {
   CardField,
   CardFields,
+  CardPath,
   DiagnosticsCard,
   DiagnosticsCardList,
   DiagnosticsSearch,
@@ -16,7 +17,7 @@ import {
 } from "@/components/admin/libraries/DiagnosticsListParts";
 import {
   pathLeaf,
-  useLibrariesTableLayout,
+  useWideDiagnosticsTableLayout,
   usePagination,
   useSort,
 } from "@/components/admin/libraries/diagnosticsListState";
@@ -32,26 +33,44 @@ import {
 } from "@/components/ui/table";
 import { useSkippedLibraryRoots } from "@/hooks/queries/admin/libraries";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT } from "@/i18n";
+import { numberText, useT } from "@/i18n";
 import { formatDateTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 
 type SkippedSortField = "root_path" | "library" | "reason" | "first_seen" | "last_seen";
 
+/** The detail paths keep the body text color, and one click selects a whole path. */
+const SKIPPED_PATH_CLASS = "text-foreground min-w-0 select-all";
+
 const REASON_BADGE_CLASS = "border-warning/30 bg-warning/5 text-warning";
 
 /** The "Troubleshooting" section: roots the scanner skipped, and why. */
-export function SkippedRootsSection() {
+export function SkippedRootsSection({
+  embedded = false,
+  onStatusChange,
+}: {
+  embedded?: boolean;
+  onStatusChange?: (status: { count: number | undefined; isError?: boolean }) => void;
+} = {}) {
   const t = useT();
-  const showTable = useLibrariesTableLayout();
+  const showTable = useWideDiagnosticsTableLayout();
   const [open, setOpen] = useState(false);
+  const isOpen = embedded || open;
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
-  const { data, hasNextPage, fetchNextPage, isFetchingNextPage } = useSkippedLibraryRoots({
-    enabled: open,
-    search: debouncedSearch,
-  });
+  const { data, isError, isLoading, hasNextPage, fetchNextPage, isFetchingNextPage } =
+    useSkippedLibraryRoots({
+      enabled: isOpen,
+      search: debouncedSearch,
+    });
   const skippedRoots = useMemo(() => data?.pages.flatMap((page) => page.roots) ?? [], [data]);
+  const totalCount = data?.pages[0]?.total;
+
+  useEffect(() => {
+    if (!onStatusChange) return;
+    if (debouncedSearch.trim() !== "") return;
+    onStatusChange({ count: totalCount, isError: data === undefined && isError });
+  }, [data, debouncedSearch, isError, onStatusChange, totalCount]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const { sortField, sortDir, toggle, setSortField, setSortDir } = useSort<SkippedSortField>(
     "last_seen",
@@ -96,15 +115,8 @@ export function SkippedRootsSection() {
     </SortableHead>
   );
 
-  return (
-    <CollapsibleDiagnosticsSection
-      title={t("web.admin.libraries.skippedRoots.title")}
-      description={t("web.admin.libraries.skippedRoots.description")}
-      count={data?.pages[0]?.total}
-      icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
-      open={open}
-      onOpenChange={setOpen}
-    >
+  const body = (
+    <>
       <DiagnosticsSearch
         className="mb-2"
         placeholder={t("web.admin.libraries.skippedRoots.filterPlaceholder")}
@@ -114,7 +126,22 @@ export function SkippedRootsSection() {
           pag.setPage(0);
         }}
       />
-      {showTable ? (
+      {data === undefined && isError ? (
+        <div
+          role="alert"
+          className="border-border/40 bg-background/40 text-destructive rounded-xl border px-4 py-8 text-center text-sm"
+        >
+          {t("web.admin.common.diagnosticsSection.countError")}
+        </div>
+      ) : data === undefined && isLoading ? (
+        <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
+          {t("web.admin.libraries.skippedRoots.loading")}
+        </div>
+      ) : data !== undefined && pag.rows.length === 0 ? (
+        <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
+          {t("web.admin.libraries.health.skippedEmpty")}
+        </div>
+      ) : showTable ? (
         <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
           <Table>
             <TableHeader>
@@ -150,14 +177,23 @@ export function SkippedRootsSection() {
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{root.library_name}</TableCell>
+                      <TableCell className="text-sm whitespace-normal">
+                        {/* A long library name wraps, so it can't push the table past
+                            its section. */}
+                        <span
+                          dir="auto"
+                          className="align-with-page block w-fit max-w-full wrap-anywhere"
+                        >
+                          {root.library_name}
+                        </span>
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={REASON_BADGE_CLASS}>
                           {root.reason}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
-                        {root.file_count}
+                        {numberText(root.file_count)}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-xs tabular-nums">
                         {formatDateTime(root.first_seen_at)}
@@ -168,7 +204,10 @@ export function SkippedRootsSection() {
                     </TableRow>
                     {isExpanded && (
                       <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={6} className="bg-muted/30 border-b px-4 py-3">
+                        <TableCell
+                          colSpan={6}
+                          className="bg-muted/30 border-b px-4 py-3 whitespace-normal"
+                        >
                           <SkippedRootDetails root={root} />
                         </TableCell>
                       </TableRow>
@@ -233,6 +272,33 @@ export function SkippedRootsSection() {
             : t("web.admin.libraries.loadMore")}
         </Button>
       ) : null}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <section className="surface-panel space-y-3 rounded-2xl border-0 p-4 sm:p-5">
+        <div className="space-y-0.5">
+          <h2 className="text-sm font-semibold">{t("web.admin.libraries.skippedRoots.title")}</h2>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.libraries.skippedRoots.description")}
+          </p>
+        </div>
+        {body}
+      </section>
+    );
+  }
+
+  return (
+    <CollapsibleDiagnosticsSection
+      title={t("web.admin.libraries.skippedRoots.title")}
+      description={t("web.admin.libraries.skippedRoots.description")}
+      count={totalCount}
+      icon={<AlertTriangle className="h-4 w-4 text-amber-500" />}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      {body}
     </CollapsibleDiagnosticsSection>
   );
 }
@@ -245,23 +311,23 @@ function skippedRootKey(root: LibrarySkippedRoot): string {
 function SkippedRootDetails({ root }: { root: LibrarySkippedRoot }) {
   const t = useT();
   return (
-    <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
+    <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs">
       <span className="text-muted-foreground font-medium">
         {t("web.admin.libraries.skippedRoots.rootPath")}
       </span>
-      <code className="min-w-0 font-mono break-all select-all">{root.root_path}</code>
+      <CardPath path={root.root_path} className={SKIPPED_PATH_CLASS} />
       {root.sample_file_path && (
         <>
           <span className="text-muted-foreground font-medium">
             {t("web.admin.libraries.skippedRoots.sampleFile")}
           </span>
-          <code className="min-w-0 font-mono break-all select-all">{root.sample_file_path}</code>
+          <CardPath path={root.sample_file_path} className={SKIPPED_PATH_CLASS} />
         </>
       )}
       <span className="text-muted-foreground font-medium">
         {t("web.admin.libraries.skippedRoots.filesAffected")}
       </span>
-      <span>{root.file_count}</span>
+      <span>{numberText(root.file_count)}</span>
     </div>
   );
 }

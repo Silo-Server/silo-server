@@ -407,13 +407,47 @@ byte is a v2 problem; a failure after it ends the stream. A stopped, expired or
 terminated session answers `410 playback_session_ended`. A subtitle sidecar the
 node has no room to read yet answers `503` with `Retry-After`; retry it then.
 
-The HLS manifest and segment answers, refusals included, carry
-`Access-Control-Allow-Origin: *` with `Range` allowed and the range and
-validator headers exposed, so a player on another origin, such as a Google Cast
-receiver, can read them. Subtitle sidecars send the same wildcard from their
-handler. The wildcard never comes with `Access-Control-Allow-Credentials`, and
-the API answers no `OPTIONS` preflight. Cast receivers fetch playlists and
-segments with plain GETs and have not been seen to send one.
+A plan may carry `stream.parallel_range_url`: a URL the client may read the
+file's byte ranges from over several connections. The server sets it only for an
+`original_http` plan whose attempt sent client feature
+`parallel_range_origin_v1` without `header_authenticated_media_v1`, and names
+one of three:
+
+- the plan's own stream, as a reference relative to the API root like
+  `stream.url`, when the API serves the file. The server names it only for an
+  attempt a login session started;
+- the same stream on the media origin the administrator set in
+  `server.web_media_url`, in place of the first, when one is set and the client
+  did not arrive through a network access provider;
+- the proxy node's own URL, the one `stream.url` already carries, when a node
+  serves the file.
+
+The URL authorizes itself (`st`, or the token in a node URL's path). A client
+uses it exactly as given and adds no account token, header or cookie to it. A
+client reads parallel ranges only over connections that are separate: on the
+page's own origin, the web player does so only when the page loaded over
+HTTP/1.1, and it stops when the browser reports that a range came over HTTP/2
+or HTTP/3 (the stream answers carry `Timing-Allow-Origin: *` for that). A plan
+without `parallel_range_url` is read from `stream.url`.
+`stream.url` stays valid; a client may also read the warm head, overflow ranges,
+or a natively played file from it.
+
+Three kinds of response are readable from another origin. Each carries
+`Access-Control-Allow-Origin: *` and no `Access-Control-Allow-Credentials`:
+
+- The original-file stream, `GET` and `HEAD` on `/api/v2/stream/{session_id}`,
+  refusals included, with `Range` allowed and `Content-Range` exposed. The web player reads it from
+  the media origin. The `OPTIONS` preflight answers `204` before any
+  credential is read, with `GET, HEAD, OPTIONS` and the `Range` header allowed,
+  and `Access-Control-Max-Age: 600` so a browser that preflights `Range` does
+  not repeat it for every range.
+- The HLS manifest and segment answers, refusals included, with `Range` allowed
+  and the range and validator headers exposed, so a player such as a Google Cast receiver can
+  read them. The API answers no `OPTIONS` preflight there; Cast receivers
+  fetch playlists and segments with plain GETs and have not been seen to send
+  one.
+- Subtitle sidecars, from their handler. A refusal before the handler runs
+  carries no CORS header.
 
 Subtitle inventory URLs in v2 playback responses use the `/api/v2/stream/`
 mount, including relative `/stream/` values produced by the shared inventory

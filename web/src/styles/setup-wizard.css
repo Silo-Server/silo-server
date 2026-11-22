@@ -462,20 +462,14 @@
   border-radius: 0.25rem;
 }
 
-/* A provider row's credential inputs, revealed when the provider is on. */
+/* A provider row's credential inputs, revealed when the provider is on. Each
+   field is a full settings row (label and hint beside the input), so they
+   stack one per line, as on the admin Providers page; side by side, each row
+   gets half the card and its label column shrinks to a word or two. */
 .setup-provider-fields {
   display: grid;
   gap: 0.5rem;
   padding: 0 0 0.9rem 0;
-}
-
-@media (min-width: 40rem) {
-  .setup-provider-fields {
-    grid-template-columns: 1fr 1fr;
-  }
-  .setup-provider-fields > .setup-provider-actions {
-    grid-column: 1 / -1;
-  }
 }
 
 .setup-provider-actions {

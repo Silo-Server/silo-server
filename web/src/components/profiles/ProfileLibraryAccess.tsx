@@ -4,6 +4,7 @@ import type { UserLibrary } from "@/api/types";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useT } from "@/i18n";
+import { SWITCH_ROW_TEXT } from "./ProfileEditorDialog.model";
 
 /**
  * The profile editor's library access: a library limit for any profile but
@@ -43,8 +44,8 @@ export function ProfileLibraryAccess({
 
   return (
     <div className="border-border space-y-3 rounded-md border p-3">
-      <div className="flex items-center justify-between gap-4">
-        <div className="space-y-0.5">
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className={SWITCH_ROW_TEXT}>
           <Label htmlFor={restrictLibrariesId}>{t("web.profiles.editor.restrictLibraries")}</Label>
           <p className="text-muted-foreground text-xs">
             {t("web.profiles.editor.restrictLibrariesHint")}
@@ -59,16 +60,20 @@ export function ProfileLibraryAccess({
 
       {restricted ? (
         <div className="space-y-2">
-          <div className="grid gap-2">
+          {/* grid-cols-1 holds the column to the list's width. An implicit auto
+              column grows to fit a row's longest word instead. */}
+          <div className="grid grid-cols-1 gap-2">
             {libraries.length === 0 ? (
               <p className="text-muted-foreground text-sm">{t("web.profiles.noLibraries")}</p>
             ) : (
               libraries.map((library) => (
                 <div
                   key={library.id}
-                  className="border-border flex items-center justify-between rounded-md border px-3 py-2"
+                  className="border-border flex items-center justify-between gap-3 rounded-md border px-3 py-2"
                 >
-                  <div className="space-y-0.5">
+                  {/* wrap-anywhere breaks a long one-word name or type instead of
+                      widening the row past the list. */}
+                  <div className="min-w-0 flex-1 space-y-0.5 wrap-anywhere">
                     <div className="text-sm font-medium">{library.name}</div>
                     <div className="text-muted-foreground text-xs capitalize">{library.type}</div>
                   </div>

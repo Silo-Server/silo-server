@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"reflect"
 	"strings"
 	"sync"
@@ -27,6 +28,10 @@ type BootstrapOverrides struct {
 	JFListen    string // from JF_PORT env
 	ABSListen   string // from ABS_PORT env
 	RedisURL    string // from REDIS_URL env
+	// Settings are this process's own setting values from the environment
+	// (config.EnvScopeProcess), overlaid on server_settings before every
+	// load. They are never stored, so replicas can differ.
+	Settings map[string]string
 	// NodeURL is this process's own stream_nodes identity (from NODE_URL env),
 	// set only in proxy mode. It is what lets a proxy find its own row
 	// and overlay that row's acceleration overrides onto the cluster-wide
@@ -125,6 +130,13 @@ func (w *Watcher) rememberNodeRegistration(id int, registeredURL string) {
 	w.nodeRowID = id
 	w.nodeRegisteredURL = registeredURL
 	w.mu.Unlock()
+}
+
+// PinNodeRow tells the watcher which row is this node's before Start, when
+// the node has already resolved it (a proxy that registered itself). The
+// watcher then reads that row by id, as it does after its own first lookup.
+func (w *Watcher) PinNodeRow(id int, registeredURL string) {
+	w.rememberNodeRegistration(id, registeredURL)
 }
 
 // rememberedNodeRowID returns the row this worker previously resolved to.
@@ -440,6 +452,12 @@ func (w *Watcher) fetchSettings(ctx context.Context) (map[string]string, error) 
 // config pointer, and notifies OnChange callbacks when the config actually
 // changed.
 func (w *Watcher) applySettings(ctx context.Context, m map[string]string) error {
+	if len(w.bootstrap.Settings) > 0 {
+		merged := make(map[string]string, len(m)+len(w.bootstrap.Settings))
+		maps.Copy(merged, m)
+		maps.Copy(merged, w.bootstrap.Settings)
+		m = merged
+	}
 	newCfg, err := config.LoadFromDB(m)
 	if err != nil {
 		return fmt.Errorf("parse config: %w", err)

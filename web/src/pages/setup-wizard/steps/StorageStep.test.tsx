@@ -44,8 +44,12 @@ window.HTMLElement.prototype.scrollIntoView ??= () => {};
 function setup({
   dirtyKeys = [],
   saved = {},
-  managedByEnv = [],
-}: { dirtyKeys?: string[]; saved?: Record<string, string>; managedByEnv?: string[] } = {}) {
+  managedByEnv = {},
+}: {
+  dirtyKeys?: string[];
+  saved?: Record<string, string>;
+  managedByEnv?: Record<string, string>;
+} = {}) {
   const values: Record<string, string> = { ...saved };
   const markDone = vi.fn();
   const setSummary = vi.fn();
@@ -62,7 +66,8 @@ function setup({
     getPersistedValue: (key: string) => saved[key] ?? "",
     setValue,
     sensitiveConfigured: [],
-    sensitiveManagedByEnv: managedByEnv,
+    sensitiveManagedByEnv: Object.keys(managedByEnv),
+    envVar: (key: string) => managedByEnv[key],
     dirtyCount: 1,
     isSaving: false,
     save,
@@ -244,12 +249,16 @@ describe("StorageStep", () => {
   });
 
   it("shows the environment-managed Redis database number read-only and keeps the check available", async () => {
-    setup({ saved: { "redis.db": "3" }, managedByEnv: ["redis.url", "redis.db"] });
+    setup({
+      saved: { "redis.db": "3" },
+      managedByEnv: { "redis.url": "REDIS_URL", "redis.db": "REDIS_URL" },
+    });
     render(<StorageStep />);
     await userEvent.click(screen.getByRole("button", { name: "View" }));
     expect(screen.getByLabelText("Database number")).toHaveValue(3);
     expect(screen.getByLabelText("Database number")).toBeDisabled();
     expect(screen.getByLabelText("Connection URL")).toBeDisabled();
+    expect(screen.getAllByText("Set by REDIS_URL in the server’s environment.")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Check connection" })).toBeEnabled();
   });
 

@@ -100,6 +100,14 @@ beforeEach(() => {
             items: [{ section_id: `row-${libraryId ?? "home"}`, hidden: true }],
           };
         }
+        case "GET /api/v2/profile/sections/baseline": {
+          const libraryId = args.query?.library_id as string | undefined;
+          if (libraryId && !canOpen(Number(libraryId))) throw notFound();
+          return {
+            section_tokens: [`tok-${libraryId ?? "home"}`],
+            visible_sections: [],
+          };
+        }
       }
       throw new Error(`Unexpected ${operation}`);
     },
@@ -130,7 +138,12 @@ async function exportedFile() {
   expect(blobs).toHaveLength(1);
   return JSON.parse(await blobs[0]!.text()) as {
     libraries: Array<{ id: number }>;
-    pages: Array<{ scope: string; library_id?: number; overrides: unknown[] }>;
+    pages: Array<{
+      scope: string;
+      library_id?: number;
+      overrides: unknown[];
+      server_section_tokens?: string[];
+    }>;
   };
 }
 
@@ -143,9 +156,39 @@ describe("useHomeLayoutExport", () => {
     expect(reads).toEqual([undefined, "7", "9"]);
     expect(file.libraries.map((library) => library.id)).toEqual([7, 9]);
     expect(file.pages.map((page) => page.library_id ?? page.scope)).toEqual(["home", 7, 9]);
+    expect(file.pages.map((page) => page.server_section_tokens)).toEqual([
+      ["tok-home"],
+      ["tok-7"],
+      ["tok-9"],
+    ]);
     expect(file.pages.every((page) => page.overrides.length === 1)).toBe(true);
     expect(exporter.libraries?.map((library) => library.id)).toEqual([7, 9]);
     expect(toast.success).toHaveBeenCalledWith("Home layout exported");
+  });
+
+  it("still exports a page whose baseline can't be read, without its tokens", async () => {
+    const answer = mocks.request.getMockImplementation()!;
+    mocks.request.mockImplementation(
+      async (operation: string, args?: { query?: Record<string, unknown> }) => {
+        if (
+          operation === "GET /api/v2/profile/sections/baseline" &&
+          args?.query?.library_id === "7"
+        ) {
+          throw new Error("unavailable");
+        }
+        return answer(operation, args);
+      },
+    );
+    await exportLayout();
+
+    const file = await exportedFile();
+    expect(file.pages.map((page) => page.server_section_tokens)).toEqual([
+      ["tok-home"],
+      undefined,
+      ["tok-8"],
+      ["tok-9"],
+    ]);
+    expect(file.pages.every((page) => page.overrides.length === 1)).toBe(true);
   });
 
   it("exports a restricted profile's allowed libraries except the one it hid", async () => {

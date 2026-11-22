@@ -87,15 +87,6 @@ export function AudioTrackMenu({
     [currentPosition, onSelect],
   );
 
-  const handleBlur = useCallback(
-    (e: React.FocusEvent) => {
-      if (!menuRef.current?.contains(e.relatedTarget as Node)) {
-        setOpen(false);
-      }
-    },
-    [setOpen],
-  );
-
   if (tracks.length === 0) return null;
 
   const disabled = tracks.length <= 1;
@@ -108,7 +99,7 @@ export function AudioTrackMenu({
     : "";
 
   return (
-    <div ref={menuRef} className="relative" onBlur={handleBlur}>
+    <div ref={menuRef} className="relative">
       {!hideTrigger && (
         <button
           type="button"

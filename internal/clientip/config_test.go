@@ -29,7 +29,6 @@ func (s *fakeStore) GetAll(_ context.Context) (map[string]string, error) {
 }
 
 func TestSeedDefaultsWritesDefaultsWhenUnset(t *testing.T) {
-	t.Setenv(EnvTrustedProxies, "")
 	store := newFakeStore()
 	if err := SeedDefaults(context.Background(), store); err != nil {
 		t.Fatal(err)
@@ -40,7 +39,6 @@ func TestSeedDefaultsWritesDefaultsWhenUnset(t *testing.T) {
 }
 
 func TestSeedDefaultsKeepsExistingValue(t *testing.T) {
-	t.Setenv(EnvTrustedProxies, "")
 	store := newFakeStore()
 	store.values[SettingTrustedProxies] = "203.0.113.0/24"
 	if err := SeedDefaults(context.Background(), store); err != nil {
@@ -48,29 +46,5 @@ func TestSeedDefaultsKeepsExistingValue(t *testing.T) {
 	}
 	if store.sets != 0 {
 		t.Fatalf("expected no writes, got %d", store.sets)
-	}
-}
-
-func TestSeedDefaultsEnvOverridesExistingValue(t *testing.T) {
-	t.Setenv(EnvTrustedProxies, " 10.0.0.0/8 ,203.0.113.7/32 ")
-	store := newFakeStore()
-	store.values[SettingTrustedProxies] = "192.168.0.0/16"
-	if err := SeedDefaults(context.Background(), store); err != nil {
-		t.Fatal(err)
-	}
-	want := "10.0.0.0/8, 203.0.113.7/32"
-	if got := store.values[SettingTrustedProxies]; got != want {
-		t.Fatalf("got %q, want %q", got, want)
-	}
-}
-
-func TestSeedDefaultsEnvInvalid(t *testing.T) {
-	t.Setenv(EnvTrustedProxies, "not-a-cidr")
-	store := newFakeStore()
-	if err := SeedDefaults(context.Background(), store); err == nil {
-		t.Fatal("expected error for invalid env CIDR list")
-	}
-	if store.sets != 0 {
-		t.Fatalf("expected no writes on invalid env, got %d", store.sets)
 	}
 }

@@ -230,6 +230,7 @@ describe("planHomeLayoutImport on the same server", () => {
     expect(plan).toEqual({
       sameServer: true,
       hideWatchedItems: true,
+      unappliedPages: [],
       skippedPages: [],
       skippedSections: [],
       skippedServerSectionChanges: 0,
@@ -781,6 +782,141 @@ describe("importPage", () => {
 
     await expect(importPage(page, true, api, sequentialIds())).rejects.toBe(refused);
     expect(api.save).toHaveBeenCalledTimes(1);
+  });
+
+  it("synthesizes hidden overrides for checked rows still present on a fresh baseline and counts them toward the 500 limit", async () => {
+    const api = {
+      ...fakeApi([{}]),
+      getBaseline: vi.fn(async () => ({
+        section_tokens: ["t1", "t2"],
+        visible_sections: [
+          {
+            id: "s-collections",
+            section_type: "collection_posters",
+            title: "Collections",
+            token: "t2",
+          },
+        ],
+      })),
+    };
+
+    // s-gone was deleted between preview and apply; only s-collections survives.
+    await importPage(page, true, api, sequentialIds(), ["s-collections", "s-gone"]);
+    expect(api.save).toHaveBeenCalledWith([
+      { id: "new-custom", user_section_type: "hidden_gems" },
+      { id: "new-1", section_id: "s-collections", hidden: true },
+    ]);
+
+    const atLimit = {
+      scope: "home" as const,
+      label: "Home",
+      overrides: Array.from({ length: 500 }, (_, index) => ({
+        id: `row-${index}`,
+        user_section_type: "hidden_gems",
+      })),
+    };
+    const apiAtLimit = fakeApi([]);
+    await expect(
+      importPage(atLimit, true, apiAtLimit, sequentialIds(), ["s-collections"]),
+    ).rejects.toThrow("more than 500 saved section changes");
+    expect(apiAtLimit.save).not.toHaveBeenCalled();
+  });
+
+  it("saves the page with the preview's hides when the fresh baseline read fails", async () => {
+    const api = {
+      ...fakeApi([{}]),
+      getBaseline: vi.fn(async () => {
+        throw new Error("unavailable");
+      }),
+    };
+
+    await importPage(page, true, api, sequentialIds(), ["s-collections"]);
+    expect(api.save).toHaveBeenCalledWith([
+      { id: "new-custom", user_section_type: "hidden_gems" },
+      { id: "new-1", section_id: "s-collections", hidden: true },
+    ]);
+  });
+
+  it("skips the save on a hide-only page when every checked row is gone", async () => {
+    const api = {
+      ...fakeApi([]),
+      getBaseline: vi.fn(async () => ({
+        section_tokens: [],
+        visible_sections: [],
+      })),
+    };
+
+    await importPage(
+      { scope: "home", label: "Home", overrides: [], replaceExisting: false },
+      true,
+      api,
+      sequentialIds(),
+      ["s-gone"],
+    );
+    expect(api.save).not.toHaveBeenCalled();
+  });
+
+  it("preserves existing destination overrides when hiding rows on a page whose file overrides were all skipped", () => {
+    const existing = [
+      stored({ id: "saved-1", section_id: "admin-1", position: 0 }),
+      stored({
+        id: "saved-col",
+        section_id: "s-collections",
+        title: "My Collections",
+        position: 2,
+      }),
+      stored({ id: "saved-gone", section_id: "s-removed", removed: true }),
+      stored({ id: "saved-custom", user_section_type: "hidden_gems", is_user_added: true }),
+    ];
+
+    expect(
+      mergeImportedPage(
+        { scope: "home", label: "Home", overrides: [], replaceExisting: false },
+        existing,
+        true,
+        sequentialIds(),
+        ["s-collections", "s-removed", "s-new"],
+      ),
+    ).toEqual([
+      { id: "saved-1", section_id: "admin-1", position: 0 },
+      {
+        id: "saved-col",
+        section_id: "s-collections",
+        title: "My Collections",
+        position: 2,
+        hidden: true,
+      },
+      { id: "saved-gone", section_id: "s-removed", removed: true },
+      { id: "saved-custom", user_section_type: "hidden_gems", is_user_added: true },
+      { id: "new-1", section_id: "s-new", hidden: true },
+    ]);
+  });
+
+  it("round-trips server_section_tokens and degrades malformed or truncated lists to []", () => {
+    const exported = buildHomeLayoutFile({
+      serverId: "server-a",
+      exportedAt: new Date("2026-11-20T12:00:00.000Z"),
+      libraries: [],
+      pages: [{ scope: "home", overrides: [], serverSectionTokens: ["tok-1", "tok-2"] }],
+    });
+    const parsed = parseHomeLayoutFile(JSON.stringify(exported));
+    expect(parsed.ok && parsed.file.pages[0]?.server_section_tokens).toEqual(["tok-1", "tok-2"]);
+
+    const withTokens = (count: number) => ({
+      ...exported,
+      pages: [
+        {
+          scope: "home",
+          overrides: [],
+          server_section_tokens: Array.from({ length: count }, (_, i) => `tok-${i}`),
+        },
+      ],
+    });
+    // A page can have more server rows than one save takes overrides.
+    const parsedLarge = parseHomeLayoutFile(JSON.stringify(withTokens(501)));
+    expect(parsedLarge.ok && parsedLarge.file.pages[0]?.server_section_tokens).toHaveLength(501);
+    const parsedTruncated = parseHomeLayoutFile(JSON.stringify(withTokens(10_001)));
+    expect(parsedTruncated.ok && parsedTruncated.file.pages[0]?.server_section_tokens).toEqual([]);
   });
 });
 

@@ -140,7 +140,11 @@ export function CollectionOptionBody({
         className="ring-border/60 aspect-[2/3] w-9 rounded-md ring-1 ring-inset"
       />
       <span className="min-w-0">
-        <span className="block truncate text-sm font-semibold">{title}</span>
+        {/* A cut name keeps its start in either script; w-fit keeps a short
+            one on the page's start side. */}
+        <span dir="auto" className="block w-fit max-w-full truncate text-sm font-semibold">
+          {title}
+        </span>
         <span aria-hidden className="text-muted-foreground block truncate text-[13px]">
           {meta}
         </span>

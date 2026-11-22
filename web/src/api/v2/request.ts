@@ -335,6 +335,19 @@ export function isNotFoundProblem(error: unknown): boolean {
 }
 
 /**
+ * The text to show for a failed v2 request: the server's answer (a
+ * `V2ProblemError`) or the session layer's translated notice that a refresh
+ * got no verdict, else `fallback`. A failed fetch (`TypeError`), a
+ * `V2TimeoutError`, or a `V2TransportError` (a proxy's error page) carries
+ * developer English, not text written for the reader.
+ */
+export function v2ErrorText(error: unknown, fallback: string): string {
+  return error instanceof V2ProblemError || error instanceof SessionRefreshUnavailableError
+    ? error.message
+    : fallback;
+}
+
+/**
  * Whether a failed v2 request may succeed if sent again later: the server was
  * busy (429, 5xx), never answered (a network error, the deadline), or a
  * session refresh got no verdict. Any other 4xx is the server's answer.
@@ -421,7 +434,7 @@ export const V2_CLIENT_HEADERS: Readonly<Record<string, string>> = {
   "X-Silo-Client-Version": typeof __SILO_WEB_VERSION__ === "string" ? __SILO_WEB_VERSION__ : "dev",
 };
 
-function isProblem(value: unknown): value is Problem {
+export function isProblem(value: unknown): value is Problem {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return (
