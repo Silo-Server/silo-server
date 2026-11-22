@@ -100,8 +100,6 @@ type meilisearchHybridRequest struct {
 
 type meilisearchSearchHit struct {
 	ContentID string `json:"content_id"`
-	// Type is the indexed document type, set when the request retrieves it.
-	Type string `json:"type,omitempty"`
 	// RankingScore is set only when the request asked for showRankingScore.
 	RankingScore float64 `json:"_rankingScore"`
 	// RankingScoreDetails is set only when the request asked for
@@ -117,15 +115,6 @@ type meilisearchRankingScoreDetails struct {
 	Words     *meilisearchWordsDetail     `json:"words,omitempty"`
 	Typo      *meilisearchTypoDetail      `json:"typo,omitempty"`
 	Proximity *meilisearchProximityDetail `json:"proximity,omitempty"`
-	Exactness *meilisearchExactnessDetail `json:"exactness,omitempty"`
-}
-
-// meilisearchExactnessDetail is how a hit's best attribute matches the search:
-// exactMatch when the attribute is the search's words and nothing else,
-// matchesStart when it starts with them, noExactMatch otherwise, including
-// every match with a typo.
-type meilisearchExactnessDetail struct {
-	MatchType string `json:"matchType"`
 }
 
 type meilisearchWordsDetail struct {

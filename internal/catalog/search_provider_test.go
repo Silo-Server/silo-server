@@ -116,10 +116,10 @@ func TestMeilisearchMixedHybridSearchQueries(t *testing.T) {
 	built := provider.buildHybridSearchQueries("catalog-v3", CatalogSearchRequest{
 		Access: AccessFilter{AllowedLibraryIDs: []int{4}},
 	}, base, 125)
-	if built.Ratio != 0.4 || len(built.Keyword) != 2 || len(built.Keyword[0].Queries) != 1 || len(built.Keyword[1].Queries) != 1 || built.Meaning == nil {
+	if built.Ratio != 0.4 || len(built.Keyword) != 2 || len(built.Keyword[0]) != 1 || len(built.Keyword[1]) != 1 || built.Meaning == nil {
 		t.Fatalf("queries = %#v", built)
 	}
-	media, episode, meaning := built.Keyword[0].Queries[0], built.Keyword[1].Queries[0], *built.Meaning
+	media, episode, meaning := built.Keyword[0][0], built.Keyword[1][0], *built.Meaning
 	if media.Hybrid != nil || media.Vector != nil || media.Query != base.Query || media.Limit != 125 || media.Offset != 0 ||
 		!strings.Contains(media.Filter, `type != "episode"`) {
 		t.Fatalf("media keyword query = %#v", media)

@@ -645,10 +645,9 @@ func (p *MeilisearchSearchProvider) buildMeilisearchSearchRequest(ctx context.Co
 
 func (p *MeilisearchSearchProvider) buildMeilisearchKeywordSearchRequest(req CatalogSearchRequest) meilisearchSearchRequest {
 	return meilisearchSearchRequest{
-		Query:  strings.TrimSpace(req.Query),
-		Filter: meilisearchSearchFilter(req.ItemTypes, req.Access),
-		// The type ranks title matches by category (meilisearchSearchPoints).
-		AttributesToRetrieve: []string{"content_id", "type"}, //nolint:goconst // A Meilisearch document attribute.
+		Query:                strings.TrimSpace(req.Query),
+		Filter:               meilisearchSearchFilter(req.ItemTypes, req.Access),
+		AttributesToRetrieve: []string{"content_id"},
 		AttributesToSearchOn: p.attributesToSearchOnForRequest(req),
 		MatchingStrategy:     p.matchingStrategyForRequest(req),
 	}
@@ -709,13 +708,15 @@ func (p *MeilisearchSearchProvider) hybridSearch(
 	var keywordFetched, keywordKept, peopleFetched, peopleKept int
 	next := 0
 	for _, search := range queries.Keyword {
-		group := responses[next : next+len(search.Queries)]
-		next += len(search.Queries)
-		combined := combineMeilisearchKeywordResponses(search, group, limit)
+		group := responses[next : next+len(search)]
+		next += len(search)
+		combined := combineMeilisearchKeywordResponses(group, limit)
 		keywordFetched += len(group[0].Hits)
 		keywordKept += combined.OtherKept
-		peopleFetched += len(search.hits(group, search.People))
-		peopleKept += combined.PeopleKept
+		if len(group) > 1 {
+			peopleFetched += len(group[1].Hits)
+			peopleKept += combined.PeopleKept
+		}
 		keywordHits = append(keywordHits, meilisearchNonIncreasingScores(combined.Hits)...)
 	}
 	if queries.Meaning != nil {
@@ -759,7 +760,7 @@ func meilisearchNonIncreasingScores(hits []meilisearchSearchHit) []meilisearchSe
 type meilisearchHybridQueries struct {
 	// Keyword holds one keyword search per filter (media, then episodes),
 	// each meilisearchKeywordQueries.
-	Keyword []meilisearchKeywordQuerySet
+	Keyword [][]meilisearchMultiSearchQuery
 	// Meaning is the meaning-only query, nil when Ratio gives it no weight.
 	Meaning *meilisearchMultiSearchQuery
 	// Ratio is the semantic ratio that weighs the two halves.
@@ -768,10 +769,7 @@ type meilisearchHybridQueries struct {
 
 // all returns the queries in the order the responses are read.
 func (q meilisearchHybridQueries) all() []meilisearchMultiSearchQuery {
-	var all []meilisearchMultiSearchQuery
-	for _, search := range q.Keyword {
-		all = append(all, search.Queries...)
-	}
+	all := slices.Concat(q.Keyword...)
 	if q.Meaning != nil {
 		all = append(all, *q.Meaning)
 	}
@@ -798,17 +796,17 @@ func (p *MeilisearchSearchProvider) buildHybridSearchQueries(
 	} else {
 		mediaFilter = meilisearchSearchFilter(mediaTypes, req.Access)
 	}
-	keywordQueries := func(filter string) meilisearchKeywordQuerySet {
+	keywordQueries := func(filter string) []meilisearchMultiSearchQuery {
 		keyword := base
 		keyword.Filter = filter
 		keyword.Offset, keyword.Limit = 0, limit
 		keyword.Vector, keyword.Hybrid = nil, nil
 		keyword.ShowRankingScore = true
 		keyword.ShowRankingScoreDetails = true
-		return meilisearchKeywordQueries(indexUID, keyword, false)
+		return meilisearchKeywordQueries(indexUID, keyword)
 	}
 
-	queries := meilisearchHybridQueries{Ratio: ratio, Keyword: []meilisearchKeywordQuerySet{keywordQueries(mediaFilter)}}
+	queries := meilisearchHybridQueries{Ratio: ratio, Keyword: [][]meilisearchMultiSearchQuery{keywordQueries(mediaFilter)}}
 	if searchRequestMixesEpisodeAndMedia(req.ItemTypes) {
 		queries.Keyword = append(queries.Keyword, keywordQueries(meilisearchSearchFilter([]string{"episode"}, req.Access))) //nolint:goconst // The indexed document type, as in the filter above.
 	}
@@ -972,9 +970,8 @@ func meilisearchKeywordHitBetter(a, b meilisearchSearchHit) bool {
 	return false
 }
 
-// meilisearchKeywordHits is a keyword search's ranking from its keyword,
-// people and title queries, cut, combined and ranked by points by
-// combineMeilisearchKeywordHits.
+// meilisearchKeywordHits is a keyword search's ranking from its keyword query
+// and its people query, cut and combined by combineMeilisearchKeywordHits.
 type meilisearchKeywordHits struct {
 	// Hits is the ranking from its first hit.
 	Hits []meilisearchSearchHit
@@ -992,11 +989,8 @@ type meilisearchKeywordHits struct {
 // survive an exact name match, nor a scattered name match an exact title.
 // Other's hits come first, as the index's attribute ranking orders titles
 // ahead of people when one query searches both. A hit in both lists
-// keeps its first place. The combined hits are then ranked by points against
-// the title query's hits (rankMeilisearchHitsByPoints), before the limit, so a
-// movie whose title matches is never cut for episodes that Meilisearch ranked
-// ahead of it. With no title hits the order is unchanged.
-func combineMeilisearchKeywordHits(other, people, title []meilisearchSearchHit, limit int) meilisearchKeywordHits {
+// keeps its first place.
+func combineMeilisearchKeywordHits(other, people []meilisearchSearchHit, limit int) meilisearchKeywordHits {
 	var best meilisearchSearchHit
 	switch {
 	case len(other) > 0 && len(people) > 0 && meilisearchKeywordHitBetter(people[0], other[0]):
@@ -1011,12 +1005,15 @@ func combineMeilisearchKeywordHits(other, people, title []meilisearchSearchHit, 
 	other = other[:meilisearchKeywordMatchCount(best, other)]
 	people = meilisearchPeopleScoresOnKeywordScale(other, people[:meilisearchKeywordMatchCount(best, people)])
 	combined := meilisearchKeywordHits{
-		Hits:       make([]meilisearchSearchHit, 0, len(other)+len(people)),
+		Hits:       make([]meilisearchSearchHit, 0, min(len(other)+len(people), max(limit, 0))),
 		OtherKept:  len(other),
 		PeopleKept: len(people),
 	}
 	seen := make(map[string]struct{}, len(other)+len(people))
 	for _, hit := range slices.Concat(other, people) {
+		if len(combined.Hits) >= limit {
+			break
+		}
 		id := strings.TrimSpace(hit.ContentID)
 		if id == "" {
 			continue
@@ -1027,8 +1024,6 @@ func combineMeilisearchKeywordHits(other, people, title []meilisearchSearchHit, 
 		seen[id] = struct{}{}
 		combined.Hits = append(combined.Hits, hit)
 	}
-	combined.Hits = rankMeilisearchHitsByPoints(combined.Hits, title)
-	combined.Hits = combined.Hits[:min(len(combined.Hits), max(limit, 0))]
 	return combined
 }
 
@@ -1056,88 +1051,57 @@ func meilisearchPeopleScoresOnKeywordScale(other, people []meilisearchSearchHit)
 	return scaled
 }
 
-// meilisearchKeywordQuerySet is the multi-search queries of one keyword
-// search: keyword first, then its people query (peopleSearchRequest) and its
-// title query (titleSearchRequest) when each is sent.
-type meilisearchKeywordQuerySet struct {
-	Queries []meilisearchMultiSearchQuery
-	// People and Title are each query's index in Queries, -1 when not sent.
-	People, Title int
-}
-
 // meilisearchKeywordQueries returns the multi-search queries of one keyword
-// search. withTitle sends its title query; a hybrid search sends none, because
-// its merge orders keyword hits by score across its media and episode
-// searches, which a ranking by points within one search cannot survive.
-func meilisearchKeywordQueries(indexUID string, keyword meilisearchSearchRequest, withTitle bool) meilisearchKeywordQuerySet {
-	set := meilisearchKeywordQuerySet{
-		Queries: []meilisearchMultiSearchQuery{{IndexUID: indexUID, meilisearchSearchRequest: keyword}},
-		People:  -1,
-		Title:   -1,
-	}
+// search: keyword, then its people query when one is sent
+// (peopleSearchRequest).
+func meilisearchKeywordQueries(indexUID string, keyword meilisearchSearchRequest) []meilisearchMultiSearchQuery {
+	queries := []meilisearchMultiSearchQuery{{IndexUID: indexUID, meilisearchSearchRequest: keyword}}
 	if people, ok := peopleSearchRequest(keyword); ok {
-		set.People = len(set.Queries)
-		set.Queries = append(set.Queries, meilisearchMultiSearchQuery{IndexUID: indexUID, meilisearchSearchRequest: people})
+		queries = append(queries, meilisearchMultiSearchQuery{IndexUID: indexUID, meilisearchSearchRequest: people})
 	}
-	if title, ok := titleSearchRequest(keyword); ok && withTitle {
-		set.Title = len(set.Queries)
-		set.Queries = append(set.Queries, meilisearchMultiSearchQuery{IndexUID: indexUID, meilisearchSearchRequest: title})
-	}
-	return set
+	return queries
 }
 
-// hits returns the hits of the query at index in responses, the responses to
-// the set's queries in order, or nil when that query was not sent.
-func (s meilisearchKeywordQuerySet) hits(responses []meilisearchSearchResponse, index int) []meilisearchSearchHit {
-	if index < 0 || index >= len(responses) {
-		return nil
+// combineMeilisearchKeywordResponses combines the responses to
+// meilisearchKeywordQueries, in query order.
+func combineMeilisearchKeywordResponses(responses []meilisearchSearchResponse, limit int) meilisearchKeywordHits {
+	var people []meilisearchSearchHit
+	if len(responses) > 1 {
+		people = responses[1].Hits
 	}
-	return responses[index].Hits
+	return combineMeilisearchKeywordHits(responses[0].Hits, people, limit)
 }
 
-// combineMeilisearchKeywordResponses combines the responses to the set's
-// queries, in query order.
-func combineMeilisearchKeywordResponses(set meilisearchKeywordQuerySet, responses []meilisearchSearchResponse, limit int) meilisearchKeywordHits {
-	return combineMeilisearchKeywordHits(set.hits(responses, 0), set.hits(responses, set.People), set.hits(responses, set.Title), limit)
-}
-
-// keywordRanking runs a keyword search and its people and title queries in
-// one multi-search from the first hit and returns their combined ranking, at
-// most limit IDs, and the most hits any query returned. A caller paging
-// through it asks again with a larger limit, as the hybrid path does, because
-// the combined order depends on every list from its first hit.
-//
-// With a title query, every query fetches the whole candidate window
-// (meilisearchCandidateScanCap) whatever limit is, and the ranking by points
-// is cut to limit afterwards: ranked within a short fetch, a movie that
-// Meilisearch places behind more episodes than the fetch holds would be
-// missing, and each larger fetch of an offset-paged search would reorder the
-// pages already served.
+// keywordRanking runs a keyword search and its people query in one
+// multi-search from the first hit and returns their combined ranking, at most
+// limit IDs, and the most hits either query returned. A caller paging through
+// it asks again with a larger limit, as the hybrid path does, because the
+// combined order puts every kept keyword hit ahead of every people hit.
 func (p *MeilisearchSearchProvider) keywordRanking(ctx context.Context, indexUID string, base meilisearchSearchRequest, limit int) ([]string, int, error) {
 	base.Offset, base.Limit = 0, limit
 	base.Vector, base.Hybrid = nil, nil
 	base.ShowRankingScoreDetails = true
-	if _, withTitle := titleSearchRequest(base); withTitle {
-		base.Limit = max(limit, meilisearchCandidateScanCap)
-	}
-	set := meilisearchKeywordQueries(indexUID, base, true)
-	responses, err := p.client.MultiSearch(ctx, set.Queries)
+	queries := meilisearchKeywordQueries(indexUID, base)
+	responses, err := p.client.MultiSearch(ctx, queries)
 	if err != nil {
 		return nil, 0, err
 	}
-	combined := combineMeilisearchKeywordResponses(set, responses, limit)
+	combined := combineMeilisearchKeywordResponses(responses, limit)
 	fetched := 0
 	for _, response := range responses {
 		fetched = max(fetched, len(response.Hits))
+	}
+	var peopleFetched int
+	if len(responses) > 1 {
+		peopleFetched = len(responses[1].Hits)
 	}
 	slog.DebugContext(ctx, "catalog search: keyword search",
 		"component", "catalog",
 		"limit", limit,
 		"keyword_hits", len(responses[0].Hits),
 		"keyword_kept", combined.OtherKept,
-		"people_hits", len(set.hits(responses, set.People)),
+		"people_hits", peopleFetched,
 		"people_kept", combined.PeopleKept,
-		"title_hits", len(set.hits(responses, set.Title)),
 	)
 	return meilisearchHitIDs(combined.Hits), fetched, nil
 }

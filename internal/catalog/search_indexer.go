@@ -962,21 +962,29 @@ func catalogSearchMeilisearchIndexSettings() map[string]any {
 			// 2021" can match the year of Dune (2021).
 			"year", //nolint:goconst // A Meilisearch document attribute, not a sort field.
 		},
-		// Meilisearch's default rules, then popularity as the final tiebreak
-		// between hits that tie on everything else (same title, no year in
-		// the search). The default order is deliberate: typo ahead of
+		// Meilisearch's default rules with type_rank after sort, then
+		// popularity as the final tiebreak between hits that tie on
+		// everything else (same title, no year in the search). The default
+		// order is deliberate: typo ahead of
 		// attributeRank keeps an exact cast match ("tom hanks") above titles
 		// that are one letter off ("Idle Hands"). A custom rule needs no
 		// sortableAttributes entry. Searches cut a keyword ranking at its
 		// first hit that matches fewer words, with more typos, or with its
 		// words further apart than the best hit (meilisearchKeywordMatchCount),
 		// which is right only while words, typo and proximity lead this list.
+		// type_rank comes right after attributeRank and sort: among hits that
+		// match as well in the same attribute, a movie or series ranks ahead
+		// of an episode, whatever their word position or exactness, while a
+		// title match still ranks ahead of a genre or keyword match. Changing
+		// where it sits is a settings change; dropping the field is a schema
+		// change.
 		"rankingRules": []string{
 			"words",
 			"typo",
 			"proximity",
 			"attributeRank",
 			"sort",
+			"type_rank:asc",
 			"wordPosition",
 			"exactness",
 			"popularity:desc",
@@ -1059,6 +1067,21 @@ type catalogSearchDocument struct {
 	// sent: Meilisearch leaves a custom ranking rule undefined for documents
 	// that lack its attribute.
 	Popularity int64 `json:"popularity"`
+	// TypeRank puts every other type ahead of episodes among hits that match
+	// equally well in the same attribute (catalogSearchTypeRank). Always sent,
+	// as Popularity is.
+	TypeRank int `json:"type_rank"`
+}
+
+// catalogSearchTypeRank is a document's type_rank: 1 for an episode, 0 for
+// every other type. An episode often has the same title as a film or series
+// ("Pressure", "Apocalypse Now"), and the index's other rules tie the two, so
+// without it the episodes, which far outnumber the film, fill the first page.
+func catalogSearchTypeRank(itemType string) int {
+	if itemType == "episode" { //nolint:goconst // The indexed document type.
+		return 1
+	}
+	return 0
 }
 
 func (i *CatalogSearchIndexer) LoadDocumentsAfter(ctx context.Context, afterContentID string, limit int, itemTypes []string, embedder string, semanticEnabled, binaryQuantized bool) ([]catalogSearchDocument, error) {
@@ -1255,6 +1278,7 @@ func scanCatalogSearchDocuments(rows pgx.Rows) ([]catalogSearchDocument, error) 
 		}
 		doc.SchemaVersion = SearchMeilisearchSchemaVersion
 		doc.TitleVariants = catalogSearchTitleVariants(doc)
+		doc.TypeRank = catalogSearchTypeRank(doc.Type)
 		docs = append(docs, doc)
 	}
 	return docs, rows.Err()

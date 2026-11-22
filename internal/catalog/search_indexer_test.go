@@ -107,6 +107,20 @@ func TestMeilisearchRankingRulesLeadWithWordsTypoProximity(t *testing.T) {
 	}
 }
 
+// An episode ties with the film or series of the same title on every rule
+// before type_rank, so type_rank must sit after attributeRank and sort (a
+// title match still beats a genre match) and before wordPosition, exactness
+// and popularity (a movie whose title starts with the search still beats an
+// episode titled exactly that).
+func TestMeilisearchRankingRulesRankEpisodesAfterMediaInOneAttribute(t *testing.T) {
+	rules, _ := catalogSearchMeilisearchSettings(DefaultMeilisearchEmbedder, false, false)["rankingRules"].([]string)
+	at := slices.Index(rules, "type_rank:asc")
+	if at < 0 || at < slices.Index(rules, "attributeRank") || at < slices.Index(rules, "sort") ||
+		at > slices.Index(rules, "wordPosition") || at > slices.Index(rules, "exactness") || at > slices.Index(rules, "popularity:desc") {
+		t.Fatalf("rankingRules = %v, want type_rank:asc after attributeRank and sort, before wordPosition, exactness and popularity:desc", rules)
+	}
+}
+
 // A failed rebuild must not leave its partial index behind, even when the
 // failure is its own context being canceled, and a new rebuild clears the
 // leftovers of runs that died before they could clean up.
