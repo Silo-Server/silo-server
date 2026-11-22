@@ -4,6 +4,9 @@ import (
 	"context"
 	"testing"
 	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 // A browser that unsubscribes, or a device removed at sign-out, after the
@@ -194,7 +197,7 @@ func TestPushRetentionKeepsTheLastChanceForAnExpiredAppleLoginDB(t *testing.T) {
 		removed, err := devices.DeleteRegistrationsWithNoLogin(ctx)
 		swept <- result{removed, err}
 	}()
-	waitForLockWait(t, pool)
+	waitForBlockedBy(t, pool, tx)
 	// The registrations nobody holds are gone already: the sweep waits one row
 	// at a time, not with a many-row delete that could deadlock with an enqueue.
 	var free bool
@@ -207,7 +210,12 @@ func TestPushRetentionKeepsTheLastChanceForAnExpiredAppleLoginDB(t *testing.T) {
 	if err := tx.Commit(ctx); err != nil {
 		t.Fatal(err)
 	}
-	first := <-swept
+	var first result
+	select {
+	case first = <-swept:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the sweep didn't finish after the delivery committed")
+	}
 	if first.err != nil {
 		t.Fatal(first.err)
 	}
@@ -223,5 +231,34 @@ func TestPushRetentionKeepsTheLastChanceForAnExpiredAppleLoginDB(t *testing.T) {
 	}
 	if removed != 2 {
 		t.Fatalf("retention removed %d registrations, want the expired login's 2", removed)
+	}
+}
+
+// waitForBlockedBy waits until another backend waits on a lock that tx
+// holds. Unlike waitForLockWait it ignores lock waits of other packages'
+// tests on the same database.
+func waitForBlockedBy(t *testing.T, pool *pgxpool.Pool, tx pgx.Tx) {
+	t.Helper()
+	var holder int
+	if err := tx.QueryRow(t.Context(), `SELECT pg_backend_pid()`).Scan(&holder); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.After(10 * time.Second)
+	poll := time.NewTicker(10 * time.Millisecond)
+	defer poll.Stop()
+	for {
+		var blocked bool
+		if err := pool.QueryRow(t.Context(), `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE $1 = ANY(pg_blocking_pids(pid)))`, holder).Scan(&blocked); err != nil {
+			t.Fatal(err)
+		}
+		if blocked {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatal("nothing waited on the delivery's locks")
+		case <-poll.C:
+		}
 	}
 }
