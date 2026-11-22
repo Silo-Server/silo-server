@@ -17,7 +17,7 @@ describe("PathText", () => {
     expect(html.replace(/<[^>]+>/g, "")).toBe(path);
   });
 
-  it("isolates a URL's query values but not a '#' in a file name", () => {
+  it("isolates a URL's query values but not a file name's", () => {
     const bdis = (path: string) =>
       [...renderToStaticMarkup(<PathText path={path} />).matchAll(/<bdi>(.*?)<\/bdi>/g)].map(
         (match) => match[1],
@@ -33,6 +33,12 @@ describe("PathText", () => {
       "10",
       "نسخة",
     ]);
-    expect(bdis("/media/كتب #1/a=b.mkv")).toEqual(["media", "كتب #1", "a=b.mkv"]);
+    // "?" and "&" are folder-name characters in a file path.
+    expect(bdis("/media/What If...?/توم & جيري/كتب #1.mkv")).toEqual([
+      "media",
+      "What If...?",
+      "توم &amp; جيري",
+      "كتب #1.mkv",
+    ]);
   });
 });

@@ -6,38 +6,32 @@ import { Fragment, type ReactNode } from "react";
 // separators must not become thousands of elements.
 const MAX_SEPARATORS = 32;
 
-// From a URL's query (`?`) or fragment (`#`) on, these also separate parts, so an
-// Arabic query value can't trade places with the `&name=value` after it.
-const QUERY_SEPARATORS = "/?&=#";
-
-/** Where a `/` path's query or a URL's fragment starts, or -1. */
-function queryStart(path: string) {
-  const query = path.indexOf("?");
-  // `#` is a folder-name character in a file path, so only a URL has a fragment.
-  const fragment = path.includes("://") ? path.indexOf("#") : -1;
-  if (query < 0 || fragment < 0) return Math.max(query, fragment);
-  return Math.min(query, fragment);
-}
+// In an http(s) URL, the query and fragment also split on these, so an Arabic query
+// value can't trade places with the `&name=value` after it. A file path keeps them
+// as part of its folder names ("What If...?", "Tom & Jerry").
+const QUERY_SEPARATORS = "?&=#";
+const HTTP_URL = /^https?:\/\//i;
 
 /**
  * A file path, or a URL, that reads left to right, folder by folder, in any
  * language, while each folder name keeps its own direction: one named in Arabic
  * reads right to left without reversing the folders around it. Put it in a
  * `dir="ltr"` element; cut short with an ellipsis, the path then keeps its
- * start. Splits on `/`, or on `\` in a Windows path with no `/`, and a URL's
- * query and fragment also on `? & = #`. Keeps every character as written.
+ * start. Splits on `/`, or on `\` in a Windows path with no `/`, and an http(s)
+ * URL's query and fragment also on `? & = #`. Keeps every character as written.
  */
 export function PathText({ path }: { path: string }) {
   // A backslash is part of a folder name in a POSIX path or a URL.
   const separator = path.includes("/") ? "/" : "\\";
-  const query = separator === "/" ? queryStart(path) : -1;
+  const query = HTTP_URL.test(path) ? path.search(/[?#]/) : -1;
   const nextSeparator = (from: number) => {
-    for (let index = from; index < path.length; index++) {
-      const char = path.charAt(index);
-      if (char === separator || (query >= 0 && index >= query && QUERY_SEPARATORS.includes(char)))
-        return index;
+    const end = path.indexOf(separator, from);
+    if (query < 0) return end;
+    const stop = end < 0 ? path.length : end;
+    for (let index = Math.max(from, query); index < stop; index++) {
+      if (QUERY_SEPARATORS.includes(path.charAt(index))) return index;
     }
-    return -1;
+    return end;
   };
   const nodes: ReactNode[] = [];
   let start = 0;
