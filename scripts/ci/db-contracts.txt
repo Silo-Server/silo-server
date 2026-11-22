@@ -1453,3 +1453,7 @@
 # Turning a library off or on sends catalog.library.changed, so catalog mirrors re-list.
 ./internal/api/handlers TestLibraryEnabledTogglePublishesCatalogLibraryChangedDB
 ./internal/api/handlers TestLibraryDisableAfterConcurrentEnablePublishesDB
+
+# The stored-subtitle list reads the database, so a deployment without subtitle
+# storage still lists the rows instead of answering 500 without a query.
+./internal/api TestAdminSubtitleHandlerListsStoredSubtitlesWithoutSubtitleStorageDB
