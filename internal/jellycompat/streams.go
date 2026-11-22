@@ -2655,8 +2655,8 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	// point, matching the native playback persistence rule.
 	if positionSeconds > 0 && h.storeProvider != nil && playSession.ItemID != "" {
 		if store, storeErr := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID); storeErr == nil {
-			version := playedSourceVersion(playSession, req.MediaSourceID)
-			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, float64(version.Duration), h.versionThresholds(r.Context(), version))
+			version, identified := playedSourceVersion(playSession, req.MediaSourceID)
+			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, float64(version.Duration), h.versionThresholds(r.Context(), version, identified))
 			if err == nil && completed {
 				refreshTasteProfile = true
 			}
@@ -4203,17 +4203,18 @@ func mediaSourceByFileID(session *PlaybackSession, fileID int) *PlaybackMediaSou
 // playedSourceVersion returns the version whose runtime and end credits a
 // progress report is judged against: the played version (see
 // playedMediaSource), whose runtime is 0 when it has none, or the first listed
-// version with a runtime when no version can be identified.
-func playedSourceVersion(session *PlaybackSession, mediaSourceID string) catalog.FileVersion {
+// version with a runtime when no version can be identified. identified
+// reports which of the two it is.
+func playedSourceVersion(session *PlaybackSession, mediaSourceID string) (version catalog.FileVersion, identified bool) {
 	if source := playedMediaSource(session, mediaSourceID); source != nil {
-		return source.Version
+		return source.Version, true
 	}
 	for _, source := range session.MediaSources {
 		if source.Version.Duration > 0 {
-			return source.Version
+			return source.Version, false
 		}
 	}
-	return catalog.FileVersion{}
+	return catalog.FileVersion{}, false
 }
 
 func findMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMediaSource {

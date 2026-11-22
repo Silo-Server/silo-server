@@ -472,10 +472,17 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 }
 
 // versionThresholds is playbackThresholds with the end credits of version,
-// whose runtime a report's position is measured against.
-func (h *PlaybackHandler) versionThresholds(ctx context.Context, version catalog.FileVersion) userstore.ProgressThresholds {
+// whose runtime a report's position is measured against. identified is false
+// when the version is only a guess at what plays (the first listed one), whose
+// credits could belong to another cut; the percentage rule alone applies then.
+// A play session doesn't record whether its item is a movie or an episode, so
+// credits in either kind's end window count.
+func (h *PlaybackHandler) versionThresholds(ctx context.Context, version catalog.FileVersion, identified bool) userstore.ProgressThresholds {
 	t := h.playbackThresholds(ctx)
-	t.CreditsStartSeconds = markers.EndCreditsStart(version.EffectiveMarkerSegments(), float64(version.Duration))
+	if identified {
+		t.CreditsStartSeconds = markers.EndCreditsStart(version.EffectiveMarkerSegments(), float64(version.Duration),
+			markers.CreditsLimitsFor(false), markers.CreditsLimitsFor(true))
+	}
 	return t
 }
 

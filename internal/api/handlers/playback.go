@@ -500,7 +500,7 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 func (h *PlaybackHandler) playbackThresholdsForFile(ctx context.Context, file *models.MediaFile, duration float64) userstore.ProgressThresholds {
 	t := h.playbackThresholds(ctx)
 	if file != nil && duration == float64(file.Duration) {
-		t.CreditsStartSeconds = markers.EndCreditsStart(models.EffectiveMarkerSegments(file), duration)
+		t.CreditsStartSeconds = markers.EndCreditsStart(models.EffectiveMarkerSegments(file), duration, markers.CreditsLimitsForFile(file))
 	}
 	return t
 }

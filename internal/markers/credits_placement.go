@@ -90,16 +90,19 @@ func (l CreditsLimits) CheckCreditsPlacement(start, end, duration float64, intro
 // EndCreditsStart returns where the end credits among segments start, for a
 // file of duration seconds, or 0 when it has none. Reaching that point
 // finishes the item (userstore.ProgressThresholds.CreditsStartSeconds). Only
-// credits starting inside the episode or movie tail window count, so the rule
-// needs no item kind and a misplaced legacy marker never finishes an item
-// early; every marker saved today already passes one of the two windows. The
-// last such occurrence wins, which in a file spanning several episodes is the
-// final episode's.
-func EndCreditsStart(segments []models.MarkerSegment, duration float64) float64 {
-	if duration <= 0 {
+// credits starting inside the tail window of one of limits count, so a
+// misplaced legacy marker never finishes an item early. A caller that knows
+// the item's kind passes its limits (CreditsLimitsForFile); one that doesn't
+// passes both kinds'. The last such occurrence wins, which in a file spanning
+// several episodes is the final episode's.
+func EndCreditsStart(segments []models.MarkerSegment, duration float64, limits ...CreditsLimits) float64 {
+	if duration <= 0 || len(limits) == 0 {
 		return 0
 	}
-	windowStart := math.Min(CreditsLimitsFor(false).WindowStart(duration), CreditsLimitsFor(true).WindowStart(duration))
+	windowStart := duration
+	for _, l := range limits {
+		windowStart = math.Min(windowStart, l.WindowStart(duration))
+	}
 	start := 0.0
 	for _, segment := range segments {
 		if segment.Kind == models.MarkerSegmentCredits && segment.StartSeconds >= windowStart && segment.StartSeconds < duration {

@@ -79,7 +79,7 @@ func TestStoppedScrobbleAfterReapUsesPlayedVersion(t *testing.T) {
 	}
 }
 
-func TestPlayedSourceDurationFallbacks(t *testing.T) {
+func TestPlayedSourceVersionFallbacks(t *testing.T) {
 	codec := NewResourceIDCodec()
 	theatrical, extended := versionedReportVersions()
 	unknownRuntime := extended
@@ -101,30 +101,37 @@ func TestPlayedSourceDurationFallbacks(t *testing.T) {
 		{"nothing identifies the version", PlaybackSession{MediaSources: sources(theatrical, extended)}, "", 3600},
 		{"played version without a runtime", PlaybackSession{MediaSources: sources(theatrical, unknownRuntime), UpstreamMediaFileID: 43}, "", 0},
 	} {
-		if got := float64(playedSourceVersion(&tc.play, tc.mediaSourceID).Duration); got != tc.want {
+		version, _ := playedSourceVersion(&tc.play, tc.mediaSourceID)
+		if got := float64(version.Duration); got != tc.want {
 			t.Errorf("%s: duration = %v, want %v", tc.name, got, tc.want)
 		}
 	}
 }
 
 // A progress report inside the played version's end credits finishes the
-// title below the % threshold; another cut's credits don't count. The report
-// is at 4600 s: past the extended cut's credits at 4550 s but only 85% of it.
+// title below the % threshold. Another cut's credits don't count, nor do the
+// credits of a version the play doesn't identify: the first listed one is
+// only a guess at what plays.
 func TestProgressReportFinishesAtPlayedVersionCredits(t *testing.T) {
 	for _, tc := range []struct {
 		name                 string
 		theatrical, extended *catalog.Marker
+		upstreamFileID       int
+		position             int64
 		wantCompleted        bool
 	}{
-		{name: "played cut's credits", extended: &catalog.Marker{Start: 4550, End: 5390}, wantCompleted: true},
-		{name: "other cut's credits", theatrical: &catalog.Marker{Start: 3000, End: 3590}},
+		// 4600 s is past the extended cut's credits but only 85% of it.
+		{name: "played cut's credits", extended: &catalog.Marker{Start: 4550, End: 5390}, upstreamFileID: 43, position: 4600, wantCompleted: true},
+		{name: "other cut's credits", theatrical: &catalog.Marker{Start: 3000, End: 3590}, upstreamFileID: 43, position: 4600},
+		// 3100 s is past the theatrical cut's credits but only 86% of it.
+		{name: "unidentified version's credits", theatrical: &catalog.Marker{Start: 3000, End: 3590}, position: 3100},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			theatrical, extended := versionedReportVersions()
 			theatrical.Credits, extended.Credits = tc.theatrical, tc.extended
-			handler, _, store := newVersionedReportHandler(t, true, []catalog.FileVersion{theatrical, extended}, extended.FileID)
+			handler, _, store := newVersionedReportHandler(t, true, []catalog.FileVersion{theatrical, extended}, tc.upstreamFileID)
 
-			body := fmt.Sprintf(`{"PlaySessionId":"play-1","PositionTicks":%d}`, int64(4600)*10_000_000)
+			body := fmt.Sprintf(`{"PlaySessionId":"play-1","PositionTicks":%d}`, tc.position*10_000_000)
 			req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Progress", strings.NewReader(body))
 			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey,
 				&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))

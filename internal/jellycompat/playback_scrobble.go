@@ -77,7 +77,11 @@ func (h *PlaybackHandler) compatScrobbleEvent(
 	scrobbleCtx, cancel := compatDetachedContext(ctx)
 	defer cancel()
 
-	source := compatScrobbleSource(playSession, upstreamSession, preferredSource)
+	source := identifiedScrobbleSource(playSession, upstreamSession, preferredSource)
+	identified := source != nil
+	if !identified {
+		source = firstMediaSource(playSession)
+	}
 	var version catalog.FileVersion
 	if source != nil {
 		version = source.Version
@@ -89,7 +93,7 @@ func (h *PlaybackHandler) compatScrobbleEvent(
 	}
 	completed := false
 	if action == compatScrobbleStop && duration > 0 {
-		_, completed, _ = userstore.ResolveProgressState(position, duration, h.versionThresholds(scrobbleCtx, version))
+		_, completed, _ = userstore.ResolveProgressState(position, duration, h.versionThresholds(scrobbleCtx, version, identified))
 	}
 	event := watchsync.ResolveScrobbleIdentity(scrobbleCtx, h.StableIdentityResolver, watchsync.ScrobbleEvent{
 		PlaybackSessionID: upstreamSession.ID,
@@ -409,6 +413,22 @@ func compatScrobbleSource(
 	upstreamSession *playback.Session,
 	preferredSource *PlaybackMediaSource,
 ) *PlaybackMediaSource {
+	if source := identifiedScrobbleSource(playSession, upstreamSession, preferredSource); source != nil {
+		return source
+	}
+	if playSession == nil {
+		return nil
+	}
+	return firstMediaSource(playSession)
+}
+
+// identifiedScrobbleSource is compatScrobbleSource without its last resort,
+// the first listed source: nil when nothing identifies the played version.
+func identifiedScrobbleSource(
+	playSession *PlaybackSession,
+	upstreamSession *playback.Session,
+	preferredSource *PlaybackMediaSource,
+) *PlaybackMediaSource {
 	if preferredSource != nil {
 		return preferredSource
 	}
@@ -420,10 +440,7 @@ func compatScrobbleSource(
 			return source
 		}
 	}
-	if source := playedMediaSource(playSession, ""); source != nil {
-		return source
-	}
-	return firstMediaSource(playSession)
+	return playedMediaSource(playSession, "")
 }
 
 // compatScrobbleFallbackSession preserves enough authenticated report state to
