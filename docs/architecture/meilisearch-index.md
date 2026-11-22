@@ -45,9 +45,9 @@ and typo tolerance; people have typo tolerance off
 Meilisearch matches the last query word as a prefix in every attribute it
 searches, and its `prefixSearch` setting is index-wide, with no per-attribute
 or per-query form. So once the index has this server's settings, each keyword
-search is three queries in one `/multi-search` request
-(`meilisearchKeywordQueries`): the two below and the title query described
-under [Title matches rank first](#title-matches-rank-first).
+search is two queries in one `/multi-search` request
+(`meilisearchKeywordQueries`), plus, outside hybrid search, the title query
+described under [Title matches rank first](#title-matches-rank-first):
 
 - the keyword query, the search as typed with `attributesToSearchOn` naming
   every searched attribute but `people` (a two-term search names only the
@@ -76,19 +76,22 @@ with that title rank ahead of the film (`episode-` IDs sort before `movie-`).
 The `popularity` rule does not separate them for items no rating source
 counts votes for.
 
-So each keyword search also sends a title query (`titleSearchRequest`): the
-search as typed, with the keyword query's filter, limit and matching
+So each keyword-only search also sends a title query (`titleSearchRequest`):
+the search as typed, with the keyword query's filter, limit and matching
 strategy, on `title`, `original_title`, `sort_title` and `title_variants`
 only, plus `year` when the search carries a year hint, as the people query
 does. Its hits are the keyword hits whose title matches, and its ranking
-details say how the title matches.
+details say how the title matches. A title hit that matches fewer of the
+search's words than the keyword hit does (`last` and `frequency` drop words)
+is not a title match.
 
 `combineMeilisearchKeywordHits` then ranks the cut, combined hits by points
 (`meilisearchSearchPoints`), highest first, keeping Meilisearch's order on a
 tie:
 
 - **Category points decide first.** A movie or series whose title matches
-  scores `searchPointsMediaTitle`, an episode whose title matches scores
+  scores `searchPointsMediaTitle` (as does any other non-episode type), an
+  episode whose title matches scores
   `searchPointsEpisodeTitle`, and every other hit (matched by a person, a
   studio, a genre, a keyword) scores nothing. They are multiplied by
   `searchCategoryWeight`, which is larger than any match points, so no title
@@ -108,8 +111,14 @@ first, and an offset-paged search's later rounds do not reorder the pages it
 already served. The ranking needs the `type` attribute on each hit, which
 the keyword queries retrieve; it is already displayed, so the change needs no
 index rebuild. While settings are pending no title query is sent and the
-order is Meilisearch's own. A hybrid search ranks each of its keyword
-searches this way before the merge by score.
+order is Meilisearch's own.
+
+A hybrid search sends no title query and keeps Meilisearch's keyword order.
+It searches media and episodes separately and merges their hits with the
+meaning hits by ranking score (`mergeMeilisearchHybridHits`), so points
+within one keyword search could not keep an episode below a movie across
+the merge, and a promoted hit with a lower score would lower every score
+after it (`meilisearchNonIncreasingScores`).
 
 ## Keyword hits kept
 

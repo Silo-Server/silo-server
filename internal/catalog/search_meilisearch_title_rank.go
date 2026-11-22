@@ -24,7 +24,8 @@ import (
 // separate them for an item no rating source counts votes for.
 const (
 	// searchPointsMediaTitle are the category points of a movie or series
-	// whose title matches the search.
+	// whose title matches the search. Every indexed type but episodes scores
+	// them, since the index holds only episodes and the media they belong to.
 	searchPointsMediaTitle = 10
 	// searchPointsEpisodeTitle are the category points of an episode whose
 	// title matches the search. Any other hit has none.
@@ -87,8 +88,18 @@ func titleSearchRequest(keyword meilisearchSearchRequest) (meilisearchSearchRequ
 // meilisearchSearchPoints returns a hit's points: its category points times
 // searchCategoryWeight plus its match points. title is the hit's ranking
 // details from the title query, nil when its title did not match.
+//
+// A title counts as a match only when it matches as many of the search's
+// words as the hit does. Under matchingStrategy last or frequency the title
+// query also returns titles that hold only some of the words, as in "Time
+// Bandits" for "time travel romance" whose other words are keywords; such a
+// hit scores like any other non-title match.
 func meilisearchSearchPoints(hit meilisearchSearchHit, title *meilisearchRankingScoreDetails) int {
 	if title == nil {
+		return 0
+	}
+	if words, matched := title.Words, hit.RankingScoreDetails; words != nil && matched != nil && matched.Words != nil &&
+		words.missed() > matched.Words.missed() {
 		return 0
 	}
 	category := searchPointsMediaTitle

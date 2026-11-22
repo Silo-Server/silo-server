@@ -180,10 +180,12 @@ func TestMeilisearchOneWordSearchStaysKeyword(t *testing.T) {
 // Once the index has this server's settings, every keyword search sends a
 // keyword query without people and, after it in the same multi-search, a
 // people query: the words as one quoted phrase on people only, with the
-// keyword query's filter, limit and exclusions. Then a title query: the search
-// as typed on the title attributes only, again with the keyword query's
-// filter, limit and matching strategy. Before that, a search sends neither
-// (TestMeilisearchHybridSearchRequestShape).
+// keyword query's filter, limit and exclusions. A keyword-only search then
+// sends a title query: the search as typed on the title attributes only, again
+// with the keyword query's filter and matching strategy, fetching the whole
+// candidate window whatever the page (see keywordRanking). A hybrid search
+// sends no title query. Before the settings are current, a search sends
+// neither (TestMeilisearchHybridSearchRequestShape).
 func TestMeilisearchPeopleQueryRequestShape(t *testing.T) {
 	type query struct {
 		Q                       string   `json:"q"`
@@ -203,13 +205,14 @@ func TestMeilisearchPeopleQueryRequestShape(t *testing.T) {
 	}{
 		{"cursor keyword", CatalogSearchRequest{CursorPaging: true, Query: `heat -"michael mann"`, Limit: 60}, 3, `"heat" -"michael mann"`},
 		{"offset keyword", CatalogSearchRequest{Query: "hanks", Limit: 20}, 3, `"hanks"`},
-		{"cursor hybrid", CatalogSearchRequest{CursorPaging: true, Query: "tom hanks -splash", Limit: 60}, 4, `"tom hanks" -splash`},
+		{"cursor hybrid", CatalogSearchRequest{CursorPaging: true, Query: "tom hanks -splash", Limit: 60}, 3, `"tom hanks" -splash`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newHybridSearchFixture(t)
 			f.settingsCurrent()
 			// Only the hybrid case sends the meaning query, last.
-			f.provider.config.SemanticEnabled = tc.wantQueries == 4
+			hybrid := strings.HasSuffix(tc.name, "hybrid")
+			f.provider.config.SemanticEnabled = hybrid
 			_, body := f.search(t, tc.req, "/multi-search")
 			var sent struct{ Queries []query }
 			if err := json.Unmarshal(body, &sent); err != nil {
@@ -218,7 +221,7 @@ func TestMeilisearchPeopleQueryRequestShape(t *testing.T) {
 			if len(sent.Queries) != tc.wantQueries {
 				t.Fatalf("multi-search sent %d queries, want %d: %s", len(sent.Queries), tc.wantQueries, body)
 			}
-			keyword, people, title := sent.Queries[0], sent.Queries[1], sent.Queries[2]
+			keyword, people := sent.Queries[0], sent.Queries[1]
 			if keyword.Q != tc.req.Query || slices.Contains(keyword.AttributesToSearchOn, meilisearchPeopleAttribute) || len(keyword.AttributesToSearchOn) == 0 {
 				t.Fatalf("keyword query = %+v", keyword)
 			}
@@ -230,10 +233,20 @@ func TestMeilisearchPeopleQueryRequestShape(t *testing.T) {
 				people.MatchingStrategy != keyword.MatchingStrategy {
 				t.Fatalf("people query %+v does not share the keyword query's %+v", people, keyword)
 			}
+			if hybrid {
+				if third := sent.Queries[2]; third.Hybrid == nil {
+					t.Fatalf("hybrid search sent a third query that is not the meaning query: %+v", third)
+				}
+				return
+			}
+			title := sent.Queries[2]
 			if title.Q != keyword.Q || !reflect.DeepEqual(title.AttributesToSearchOn, meilisearchTitleSearchAttributes) ||
 				!title.ShowRankingScoreDetails || title.Hybrid != nil || title.Filter != keyword.Filter ||
-				title.Limit != keyword.Limit || title.Offset != 0 || title.MatchingStrategy != keyword.MatchingStrategy {
+				title.Offset != 0 || title.MatchingStrategy != keyword.MatchingStrategy {
 				t.Fatalf("title query %+v does not match the keyword query %+v on the title attributes", title, keyword)
+			}
+			if keyword.Limit != meilisearchCandidateScanCap || title.Limit != keyword.Limit {
+				t.Fatalf("keyword/title limits = %d/%d, want the candidate window %d", keyword.Limit, title.Limit, meilisearchCandidateScanCap)
 			}
 		})
 	}
@@ -443,12 +456,67 @@ func TestCombineMeilisearchKeywordHitsRanksByPoints(t *testing.T) {
 		t.Fatalf("ranking = %v, want %v", ids, want)
 	}
 
-	exact := meilisearchSearchPoints(kept("m", "movie"), title("m", "exactMatch", 0).RankingScoreDetails)
-	typo := meilisearchSearchPoints(kept("m", "movie"), title("m", "exactMatch", 1).RankingScoreDetails)
+	// Meilisearch reports every match with a typo as noExactMatch.
+	partial := meilisearchSearchPoints(kept("m", "movie"), title("m", "noExactMatch", 0).RankingScoreDetails)
+	typo := meilisearchSearchPoints(kept("m", "movie"), title("m", "noExactMatch", 1).RankingScoreDetails)
 	episode := meilisearchSearchPoints(kept("e", "episode"), title("e", "exactMatch", 0).RankingScoreDetails)
-	partial := meilisearchSearchPoints(kept("m", "movie"), title("m", "noExactMatch", 3).RankingScoreDetails)
-	if typo >= exact || partial <= episode || episode <= 0 {
-		t.Fatalf("points exact/typo/partial-with-typos/episode = %d/%d/%d/%d", exact, typo, partial, episode)
+	typos := meilisearchSearchPoints(kept("m", "movie"), title("m", "noExactMatch", 3).RankingScoreDetails)
+	if typo >= partial || typos <= episode || episode <= 0 {
+		t.Fatalf("points partial/typo/three-typos/episode = %d/%d/%d/%d", partial, typo, typos, episode)
+	}
+
+	// A title that holds fewer of the search's words than the hit matches is
+	// not a title match: "time travel romance" against "Time Bandits".
+	threeWords := kept("m", "movie")
+	threeWords.RankingScoreDetails.Words = &meilisearchWordsDetail{MatchingWords: 3, MaxMatchingWords: 3}
+	oneWordTitle := title("m", "matchesStart", 0).RankingScoreDetails
+	oneWordTitle.Words = &meilisearchWordsDetail{MatchingWords: 1, MaxMatchingWords: 3}
+	if got := meilisearchSearchPoints(threeWords, oneWordTitle); got != 0 {
+		t.Fatalf("points of a title holding one of three words = %d, want 0", got)
+	}
+}
+
+// keywordRanking reads the people and title responses from their own places
+// in the multi-search and ranks before cutting to the page: a page of one hit
+// is the film Meilisearch ranked behind an episode with the same title.
+func TestMeilisearchKeywordRankingRanksTitleResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var sent struct {
+			Queries []struct {
+				AttributesToSearchOn []string `json:"attributesToSearchOn"`
+			}
+		}
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &sent)
+		details := `"_rankingScoreDetails":{"words":{"matchingWords":1,"maxMatchingWords":1},"typo":{"typoCount":0},"proximity":{"score":1},"exactness":{"matchType":"exactMatch"}}`
+		results := make([]string, 0, len(sent.Queries))
+		for _, query := range sent.Queries {
+			hits := `[{"content_id":"episode-pressure","type":"episode",` + details + `},{"content_id":"movie-pressure","type":"movie",` + details + `}]`
+			switch {
+			case reflect.DeepEqual(query.AttributesToSearchOn, []string{meilisearchPeopleAttribute}):
+				// A person credited in the episode, so a misread people
+				// response would name the episode as the only title match.
+				hits = `[{"content_id":"episode-pressure","type":"episode",` + details + `}]`
+			case reflect.DeepEqual(query.AttributesToSearchOn, meilisearchTitleSearchAttributes):
+				hits = `[{"content_id":"movie-pressure","type":"movie",` + details + `},{"content_id":"episode-pressure","type":"episode",` + details + `}]`
+			}
+			results = append(results, `{"hits":`+hits+`,"estimatedTotalHits":2}`)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"results":[` + strings.Join(results, ",") + `]}`))
+	}))
+	t.Cleanup(server.Close)
+	provider, err := NewMeilisearchSearchProvider(nil, nil, nil, MeilisearchProviderConfig{URL: server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := provider.buildMeilisearchKeywordSearchRequest(CatalogSearchRequest{Query: "pressure"})
+	ids, _, err := provider.keywordRanking(t.Context(), "catalog", request, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(ids, []string{"movie-pressure"}) {
+		t.Fatalf("first page = %v, want the film", ids)
 	}
 }
 

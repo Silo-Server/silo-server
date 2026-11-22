@@ -805,7 +805,7 @@ func (p *MeilisearchSearchProvider) buildHybridSearchQueries(
 		keyword.Vector, keyword.Hybrid = nil, nil
 		keyword.ShowRankingScore = true
 		keyword.ShowRankingScoreDetails = true
-		return meilisearchKeywordQueries(indexUID, keyword)
+		return meilisearchKeywordQueries(indexUID, keyword, false)
 	}
 
 	queries := meilisearchHybridQueries{Ratio: ratio, Keyword: []meilisearchKeywordQuerySet{keywordQueries(mediaFilter)}}
@@ -1066,8 +1066,10 @@ type meilisearchKeywordQuerySet struct {
 }
 
 // meilisearchKeywordQueries returns the multi-search queries of one keyword
-// search.
-func meilisearchKeywordQueries(indexUID string, keyword meilisearchSearchRequest) meilisearchKeywordQuerySet {
+// search. withTitle sends its title query; a hybrid search sends none, because
+// its merge orders keyword hits by score across its media and episode
+// searches, which a ranking by points within one search cannot survive.
+func meilisearchKeywordQueries(indexUID string, keyword meilisearchSearchRequest, withTitle bool) meilisearchKeywordQuerySet {
 	set := meilisearchKeywordQuerySet{
 		Queries: []meilisearchMultiSearchQuery{{IndexUID: indexUID, meilisearchSearchRequest: keyword}},
 		People:  -1,
@@ -1077,7 +1079,7 @@ func meilisearchKeywordQueries(indexUID string, keyword meilisearchSearchRequest
 		set.People = len(set.Queries)
 		set.Queries = append(set.Queries, meilisearchMultiSearchQuery{IndexUID: indexUID, meilisearchSearchRequest: people})
 	}
-	if title, ok := titleSearchRequest(keyword); ok {
+	if title, ok := titleSearchRequest(keyword); ok && withTitle {
 		set.Title = len(set.Queries)
 		set.Queries = append(set.Queries, meilisearchMultiSearchQuery{IndexUID: indexUID, meilisearchSearchRequest: title})
 	}
@@ -1118,7 +1120,7 @@ func (p *MeilisearchSearchProvider) keywordRanking(ctx context.Context, indexUID
 	if _, withTitle := titleSearchRequest(base); withTitle {
 		base.Limit = max(limit, meilisearchCandidateScanCap)
 	}
-	set := meilisearchKeywordQueries(indexUID, base)
+	set := meilisearchKeywordQueries(indexUID, base, true)
 	responses, err := p.client.MultiSearch(ctx, set.Queries)
 	if err != nil {
 		return nil, 0, err
