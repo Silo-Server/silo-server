@@ -58,6 +58,7 @@ import {
 } from "@/hooks/queries/admin/libraries";
 import { useDebounce } from "@/hooks/useDebounce";
 import { numberText, useT, type Translate } from "@/i18n";
+import { itemTypeLabel } from "@/lib/itemTypeLabels";
 import { cn } from "@/lib/utils";
 
 // Not translated: a sample year.
@@ -69,8 +70,28 @@ function rootRowModel(t: Translate, root: LibraryRoot) {
     key: `${root.library_id}:${root.root_path}`,
     label: root.title || pathLeaf(root.root_path),
     evidence: root.evidence_json ? buildRootEvidenceSummary(t, root) : null,
-    typeLabel: root.inferred_type || t("web.admin.libraries.ambiguousRoots.unknownType"),
+    typeLabel: root.inferred_type
+      ? itemTypeLabel(t, root.inferred_type)
+      : t("web.admin.libraries.ambiguousRoots.unknownType"),
+    confidenceLabel: confidenceLabel(t, root.type_confidence),
   };
+}
+
+/**
+ * The label for a root's type confidence, which the API sends as English
+ * data. A level the scanner doesn't send shows as sent.
+ */
+function confidenceLabel(t: Translate, confidence: string): string {
+  switch (confidence) {
+    case "low":
+      return t("web.admin.libraries.ambiguousRoots.confidence.low");
+    case "medium":
+      return t("web.admin.libraries.ambiguousRoots.confidence.medium");
+    case "high":
+      return t("web.admin.libraries.ambiguousRoots.confidence.high");
+    default:
+      return confidence;
+  }
 }
 
 /**
@@ -238,7 +259,7 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                         <Badge variant="outline">{row.typeLabel}</Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{root.type_confidence}</Badge>
+                        <Badge variant="secondary">{row.confidenceLabel}</Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
                         {numberText(root.observed_file_count)}
@@ -279,7 +300,7 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                   </CardField>
                   <CardField label={t("web.admin.libraries.column.confidence")}>
                     <Badge variant="secondary" className="max-w-full whitespace-normal">
-                      {root.type_confidence}
+                      {row.confidenceLabel}
                     </Badge>
                   </CardField>
                   <CardField label={t("web.admin.libraries.column.files")}>
