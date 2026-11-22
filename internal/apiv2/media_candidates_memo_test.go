@@ -11,8 +11,9 @@ import (
 
 // TestDetailPreplayDiscoveryCoalescesRepeatedWatchReads proves the player's
 // inventory poll cannot re-list the provider and rewrite candidates on every
-// watch read. A different selected file is a different preparation target and
-// must still run discovery.
+// watch read, and that switching the selected version does not either: the
+// listing and its persistence are item-wide, while the selected row's own
+// preparation is scheduled separately.
 func TestDetailPreplayDiscoveryCoalescesRepeatedWatchReads(t *testing.T) {
 	deps, base := catalogDeps(t)
 	fake := &fakePreplayCatalog{
@@ -44,8 +45,8 @@ func TestDetailPreplayDiscoveryCoalescesRepeatedWatchReads(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("selected-file read: %s", rec.Body.String())
 	}
-	if fake.discoveries != 2 {
-		t.Fatalf("discoveries after selecting another file = %d, want 2", fake.discoveries)
+	if fake.discoveries != 1 {
+		t.Fatalf("discoveries after selecting another file = %d, want the 1 item-wide listing already fresh", fake.discoveries)
 	}
 }
 
@@ -53,7 +54,7 @@ func TestDetailPreplayDiscoveryCoalescesRepeatedWatchReads(t *testing.T) {
 // page remount with a different selected row does not re-enumerate the item's
 // provider listing. The catalog leaf read is item-wide and the client picks a
 // version locally, so the selected file must not create a new memo entry; the
-// watch read above stays selection-scoped because it is about to play it.
+// watch read above shares that same item-scoped entry.
 func TestCatalogDetailPreplayDiscoveryIsItemScopedAcrossMounts(t *testing.T) {
 	deps, base := catalogDeps(t)
 	fake := &fakePreplayCatalog{
