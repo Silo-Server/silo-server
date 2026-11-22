@@ -36,9 +36,9 @@ export function playbackQualitySettings(
   if (metered) {
     const quality = effective?.[qualityKey];
     const bitrate = effective?.[bitrateKey];
-    const baseCap = (
-      bitrate ? bitrate.value : SETTING_DEFINITIONS[bitrateKey].defaultValue
-    ) as number | null;
+    const baseCap = (bitrate ? bitrate.value : SETTING_DEFINITIONS[bitrateKey].defaultValue) as
+      | number
+      | null;
     let maxBitrateKbps = baseCap;
     if (tier === "low_data") {
       maxBitrateKbps =

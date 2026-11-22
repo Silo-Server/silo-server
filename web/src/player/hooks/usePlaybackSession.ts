@@ -4,7 +4,7 @@ import { usePlayerConfig } from "../context/PlayerConfigContext";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { startPlaybackV2 } from "../start-v2";
 import { settleTrackPreferenceWrites } from "../utils/trackPreferenceWrites";
-import { playbackStartEnded } from "../bandwidth-probe";
+import { playbackStartEnded, type PlaybackNetworkTier } from "../bandwidth-probe";
 import { hasSequencedProgress, stopSequencedSession } from "../session-mutations";
 import {
   connectionLostError,
@@ -524,6 +524,8 @@ export function usePlaybackSession(
   bufferingMode: BufferingMode = "always",
   /** The viewer chose `fileId`; see `versionPinnedRef`. */
   versionPicked = false,
+  /** Current network tier (`unmetered`, `metered`, `low_data`) for mid-session cap replans. */
+  networkTier?: PlaybackNetworkTier,
 ): UsePlaybackSessionResult {
   const config = usePlayerConfig();
   const probe = useCodecDetection();
@@ -600,9 +602,21 @@ export function usePlaybackSession(
   );
   // The adoptions already summarized, so a second report of one is dropped.
   const summarizedAdoptionsRef = useRef(new Set<string>());
-  // The estimate on the start or replan in flight; requests are serialized,
-  // so the next adoption answers it.
+  // The estimate and bandwidth cap on the start or replan in flight; requests
+  // are serialized, so the next adoption answers them.
   const requestedEstimateRef = useRef<number | null | undefined>(undefined);
+  const requestedCapRef = useRef<number | null>(maxBitrateKbps ?? null);
+  const activeBandwidthCapRef = useRef<number | null>(maxBitrateKbps ?? null);
+  const activeNetworkTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
+  const userPickedQualityRef = useRef(false);
+  const latestQualitySettingsRef = useRef({
+    qualityPreference: normalizeQualityPreferenceV3(qualityPreference),
+    maxBitrateKbps: maxBitrateKbps ?? null,
+  });
+  latestQualitySettingsRef.current = {
+    qualityPreference: normalizeQualityPreferenceV3(qualityPreference),
+    maxBitrateKbps: maxBitrateKbps ?? null,
+  };
   const keptEstimateRef = useRef<number | undefined>(undefined);
   const setKeptEstimate = useCallback((kbps: number | undefined) => {
     keptEstimateRef.current = kbps;
@@ -911,6 +925,7 @@ export function usePlaybackSession(
         if (oldest) summaryIdentitiesRef.current.delete(oldest);
       }
       hasAdoptedPlanRef.current = true;
+      activeBandwidthCapRef.current = requestedCapRef.current;
       if (
         Number.isFinite(plan.timeline.source_start_seconds) &&
         plan.timeline.source_start_seconds >= 0
@@ -961,6 +976,7 @@ export function usePlaybackSession(
     ): Promise<DecisionResponseV3> => {
       const bandwidthEstimateKbps = detectBandwidthEstimateKbpsV3();
       requestedEstimateRef.current = bandwidthEstimateKbps;
+      requestedCapRef.current = maxBitrateKbps ?? null;
       // An owed Restore's `clear` goes out once, on this start.
       const clearOwed = clearOwedRef.current;
       clearOwedRef.current = false;
@@ -1322,6 +1338,9 @@ export function usePlaybackSession(
     }
     activeRequestKeyRef.current = requestKey;
     activeCapabilityRequestKeyRef.current = capabilityRequestKey;
+    activeNetworkTierRef.current = networkTier;
+    activeBandwidthCapRef.current = maxBitrateKbps ?? null;
+    userPickedQualityRef.current = false;
     versionPinnedRef.current = versionPicked;
     qualityRef.current = normalizeQualityPreferenceV3(qualityPreference);
     playbackPositionRef.current = initialPosition;
@@ -1352,6 +1371,8 @@ export function usePlaybackSession(
     forceInitialPosition,
     initialPosition,
     loadSession,
+    maxBitrateKbps,
+    networkTier,
     qualityPreference,
     requestKey,
     versionPicked,
@@ -1509,6 +1530,7 @@ export function usePlaybackSession(
       const bandwidthEstimateSource =
         options.bandwidthEstimateKbps !== undefined ? options.bandwidthEstimateSource : undefined;
       requestedEstimateRef.current = bandwidthEstimateKbps;
+      requestedCapRef.current = maxBitrateKbps ?? null;
       // A Restore that could not go at once rides its `clear` on the request
       // that replaced it.
       const learnedLimit =
@@ -1771,6 +1793,76 @@ export function usePlaybackSession(
     retireActiveSession,
   ]);
 
+  useEffect(() => {
+    if (!capabilitiesSettled || activeRequestKeyRef.current !== requestKey) return;
+    if (networkTier === undefined) {
+      activeNetworkTierRef.current = undefined;
+      return;
+    }
+    const previousTier = activeNetworkTierRef.current;
+    if (previousTier === undefined) {
+      activeNetworkTierRef.current = networkTier;
+      return;
+    }
+    if (previousTier === networkTier) return;
+    activeNetworkTierRef.current = networkTier;
+    if (sessionEndedRef.current) return;
+
+    const loadSequence = loadSequenceRef.current;
+    const applyTierChange = () => {
+      if (loadSequence !== loadSequenceRef.current || sessionEndedRef.current) return;
+      if (!replanInFlightRef.current && (!planRef.current || !sessionIdRef.current)) {
+        const settling = awaitAdoptionSettled();
+        if (settling) {
+          void settling.then(applyTierChange);
+        }
+        return;
+      }
+      if (!planRef.current || !sessionIdRef.current) return;
+
+      const { qualityPreference: tierQuality, maxBitrateKbps: tierCap } =
+        latestQualitySettingsRef.current;
+      const nextQuality = userPickedQualityRef.current ? qualityRef.current : tierQuality;
+      const qualityChanged = nextQuality !== qualityRef.current;
+      const capChanged = tierCap !== activeBandwidthCapRef.current;
+      if (!qualityChanged && !capChanged) return;
+
+      const previousPreference = qualityRef.current;
+      if (qualityChanged) {
+        qualityRef.current = nextQuality;
+        setState((current) => ({ ...current, qualityPreference: nextQuality }));
+      }
+      const leavingMetered =
+        previousTier !== "unmetered" && activeNetworkTierRef.current === "unmetered";
+      if (leavingMetered) {
+        keptEstimateRef.current = undefined;
+      }
+      void issueReplanRef
+        .current({
+          operation: "quality_change",
+          positionSeconds: playbackPositionRef.current,
+          ...(leavingMetered ? { bandwidthEstimateKbps: null } : {}),
+        })
+        .then((adopted) => {
+          if (adopted || !qualityChanged || qualityRef.current !== nextQuality) return;
+          qualityRef.current = previousPreference;
+          setState((current) =>
+            current.qualityPreference === nextQuality
+              ? { ...current, qualityPreference: previousPreference }
+              : current,
+          );
+        });
+    };
+    applyTierChange();
+  }, [
+    awaitAdoptionSettled,
+    capabilitiesSettled,
+    maxBitrateKbps,
+    networkTier,
+    qualityPreference,
+    requestKey,
+  ]);
+
   const switchAudioTrack = useCallback(
     (index: number, currentPosition: number) => {
       const plan = planRef.current;
@@ -1821,6 +1913,10 @@ export function usePlaybackSession(
       }
       const normalized = normalizeQualityPreferenceV3(label);
       const previousPreference = qualityRef.current;
+      const previousUserPicked = userPickedQualityRef.current;
+      if (!buffering) {
+        userPickedQualityRef.current = true;
+      }
       qualityRef.current = normalized;
       setState((current) => ({ ...current, qualityPreference: normalized }));
       // The replan tells onAdopt as it adopts, before the new plan renders; a
@@ -1847,6 +1943,7 @@ export function usePlaybackSession(
           onAdopt?.(undefined);
           if (qualityRef.current !== normalized) return;
           qualityRef.current = previousPreference;
+          userPickedQualityRef.current = previousUserPicked;
           setState((current) =>
             current.qualityPreference === normalized
               ? { ...current, qualityPreference: previousPreference }

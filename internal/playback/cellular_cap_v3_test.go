@@ -73,6 +73,63 @@ func TestPlanPlaybackV3ExplicitBandwidthCapRefusesWhenTranscodingDisabled(t *tes
 	}
 }
 
+func TestPlanPlaybackV3ExplicitBandwidthCapRefusesWithLowerEstimateWhenTranscodingDisabled(t *testing.T) {
+	file := cellularCapFixtureFileV3(25_000, 3840, 2160, "hevc", "2160p")
+	req := cellularCapDirectPlayRequestV3()
+	req.BandwidthCapKbps = new(10_000)
+	req.BandwidthEstimateKbps = new(5_000)
+
+	res := PlanPlaybackV3(PlannerInputV3{
+		Request:         req,
+		RequestedFile:   file,
+		EffectiveFile:   file,
+		AudioTrackIndex: 0,
+		Settings:        PlannerSettingsV3{TranscodeEnabled: false, Allow4KTranscode: true},
+		Registry:        testTransformationRegistryV3(),
+	})
+	if res.Terminal == nil || res.Terminal.Reason != "transcoding_disabled" {
+		t.Fatalf("over-cap source with lower estimate and transcoding disabled = %s, want terminal transcoding_disabled", ExplainPlannerResultV3(res))
+	}
+}
+
+func TestPlanPlaybackV3ExplicitBandwidthCapRefusesWithDeviceLimitWhenTranscodingDisabled(t *testing.T) {
+	file := cellularCapFixtureFileV3(25_000, 3840, 2160, "hevc", "2160p")
+	req := cellularCapDirectPlayRequestV3()
+	req.Capabilities.MaxResolution = "1080p"
+	req.BandwidthCapKbps = new(10_000)
+
+	res := PlanPlaybackV3(PlannerInputV3{
+		Request:         req,
+		RequestedFile:   file,
+		EffectiveFile:   file,
+		AudioTrackIndex: 0,
+		Settings:        PlannerSettingsV3{TranscodeEnabled: false, Allow4KTranscode: true},
+		Registry:        testTransformationRegistryV3(),
+	})
+	if res.Terminal == nil || res.Terminal.Reason != "transcoding_disabled" {
+		t.Fatalf("over-cap source with device limit and transcoding disabled = %s, want terminal transcoding_disabled", ExplainPlannerResultV3(res))
+	}
+}
+
+func TestPlanPlaybackV3ExplicitBandwidthCapAllowsEstimateFallbackWhenSourceFitsCap(t *testing.T) {
+	file := cellularCapFixtureFileV3(6_000, 3840, 2160, "hevc", "2160p")
+	req := cellularCapDirectPlayRequestV3()
+	req.BandwidthCapKbps = new(10_000)
+	req.BandwidthEstimateKbps = new(5_000)
+
+	res := PlanPlaybackV3(PlannerInputV3{
+		Request:         req,
+		RequestedFile:   file,
+		EffectiveFile:   file,
+		AudioTrackIndex: 0,
+		Settings:        PlannerSettingsV3{TranscodeEnabled: false, Allow4KTranscode: true},
+		Registry:        testTransformationRegistryV3(),
+	})
+	if res.Plan == nil || res.Plan.Delivery != DeliveryOriginalHTTPV3 {
+		t.Fatalf("under-cap source with lower estimate and transcoding disabled = %s, want direct play fallback", ExplainPlannerResultV3(res))
+	}
+}
+
 func TestPlanPlaybackV3ExplicitBandwidthCapAllowsDirectPlayUnderCapWhenTranscodingDisabled(t *testing.T) {
 	file := cellularCapFixtureFileV3(6_000, 1920, 1080, "hevc", "1080p")
 	req := cellularCapDirectPlayRequestV3()

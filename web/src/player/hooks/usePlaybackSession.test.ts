@@ -518,6 +518,97 @@ describe("usePlaybackSession quality changes", () => {
 
     unmount();
   });
+
+  it("replans active playback when the network tier changes cap or quality", async () => {
+    let planCount = 0;
+    const fetchMock = sessionFetch(() => {
+      planCount += 1;
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: `plan:tier-${planCount}`,
+            plan_attempt_key: `v3:tier-${planCount}`,
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({
+        quality,
+        cap,
+        tier,
+      }: {
+        quality: string;
+        cap: number | null;
+        tier: "unmetered" | "metered" | "low_data";
+      }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          quality,
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          quality: "auto",
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+    expect(bodiesTo("/playback/start")[0]?.bandwidth_cap_kbps).toBe(10_000);
+
+    // Settings resolving on the same tier must not trigger a replan.
+    rerender({ quality: "auto", cap: 12_000, tier: "metered" });
+    await Promise.resolve();
+    expect(bodiesTo("/playback/session-1/replan")).toHaveLength(0);
+
+    // Enabling Data Saver lowers the active cap from 10 Mbps to 2 Mbps.
+    rerender({ quality: "auto", cap: 2_000, tier: "low_data" });
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+    expect(bodiesTo("/playback/session-1/replan")[0]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "auto",
+      bandwidth_cap_kbps: 2_000,
+    });
+    await waitFor(() => expect(result.current.replanning).toBe(false));
+
+    // A manual quality pick stays in place while a later tier change updates the cap.
+    act(() => result.current.changeQuality("720p", 90));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(2));
+    await waitFor(() => expect(result.current.replanning).toBe(false));
+
+    rerender({ quality: "auto", cap: null, tier: "unmetered" });
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(3));
+    expect(bodiesTo("/playback/session-1/replan")[2]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "720p",
+    });
+    expect(bodiesTo("/playback/session-1/replan")[2]).not.toHaveProperty("bandwidth_cap_kbps");
+
+    unmount();
+  });
 });
 
 describe("usePlaybackSession initial bitmap subtitles", () => {

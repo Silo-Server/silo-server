@@ -189,7 +189,7 @@ func (p *candidatePlannerV3) videoBase(videoClaims VideoClaimsV3, passthrough, s
 func (p *candidatePlannerV3) routeFacts(evidenceInsufficient bool) {
 	in, source, f := p.input, p.source, &p.video
 	anySubtitle := f.originalSubtitleOK || f.remuxSubtitleOK || f.hlsSubtitleOK
-	if in.ServerBitrateCapKbps == 0 && f.quality.RequiresTranscode && !f.quality.ExplicitRung && !f.quality.CapApplied && anySubtitle && f.videoOK &&
+	if in.ServerBitrateCapKbps == 0 && f.quality.RequiresTranscode && !f.quality.ExplicitRung && !f.quality.SourceExceedsCap && anySubtitle && f.videoOK &&
 		f.anyCopyRange() && !encodeCanRunV3(in, source) && !lowerVersionServesQualitiesV3(in) {
 		warnings := append(f.quality.Warnings, DegradationWarningV3{Code: "quality_reduction_unavailable", Message: "Reduced-quality transcoding is unavailable for this source; it is delivered at original quality."})
 		f.quality = originalQualityResultV3(source)

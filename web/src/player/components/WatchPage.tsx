@@ -185,6 +185,7 @@ function WatchPagePlayer({
   forceInitialPosition,
   qualityPreference,
   maxBitrateKbps,
+  networkTier,
   explicitAudioTrackIndex,
   initialSubtitleTrackIndexByFileId,
   initialBitmapSubtitleTrackIndexByFileId,
@@ -250,6 +251,7 @@ function WatchPagePlayer({
     !watchTogetherRoomId,
     bufferingMode,
     versionPicked,
+    networkTier,
   );
 
   const fallbackHandledRef = useRef<string | null>(null);

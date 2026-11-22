@@ -40,7 +40,7 @@ function subscribeToNetworkChanges(onChange: () => void): () => void {
  * Whether the current link is metered, as the player decides it at start,
  * updated when the browser reports a network or Data Saver change.
  */
-function usePlaybackNetworkTier(): PlaybackNetworkTier {
+export function usePlaybackNetworkTier(): PlaybackNetworkTier {
   return useSyncExternalStore(
     subscribeToNetworkChanges,
     playbackNetworkTier,
