@@ -42,14 +42,87 @@ func (r *PgExecutionRepository) Insert(ctx context.Context, result taskmanager.E
 	return nil
 }
 
+// Start records an in-flight execution owned by ownerID so a crash leaves a
+// row that can be reconciled once its heartbeat expires.
+func (r *PgExecutionRepository) Start(ctx context.Context, taskKey string, startedAt time.Time, ownerID string) (int64, error) {
+	var id int64
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO task_executions (task_key, started_at, completed_at, status, duration_ms, owner_id, heartbeat_at)
+		VALUES ($1, $2, NULL, $3, 0, $4, $2)
+		RETURNING id`,
+		taskKey, startedAt, taskmanager.ExecutionStatusRunning, ownerID,
+	).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("starting task execution: %w", err)
+	}
+	return id, nil
+}
+
+// Heartbeat refreshes the liveness timestamp of a running execution owned by ownerID.
+func (r *PgExecutionRepository) Heartbeat(ctx context.Context, id int64, ownerID string, at time.Time) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE task_executions
+		SET heartbeat_at = $3
+		WHERE id = $1 AND owner_id = $2 AND status = $4`,
+		id, ownerID, at, taskmanager.ExecutionStatusRunning,
+	)
+	if err != nil {
+		return fmt.Errorf("updating task execution heartbeat: %w", err)
+	}
+	return nil
+}
+
+// Finish writes the final outcome onto an execution row owned by ownerID.
+// Matching by (id, owner_id) without requiring status='running' lets a worker
+// that survived a brief heartbeat pause overwrite a premature stale-failed
+// mark with its real outcome instead of inserting a duplicate row.
+func (r *PgExecutionRepository) Finish(ctx context.Context, id int64, ownerID string, result taskmanager.ExecutionResult) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE task_executions
+		SET completed_at = $3,
+			status = $4,
+			error_message = $5,
+			result_data = $6,
+			duration_ms = $7,
+			heartbeat_at = $3
+		WHERE id = $1 AND owner_id = $2`,
+		id, ownerID, result.CompletedAt, result.Status,
+		result.ErrorMessage, result.ResultData, result.DurationMs,
+	)
+	if err != nil {
+		return false, fmt.Errorf("finishing task execution: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// ReconcileStale transitions running executions whose heartbeat is older than
+// staleBefore to failed so crashed runs become visible without touching active
+// runs on healthy peers.
+func (r *PgExecutionRepository) ReconcileStale(ctx context.Context, staleBefore time.Time, completedAt time.Time, reason string) (int64, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE task_executions
+		SET status = 'failed',
+			completed_at = $2,
+			duration_ms = GREATEST(0, (EXTRACT(EPOCH FROM ($2 - started_at)) * 1000)::BIGINT),
+			error_message = $3
+		WHERE status = $4
+		  AND COALESCE(heartbeat_at, started_at) < $1`,
+		staleBefore, completedAt, reason, taskmanager.ExecutionStatusRunning,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("reconciling stale task executions: %w", err)
+	}
+	return tag.RowsAffected(), nil
+}
+
 func (r *PgExecutionRepository) GetLatest(ctx context.Context, taskKey string) (*taskmanager.ExecutionResult, error) {
 	var result taskmanager.ExecutionResult
 	err := r.pool.QueryRow(ctx, `
 		SELECT id, task_key, started_at, completed_at, status, COALESCE(error_message, ''), result_data, duration_ms
 		FROM task_executions
-		WHERE task_key = $1
+		WHERE task_key = $1 AND status <> $2 AND completed_at IS NOT NULL
 		ORDER BY completed_at DESC, id DESC
-		LIMIT 1`, taskKey,
+		LIMIT 1`, taskKey, taskmanager.ExecutionStatusRunning,
 	).Scan(
 		&result.ID, &result.TaskKey, &result.StartedAt, &result.CompletedAt,
 		&result.Status, &result.ErrorMessage, &result.ResultData, &result.DurationMs,
@@ -67,9 +140,9 @@ func (r *PgExecutionRepository) List(ctx context.Context, taskKey string, limit 
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, task_key, started_at, completed_at, status, COALESCE(error_message, ''), result_data, duration_ms
 		FROM task_executions
-		WHERE task_key = $1
+		WHERE task_key = $1 AND status <> $2 AND completed_at IS NOT NULL
 		ORDER BY completed_at DESC, id DESC
-		LIMIT $2`, taskKey, limit,
+		LIMIT $3`, taskKey, taskmanager.ExecutionStatusRunning, limit,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("listing task executions: %w", err)
@@ -95,11 +168,11 @@ func (r *PgExecutionRepository) ListPage(ctx context.Context, key string, before
 	if limit < 1 || limit > 201 {
 		return nil, fmt.Errorf("invalid task history page limit")
 	}
-	args := []any{key, limit}
-	query := `SELECT id,task_key,started_at,completed_at,status,COALESCE(error_message,''),result_data,duration_ms FROM task_executions WHERE task_key=$1`
+	args := []any{key, limit, taskmanager.ExecutionStatusRunning}
+	query := `SELECT id,task_key,started_at,completed_at,status,COALESCE(error_message,''),result_data,duration_ms FROM task_executions WHERE task_key=$1 AND status<>$3 AND completed_at IS NOT NULL`
 	if beforeID != 0 {
 		args = append(args, before, beforeID)
-		query += ` AND (completed_at,id)<($3,$4)`
+		query += ` AND (completed_at,id)<($4,$5)`
 	}
 	query += ` ORDER BY completed_at DESC,id DESC LIMIT $2`
 	rows, err := r.pool.Query(ctx, query, args...)
@@ -191,7 +264,7 @@ func (r *PgExecutionRepository) Prune(
 }
 
 func (r *PgExecutionRepository) listTaskKeys(ctx context.Context) ([]string, error) {
-	rows, err := r.pool.Query(ctx, `SELECT DISTINCT task_key FROM task_executions`)
+	rows, err := r.pool.Query(ctx, `SELECT DISTINCT task_key FROM task_executions WHERE status <> $1 AND completed_at IS NOT NULL`, taskmanager.ExecutionStatusRunning)
 	if err != nil {
 		return nil, fmt.Errorf("listing task history keys: %w", err)
 	}
@@ -236,24 +309,28 @@ type taskHistoryDoomedBounds struct {
 }
 
 // where renders the doomed predicate and its arguments. A row is doomed when
-// it is not the newest for its task AND it is either older than the cutoff or
-// beyond the count cap.
+// it is finished, is not the newest for its task, AND is either older than the
+// cutoff or beyond the count cap.
 func (b taskHistoryDoomedBounds) where() (string, []any) {
-	args := []any{b.taskKey, b.newestAt, b.newestID, b.cutoff}
+	args := []any{b.taskKey, b.newestAt, b.newestID, b.cutoff, taskmanager.ExecutionStatusRunning}
 	clause := `task_key = $1
+		AND status <> $5
+		AND completed_at IS NOT NULL
 		AND (completed_at, id) < ($2, $3)
 		AND completed_at < $4`
 	if b.hasBoundary {
 		args = append(args, b.boundaryAt, b.boundaryID)
 		clause = `task_key = $1
+		AND status <> $5
+		AND completed_at IS NOT NULL
 		AND (completed_at, id) < ($2, $3)
-		AND (completed_at < $4 OR (completed_at, id) < ($5, $6))`
+		AND (completed_at < $4 OR (completed_at, id) < ($6, $7))`
 	}
 	return clause, args
 }
 
 // loadDoomedBounds resolves the two boundary rows for a task key. It reports
-// false when the task has no executions at all.
+// false when the task has no finished executions at all.
 func (r *PgExecutionRepository) loadDoomedBounds(
 	ctx context.Context,
 	taskKey string,
@@ -264,9 +341,9 @@ func (r *PgExecutionRepository) loadDoomedBounds(
 	err := r.pool.QueryRow(ctx, `
 		SELECT completed_at, id
 		FROM task_executions
-		WHERE task_key = $1
+		WHERE task_key = $1 AND status <> $2 AND completed_at IS NOT NULL
 		ORDER BY completed_at DESC, id DESC
-		LIMIT 1`, taskKey,
+		LIMIT 1`, taskKey, taskmanager.ExecutionStatusRunning,
 	).Scan(&bounds.newestAt, &bounds.newestID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -281,10 +358,10 @@ func (r *PgExecutionRepository) loadDoomedBounds(
 	err = r.pool.QueryRow(ctx, `
 		SELECT completed_at, id
 		FROM task_executions
-		WHERE task_key = $1
+		WHERE task_key = $1 AND status <> $2 AND completed_at IS NOT NULL
 		ORDER BY completed_at DESC, id DESC
-		OFFSET $2
-		LIMIT 1`, taskKey, offset,
+		OFFSET $3
+		LIMIT 1`, taskKey, taskmanager.ExecutionStatusRunning, offset,
 	).Scan(&bounds.boundaryAt, &bounds.boundaryID)
 	switch {
 	case err == nil:

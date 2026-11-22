@@ -126,6 +126,13 @@ New completions appear after restarting history; loaded pages do not silently
 expand into a whole-history read. Live last-execution summaries have no saved ID;
 persisted history entries have opaque string IDs.
 
+In-flight runs are tracked in `task_executions` with an owner identity and
+periodic heartbeat and stay hidden from history reads until finished. If a
+process crashes before completing a run, any API server reconciles rows whose
+heartbeat has expired to `failed` without affecting active runs on healthy
+peers. Graceful shutdown cancels active runs and waits briefly so their final
+status is persisted before exit.
+
 `GET /api/v2/admin/tasks/refresh_metadata/metrics` returns typed queue counters
 and at most ten entries per sample list. Other tasks return 404. A sample's
 `title` is its target's own title as stored; a season or episode that still
