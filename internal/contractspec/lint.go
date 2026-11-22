@@ -393,8 +393,8 @@ func walkSchema(where string, s *schema, visit func(where string, s *schema)) {
 	}
 }
 
-// lintVariantTags requires a oneOf of named variants that share an enum
-// member (a tag such as kind or status) to keep at least one such tag's
+// lintVariantTags requires a oneOf of named variants that share a required
+// enum member (a tag such as kind or status) to keep at least one such tag's
 // values disjoint across the variants. Response variants are additive, so a
 // tag value may be added, but one that another variant already uses makes a
 // response match two variants, and a client dispatching on the tag picks the
@@ -415,7 +415,7 @@ func lintVariantTags(fail func(string, ...any), where string, s *schema, compone
 	for _, name := range sortedKeys(variants[0].Properties) {
 		shared := true
 		for _, v := range variants {
-			if p := v.Properties[name]; p == nil || len(p.Enum) == 0 {
+			if p := v.Properties[name]; p == nil || len(p.Enum) == 0 || !slices.Contains(v.Required, name) {
 				shared = false
 				break
 			}
@@ -571,6 +571,7 @@ type schema struct {
 	Items                *schema            `json:"items"`
 	AdditionalProperties any                `json:"additionalProperties"`
 	Enum                 []any              `json:"enum"`
+	Required             []string           `json:"required"`
 	OneOf                []*schema          `json:"oneOf"`
 	AnyOf                []*schema          `json:"anyOf"`
 	AllOf                []*schema          `json:"allOf"`

@@ -288,11 +288,15 @@ func TestLintSeededFailures(t *testing.T) {
 		},
 		"oneOf variants that share a tag value": {
 			seed: func(doc map[string]any) {
-				variant := func(kinds ...any) map[string]any {
-					return map[string]any{"type": "object", "properties": map[string]any{"kind": map[string]any{"type": "string", "enum": kinds}}}
+				// state is disjoint but optional, so it can't tell the variants apart.
+				variant := func(state string, kinds ...any) map[string]any {
+					return map[string]any{"type": "object", "required": []any{"kind"}, "properties": map[string]any{
+						"kind":  map[string]any{"type": "string", "enum": kinds},
+						"state": map[string]any{"type": "string", "enum": []any{state}},
+					}}
 				}
-				schemas(doc)["PathDefault"] = variant("default", "provider")
-				schemas(doc)["PathProvider"] = variant("provider")
+				schemas(doc)["PathDefault"] = variant("idle", "default", "provider")
+				schemas(doc)["PathProvider"] = variant("connected", "provider")
 				props := schemas(doc)["SystemInfo"].(map[string]any)["properties"].(map[string]any)
 				props["path"] = map[string]any{"oneOf": []any{
 					map[string]any{"$ref": "#/components/schemas/PathDefault"},

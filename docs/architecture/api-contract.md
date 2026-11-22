@@ -274,7 +274,7 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   before and after the lock. Two cases stay breaking: an addition paired with a removal on the
   same response property, which is a rename, and a value removed from a request enum, which
   stays closed. The spec lint also requires the variants
-  of a `oneOf` to keep a shared tag (such as `kind`) disjoint, so a new tag value can't make a
+  of a `oneOf` to keep a shared required tag (such as `kind`) disjoint, so a new tag value can't make a
   response match two variants. An approval lives only on the pull request that needs it: an entry matching no
   change in the diff fails the gate, so the next pull request removes entries that have
   merged (the record is the file's history and the entry's `approved_in`), and a push whose
