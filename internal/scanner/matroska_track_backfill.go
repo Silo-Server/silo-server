@@ -376,7 +376,7 @@ func (b *MatroskaTrackBackfiller) backfillFile(ctx context.Context, c matroskaTr
 		)`+matroskaTrackCheckInsert+`
 		SELECT id, $7::int, file_size, file_modified_at, `+matroskaTrackProbeMD5+` FROM updated`+
 		matroskaTrackCheckConflict,
-		c.id, c.size, c.normalizedModifiedAt(), c.subtitleJSON, c.probeMD5, patchJSON, matroskaTrackMatcherVersion)
+		c.id, c.size, normalizedStoredModifiedAt(c.modifiedAt), c.subtitleJSON, c.probeMD5, patchJSON, matroskaTrackMatcherVersion)
 	if err != nil {
 		return 0, fmt.Errorf("updating subtitle_tracks for file %d: %w", c.id, err)
 	}
@@ -395,7 +395,7 @@ func (b *MatroskaTrackBackfiller) recordCheck(ctx context.Context, c matroskaTra
 		SELECT id, $6::int, file_size, file_modified_at, $5
 		FROM media_files
 		WHERE `+matroskaTrackRowAsRead+matroskaTrackCheckConflict,
-		c.id, c.size, c.normalizedModifiedAt(), c.subtitleJSON, c.probeMD5, matroskaTrackMatcherVersion)
+		c.id, c.size, normalizedStoredModifiedAt(c.modifiedAt), c.subtitleJSON, c.probeMD5, matroskaTrackMatcherVersion)
 	// A file deleted after the insert read its row fails the foreign key.
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "23503" {
 		return outcome, nil
@@ -404,13 +404,4 @@ func (b *MatroskaTrackBackfiller) recordCheck(ctx context.Context, c matroskaTra
 		return 0, fmt.Errorf("recording Matroska track check for file %d: %w", c.id, err)
 	}
 	return outcome, nil
-}
-
-// normalizedModifiedAt is the stored mtime in the form row comparisons use.
-func (c matroskaTrackCandidate) normalizedModifiedAt() *time.Time {
-	if c.modifiedAt == nil {
-		return nil
-	}
-	normalized := models.NormalizeFileModifiedAt(*c.modifiedAt)
-	return &normalized
 }
