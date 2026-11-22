@@ -861,7 +861,7 @@ export interface BoxSetSummary {
 export interface BrowseItem {
   content_id: string;
   play_content_id?: string;
-  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga";
+  type: "movie" | "series" | "season" | "episode" | "audiobook" | "ebook" | "manga" | "podcast";
   title: string;
   /** On a Continue Watching or Next Up row's card: in_progress or next_up. */
   item_source?: string;

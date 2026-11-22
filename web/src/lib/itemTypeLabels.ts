@@ -16,6 +16,8 @@ function itemTypeLabelKey(type: string): MessageKey | null {
       return "web.search.typeAudiobook";
     case "manga":
       return "web.search.typeManga";
+    case "podcast":
+      return "web.search.typePodcast";
     default:
       return null;
   }

@@ -133395,6 +133395,12 @@
       "value": "Movie"
     }
   ],
+  "web.search.typePodcast": [
+    {
+      "type": 0,
+      "value": "Podcast"
+    }
+  ],
   "web.search.typeSeason": [
     {
       "type": 0,
