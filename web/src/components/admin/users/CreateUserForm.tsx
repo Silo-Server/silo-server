@@ -135,6 +135,9 @@ function CreateUserForm({
   const [username, setUsername] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  // A password the policy refuses, shown at the field rather than in the alert.
+  const [passwordError, setPasswordError] = useState("");
+  const passwordRef = useRef<HTMLInputElement>(null);
   const [requirePasswordChange, setRequirePasswordChange] = useState(false);
   const [role, setRole] = useState("user");
   const [permissions, setPermissions] = useState<string[]>([PERMISSION_MARKER_EDIT]);
@@ -157,6 +160,7 @@ function CreateUserForm({
   const usernameId = useId();
   const emailId = useId();
   const passwordId = useId();
+  const passwordErrorId = useId();
   const requireChangeId = useId();
   const roleId = useId();
   const markerEditId = useId();
@@ -210,7 +214,13 @@ function CreateUserForm({
     }
     const passwordProblem = newPasswordPolicyProblem(password, passwordPolicy);
     if (passwordProblem) {
-      setError(passwordProblem);
+      // Saved from another tab, the field is not rendered: show it first.
+      setError("");
+      flushSync(() => {
+        setDialogTab("account");
+        setPasswordError(passwordProblem);
+      });
+      passwordRef.current?.focus();
       return;
     }
     // A cleared or half-typed limit is not in the policy state, which still
@@ -318,13 +328,25 @@ function CreateUserForm({
               <div className="space-y-2">
                 <Label htmlFor={passwordId}>{t("web.admin.users.list.create.password")}</Label>
                 <Input
+                  ref={passwordRef}
                   id={passwordId}
                   type="password"
                   autoComplete="new-password"
                   value={password}
-                  onChange={(e) => setPassword(e.target.value)}
+                  onChange={(e) => {
+                    setPassword(e.target.value);
+                    setPasswordError("");
+                  }}
+                  aria-invalid={passwordError ? true : undefined}
+                  aria-errormessage={passwordError ? passwordErrorId : undefined}
+                  aria-describedby={passwordError ? passwordErrorId : undefined}
                   required
                 />
+                {passwordError ? (
+                  <p id={passwordErrorId} className="text-destructive text-xs">
+                    {passwordError}
+                  </p>
+                ) : null}
                 <div className="flex items-center gap-2">
                   <Switch
                     id={requireChangeId}
