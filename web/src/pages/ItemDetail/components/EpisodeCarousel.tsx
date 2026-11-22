@@ -25,6 +25,8 @@ interface EpisodeCarouselProps {
   episodeLinkState?: EpisodeNavigationState;
   /** The page's library scope, kept on each episode link. */
   libraryId?: number;
+  /** The series' episode labels; "air_date" leads each caption with its title, not its code. */
+  episodeLabels?: string;
 }
 
 export default function EpisodeCarousel({
@@ -32,6 +34,7 @@ export default function EpisodeCarousel({
   currentEpisodeNumber,
   episodeLinkState,
   libraryId,
+  episodeLabels,
 }: EpisodeCarouselProps) {
   const t = useT();
   const currentEpisodeIndex = episodes.findIndex(
@@ -81,6 +84,7 @@ export default function EpisodeCarousel({
                 isCurrent={ep.episode_number === currentEpisodeNumber}
                 episodeLinkState={linkState}
                 libraryId={libraryId}
+                episodeLabels={episodeLabels}
                 quickActionMode={quickActionMode}
                 hideImageIfUnwatched={hideImages}
                 hideOverviewIfUnwatched={hideOverviews}
@@ -109,6 +113,7 @@ function EpisodeCarouselCard({
   isCurrent,
   episodeLinkState,
   libraryId,
+  episodeLabels,
   quickActionMode,
   hideImageIfUnwatched,
   hideOverviewIfUnwatched,
@@ -117,6 +122,7 @@ function EpisodeCarouselCard({
   isCurrent: boolean;
   episodeLinkState?: EpisodeNavigationState;
   libraryId?: number;
+  episodeLabels?: string;
   quickActionMode: CardQuickActionMode;
   hideImageIfUnwatched: boolean;
   hideOverviewIfUnwatched: boolean;
@@ -218,6 +224,7 @@ function EpisodeCarouselCard({
         >
           <EpisodeCardCaption
             episode={ep}
+            episodeLabels={episodeLabels}
             hideOverview={hideOverviewIfUnwatched && isEpisodeUnwatched(ep.user_data)}
             isCurrent={isCurrent}
             badges={ep.user_data?.played && <WatchedCheckIndicator />}

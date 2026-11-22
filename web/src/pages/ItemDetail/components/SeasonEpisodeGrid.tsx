@@ -45,6 +45,8 @@ interface SeasonEpisodeGridProps {
   episodeLinkState?: EpisodeNavigationState;
   /** The page's library scope, kept on each episode link. */
   libraryId?: number;
+  /** The series' episode labels; "air_date" leads each caption with its title, not its code. */
+  episodeLabels?: string;
 }
 
 export default function SeasonEpisodeGrid({
@@ -53,6 +55,7 @@ export default function SeasonEpisodeGrid({
   isLoading,
   episodeLinkState,
   libraryId,
+  episodeLabels,
 }: SeasonEpisodeGridProps) {
   const t = useT();
   const { prefs: overlayPrefs, quickActionMode } = useOverlayPrefs();
@@ -89,6 +92,7 @@ export default function SeasonEpisodeGrid({
           playbackEpisode={playbackById.get(episode.content_id) ?? episode}
           episodeLinkState={episodeLinkState}
           libraryId={libraryId}
+          episodeLabels={episodeLabels}
           overlayPrefs={overlayPrefs}
           quickActionMode={quickActionMode}
           spoilerPrefs={spoilerPrefs}
@@ -103,6 +107,7 @@ function SeasonEpisodeCard({
   playbackEpisode,
   episodeLinkState,
   libraryId,
+  episodeLabels,
   overlayPrefs,
   quickActionMode,
   spoilerPrefs,
@@ -111,6 +116,7 @@ function SeasonEpisodeCard({
   playbackEpisode: EpisodeListItem;
   episodeLinkState?: EpisodeNavigationState;
   libraryId?: number;
+  episodeLabels?: string;
   overlayPrefs: CardOverlayPrefs | null;
   quickActionMode: CardQuickActionMode;
   spoilerPrefs: EpisodeSpoilerPrefs;
@@ -202,6 +208,7 @@ function SeasonEpisodeCard({
       <ViewTransitionLink to={episodeHref} state={episodeLinkState} className="block">
         <EpisodeCardCaption
           episode={episode}
+          episodeLabels={episodeLabels}
           hideOverview={hideOverview}
           badges={episode.user_data?.played && <WatchedCheckIndicator />}
           notice={unreadable && <UnreadableFileBadge />}

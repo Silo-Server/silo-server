@@ -345,10 +345,14 @@ type sectionItemResponse struct {
 	// AdvisoryAge and AdvisorySource carry the item's advisory to the
 	// v2 card renderer. json:"-" because /api/v1 is frozen: the fields exist on
 	// the Go struct only, and apiv2 emits them under its own names.
-	AdvisoryAge            *int                   `json:"-"`
-	AdvisorySource         string                 `json:"-"`
-	Status                 string                 `json:"status"`
-	ShowStatus             string                 `json:"show_status,omitempty"`
+	AdvisoryAge    *int   `json:"-"`
+	AdvisorySource string `json:"-"`
+	Status         string `json:"status"`
+	ShowStatus     string `json:"show_status,omitempty"`
+	// EpisodeLabels and AirDate tell a v2 card to label a date-labeled
+	// series' episode by its air date. json:"-" because /api/v1 is frozen.
+	EpisodeLabels          string                 `json:"-"`
+	AirDate                string                 `json:"-"`
 	RatingIMDB             *float64               `json:"rating_imdb,omitempty"`
 	RatingTMDB             *float64               `json:"rating_tmdb,omitempty"`
 	RatingRTCritic         *int                   `json:"rating_rt_critic,omitempty"`
@@ -1128,6 +1132,7 @@ const (
 	sectionLookupImageURLs
 	sectionLookupEpisodeMeta
 	sectionLookupMangaChapterMeta
+	sectionLookupEpisodeLabels
 	sectionLookupAvailability
 	sectionLookupCount
 )
@@ -1140,6 +1145,7 @@ var sectionLookupTimingKeys = [sectionLookupCount]string{
 	sectionLookupImageURLs:        "image_urls_ms",
 	sectionLookupEpisodeMeta:      "episode_meta_ms",
 	sectionLookupMangaChapterMeta: "manga_chapter_meta_ms",
+	sectionLookupEpisodeLabels:    "episode_labels_ms",
 	sectionLookupAvailability:     "availability_ms",
 }
 
@@ -1175,6 +1181,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	var imageURLs map[sectionItemImageKey]sectionItemImageURLs
 	var episodeMeta map[string]sections.SectionItemMeta
 	var mangaChapterMeta map[string]sections.SectionItemMeta
+	var episodeLabels map[string]sections.EpisodeLabel
 
 	var wg sync.WaitGroup
 
@@ -1208,6 +1215,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	goSectionLookup(ctx, &wg, sectionLookupImageURLs, timings, func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, art) })
 	goSectionLookup(ctx, &wg, sectionLookupEpisodeMeta, timings, func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
 	goSectionLookup(ctx, &wg, sectionLookupMangaChapterMeta, timings, func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
+	goSectionLookup(ctx, &wg, sectionLookupEpisodeLabels, timings, func() { episodeLabels = h.listSectionEpisodeLabels(ctx, allItems) })
 	availability := h.startSectionAvailability(ctx, &wg, timings, includeAvailability, viewerAccess, allItems)
 
 	wg.Wait()
@@ -1229,6 +1237,9 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			imageKey := sectionItemImageKey{sectionID: s.ID, contentID: item.ContentID}
 			response := h.toSectionItemResponse(s.SectionType, card, meta, overlaySummaries[item.ContentID], userStates[item.ContentID], imageURLs[imageKey], playTargets[playableTargetKeyForItem(item)])
 			response.PendingTranslationLanguage = pendingTranslations[item.ContentID]
+			if label, ok := episodeLabels[item.ContentID]; ok {
+				response.EpisodeLabels, response.AirDate = label.Labels, label.AirDate
+			}
 			items = append(items, response)
 		}
 		resp.Sections = append(resp.Sections, resolvedSectionResponse{
@@ -1452,6 +1463,32 @@ func (h *SectionHandler) listSectionMangaChapterItemMeta(ctx context.Context, it
 		return map[string]sections.SectionItemMeta{}
 	}
 	return meta
+}
+
+// listSectionEpisodeLabels finds the series and episodes among the section
+// items whose episodes are labeled by air date instead of numbers.
+func (h *SectionHandler) listSectionEpisodeLabels(ctx context.Context, items []*models.MediaItem) map[string]sections.EpisodeLabel {
+	if h == nil || h.fetcher == nil {
+		return map[string]sections.EpisodeLabel{}
+	}
+	ids := make([]string, 0)
+	seen := make(map[string]struct{})
+	for _, item := range items {
+		if item == nil || (item.Type != "episode" && item.Type != "series") || strings.TrimSpace(item.ContentID) == "" {
+			continue
+		}
+		if _, ok := seen[item.ContentID]; ok {
+			continue
+		}
+		seen[item.ContentID] = struct{}{}
+		ids = append(ids, item.ContentID)
+	}
+	labels, err := h.fetcher.FetchEpisodeLabels(ctx, ids)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section episode labels", "component", "api", "error", err)
+		return map[string]sections.EpisodeLabel{}
+	}
+	return labels
 }
 
 func (h *SectionHandler) listSectionEpisodeItemMeta(ctx context.Context, withItems []sections.SectionWithItems, filter catalog.AccessFilter) map[string]sections.SectionItemMeta {

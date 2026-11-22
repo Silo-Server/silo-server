@@ -297,6 +297,10 @@ type ItemDetail struct {
 
 	// Series-specific.
 	SeasonCount *int `json:"season_count,omitempty"`
+	// EpisodeLabels is the series' models.EpisodeLabelsAirDate choice, on the
+	// series and on its seasons and episodes. Not part of the frozen v1
+	// contract; apiv2 emits it.
+	EpisodeLabels string `json:"-"`
 	// EpisodeMetadataIncomplete is the series row's flag that some episodes
 	// still lack metadata, so item detail can request a refresh without
 	// reading the row again. Not part of any JSON contract.
@@ -2635,6 +2639,7 @@ func (s *DetailService) buildMediaItemDetail(ctx context.Context, item *models.M
 		AirTime:                    item.AirTime,
 		AirTimezone:                item.AirTimezone,
 		ShowStatus:                 item.ShowStatus,
+		EpisodeLabels:              item.EpisodeLabels,
 		PosterThumbhash:            item.PosterThumbhash,
 		BackdropThumbhash:          item.BackdropThumbhash,
 		SeasonCount:                item.SeasonCount,
@@ -3721,6 +3726,7 @@ func (s *DetailService) buildSeasonDetail(ctx context.Context, season *models.Se
 		BackdropThumbhash:          series.BackdropThumbhash,
 		SeriesID:                   season.SeriesID,
 		SeriesTitle:                series.Title,
+		EpisodeLabels:              series.EpisodeLabels,
 		SeasonNumber:               &seasonNumber,
 		EpisodeCount:               &episodeCount,
 		IsSpecials:                 season.SeasonNumber == 0,
@@ -3859,6 +3865,7 @@ func (s *DetailService) buildEpisodeDetail(ctx context.Context, episode *models.
 		BackdropThumbhash:          series.BackdropThumbhash,
 		SeriesID:                   episode.SeriesID,
 		SeriesTitle:                series.Title,
+		EpisodeLabels:              series.EpisodeLabels,
 		SeasonNumber:               &seasonNumber,
 		SeasonID:                   episode.SeasonID,
 		EpisodeNumber:              &episodeNumber,

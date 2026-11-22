@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import { useLocation, useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
 import { useStartShuffle } from "@/hooks/queries/shuffles";
@@ -154,7 +155,9 @@ export default function SeriesContent({
       ? {
           content_id: nextUpEpisode.content_id,
           title: nextUpEpisode.title,
-          subtitle: `S${nextUpEpisode.season_number} E${nextUpEpisode.episode_number}`,
+          subtitle:
+            episodeAirDateLabel(item.episode_labels, nextUpEpisode.air_date) ??
+            `S${nextUpEpisode.season_number} E${nextUpEpisode.episode_number}`,
           poster_url: item.poster_url,
           poster_thumbhash: item.poster_thumbhash,
         }
@@ -284,6 +287,7 @@ export default function SeriesContent({
                     isLoading={singleSeasonEpisodesQuery.isLoading}
                     episodeLinkState={singleSeasonEpisodeLinkState}
                     libraryId={libraryId}
+                    episodeLabels={item.episode_labels}
                   />
                 </section>
               ) : (

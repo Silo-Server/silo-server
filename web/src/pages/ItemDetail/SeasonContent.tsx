@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import { useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
 import { useStartShuffle } from "@/hooks/queries/shuffles";
@@ -92,7 +93,9 @@ export default function SeasonContent({
       ? {
           content_id: firstUnwatched.content_id,
           title: firstUnwatched.title,
-          subtitle: `S${firstUnwatched.season_number} E${firstUnwatched.episode_number}`,
+          subtitle:
+            episodeAirDateLabel(item.episode_labels, firstUnwatched.air_date) ??
+            `S${firstUnwatched.season_number} E${firstUnwatched.episode_number}`,
           poster_url: item.poster_url,
           poster_thumbhash: item.poster_thumbhash,
         }
@@ -226,6 +229,7 @@ export default function SeasonContent({
               isLoading={episodesLoading}
               episodeLinkState={episodeLinkState}
               libraryId={libraryId}
+              episodeLabels={item.episode_labels}
             />
           </section>
         </div>

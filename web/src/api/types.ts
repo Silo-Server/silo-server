@@ -880,6 +880,10 @@ export interface BrowseItem {
   advisory_source?: string;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
+  /** "air_date" when the series labels episodes by date; see formatEpisodeLabel. */
+  episode_labels?: string;
+  /** An episode card's air date, sent when episode_labels is air_date. */
+  air_date?: string | null;
   rating_imdb: number | null;
   rating_tmdb?: number | null;
   rating_rt_critic?: number | null;
@@ -1292,6 +1296,8 @@ export interface ItemDetail {
   first_air_date: string | null;
   // Publication/airing status ("Ongoing", "Completed", "Continuing", "Ended").
   show_status?: string;
+  /** "air_date" when the series (or the series of this season or episode) labels episodes by date. */
+  episode_labels?: string;
   last_air_date: string | null;
   air_time?: string | null;
   air_timezone?: string | null;
@@ -4627,6 +4633,10 @@ export interface SectionItem {
   advisory_source?: string;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
+  /** "air_date" when the series labels episodes by date; see formatEpisodeLabel. */
+  episode_labels?: string;
+  /** An episode card's air date, sent when episode_labels is air_date. */
+  air_date?: string | null;
   rating_imdb: number | null;
   rating_tmdb?: number | null;
   rating_rt_critic?: number | null;

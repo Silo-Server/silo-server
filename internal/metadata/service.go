@@ -9627,6 +9627,7 @@ func itemToMetadataResult(item *models.MediaItem) *MetadataResult {
 		result.SeasonCount = *item.SeasonCount
 	}
 	result.ShowStatus = item.ShowStatus
+	result.EpisodeLabels = item.EpisodeLabels
 
 	return result
 }
@@ -9711,6 +9712,7 @@ func metadataResultToItem(r *MetadataResult, contentType string) *models.MediaIt
 	// manga enrichment pipeline). Pass non-series values through untouched so
 	// a round-trip through itemToMetadataResult can never mangle them.
 	if contentType == "series" {
+		item.EpisodeLabels = models.NormalizeEpisodeLabels(r.EpisodeLabels)
 		item.ShowStatus = showstatus.Normalize(r.ShowStatus)
 	} else {
 		item.ShowStatus = r.ShowStatus

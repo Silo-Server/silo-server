@@ -1426,7 +1426,7 @@ func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 		SeriesID: d.SeriesID, SeriesTitle: d.SeriesTitle, SeasonNumber: d.SeasonNumber, EpisodeNumber: d.EpisodeNumber,
 		Year: d.Year, Runtime: d.Runtime, Genres: NonNil(d.Genres), Keywords: []string{}, Studios: d.Studios, Networks: d.Networks,
 		ContentRating: d.ContentRating, AdvisoryAge: d.AdvisoryAge, AdvisorySource: d.AdvisorySource,
-		ShowStatus: d.ShowStatus,
+		ShowStatus: d.ShowStatus, EpisodeLabels: d.EpisodeLabels,
 		RatingIMDB: d.RatingIMDB, RatingTMDB: d.RatingTMDB, RatingRTCritic: d.RatingRTCritic, RatingRTAudience: d.RatingRTAudience,
 		Overview: d.Overview, ReleaseDate: calendarDatePtr(d.ReleaseDate), LastAirDate: calendarDatePtr(d.LastAirDate),
 		PosterURL: d.PosterURL, PosterThumbhash: d.PosterThumbhash, BackdropURL: d.BackdropURL, BackdropThumbhash: d.BackdropThumbhash, LogoURL: d.LogoURL,

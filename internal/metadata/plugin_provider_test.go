@@ -392,3 +392,48 @@ func TestPluginProviderSendsAndReadsISBNsAsISBN13(t *testing.T) {
 		t.Fatalf("GetMetadata() result = %+v, want the ISBN-13", result)
 	}
 }
+
+// A provider whose numbering is synthetic (Sportarr's S2026E296) asks for its
+// series' episodes to be labeled by air date. Only series carry the choice,
+// and only values the clients know are kept.
+func TestPluginProviderReadsEpisodeLabels(t *testing.T) {
+	tests := []struct {
+		name     string
+		itemType string
+		value    any
+		want     string
+	}{
+		{name: "series by air date", itemType: "series", value: "air_date", want: "air_date"},
+		{name: "unknown value", itemType: "series", value: "absolute", want: ""},
+		{name: "not a series", itemType: "movie", value: "air_date", want: ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			md, err := structpb.NewStruct(map[string]any{"episode_labels": tt.value})
+			if err != nil {
+				t.Fatalf("NewStruct: %v", err)
+			}
+			client := &fakePluginMetadataClient{response: &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{
+				ProviderId: "lg-000030", ItemType: tt.itemType, Title: "NBA", Metadata: md,
+			}}}
+			provider, err := NewPluginProviderWithClientFactory(map[string]string{
+				pluginInstallationIDSetting: "1",
+				capabilityIDSetting:         "sportarr",
+			}, func(context.Context, int, string) (pluginMetadataClient, error) {
+				return client, nil
+			})
+			if err != nil {
+				t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
+			}
+			result, err := provider.GetMetadata(context.Background(), MetadataRequest{
+				ContentType: tt.itemType, ProviderIDs: map[string]string{"sportarr": "lg-000030"},
+			})
+			if err != nil {
+				t.Fatalf("GetMetadata() error = %v", err)
+			}
+			if result.EpisodeLabels != tt.want {
+				t.Fatalf("EpisodeLabels = %q, want %q", result.EpisodeLabels, tt.want)
+			}
+		})
+	}
+}

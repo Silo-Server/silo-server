@@ -56,6 +56,7 @@ func MergeMetadata(source, target *MetadataResult, locked []MetadataField, mode 
 	// Series fields (not lockable — structural)
 	mergeInt(&target.SeasonCount, source.SeasonCount, mode)
 	mergeScalar(&target.ShowStatus, source.ShowStatus, mode)
+	mergeScalar(&target.EpisodeLabels, source.EpisodeLabels, mode)
 	if !isLocked(FieldAirSchedule) {
 		mergeScalar(&target.AirTime, source.AirTime, mode)
 		mergeScalar(&target.AirTimezone, source.AirTimezone, mode)
@@ -136,6 +137,7 @@ func MergeGlobalMetadata(source, target *MetadataResult, locked []MetadataField,
 	mergeScalar(&target.OriginalLanguage, source.OriginalLanguage, mode)
 	mergeInt(&target.SeasonCount, source.SeasonCount, mode)
 	mergeScalar(&target.ShowStatus, source.ShowStatus, mode)
+	mergeScalar(&target.EpisodeLabels, source.EpisodeLabels, mode)
 	if !isLocked(FieldAirSchedule) {
 		mergeScalar(&target.AirTime, source.AirTime, mode)
 		mergeScalar(&target.AirTimezone, source.AirTimezone, mode)

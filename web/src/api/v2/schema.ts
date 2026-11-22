@@ -24599,6 +24599,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -24629,6 +24634,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -24894,6 +24905,12 @@ export interface components {
       effective_version_resolution?: string;
       /** Format: int64 */
       episode_count?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       extras?: components["schemas"]["ItemExtraInfo"][];
@@ -28228,6 +28245,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -28258,6 +28280,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -37946,6 +37974,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -37978,6 +38011,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */
@@ -38186,6 +38225,11 @@ export interface components {
        */
       advisory_source?: "commonsense" | "mdblist";
       /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date
+       */
+      air_date?: string;
+      /**
        * @description On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author
        * @example [
        *       "Frank Herbert"
@@ -38216,6 +38260,12 @@ export interface components {
        * @description The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair
        */
       duration_seconds?: number;
+      /**
+       * @description How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent: show the numbers
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       /** @description Empty, never null */

@@ -742,6 +742,7 @@ type MediaItem struct {
 	LastAirDate                  *string // ISO date (series only), nullable
 	AirTime                      *string // Series broadcast time (e.g. "20:00"), nullable
 	AirTimezone                  *string // Series broadcast timezone (IANA name, e.g. "America/New_York"), nullable
+	EpisodeLabels                string  // Series only: how clients label its episodes, "" (season and episode numbers) or EpisodeLabelsAirDate
 	ShowStatus                   string  // Series lifecycle: "returning", "ended", "cancelled", "in_production", "upcoming", or "" if unknown (series; manga uses its own domain, e.g. "Ongoing")
 	People                       []ItemPerson
 	AudiobookSeries              []AudiobookSeriesMembership
@@ -990,4 +991,18 @@ type EpisodeLocalization struct {
 	OverviewSource   string // provider | ai | manual
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+}
+
+// EpisodeLabelsAirDate marks a series whose season and episode numbers are
+// synthetic, such as a sports league Sportarr numbers S2026E296: clients label
+// its episodes by air date instead. The numbers still order the episodes.
+const EpisodeLabelsAirDate = "air_date"
+
+// NormalizeEpisodeLabels keeps the episode-label values clients understand and
+// maps anything else to "" (season and episode numbers).
+func NormalizeEpisodeLabels(raw string) string {
+	if raw == EpisodeLabelsAirDate {
+		return EpisodeLabelsAirDate
+	}
+	return ""
 }

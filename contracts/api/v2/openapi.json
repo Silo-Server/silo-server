@@ -27850,6 +27850,11 @@
             ],
             "type": "string"
           },
+          "air_date": {
+            "description": "An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date",
+            "format": "date",
+            "type": "string"
+          },
           "authors": {
             "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
             "examples": [
@@ -27903,6 +27908,16 @@
             "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
+          },
+          "episode_labels": {
+            "description": "How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent: show the numbers",
+            "enum": [
+              "air_date"
+            ],
+            "examples": [
+              "air_date"
+            ],
+            "type": "string"
           },
           "episode_number": {
             "format": "int64",
@@ -28408,6 +28423,16 @@
           "episode_count": {
             "format": "int64",
             "type": "integer"
+          },
+          "episode_labels": {
+            "description": "How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent: show the numbers",
+            "enum": [
+              "air_date"
+            ],
+            "examples": [
+              "air_date"
+            ],
+            "type": "string"
           },
           "episode_number": {
             "format": "int64",
@@ -36943,6 +36968,11 @@
             ],
             "type": "string"
           },
+          "air_date": {
+            "description": "An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date",
+            "format": "date",
+            "type": "string"
+          },
           "authors": {
             "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
             "examples": [
@@ -36996,6 +37026,16 @@
             "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
+          },
+          "episode_labels": {
+            "description": "How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent: show the numbers",
+            "enum": [
+              "air_date"
+            ],
+            "examples": [
+              "air_date"
+            ],
+            "type": "string"
           },
           "episode_number": {
             "format": "int64",
@@ -59454,6 +59494,11 @@
             ],
             "type": "string"
           },
+          "air_date": {
+            "description": "An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date",
+            "format": "date",
+            "type": "string"
+          },
           "authors": {
             "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
             "examples": [
@@ -59514,6 +59559,16 @@
             "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
+          },
+          "episode_labels": {
+            "description": "How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent: show the numbers",
+            "enum": [
+              "air_date"
+            ],
+            "examples": [
+              "air_date"
+            ],
+            "type": "string"
           },
           "episode_number": {
             "format": "int64",
@@ -59893,6 +59948,11 @@
             ],
             "type": "string"
           },
+          "air_date": {
+            "description": "An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date",
+            "format": "date",
+            "type": "string"
+          },
           "authors": {
             "description": "On an audiobook or ebook card in a catalog browse listing: up to three author names in credit order, the names the book's detail page lists under authors. Absent for other types, on other listings, and when the book credits no author",
             "examples": [
@@ -59946,6 +60006,16 @@
             "description": "The length position_seconds is measured against, in seconds, as the progress record holds it. Present with position_seconds; a card draws its progress bar and time left from the pair",
             "format": "double",
             "type": "number"
+          },
+          "episode_labels": {
+            "description": "How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent: show the numbers",
+            "enum": [
+              "air_date"
+            ],
+            "examples": [
+              "air_date"
+            ],
+            "type": "string"
           },
           "episode_number": {
             "format": "int64",

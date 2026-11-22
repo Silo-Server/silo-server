@@ -1,4 +1,5 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
+import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import { BookOpen, Play } from "lucide-react";
 import { Children, memo, useCallback, useRef } from "react";
 import { useLocation } from "react-router";
@@ -95,6 +96,10 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
           seriesTitle: props.sectionItem.series_title,
           seasonNumber: props.sectionItem.season_number,
           episodeNumber: props.sectionItem.episode_number,
+          airDateLabel: episodeAirDateLabel(
+            props.sectionItem.episode_labels,
+            props.sectionItem.air_date,
+          ),
           backdropIsStill: props.sectionItem.backdrop_is_episode_still,
           posterIsStill: props.sectionItem.poster_is_episode_still,
           backdropUrl: props.sectionItem.backdrop_url,
@@ -119,6 +124,7 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
           seriesTitle: props.detail.series_title,
           seasonNumber: props.detail.season_number,
           episodeNumber: props.detail.episode_number,
+          airDateLabel: episodeAirDateLabel(props.detail.episode_labels, props.detail.air_date),
           backdropIsStill: props.detail.backdrop_is_episode_still ?? false,
           posterIsStill: props.detail.poster_is_episode_still ?? props.detail.type === "episode",
           backdropUrl: props.detail.backdrop_url,
@@ -168,16 +174,30 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
       {card.title}
     </span>
   ) : null;
-  const episodeMeta = hasEpisodeMeta
-    ? card.seriesTitle && card.title
-      ? t("web.home.continueWatching.episodeLabelWithTitle", {
-          ...episodeNumbers,
-          title: episodeTitle,
-        })
-      : t("web.home.continueWatching.episodeLabel", episodeNumbers)
-    : isMangaChapter
-      ? episodeTitle
-      : null;
+  const episodeMeta = hasEpisodeMeta ? (
+    card.airDateLabel ? (
+      // A date-labeled series (sports): the game's date replaces its
+      // synthetic season and episode numbers.
+      card.title && card.seriesTitle ? (
+        <>
+          {card.airDateLabel}
+          {" •\u00a0"}
+          {episodeTitle}
+        </>
+      ) : (
+        card.airDateLabel
+      )
+    ) : card.seriesTitle && card.title ? (
+      t("web.home.continueWatching.episodeLabelWithTitle", {
+        ...episodeNumbers,
+        title: episodeTitle,
+      })
+    ) : (
+      t("web.home.continueWatching.episodeLabel", episodeNumbers)
+    )
+  ) : isMangaChapter ? (
+    episodeTitle
+  ) : null;
   const premiereBadge =
     "sectionItem" in props && props.sectionItem
       ? props.sectionItem.badges?.find((badge) => badge === "season_premiere")
