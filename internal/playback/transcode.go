@@ -4202,7 +4202,7 @@ func (s *TranscodeSession) restart(
 
 	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, fspath.RedactRelayed(strings.Join(args, " ")))
 	if decodeOnCPU {
-		slog.WarnContext(ctx, "transcode could not configure its filter graph on GPU-decoded frames; restarting with CPU decoding",
+		slog.WarnContext(ctx, "transcode failed on GPU decoding; restarting with CPU decoding",
 			"component", "playback",
 			"playback_session_id", opts.SessionID,
 			"hw_accel", opts.HWAccel,
@@ -4948,9 +4948,10 @@ func (w *ffmpegStderrWriter) Write(p []byte) (int, error) {
 
 // stopOnHardwareDecodeUnavailable kills FFmpeg when line says its AV1
 // decoder has no hardware to run on (see ffmpegAV1HardwareDecodeUnavailable).
-// It runs on the stderr copy. No frame can follow, and the process would otherwise read the whole input
-// first. The retained stderr already holds the line (the session's tail
-// buffer is written before this writer), so the exit classifies as
+// It runs on the stderr copy. No frame can follow, and the process would
+// otherwise read the whole input first. The retained stderr already holds the
+// line (the session's tail buffer is written before this writer), so the
+// exit classifies as
 // ErrHardwareDecodeUnsupported and startup, or download preparation, walks
 // CPU decoding at once. A writer without a session only does this stop.
 //
@@ -4968,17 +4969,20 @@ func (w *ffmpegStderrWriter) stopOnHardwareDecodeUnavailable(line string) {
 	// Wait reaps FFmpeg before it finishes copying stderr, so this line can
 	// arrive after FFmpeg exited on its own. Its group id may then belong to
 	// another process, which procgroup.Kill must not signal. The process
-	// handle knows whether it was reaped.
+	// handle knows whether it was reaped. The kill follows at once, so the
+	// window between the check and the signal stays as short as it can be.
 	if errors.Is(w.cmd.Process.Signal(syscall.Signal(0)), os.ErrProcessDone) {
 		return
 	}
-	slog.WarnContext(w.ctx, "ffmpeg has no hardware AV1 decoder for this source; stopping it",
+	// The whole group: a configured FFmpeg path may be a wrapper script whose
+	// real FFmpeg would otherwise read on, outside the device allocator.
+	if errors.Is(procgroup.Kill(w.cmd), os.ErrProcessDone) {
+		return
+	}
+	slog.WarnContext(w.ctx, "ffmpeg has no hardware AV1 decoder for this source; stopped it",
 		"component", "playback",
 		"playback_session_id", w.sessionID,
 	)
-	// The whole group: a configured FFmpeg path may be a wrapper script whose
-	// real FFmpeg would otherwise read on, outside the device allocator.
-	_ = procgroup.Kill(w.cmd)
 }
 
 func (w *ffmpegStderrWriter) Flush() {

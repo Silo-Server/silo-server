@@ -402,15 +402,19 @@ func PrepareFile(ctx context.Context, opts TranscodeOpts, outputPath string) err
 
 		cmd := fspath.CommandContext(ctx, bin, args...)
 		stderr := newBoundedTailBuffer(stderrTailMaxBytes)
-		// Stops a GPU decode FFmpeg's AV1 decoder can't run, as a playback
-		// start does (see stopOnHardwareDecodeUnavailable), so the CPU-decode
-		// retry below runs without reading the whole input first. The tail
-		// buffer comes first so the exit classifies with the line.
-		stop := &ffmpegStderrWriter{ctx: ctx, cmd: cmd, sessionID: runOpts.SessionID}
-		cmd.Stderr = io.MultiWriter(stderr, stop)
+		cmd.Stderr = stderr
 		if logs != nil {
 			logs.setHWAccel(runOpts.HWAccel)
-			cmd.Stderr = io.MultiWriter(stderr, logs, stop)
+			cmd.Stderr = io.MultiWriter(stderr, logs)
+		}
+		if slices.Contains(args, "-hwaccel") {
+			// Stops a GPU decode FFmpeg's AV1 decoder can't run, as a
+			// playback start does (see stopOnHardwareDecodeUnavailable), so
+			// the CPU-decode retry below runs without reading the whole input
+			// first. It goes after the tail buffer so the exit classifies
+			// with the line.
+			stop := &ffmpegStderrWriter{ctx: ctx, cmd: cmd, sessionID: runOpts.SessionID}
+			cmd.Stderr = io.MultiWriter(cmd.Stderr, stop)
 		}
 		if runOpts.PrepareProgressSink != nil {
 			// Copied video keeps the source's own timing, which the probed

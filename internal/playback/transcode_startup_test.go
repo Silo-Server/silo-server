@@ -620,7 +620,7 @@ func assertProcessGone(t *testing.T, pidFile string) {
 
 // Windows Media Video 7 and 8 and the Microsoft MPEG-4 variants have no GPU
 // decoder in FFmpeg, so they are planned on CPU decode. WMV3 is VC-1, which
-// Intel and NVIDIA GPUs decode, and keeps GPU decode.
+// NVIDIA and most Intel GPUs decode, and keeps GPU decode.
 func TestRequiresSoftwareVideoDecodeForCodecsWithoutGPUDecoder(t *testing.T) {
 	for codec, want := range map[string]bool{
 		"wmv1": true, "wmv2": true, " WMV2 ": true, "msmpeg4v1": true, "msmpeg4v2": true, "msmpeg4v3": true, "msmpeg4": true,
