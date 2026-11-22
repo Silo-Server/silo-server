@@ -1706,6 +1706,19 @@ An audio-output initialization failure is a verdict on the audio shape the
 recipe delivered (§6.2.1); once its one stereo retry is spent, the class retires
 as it always did.
 
+**A generation fence is not a failed recipe.** A segment request answered
+`412 stale_generation` names an FFmpeg generation the server has replaced; the
+bytes are gone, the recipe is not. A client may report it as
+`failure_recovery` with `failure.classification: "stale_generation"`, and the
+server keeps the current recipe eligible: neither the client's attempted-key
+history nor the durable recipe-exclusion chain records it, and the delivery
+class stays eligible. The replan answers with the same route for the rebuilt
+generation rather than walking the ladder, so fencing cannot reach
+`adaptation_exhausted`. A client that can reanchor or refetch on the fence should
+do that instead of spending a recovery at all; the classification exists so a
+fence that does arrive through the failure path still cannot retire a healthy
+recipe.
+
 **A failed direct play retires direct play for the attempt.** `original_http`
 ships the source container untouched, so it has no server-side executor that can
 transform the bytes around what a device could not render. Any recognized

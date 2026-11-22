@@ -78,6 +78,9 @@ const hlsJS = vi.hoisted(() => ({
   },
   // Seconds buffered past the playhead, as hls.js measures them.
   forwardBufferSeconds: 0,
+  // Bodies the fenced-playlist base loader answers, one per fetch. A test that
+  // drives the real gate pushes playlists that keep naming the fenced token.
+  playlists: [] as string[],
 }));
 
 vi.mock("sonner", () => ({
@@ -171,59 +174,103 @@ vi.mock("../hooks/useSubtitleAppearance", () => ({
 vi.mock("../hooks/useSubtitleLayout", () => ({
   useSubtitleLayout: () => ({ positionStyle: {}, fontScale: 1 }),
 }));
-vi.mock("hls.js", () => ({
-  default: class MockHls {
-    static Events = {
-      ERROR: "error",
-      MANIFEST_PARSED: "manifestParsed",
-      BUFFER_APPENDED: "bufferAppended",
-      FRAG_LOADING: "fragLoading",
-      FRAG_LOADED: "fragLoaded",
-      FRAG_BUFFERED: "fragBuffered",
-      BUFFER_EOS: "bufferEos",
+vi.mock("hls.js", () => {
+  // The base loader the fenced-playlist wrapper delegates to. It answers the
+  // bodies a test queues in `hlsJS.playlists`, so the real gate can be driven
+  // through its retry bound.
+  class MockPlaylistLoader {
+    stats = {
+      aborted: false,
+      loaded: 0,
+      retry: 0,
+      total: 0,
+      chunkCount: 0,
+      bwEstimate: 0,
+      loading: { start: 0, first: 0, end: 0 },
+      parsing: { start: 0, end: 0 },
+      buffering: { start: 0, first: 0, end: 0 },
     };
-    static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
-    static ErrorDetails = {
-      MANIFEST_LOAD_ERROR: "manifestLoadError",
-      MANIFEST_LOAD_TIMEOUT: "manifestLoadTimeOut",
-      MANIFEST_PARSING_ERROR: "manifestParsingError",
-      FRAG_LOAD_ERROR: "fragLoadError",
-    };
-    static isSupported = () => hlsJS.supported;
-    static DefaultConfig = { loader: class {} };
-
-    handlers = new Map<string, (event: string, data: unknown) => void>();
-    startLoad = hlsJS.startLoad;
-    stopLoad = hlsJS.stopLoad;
-    loadSource = hlsJS.loadSource;
-    recoverMediaError = vi.fn();
-
-    bufferedToEnd = false;
-    maxBufferLength: number;
-    config: { startPosition?: number };
-    url?: string;
-
-    constructor(config?: { maxBufferLength?: number; startPosition?: number }) {
-      hlsJS.constructed(config);
-      hlsJS.latest = this;
-      this.maxBufferLength = config?.maxBufferLength ?? 30;
-      this.config = { ...config };
+    context = null;
+    load(
+      context: { url: string },
+      _config: unknown,
+      callbacks: {
+        onSuccess: (
+          response: { url: string; data: string; code: number },
+          stats: unknown,
+          context: unknown,
+          networkDetails: unknown,
+        ) => void;
+      },
+    ) {
+      const data = hlsJS.playlists.shift() ?? "#EXTM3U\n";
+      queueMicrotask(() =>
+        callbacks.onSuccess({ url: context.url, data, code: 200 }, this.stats, context, null),
+      );
     }
-
-    get mainForwardBufferInfo() {
-      return { len: hlsJS.forwardBufferSeconds };
-    }
-
-    on(event: string, handler: (event: string, data: unknown) => void) {
-      this.handlers.set(event, handler);
-    }
-    emit(event: string, data: unknown) {
-      this.handlers.get(event)?.(event, data);
-    }
-    attachMedia() {}
+    abort() {}
     destroy() {}
-  },
-}));
+    getCacheAge() {
+      return null;
+    }
+    getResponseHeader() {
+      return null;
+    }
+  }
+  return {
+    default: class MockHls {
+      static Events = {
+        ERROR: "error",
+        MANIFEST_PARSED: "manifestParsed",
+        BUFFER_APPENDED: "bufferAppended",
+        FRAG_LOADING: "fragLoading",
+        FRAG_LOADED: "fragLoaded",
+        FRAG_BUFFERED: "fragBuffered",
+        BUFFER_EOS: "bufferEos",
+      };
+      static ErrorTypes = { NETWORK_ERROR: "networkError", MEDIA_ERROR: "mediaError" };
+      static ErrorDetails = {
+        MANIFEST_LOAD_ERROR: "manifestLoadError",
+        MANIFEST_LOAD_TIMEOUT: "manifestLoadTimeOut",
+        MANIFEST_PARSING_ERROR: "manifestParsingError",
+        FRAG_LOAD_ERROR: "fragLoadError",
+      };
+      static isSupported = () => hlsJS.supported;
+      static DefaultConfig = { loader: MockPlaylistLoader };
+
+      handlers = new Map<string, (event: string, data: unknown) => void>();
+      startLoad = hlsJS.startLoad;
+      stopLoad = hlsJS.stopLoad;
+      loadSource = hlsJS.loadSource;
+      recoverMediaError = vi.fn();
+
+      bufferedToEnd = false;
+      maxBufferLength: number;
+      config: { startPosition?: number };
+      url?: string;
+
+      constructor(config?: { maxBufferLength?: number; startPosition?: number }) {
+        hlsJS.constructed(config);
+        hlsJS.latest = this;
+        this.maxBufferLength = config?.maxBufferLength ?? 30;
+        this.config = { ...config };
+      }
+
+      get mainForwardBufferInfo() {
+        return { len: hlsJS.forwardBufferSeconds };
+      }
+
+      on(event: string, handler: (event: string, data: unknown) => void) {
+        this.handlers.set(event, handler);
+      }
+      emit(event: string, data: unknown) {
+        this.handlers.get(event)?.(event, data);
+      }
+      attachMedia() {}
+      destroy() {}
+    },
+  };
+});
 vi.mock("./PlayerControls", () => ({
   SKIP_BACK_SECONDS: 10,
   SKIP_FORWARD_SECONDS: 30,
@@ -4896,6 +4943,208 @@ describe("VideoPlayer source timeline", () => {
       expect(hlsJS.stopLoad).toHaveBeenCalledTimes(4);
       expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
       expect(hlsJS.startLoad).not.toHaveBeenCalled();
+    });
+
+    // The stress failure: the playlist gate holds a stale playlist whose
+    // generation the server replaced. It spends its 8 x 500 ms bound, and the
+    // old code reported that as a plan failure — the failure_recovery replan
+    // then retired the only recipe and DELETEd the session. The gate now hands
+    // the transport back as a reanchor, and no route failure is reported.
+    it("does not fail the route when the playlist gate spends its bound", async () => {
+      vi.useFakeTimers({
+        toFake: [
+          "setInterval",
+          "clearInterval",
+          "setTimeout",
+          "clearTimeout",
+          "performance",
+          "Date",
+        ],
+      });
+      try {
+        hlsJS.supported = true;
+        vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+        hlsJS.constructed.mockClear();
+        hlsJS.playlists = [];
+        const onReanchorSeek = vi.fn(() => true);
+        const onPlanFailure = vi.fn();
+        const { container } = renderPlayer({ plan: anchoredPlan, onReanchorSeek, onPlanFailure });
+        const video = container.querySelector("video");
+        if (!video) throw new Error("expected video element");
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        expect(hlsJS.latest).not.toBeNull();
+        fireEvent.loadedMetadata(video);
+        fireFrameTimeUpdate(video);
+        fireEvent.playing(video);
+
+        const instance = hlsJS.latest!;
+        Object.defineProperty(instance, "url", {
+          configurable: true,
+          value: anchoredPlan.stream.url,
+        });
+        Object.defineProperty(instance, "config", {
+          configurable: true,
+          value: { startPosition: 0 },
+        });
+
+        const token = "session-1:inc:1";
+        const stalePlaylist = [
+          "#EXTM3U",
+          "#EXT-X-TARGETDURATION:2",
+          `seg_00000.ts?sgen=${encodeURIComponent(token)}`,
+          "",
+        ].join("\n");
+        // Every refetch keeps naming the generation the server replaced: the
+        // retained switchover playlist, not a rebuilt one.
+        hlsJS.playlists = Array.from({ length: 40 }, () => stalePlaylist);
+
+        // A playback fence (no pending seek) arms the playlist gate.
+        act(() =>
+          instance.emit("error", {
+            fatal: false,
+            type: "networkError",
+            details: "fragLoadError",
+            response: { code: 412 },
+            frag: {
+              sn: 47,
+              url: `/playback/transcode/session-1/seg_00047.ts?sgen=${encodeURIComponent(token)}`,
+            },
+          }),
+        );
+
+        const config = hlsJS.constructed.mock.calls.at(-1)?.[0] as {
+          pLoader?: new (config: unknown) => {
+            load: (context: unknown, config: unknown, callbacks: Record<string, unknown>) => void;
+          };
+        };
+        expect(config.pLoader).toBeDefined();
+        const Loader = config.pLoader!;
+        const loader = new Loader({});
+        const onError = vi.fn();
+        loader.load(
+          { url: `http://localhost${anchoredPlan.stream.url}`, responseType: "text" },
+          {},
+          { onSuccess: vi.fn(), onError, onTimeout: vi.fn() },
+        );
+        // Eight 500 ms refetches plus their request turns.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(6_000);
+        });
+        expect(onError).not.toHaveBeenCalled();
+        expect(onPlanFailure).not.toHaveBeenCalled();
+        expect(onReanchorSeek).toHaveBeenCalledOnce();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    // A fence is not a route failure. When the playlist refetch bound for one
+    // generation is spent, the player rebuilds the stream at the playhead (a
+    // seek_reanchor) instead of reporting a failure_recovery that would retire
+    // the only recipe and terminal the session at adaptation_exhausted.
+    it("reanchors at the playhead when a fence outlasts its refetch bound", async () => {
+      hlsJS.supported = true;
+      vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+      const onReanchorSeek = vi.fn(() => true);
+      const onPlanFailure = vi.fn();
+      const { container } = renderPlayer({ plan: anchoredPlan, onReanchorSeek, onPlanFailure });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+
+      const instance = hlsJS.latest!;
+      Object.defineProperty(instance, "url", {
+        configurable: true,
+        value: anchoredPlan.stream.url,
+      });
+      Object.defineProperty(instance, "config", {
+        configurable: true,
+        value: { startPosition: 0 },
+      });
+      // The element's own clock: 42 s into a transport whose clock zero is
+      // source 94, so the reanchor asks for media second 136.
+      Object.defineProperty(video, "currentTime", { configurable: true, value: 42 });
+      hlsJS.loadSource.mockClear();
+      hlsJS.stopLoad.mockClear();
+
+      const staleSegment = (sn: number) => ({
+        fatal: true,
+        type: "networkError",
+        details: "fragLoadError",
+        response: { code: 412 },
+        frag: { sn, url: `/playback/transcode/session-1/seg_000${sn}.ts` },
+      });
+      act(() => instance.emit("error", staleSegment(47)));
+      act(() => instance.emit("error", staleSegment(48)));
+      expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
+      expect(onReanchorSeek).not.toHaveBeenCalled();
+      expect(onPlanFailure).not.toHaveBeenCalled();
+
+      // The third fence from the same (tokenless) generation spends the
+      // bound. The transport is already stopped; the recovery is a reanchor.
+      act(() => instance.emit("error", staleSegment(49)));
+      expect(hlsJS.loadSource).toHaveBeenCalledTimes(2);
+      expect(onReanchorSeek).toHaveBeenCalledWith(136, expect.any(Boolean));
+      expect(onPlanFailure).not.toHaveBeenCalled();
+    });
+
+    // The stress case: a seek burst with a rotation under each target. Every
+    // seek's pending target reanchors exactly once (the queued retry of the
+    // fenced URL does not), the route is never reported failed, and the
+    // playhead keeps moving. Nothing here may reach the failure_recovery
+    // replan that ends the session.
+    it("survives a seek burst across rotations without failing the route", async () => {
+      hlsJS.supported = true;
+      vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+      const onReanchorSeek = vi.fn(() => true);
+      const onPlanFailure = vi.fn();
+      const { container } = renderPlayer({ plan: anchoredPlan, onReanchorSeek, onPlanFailure });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+      const instance = hlsJS.latest!;
+      seekableWindow(video, 6900);
+
+      const playheads: number[] = [];
+      for (let i = 0; i < 15; i += 1) {
+        const target = 120 + i * 30;
+        act(() => controls.current!.onSeek(target));
+        const generation = `session-1:inc:${i + 1}`;
+        const stale = {
+          fatal: true,
+          type: "networkError",
+          details: "fragLoadError",
+          response: { code: 412 },
+          frag: {
+            sn: 40 + i,
+            url: `/playback/transcode/session-1/seg_00${40 + i}.ts?sgen=${encodeURIComponent(generation)}`,
+          },
+        };
+        act(() => instance.emit("error", stale));
+        // hls.js's queued retry of the same dead URL.
+        act(() => instance.emit("error", stale));
+        // One pending seek, one reanchor: the retry does not buy another.
+        expect(onReanchorSeek).toHaveBeenCalledTimes(i + 1);
+        expect(onReanchorSeek).toHaveBeenLastCalledWith(target, expect.any(Boolean));
+
+        // The reanchor's replacement plays from the target and moves on.
+        video.currentTime = target - 94 + 5;
+        fireFrameTimeUpdate(video);
+        playheads.push(controls.current!.currentTime);
+      }
+
+      expect(onPlanFailure).not.toHaveBeenCalled();
+      for (let i = 1; i < playheads.length; i += 1) {
+        expect(playheads[i]!).toBeGreaterThan(playheads[i - 1]!);
+      }
     });
 
     // A transport a reanchor attaches starts on the old frame while it loads.

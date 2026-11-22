@@ -10191,6 +10191,12 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	seekSubtitleDegraded := false
 	seekFailureRecovery := operation == playback.ReplanOperationSeekFailureRecoveryV3
 	seekScopedRecovery := seekReanchor || seekFailureRecovery
+	// A segment-generation fence (the segment route's 412 stale_generation)
+	// reports that FFmpeg's generation moved, not that the recipe is bad. It
+	// must never be spent as a failed attempt: retiring the recipe's key is
+	// what terminals a healthy session at adaptation_exhausted even though the
+	// same route can serve the rebuilt generation.
+	generationFence := failureRecoveryOperationV3(operation) && generationFenceFailureV3(req.Failure.Classification)
 	// A failure recovery on a transcode session that answered the playlist and
 	// never served a single segment request is a client that walked away after
 	// fetching the manifest: the encode was live, the bytes were ready, and
@@ -10311,7 +10317,8 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// client already reached: the class stays eligible, and the abandoned
 	// recipe key is what keeps a later replan from replaying it.
 	abandonedRecipe := false
-	if !audioShapeRetry &&
+	if !generationFence &&
+		!audioShapeRetry &&
 		failureRecoveryAbandonedDeliveryV3(operation, req.Failure.Classification) &&
 		len(unreachableNodes) == 0 &&
 		(!decodeFailureClassificationV3(req.Failure.Classification) ||
@@ -10715,7 +10722,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		failedKey := strings.TrimSpace(req.PlanAttemptKey)
 		for _, key := range req.AttemptedPlanKeys {
 			trimmed := strings.TrimSpace(key)
-			if nodeRecovery && (trimmed == failedKey || trimmed == currentKey) {
+			if (nodeRecovery || generationFence) && (trimmed == failedKey || trimmed == currentKey) {
 				continue
 			}
 			// A progress reissue keeps the recipe it just played out of the loop
@@ -10727,7 +10734,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			}
 			attemptedKeys = append(attemptedKeys, key)
 		}
-		if !proxyOriginRecovery && !nodeRecovery && !progressReissue && !containsStringExactV3(attemptedKeys, req.PlanAttemptKey) {
+		if !proxyOriginRecovery && !nodeRecovery && !generationFence && !progressReissue && !containsStringExactV3(attemptedKeys, req.PlanAttemptKey) {
 			attemptedKeys = append(attemptedKeys, req.PlanAttemptKey)
 		}
 	}
@@ -10737,10 +10744,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		// ping-pong the session. A client-reported local mutation (for example a
 		// PCM recovery route) is folded into the failed plan's key here — the
 		// server owns the hash; clients only echo opaque keys.
-		if !proxyOriginRecovery && !nodeRecovery && !progressReissue && !containsStringExactV3(attemptedKeys, currentKey) {
+		if !proxyOriginRecovery && !nodeRecovery && !generationFence && !progressReissue && !containsStringExactV3(attemptedKeys, currentKey) {
 			attemptedKeys = append(attemptedKeys, currentKey)
 		}
-		if len(req.LocalMutations) > 0 && !proxyOriginRecovery && !nodeRecovery && !progressReissue {
+		if len(req.LocalMutations) > 0 && !proxyOriginRecovery && !nodeRecovery && !generationFence && !progressReissue {
 			// The unmutated recipe already failed before the client mutated it
 			// locally; exclude it as well.
 			if !containsStringExactV3(attemptedKeys, unmutatedKey) {
@@ -11426,11 +11433,11 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		plannerSettings, plannerSettingsErr = h.plannerSettingsV3Result(r.Context())
 		attemptedKeys := append([]string(nil), req.AttemptedPlanKeys...)
-		if !containsStringExactV3(attemptedKeys, req.PlanAttemptKey) {
+		if !generationFence && !containsStringExactV3(attemptedKeys, req.PlanAttemptKey) {
 			attemptedKeys = append(attemptedKeys, req.PlanAttemptKey)
 		}
 		currentKey := playback.PlanAttemptKeyV3(record.CurrentPlan, record.NormalizedRequest.ClientPlaybackContext.Output.OutputContextID, req.LocalMutations)
-		if !containsStringExactV3(attemptedKeys, currentKey) {
+		if !generationFence && !containsStringExactV3(attemptedKeys, currentKey) {
 			attemptedKeys = append(attemptedKeys, currentKey)
 		}
 		if virtualDecodeRotation {
@@ -11847,7 +11854,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			failedKey := strings.TrimSpace(req.PlanAttemptKey)
 			for _, key := range req.AttemptedPlanKeys {
 				trimmed := strings.TrimSpace(key)
-				if nodeRecovery && (trimmed == failedKey || trimmed == currentKey) {
+				if (nodeRecovery || generationFence) && (trimmed == failedKey || trimmed == currentKey) {
 					continue
 				}
 				// Keep the current recipe out of the loop guard for its one
@@ -11859,7 +11866,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 				}
 				attemptedKeys = append(attemptedKeys, key)
 			}
-			if !proxyOriginRecovery && !nodeRecovery && !progressReissue && !containsStringExactV3(attemptedKeys, req.PlanAttemptKey) {
+			if !proxyOriginRecovery && !nodeRecovery && !generationFence && !progressReissue && !containsStringExactV3(attemptedKeys, req.PlanAttemptKey) {
 				attemptedKeys = append(attemptedKeys, req.PlanAttemptKey)
 			}
 		}
@@ -11869,10 +11876,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			// ping-pong the session. A client-reported local mutation (for example a
 			// PCM recovery route) is folded into the failed plan's key here — the
 			// server owns the hash; clients only echo opaque keys.
-			if !proxyOriginRecovery && !nodeRecovery && !progressReissue && !containsStringExactV3(attemptedKeys, currentKey) {
+			if !proxyOriginRecovery && !nodeRecovery && !generationFence && !progressReissue && !containsStringExactV3(attemptedKeys, currentKey) {
 				attemptedKeys = append(attemptedKeys, currentKey)
 			}
-			if len(req.LocalMutations) > 0 && !proxyOriginRecovery && !nodeRecovery && !progressReissue {
+			if len(req.LocalMutations) > 0 && !proxyOriginRecovery && !nodeRecovery && !generationFence && !progressReissue {
 				// The unmutated recipe already failed before the client mutated it
 				// locally; exclude it as well.
 				if !containsStringExactV3(attemptedKeys, unmutatedKey) {
@@ -15291,6 +15298,21 @@ func connectivityFailureClassificationV3(classification string) bool {
 	return connectivityFailureClassificationsV3[failureClassificationKeyV3(classification)]
 }
 
+// generationFenceClassificationV3 is the client classification for a segment
+// URL the server answered with 412 stale_generation. The generation moved
+// under a request that named the displaced one; nothing about the recipe that
+// produced it changed.
+const generationFenceClassificationV3 = "stale_generation"
+
+// generationFenceFailureV3 reports whether a replan reports the segment
+// layer's generation fence. A fence must never be spent as a failed attempt:
+// the recipe is healthy, and retiring its key is what terminals a session at
+// adaptation_exhausted while the same route could serve the rebuilt
+// generation.
+func generationFenceFailureV3(classification string) bool {
+	return failureClassificationKeyV3(classification) == generationFenceClassificationV3
+}
+
 // failureRecoveryAbandonedDeliveryV3 reports whether this replan is a failure
 // recovery (or its seek-scoped variant) that abandoned the current plan's
 // delivery with an explicit transport-failure classification — the moment
@@ -15324,6 +15346,11 @@ func failureRecoveryOperationV3(operation playback.ReplanOperationV3) bool {
 func virtualReplanNeedsFreshProviderListingV3(operation playback.ReplanOperationV3, failureClassification string, decodeRotation bool) bool {
 	if decodeRotation {
 		return true
+	}
+	// A generation fence says the segment URL is stale, not the source: the
+	// provider listing that served this route is still the right one.
+	if generationFenceFailureV3(failureClassification) {
+		return false
 	}
 	switch operation {
 	case playback.ReplanOperationSeekFailureRecoveryV3:

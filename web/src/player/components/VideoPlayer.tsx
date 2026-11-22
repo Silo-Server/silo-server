@@ -3498,6 +3498,10 @@ export function VideoPlayer({
     // own retry of a failed fragment before this listener runs, and a further
     // 412 for the same URL is that retry arriving, not a new fence.
     let fencedSegmentKey: string | null = null;
+    // The generation the refetch budget below is counting. A different token
+    // is a rotation: it starts a new bound instead of spending the displaced
+    // generation's.
+    let fencedGeneration: string | null = null;
     // The pending seek target a stale-generation fence already sent back as a
     // reanchor. A second fence for the same target is not re-sent: it falls
     // through to the ordinary failure path, so one seek cannot loop on replans.
@@ -3821,6 +3825,43 @@ export function VideoPlayer({
               timeoutRetry: { maxNumRetry: 3, retryDelayMs: 500, maxRetryDelayMs: 3000 },
               errorRetry: { maxNumRetry: 3, retryDelayMs: 500, maxRetryDelayMs: 3000 },
             };
+            // A generation fence is the timeline moving, not the recipe
+            // failing. Rebuilding at the playhead is a seek_reanchor: it keeps
+            // the session, the route and the attempt history, and it never
+            // reaches failure_recovery, which would retire the only recipe and
+            // terminal the session at adaptation_exhausted. Only when no
+            // reanchor handler exists does this surface the retryable card.
+            // One recovery per transport: the gate and the segment refetch
+            // bound can report the same fence, and a second reanchor would
+            // replace the plan the first one is already fetching.
+            let fenceRecoveryInFlight = false;
+            const recoverFencedTransport = (): void => {
+              if (destroyed || fenceRecoveryInFlight) return;
+              fenceRecoveryInFlight = true;
+              hls?.stopLoad();
+              const seconds = toMediaTime(video.currentTime, timelineOffsetRef.current);
+              let accepted: boolean | Promise<boolean>;
+              try {
+                accepted = reanchorAtRef.current(seconds);
+              } catch {
+                accepted = false;
+              }
+              if (accepted === false) {
+                setPlayerError("Playback failed. Please try again.", true);
+                return;
+              }
+              if (accepted && typeof (accepted as Promise<boolean>).then === "function") {
+                void (accepted as Promise<boolean>).then(
+                  (ok) => {
+                    if (!ok && !destroyed)
+                      setPlayerError("Playback failed. Please try again.", true);
+                  },
+                  () => {
+                    if (!destroyed) setPlayerError("Playback failed. Please try again.", true);
+                  },
+                );
+              }
+            };
             // A 412 names a generation the server has replaced. A playlist
             // fetched before the successor is published lists the dead
             // generation again, and hls.js would request (and retry) those
@@ -3828,16 +3869,8 @@ export function VideoPlayer({
             // serves the rebuilt generation, so hls.js only ever sees live
             // segment URLs.
             const playlistGeneration = createPlaylistGenerationGate(() => {
-              if (destroyed) return;
-              hls?.stopLoad();
-              if (
-                !reportCurrentPlanFailureRef.current({
-                  classification: "network_error",
-                  message: "HLS kept addressing a replaced segment generation.",
-                })
-              ) {
-                setPlayerError("Playback failed. Please try again.", true);
-              }
+              recoverFencedTransport();
+              return true;
             });
             const defaultLoader = Hls.DefaultConfig?.loader;
             const FencedPlaylistLoader = defaultLoader
@@ -3942,6 +3975,13 @@ export function VideoPlayer({
                 if (fenceKey !== null && fenceKey === fencedSegmentKey) return;
                 if (fenceKey !== null) fencedSegmentKey = fenceKey;
                 if (fenceToken !== null) playlistGeneration.fence(fenceToken);
+                // A different generation is the server rotating again, which
+                // is normal under a seek burst. Start its refetch bound again
+                // instead of spending the displaced generation's.
+                if (fenceToken !== null && fenceToken !== fencedGeneration) {
+                  fencedGeneration = fenceToken;
+                  staleGenerationRecoveries = 0;
+                }
                 if (!destroyed && staleGenerationRecoveries < MAX_STALE_GENERATION_RECOVERIES) {
                   staleGenerationRecoveries += 1;
                   // hls.js's startPosition is on the playlist's own clock, the
@@ -3966,20 +4006,11 @@ export function VideoPlayer({
                     return;
                   }
                 }
-                // The refetch budget is spent (or the playlist URL is gone).
-                // The transport is already stopped; letting the fatal branch
-                // below retry would replay the fenced fragment. Surface the
-                // ordinary retryable failure so the session can replan.
-                if (!destroyed) {
-                  if (
-                    !reportCurrentPlanFailureRef.current({
-                      classification: "network_error",
-                      message: "HLS kept addressing a replaced segment generation.",
-                    })
-                  ) {
-                    setPlayerError("Playback failed. Please try again.", true);
-                  }
-                }
+                // The refetch bound is spent for this generation, or there is
+                // no playlist to refetch. A fence is not a route failure, so
+                // do not report one: reanchor at the playhead, which rebuilds
+                // the generation while keeping the recipe eligible.
+                recoverFencedTransport();
                 return;
               }
               if (

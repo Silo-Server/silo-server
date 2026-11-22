@@ -54,15 +54,27 @@ function playlistUris(body: string): string[] {
 }
 
 /**
- * Whether a playlist still addresses `token`. A media playlist lists segment
- * URIs carrying the token; a multivariant playlist lists variants that do not,
- * so the answer is false and the gate lets it through to be followed.
+ * Whether a playlist still addresses a generation the gate knows is gone. A
+ * media playlist lists segment URIs carrying the token; a multivariant
+ * playlist lists variants that do not, so the answer is false and the gate
+ * lets it through to be followed.
+ *
+ * `fenced` is every generation this transport has seen fenced. A later fence
+ * does not make an earlier one live again: a playlist that names any of them
+ * would send hls.js to a URL the server has already refused.
  */
-export function playlistNamesGeneration(body: string, token: string, baseUrl: string): boolean {
-  if (!body || !token) return false;
+export function playlistNamesGeneration(
+  body: string,
+  fenced: string | ReadonlySet<string>,
+  baseUrl: string,
+): boolean {
+  if (!body) return false;
+  const tokens = typeof fenced === "string" ? new Set([fenced]) : fenced;
+  if (tokens.size === 0) return false;
   return playlistUris(body).some((uri) => {
     try {
-      return new URL(uri, baseUrl).searchParams.get(GENERATION_QUERY_PARAM) === token;
+      const token = new URL(uri, baseUrl).searchParams.get(GENERATION_QUERY_PARAM);
+      return token !== null && tokens.has(token);
     } catch {
       return false;
     }
@@ -70,32 +82,56 @@ export function playlistNamesGeneration(body: string, token: string, baseUrl: st
 }
 
 /**
- * The generation a transport's playlists must stop naming. Shared by every
+ * The generations a transport's playlists must stop naming. Shared by every
  * playlist loader hls.js creates for one transport (manifest, level, audio and
  * subtitle playlists), because a fence applies to the whole generation.
  */
 export interface PlaylistGenerationGate {
-  /** Hold playlists that still list `token`; null lifts the gate. */
+  /** Hold playlists that name any fenced generation; null lifts the gates. */
   fence(token: string | null): void;
-  /** The generation currently fenced, or null. */
-  readonly fencedToken: string | null;
-  /** The gate spent its refetch budget without a rebuilt generation. */
-  exhausted(): void;
+  /** Every generation fenced so far, until the gate is lifted. */
+  readonly fencedTokens: ReadonlySet<string>;
+  /**
+   * Bumped whenever a new generation is fenced or the gate is lifted. A
+   * loader that sees a new revision while it is refetching re-targets at the
+   * newest generation and starts its retry bound again: a rotation during the
+   * gate's work is a normal seek-burst event, not evidence that the gate is
+   * stuck.
+   */
+  readonly revision: number;
+  /**
+   * Reports the refetch bound was spent. Returns whether the transport owner
+   * recovered the transport itself (a reanchor), in which case the loader must
+   * not fail the playlist load.
+   */
+  exhausted(): boolean;
 }
 
 export function createPlaylistGenerationGate(
-  onExhausted: () => void = () => {},
+  onExhausted: () => boolean = () => false,
 ): PlaylistGenerationGate {
-  let fencedToken: string | null = null;
+  const fenced = new Set<string>();
+  let revision = 0;
   return {
     fence(token) {
-      fencedToken = token;
+      if (!token) {
+        if (fenced.size === 0) return;
+        fenced.clear();
+        revision += 1;
+        return;
+      }
+      if (fenced.has(token)) return;
+      fenced.add(token);
+      revision += 1;
     },
-    get fencedToken() {
-      return fencedToken;
+    get fencedTokens() {
+      return fenced;
+    },
+    get revision() {
+      return revision;
     },
     exhausted() {
-      onExhausted();
+      return onExhausted();
     },
   };
 }
@@ -120,6 +156,11 @@ export interface FencedPlaylistLoaderOptions {
  *
  * The base loader is hls.js's own loader class, so authentication, redirects,
  * byte ranges and abort semantics stay the library's.
+ *
+ * A new fence during a retry re-targets the gate and restarts that retry
+ * bound, because a second rotation is normal under a seek burst. When the
+ * bound really is spent the owner recovers the transport (a reanchor) rather
+ * than failing the route: a fence is a moved generation, not a bad recipe.
  */
 export function createFencedPlaylistLoader(
   BaseLoader: new (config: HlsConfig) => Loader<LoaderContext>,
@@ -170,7 +211,7 @@ export function createFencedPlaylistLoader(
     ) {
       this.clearPending();
       this.currentContext = context;
-      this.loadWithGate(context, config, callbacks, 0);
+      this.loadWithGate(context, config, callbacks, 0, gate.revision);
     }
 
     private loadWithGate(
@@ -178,6 +219,7 @@ export function createFencedPlaylistLoader(
       config: LoaderConfiguration,
       callbacks: LoaderCallbacks<PlaylistLoaderContext>,
       attempt: number,
+      fenceRevision: number,
     ) {
       this.inner.load(context, config, {
         ...(callbacks as unknown as LoaderCallbacks<LoaderContext>),
@@ -188,25 +230,31 @@ export function createFencedPlaylistLoader(
           networkDetails: unknown,
         ) => {
           const body = typeof response.data === "string" ? response.data : null;
-          const fencedToken = gate.fencedToken;
-          if (
-            body !== null &&
-            fencedToken !== null &&
-            playlistNamesGeneration(body, fencedToken, loadedContext.url)
-          ) {
+          // A new fence while this refetch was in flight is another rotation,
+          // not a spent budget: re-target at the newest generation and let its
+          // own bound run. The seek burst produces several rotations while one
+          // playlist is being fetched, and the old generation's count must not
+          // end the route for the live one.
+          if (gate.revision !== fenceRevision) {
+            fenceRevision = gate.revision;
+            attempt = 0;
+          }
+          const fenced = gate.fencedTokens;
+          if (body !== null && playlistNamesGeneration(body, fenced, loadedContext.url)) {
             if (attempt < maxRetries) {
               this.pending = schedule(() => {
                 this.pending = null;
                 this.inner.abort();
-                this.loadWithGate(context, config, callbacks, attempt + 1);
+                this.loadWithGate(context, config, callbacks, attempt + 1, fenceRevision);
               }, retryDelayMs);
               return;
             }
             // The rebuilt generation never appeared. Do not hand hls.js the
-            // dead playlist: tell the transport owner and fail the playlist
-            // load so the ordinary fence path can end the route.
+            // dead playlist; the transport owner recovers it (a reanchor at
+            // the playhead) without calling this a route failure. Only an
+            // unhandled exhaustion fails the playlist load.
             this.currentContext = null;
-            gate.exhausted();
+            if (gate.exhausted()) return;
             callbacks.onError(
               { code: 412, text: "segment generation is stale" },
               loadedContext as PlaylistLoaderContext,
