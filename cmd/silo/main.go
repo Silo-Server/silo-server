@@ -4608,6 +4608,15 @@ func main() {
 			slog.Error("abs compat shutdown error", "error", shutdownErr)
 		}
 	}
+
+	// 1b. Stop admitting tasks and cancel running ones while their
+	// dependencies (user store, admin jobs, recommendations, database) are
+	// still open. Manual runs use their own context, so appCancel doesn't
+	// reach them, and the deferred Stop would run only after teardown.
+	if deps.TaskManager != nil {
+		deps.TaskManager.Stop()
+	}
+
 	if err := runShutdownWorkWithTimeout(30*time.Second, func(cleanupCtx context.Context) error {
 		return waitForShutdownWork(cleanupCtx, shutdownWork)
 	}); err != nil {
