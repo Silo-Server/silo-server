@@ -245,7 +245,6 @@ export default function NetworkAccessSettings() {
       <p className="text-muted-foreground max-w-prose text-sm">
         {t("web.admin.settings.network.page.intro")}
       </p>
-      <DirectConnectionsSection />
       {capabilities.isLoading ? (
         <div className="space-y-3" aria-busy="true">
           <Skeleton className="h-6 w-1/3" />
@@ -266,6 +265,8 @@ export default function NetworkAccessSettings() {
       ) : (
         providers.map((provider) => <ProviderGroup key={provider.provider} provider={provider} />)
       )}
+      {/* After the providers, so the intro above stays next to the list it describes. */}
+      <DirectConnectionsSection />
     </div>
   );
 }
