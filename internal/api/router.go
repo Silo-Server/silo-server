@@ -131,7 +131,8 @@ type ArtworkDelivery struct {
 }
 
 type Dependencies struct {
-	Config *config.Config
+	DirectConnections apiv2.DirectConnectionsService
+	Config            *config.Config
 	// SubtitlePlaySync receives subtitles a player is served, so one never
 	// synced is aligned the first time it is played. The routes here connect
 	// it to the subtitle sync service; the Jellyfin routes share it. May be nil.
@@ -3297,6 +3298,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if deps.PluginService != nil {
 		v2deps.NetworkAccess = deps.PluginService
+	}
+	if deps.DirectConnections != nil {
+		v2deps.DirectConnections = deps.DirectConnections
 	}
 	if deps.TaskManager != nil && deps.DB != nil {
 		v2deps.AdminTasks = deps.TaskManager

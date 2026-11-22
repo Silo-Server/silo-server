@@ -1300,6 +1300,26 @@
       "body_file": "admin_devices.json"
     },
     {
+      "name": "admin_direct_connections_status_ok",
+      "operation_id": "getAdminDirectConnectionsStatus",
+      "scenario": "An acting administrator reads the API host's direct-connection readiness while the hidden toggle is off.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/direct-connections/status",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/DirectConnectionsStatus",
+      "body_file": "admin_direct_connections_status_ok.json"
+    },
+    {
       "name": "admin_discord_test",
       "operation_id": "testAdminDiscordNotification",
       "scenario": "A synthetic bot identity lookup verifies credentials without sending a notification.",
