@@ -29,11 +29,15 @@ const (
 	// files again and walks on past them. A read that fails fast (an offline
 	// library root) does not count: its file is listed to read again.
 	attachmentBitrateBackfillMaxTimeouts = 8
-	// attachmentBitrateProbeTimeout bounds one header read: format and stream
-	// entries only, the same stream analysis a scan's probe does, with no
-	// packets or frames printed.
-	attachmentBitrateProbeTimeout = 30 * time.Second
 )
+
+// attachmentBitrateProbeTimeout bounds one header read: format and stream
+// entries only, the same stream analysis a scan's probe does, with no packets
+// or frames printed. FFmpeg loads every Matroska attachment when it opens the
+// file, so for the files this pass reads, the read covers the whole font
+// payload, often most of the file. It gets the scan probe's limit, so a file a
+// scan can read on slow storage does not time out here.
+var attachmentBitrateProbeTimeout = defaultProbeLimits.probe
 
 // attachmentBitrateBackfillSubtitleCodecs are the subtitle codecs, as FFmpeg
 // names them, of the releases that embed fonts: ASS and SSA render with the
@@ -41,10 +45,7 @@ const (
 // enough to move their rate, so they are not read.
 var attachmentBitrateBackfillSubtitleCodecs = []string{ffmpegCodecASS, "ssa"}
 
-var (
-	errAttachmentBitrateStorageStalled = errors.New("media storage is not responding")
-	errAttachmentBitrateProbeTimeout   = errors.New("ffprobe timed out")
-)
+var errAttachmentBitrateStorageStalled = errors.New("media storage is not responding")
 
 // AttachmentBitrateBackfillResult counts what one pass did.
 type AttachmentBitrateBackfillResult struct {
@@ -373,11 +374,21 @@ func (b *AttachmentBitrateBackfiller) eachBatch(ctx context.Context, afterID int
 // loadCandidates returns the next batch of candidates after afterID, only
 // those in onlyIDs when it is non-nil, and the last ID among them.
 func (b *AttachmentBitrateBackfiller) loadCandidates(ctx context.Context, afterID int, onlyIDs []int64) ([]attachmentBitrateCandidate, int, error) {
+	// The listed files get their own statement. A "$4 IS NULL OR id = ANY($4)"
+	// shared with the walk turns into a generic plan once the walk has run it a
+	// few times, and that plan reads every row after afterID for a handful of
+	// listed IDs.
+	idFilter := ""
+	args := []any{afterID, b.batch, attachmentBitrateBackfillSubtitleCodecs}
+	if onlyIDs != nil {
+		idFilter = "AND mf.id = ANY($4::bigint[])"
+		args = append(args, onlyIDs)
+	}
 	rows, err := b.pool.Query(ctx, `
 		SELECT mf.id, mf.file_path, mf.file_size, mf.file_modified_at, mf.bitrate
 		FROM media_files mf
 		WHERE mf.id > $1
-		  AND ($4::bigint[] IS NULL OR mf.id = ANY($4::bigint[]))
+		  `+idFilter+`
 		  AND mf.container = 'mkv'
 		  AND mf.missing_since IS NULL
 		  AND mf.file_size IS NOT NULL
@@ -388,7 +399,7 @@ func (b *AttachmentBitrateBackfiller) loadCandidates(ctx context.Context, afterI
 			WHERE lower(COALESCE(t->>'codec', '')) = ANY($3::text[])
 		  )
 		ORDER BY mf.id
-		LIMIT $2`, afterID, b.batch, attachmentBitrateBackfillSubtitleCodecs, onlyIDs)
+		LIMIT $2`, args...)
 	if err != nil {
 		return nil, afterID, fmt.Errorf("loading attachment bitrate backfill candidates: %w", err)
 	}
@@ -419,7 +430,7 @@ func (b *AttachmentBitrateBackfiller) backfillFile(ctx context.Context, c attach
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return 0, ctxErr
 	}
-	if errors.Is(err, errAttachmentBitrateProbeTimeout) {
+	if errors.Is(err, errProbeTimeout) {
 		slog.WarnContext(ctx, "scanner: attachment bitrate probe timed out",
 			"component", "scanner", "file_id", c.id, "path", c.path, "timeout", attachmentBitrateProbeTimeout)
 		return attachmentBitrateOutcomeTimedOut, nil
@@ -477,7 +488,7 @@ func probeContainerBitrate(ctx context.Context, ffprobePath, filePath string) (c
 	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, runCtx.Err())
 	if err != nil {
 		if probeTimedOut(ctx, runCtx) {
-			return containerBitrate{}, fmt.Errorf("%w: no result for %s within %s", errAttachmentBitrateProbeTimeout, filePath, attachmentBitrateProbeTimeout)
+			return containerBitrate{}, fmt.Errorf("%w: no result for %s within %s", errProbeTimeout, filePath, attachmentBitrateProbeTimeout)
 		}
 		return containerBitrate{}, fmt.Errorf("ffprobe failed for %s: %w", filePath, err)
 	}

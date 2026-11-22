@@ -199,7 +199,7 @@ func TestAttachmentBitrateBackfillResumesAfterStorageStallDB(t *testing.T) {
 	}
 	// failing maps a path to how its read fails; others answer.
 	failing := map[string]error{}
-	timeout := fmt.Errorf("%w after 30s", errAttachmentBitrateProbeTimeout)
+	timeout := fmt.Errorf("%w after 30s", errProbeTimeout)
 	for _, p := range paths[2:] {
 		failing[p] = timeout
 	}
