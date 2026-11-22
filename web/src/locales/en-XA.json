@@ -78975,6 +78975,114 @@
       "value": "⟦Ŵĥåţ šĥöûļđ ɱöṽé?~~~~~~~⟧"
     }
   ],
+  "web.admin.settings.search.streaming.description": [
+    {
+      "type": 0,
+      "value": "⟦Šţŕéɱîö þŕöṽîđéŕ, ṽîŕţûåļ ļîƀŕåŕîéš, åñđ ǫûåļîţý þŕöƒîļéš.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.label": [
+    {
+      "type": 0,
+      "value": "⟦Šţŕéåɱîñĝ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.allowHttpForLocalManifests": [
+    {
+      "type": 0,
+      "value": "⟦Åļļöŵ ĤŢŢÞ ƒöŕ ļöçåļ ɱåñîƒéšţš~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.allowPrivateNetworkStreams": [
+    {
+      "type": 0,
+      "value": "⟦Åļļöŵ þŕîṽåţé ñéţŵöŕķ šţŕéåɱš~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.cacheTtl": [
+    {
+      "type": 0,
+      "value": "⟦Çåçĥé ŢŢĻ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.enableQualityProfiles": [
+    {
+      "type": 0,
+      "value": "⟦Éñåƀļé ǫûåļîţý þŕöƒîļéš~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.enableStreaming": [
+    {
+      "type": 0,
+      "value": "⟦Éñåƀļé šţŕéåɱîñĝ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.manifestUrl": [
+    {
+      "type": 0,
+      "value": "⟦Ṁåñîƒéšţ ÛŔĻ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.monitorFile": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöñîţöŕ ƒîļé~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.moviesLibraryId": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽîéš ļîƀŕåŕý ÎĐ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.networkAccess": [
+    {
+      "type": 0,
+      "value": "⟦Ñéţŵöŕķ åççéšš~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.quality": [
+    {
+      "type": 0,
+      "value": "⟦Ǫûåļîţý~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.qualityPreset": [
+    {
+      "type": 0,
+      "value": "⟦Ǫûåļîţý þŕéšéţ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.scheduleRefresh": [
+    {
+      "type": 0,
+      "value": "⟦Šçĥéđûļé ŕéƒŕéšĥ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.seriesLibraryId": [
+    {
+      "type": 0,
+      "value": "⟦Šéŕîéš ļîƀŕåŕý ÎĐ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.stremioProvider": [
+    {
+      "type": 0,
+      "value": "⟦Šţŕéɱîö þŕöṽîđéŕ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.tmdbApiKey": [
+    {
+      "type": 0,
+      "value": "⟦ŢṀĐƁ ÅÞÎ ķéý~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.virtualLibraries": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîŕţûåļ ļîƀŕåŕîéš~~~~~~~⟧"
+    }
+  ],
   "web.admin.settings.search.title": [
     {
       "type": 0,

@@ -72591,6 +72591,114 @@
       "value": "Mitä siirretään?"
     }
   ],
+  "web.admin.settings.search.streaming.description": [
+    {
+      "type": 0,
+      "value": "Stremio provider, virtual libraries, and quality profiles."
+    }
+  ],
+  "web.admin.settings.search.streaming.label": [
+    {
+      "type": 0,
+      "value": "Streaming"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.allowHttpForLocalManifests": [
+    {
+      "type": 0,
+      "value": "Allow HTTP for local manifests"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.allowPrivateNetworkStreams": [
+    {
+      "type": 0,
+      "value": "Allow private network streams"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.cacheTtl": [
+    {
+      "type": 0,
+      "value": "Cache TTL"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.enableQualityProfiles": [
+    {
+      "type": 0,
+      "value": "Enable quality profiles"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.enableStreaming": [
+    {
+      "type": 0,
+      "value": "Enable streaming"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.manifestUrl": [
+    {
+      "type": 0,
+      "value": "Manifest URL"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.monitorFile": [
+    {
+      "type": 0,
+      "value": "Monitor file"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.moviesLibraryId": [
+    {
+      "type": 0,
+      "value": "Movies library ID"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.networkAccess": [
+    {
+      "type": 0,
+      "value": "Network access"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.quality": [
+    {
+      "type": 0,
+      "value": "Quality"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.qualityPreset": [
+    {
+      "type": 0,
+      "value": "Quality preset"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.scheduleRefresh": [
+    {
+      "type": 0,
+      "value": "Schedule refresh"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.seriesLibraryId": [
+    {
+      "type": 0,
+      "value": "Series library ID"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.stremioProvider": [
+    {
+      "type": 0,
+      "value": "Stremio provider"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.tmdbApiKey": [
+    {
+      "type": 0,
+      "value": "TMDB API key"
+    }
+  ],
+  "web.admin.settings.search.streaming.setting.virtualLibraries": [
+    {
+      "type": 0,
+      "value": "Virtual libraries"
+    }
+  ],
   "web.admin.settings.search.title": [
     {
       "type": 0,
