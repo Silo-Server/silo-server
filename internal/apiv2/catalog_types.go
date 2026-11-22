@@ -28,7 +28,7 @@ type CatalogItem struct {
 	SeriesTitle            string                    `json:"series_title,omitempty"`
 	SeasonNumber           *int                      `json:"season_number,omitempty"`
 	EpisodeNumber          *int                      `json:"episode_number,omitempty"`
-	AirDate                *string                   `json:"air_date,omitempty" format:"date" doc:"An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date"`
+	AirDate                *string                   `json:"air_date,omitempty" format:"date" doc:"An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date"`
 	EpisodeLabels          string                    `json:"episode_labels,omitempty" enum:"air_date" doc:"How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent: show the numbers" example:"air_date"`
 	Year                   int                       `json:"year,omitempty" example:"1995"`
 	Runtime                int                       `json:"runtime,omitempty" doc:"Minutes" example:"170"`

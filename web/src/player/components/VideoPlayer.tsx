@@ -1,5 +1,5 @@
 import { ChevronDown, X } from "lucide-react";
-import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
+import { airDateWithTitle, episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import "@/styles/player-hud.css";
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
 import {
@@ -2695,9 +2695,7 @@ export function VideoPlayer({
     ? episodeAirDateLabel(seriesContext.episodeLabels, seriesContext.currentAirDate)
     : null;
   const hudSubtitle = airDateLabel
-    ? title
-      ? `${airDateLabel} • ${title}`
-      : airDateLabel
+    ? airDateWithTitle(airDateLabel, title)
     : seriesContext
       ? t(title ? "web.player.hud.episodeWithTitle" : "web.player.hud.episode", {
           season: codeNumber(seriesContext.currentSeason),

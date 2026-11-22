@@ -1,5 +1,5 @@
 import "@/styles/player-hud.css";
-import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
+import { airDateWithTitle, episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { MotionConfig, motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Play, Shuffle, X } from "lucide-react";
@@ -534,21 +534,27 @@ function OnDeckCarousel({
             const episodeMeta = !hasEpisodeNumber
               ? null
               : airDateLabel
-                ? titledEpisode
-                  ? `${airDateLabel} • ${titledEpisode}`
-                  : airDateLabel
+                ? airDateWithTitle(airDateLabel, titledEpisode)
                 : titledEpisode
                   ? t("web.player.episode.codeWithTitle", { ...episodeCode, title: titledEpisode })
                   : t("web.player.episode.code", episodeCode);
             // The same line with the title in its own box; `episodeMeta` stays
             // the plain text for the tooltip.
             const episodeLine =
-              hasEpisodeNumber && titledEpisode && !airDateLabel
-                ? t("web.player.episode.codeWithTitle", {
-                    ...episodeCode,
-                    title: <LineTitle>{titledEpisode}</LineTitle>,
-                  })
-                : episodeMeta;
+              hasEpisodeNumber && titledEpisode && airDateLabel ? (
+                <>
+                  {airDateLabel}
+                  {" • "}
+                  <LineTitle>{titledEpisode}</LineTitle>
+                </>
+              ) : hasEpisodeNumber && titledEpisode ? (
+                t("web.player.episode.codeWithTitle", {
+                  ...episodeCode,
+                  title: <LineTitle>{titledEpisode}</LineTitle>,
+                })
+              ) : (
+                episodeMeta
+              );
             const thumbnailUrl = detail.backdrop_url ?? detail.poster_url;
             const progressPercent =
               item.progress.duration_seconds > 0

@@ -63,6 +63,11 @@ export function formatEpisodeLabel(item: {
   );
 }
 
+/** "Nov 20, 2026 • Chicago Bulls vs Washington Wizards", or the date alone. */
+export function airDateWithTitle(airDateLabel: string, title?: string | null): string {
+  return title ? `${airDateLabel} • ${title}` : airDateLabel;
+}
+
 /**
  * A short episode subtitle for pickers and sheets: "S1 E2", or the air date
  * when the series is labeled by date.

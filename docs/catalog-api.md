@@ -627,8 +627,9 @@ use the numbers. An undated episode keeps its numbers, and an absent
 
 The value comes from the series' metadata provider: a plugin's series
 `MetadataItem.metadata` sets `episode_labels` (`air_date` is the only value; any
-other is ignored). It is stored on the series, kept by a refresh, and cleared
-when Identify corrects the match. A refresh fills only empty episode dates, so
+other is ignored). It is stored on the series and kept by a refresh. Identify
+and "Replace all metadata" take it from the new answer, so matching a Sportarr
+league to a numbered show brings the numbers back. A refresh fills only empty episode dates, so
 an episode date a provider has since corrected takes "Replace all metadata".
 
 `episode_labels` appears on:

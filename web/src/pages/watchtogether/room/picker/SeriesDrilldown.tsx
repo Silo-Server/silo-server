@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { airDateWithTitle, episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import { Play, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -163,6 +164,10 @@ export function SeriesDrilldown({
 }) {
   const t = useT();
   const detail = useCatalogItemDetail(series.content_id, series.library_id);
+  // A date-labeled series (sports) names the picked game by its air date.
+  const pickedAirDate = picked
+    ? episodeAirDateLabel(detail.data?.episode_labels, picked.episode.air_date)
+    : null;
   const item = detail.data;
   const seasons = useSeasons(series.content_id);
   const spoilerPrefs = useEpisodeSpoilerPrefs();
@@ -465,11 +470,13 @@ export function SeriesDrilldown({
               {t("web.watchTogether.series.yourPick")}
             </p>
             <p className="truncate text-sm font-semibold">
-              {t("web.watchTogether.series.pickedEpisode", {
-                season: picked.seasonNumber,
-                episode: picked.episode.episode_number,
-                title: picked.episode.title,
-              })}
+              {pickedAirDate
+                ? airDateWithTitle(pickedAirDate, picked.episode.title)
+                : t("web.watchTogether.series.pickedEpisode", {
+                    season: picked.seasonNumber,
+                    episode: picked.episode.episode_number,
+                    title: picked.episode.title,
+                  })}
             </p>
             {risk ? (
               <p className="text-xs text-amber-300">

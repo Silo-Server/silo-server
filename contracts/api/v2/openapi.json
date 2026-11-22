@@ -27851,7 +27851,7 @@
             "type": "string"
           },
           "air_date": {
-            "description": "An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date",
+            "description": "An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date",
             "format": "date",
             "type": "string"
           },
@@ -36969,7 +36969,7 @@
             "type": "string"
           },
           "air_date": {
-            "description": "An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date",
+            "description": "An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date",
             "format": "date",
             "type": "string"
           },
@@ -59510,7 +59510,7 @@
             "type": "string"
           },
           "air_date": {
-            "description": "An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date",
+            "description": "An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date",
             "format": "date",
             "type": "string"
           },
@@ -59964,7 +59964,7 @@
             "type": "string"
           },
           "air_date": {
-            "description": "An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date",
+            "description": "An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date",
             "format": "date",
             "type": "string"
           },

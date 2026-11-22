@@ -24600,7 +24600,7 @@ export interface components {
       advisory_source?: "commonsense" | "mdblist";
       /**
        * Format: date
-       * @description An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
        */
       air_date?: string;
       /**
@@ -28246,7 +28246,7 @@ export interface components {
       advisory_source?: "commonsense" | "mdblist";
       /**
        * Format: date
-       * @description An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
        */
       air_date?: string;
       /**
@@ -37986,7 +37986,7 @@ export interface components {
       advisory_source?: "commonsense" | "mdblist";
       /**
        * Format: date
-       * @description An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
        */
       air_date?: string;
       /**
@@ -38237,7 +38237,7 @@ export interface components {
       advisory_source?: "commonsense" | "mdblist";
       /**
        * Format: date
-       * @description An episode's air date, YYYY-MM-DD. Home and library section cards carry it when episode_labels is air_date
+       * @description An episode's air date, YYYY-MM-DD. An episode card carries it when episode_labels is air_date
        */
       air_date?: string;
       /**

@@ -1,5 +1,5 @@
 import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
-import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
+import { airDateWithTitle, episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import {
   consumeAutomaticStart,
   expectAutomaticStart,
@@ -154,7 +154,7 @@ function buildPlaybackSubtitle(
     ? episodeAirDateLabel(item.episode_labels, item.air_date)
     : null;
   if (airDateLabel) {
-    return item.title ? `${airDateLabel} • ${item.title}` : airDateLabel;
+    return airDateWithTitle(airDateLabel, item.title);
   }
 
   if (item.series_title && item.season_number != null && item.episode_number != null) {
