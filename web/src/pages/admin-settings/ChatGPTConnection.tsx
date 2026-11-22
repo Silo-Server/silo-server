@@ -29,6 +29,15 @@ type LoginAttempt = { id: string; confirmed: boolean };
 /** The sign-in callback shown before the server names its own. */
 const DEFAULT_CALLBACK_URI = "http://127.0.0.1:51121/auth/callback";
 
+/**
+ * A button whose label can be wider than a phone's tile: a saved account's
+ * Reconnect and Disconnect name its email, and Retry can be a long translation
+ * at a large text size. The label wraps inside the button, breaking a long
+ * word such as an email where it must, instead of running past the screen's
+ * edge.
+ */
+const WRAPPING_BUTTON = "h-auto min-h-8 max-w-full py-1 wrap-anywhere whitespace-normal";
+
 /** Which note a saved account carries in the account select. */
 function accountState(account: {
   plan_ineligible?: boolean;
@@ -254,11 +263,16 @@ function ChatGPTConnectionPanel({
         {t("web.admin.settings.ai.chatgptConnection.intro")}
       </p>
       {status.isError ? (
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <SettingFieldStatus tone="warn">
             {t("web.admin.settings.ai.chatgptConnection.loadFailed")}
           </SettingFieldStatus>
-          <Button size="sm" variant="outline" onClick={() => void status.refetch()}>
+          <Button
+            size="sm"
+            variant="outline"
+            className={WRAPPING_BUTTON}
+            onClick={() => void status.refetch()}
+          >
             {t("common.retry")}
           </Button>
         </div>
@@ -317,11 +331,16 @@ function ChatGPTConnectionPanel({
             disabled={models.isLoading || models.isError || availableModels.length === 0}
           />
           {models.isError ? (
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <SettingFieldStatus tone="warn">
                 {t("web.admin.settings.ai.chatgptConnection.modelsFailed")}
               </SettingFieldStatus>
-              <Button size="sm" variant="outline" onClick={() => void models.refetch()}>
+              <Button
+                size="sm"
+                variant="outline"
+                className={WRAPPING_BUTTON}
+                onClick={() => void models.refetch()}
+              >
                 {t("web.admin.settings.ai.chatgptConnection.retryModels")}
               </Button>
             </div>
@@ -346,6 +365,7 @@ function ChatGPTConnectionPanel({
               <Button
                 size="sm"
                 variant="outline"
+                className={WRAPPING_BUTTON}
                 disabled={start.isPending}
                 onClick={() => void begin(account.client_id)}
               >
@@ -362,6 +382,7 @@ function ChatGPTConnectionPanel({
               <Button
                 size="sm"
                 variant="outline"
+                className={WRAPPING_BUTTON}
                 disabled={disconnect.isPending}
                 onClick={() => void signOut(account.client_id)}
               >
@@ -445,6 +466,7 @@ function ChatGPTConnectionPanel({
               {t("web.admin.settings.ai.chatgptConnection.browserUrl")}
             </Label>
             <Input
+              dir="ltr"
               id={callbackID}
               type="text"
               placeholder={callbackPlaceholder}

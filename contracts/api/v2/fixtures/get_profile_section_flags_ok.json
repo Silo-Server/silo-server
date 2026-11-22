@@ -1,3 +1,4 @@
 {
-  "allow_profile_custom_sections": true
+  "allow_profile_custom_sections": true,
+  "home_layout_baseline": true
 }

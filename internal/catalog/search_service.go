@@ -35,7 +35,7 @@ func (s *CatalogSearchService) WithSearchSessionStore(client redis.UniversalClie
 
 func NewCatalogSearchService(
 	ctx context.Context,
-	settingsStore SettingsStore,
+	settingsStore SearchSettingsStore,
 	itemRepo *ItemRepository,
 	stateRepo *SearchIndexEventRepository,
 	vectorizer ...CatalogSearchQueryVectorizer,

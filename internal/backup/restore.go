@@ -360,8 +360,9 @@ const (
 // carry replaces the restored database's credentials, outbound settings,
 // plugin releases, and policies with those of carryFrom, or with none when
 // carryFrom is empty. destination is the live database that will be replaced,
-// even if the backup came from another deployment.
-func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, carryFrom, destination string) error {
+// even if the backup came from another deployment. cipher is this server's
+// SECRET_KEY, or nil.
+func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, carryFrom, destination string, cipher *secret.Cipher) error {
 	authorityRestricted, err := carryCredentials(ctx, loader, dbURL, carryFrom, p.out)
 	if err := p.strictStep("replacing the backup's credentials", err,
 		"leaving out all of the backup's "+carriedKinds, func() error {
@@ -371,7 +372,7 @@ func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, carry
 		}); err != nil {
 		return err
 	}
-	if err := p.step("carrying the outbound settings", carryOutboundSettings(ctx, loader, dbURL, carryFrom, p.out)); err != nil {
+	if err := p.step("carrying the outbound settings", carryOutboundSettings(ctx, loader, dbURL, carryFrom, cipher, p.out)); err != nil {
 		return err
 	}
 	releasesRestricted, err := carryPluginReleases(ctx, loader, dbURL, carryFrom, p.out)
@@ -615,8 +616,9 @@ type DatabaseLoader interface {
 	CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string) (int, error)
 	// CarryOutboundSettings gives dbURL liveURL's outbound settings, each
 	// bundle as a unit, clearing the secrets of one liveURL lacks ("" for
-	// none), and returns the bundles carried and cleared.
-	CarryOutboundSettings(ctx context.Context, dbURL, liveURL string) (carried, cleared []string, err error)
+	// none), and returns the bundles carried and cleared. cipher (nil for
+	// none) encrypts what a cleared bundle is left with.
+	CarryOutboundSettings(ctx context.Context, dbURL, liveURL string, cipher *secret.Cipher) (carried, cleared []string, err error)
 	// InterruptWork ends the work queued or running in the restored
 	// database dbURL and gives it liveURL's storage transition target
 	// (none for ""), returning what it changed.
@@ -797,7 +799,7 @@ func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, op
 	}
 	// A copy is not the live server: it gets none of the backup's
 	// credentials and none of the live ones.
-	if err := post.carry(ctx, loader, opts.Into, "", ""); err != nil {
+	if err := post.carry(ctx, loader, opts.Into, "", "", opts.Cipher); err != nil {
 		return RestoreReport{}, err
 	}
 	if err := post.step(stepInterrupt, interruptWork(ctx, loader, opts.Into, "", out)); err != nil {

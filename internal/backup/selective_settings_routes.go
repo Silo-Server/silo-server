@@ -69,8 +69,8 @@ func (p settingPlan) writes() bool {
 
 // settingCounts tallies a settings page's plans by status.
 type settingCounts struct {
-	differs, cleared, needsKey, stricter, unverified int
-	clearedKeys                                      []string
+	differs, cleared, needsKey, stricter, unverified, environment int
+	clearedKeys                                                   []string
 }
 
 func (c *settingCounts) add(p settingPlan) {
@@ -86,6 +86,8 @@ func (c *settingCounts) add(p settingPlan) {
 		c.stricter++
 	case SettingUnverifiedBackup:
 		c.unverified++
+	case SettingManagedByEnvironment:
+		c.environment++
 	}
 }
 
@@ -107,6 +109,12 @@ func (c *settingCounts) notes() []string {
 	}
 	if c.unverified > 0 {
 		notes = append(notes, msgUnverifiedServices)
+	}
+	switch {
+	case c.environment == 1:
+		notes = append(notes, "1 setting on this page keeps its current value because this server's environment sets it, or part of its connection.")
+	case c.environment > 1:
+		notes = append(notes, fmt.Sprintf("%d settings on this page keep their current values because this server's environment sets them, or part of their connection.", c.environment))
 	}
 	if c.cleared > 0 {
 		notes = append(notes, "A service's address changes without its credentials in the backup, so restoring clears "+

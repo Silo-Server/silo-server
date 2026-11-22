@@ -9,9 +9,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
@@ -54,10 +54,10 @@ func TestSignupPolicySerializationDB(t *testing.T) {
 	t.Cleanup(peer.Close)
 	node := func(pool *pgxpool.Pool) *Service {
 		users, sessions := NewUserRepository(pool), NewSessionRepository(pool)
-		return NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-signup-policy-secret", time.Minute, time.Hour), sessions, users, NewInviteCodeRepository(pool), catalog.NewServerSettingsRepo(pool), pgstore.NewPostgresProvider(pool))
+		return NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-signup-policy-secret", time.Minute, time.Hour), sessions, users, NewInviteCodeRepository(pool), serversettings.NewServerSettingsRepo(pool), pgstore.NewPostgresProvider(pool))
 	}
 	a, b := node(env.pool), node(peer)
-	settings := catalog.NewServerSettingsRepo(peer)
+	settings := serversettings.NewServerSettingsRepo(peer)
 	setEnabled := func(t *testing.T, enabled string) {
 		t.Helper()
 		if err := settings.Set(ctx, "signup.enabled", enabled); err != nil {

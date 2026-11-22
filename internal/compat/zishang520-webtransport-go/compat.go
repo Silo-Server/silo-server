@@ -23,7 +23,7 @@ type (
 	SendStream       = upstream.SendStream
 	StreamError      = upstream.StreamError
 	StreamErrorCode  = upstream.StreamErrorCode
-	Dialer           = upstream.Dialer
+	Dialer           = upstream.Transport
 )
 
 const (

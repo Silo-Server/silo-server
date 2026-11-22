@@ -1,5 +1,6 @@
 import { ExternalLink, Loader2 } from "lucide-react";
 
+import { DirectConnectionsSection } from "@/components/admin/DirectConnectionsSection";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -264,6 +265,8 @@ export default function NetworkAccessSettings() {
       ) : (
         providers.map((provider) => <ProviderGroup key={provider.provider} provider={provider} />)
       )}
+      {/* After the providers, so the intro above stays next to the list it describes. */}
+      <DirectConnectionsSection />
     </div>
   );
 }

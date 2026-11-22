@@ -4,7 +4,7 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { GripVertical, Plus, X } from "lucide-react";
 import {
   Sheet,
@@ -15,7 +15,14 @@ import {
 } from "@/components/ui/sheet";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
-import { useDragAutoScroll } from "./dragAutoScroll";
+import { type AutoScrollGesture, useDragAutoScroll } from "./dragAutoScroll";
+import {
+  CUSTOMIZE_GRID_CLASS,
+  GRID_COLUMNS,
+  readColumnGapPx,
+  readRowGapPx,
+  readRowHeightPx,
+} from "./gridMetrics";
 import { getDashboardWidget } from "./registry";
 import type { WidgetId } from "./types";
 import type { DashboardLayout } from "./useDashboardLayout";
@@ -23,60 +30,12 @@ import { WidgetChromeProvider } from "./widgetChrome";
 import { isRightToLeft, readingArrowKey } from "@/lib/direction";
 import { Direction } from "radix-ui";
 
-/** Fallback for the `gap` of `.admin-widget-grid` in app.css (0.875rem). */
-const GRID_GAP_PX = 14;
-/** Must match `--admin-row-h` on `.admin-widget-grid` in app.css (6.25rem). */
-const GRID_ROW_HEIGHT_PX = 100;
-const GRID_COLUMNS = 12;
-
 /**
  * Drag payload type for adding a widget from the Add-widget sheet, distinct
  * from the `text/plain` payload a grid reorder drag carries so neither path
  * can mistake the other's drag for its own.
  */
 const WIDGET_ADD_DRAG_TYPE = "application/x-silo-widget-add";
-
-/**
- * Row height in CSS pixels.
- *
- * Read back from `--admin-row-h` so a drag follows the stylesheet instead of a
- * second copy of the number; `GRID_ROW_HEIGHT_PX` is the fallback for anything
- * that cannot resolve the variable (jsdom, a grid that is not mounted yet).
- */
-function readRowHeightPx(grid: HTMLElement | null): number {
-  if (!grid) {
-    return GRID_ROW_HEIGHT_PX;
-  }
-  const raw = window.getComputedStyle(grid).getPropertyValue("--admin-row-h").trim();
-  const value = Number.parseFloat(raw);
-  if (!Number.isFinite(value) || value <= 0) {
-    return GRID_ROW_HEIGHT_PX;
-  }
-  if (raw.endsWith("rem")) {
-    const root = Number.parseFloat(window.getComputedStyle(document.documentElement).fontSize);
-    return Number.isFinite(root) && root > 0 ? value * root : GRID_ROW_HEIGHT_PX;
-  }
-  return value;
-}
-
-/**
- * Gutter width in CSS pixels.
- *
- * Read back from the resolved `column-gap` for the same reason as the row
- * height: a drag follows the stylesheet rather than a second copy of the
- * number. `GRID_GAP_PX` is the fallback for anything that cannot resolve it
- * (jsdom, a grid that is not mounted yet).
- */
-function readGapPx(grid: HTMLElement | null): number {
-  if (!grid) {
-    return GRID_GAP_PX;
-  }
-  const value = Number.parseFloat(window.getComputedStyle(grid).columnGap);
-  if (!Number.isFinite(value) || value < 0) {
-    return GRID_GAP_PX;
-  }
-  return value;
-}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -131,6 +90,10 @@ export function DashboardGrid({
   const [collapsedIds, setCollapsedIds] = useState<readonly WidgetId[]>([]);
   const resizeSessionRef = useRef<{
     id: WidgetId;
+    /** The resize handle the session started from. */
+    handle: Element;
+    /** The pointer that pressed it; other pointers' moves and releases are ignored. */
+    pointerId: number;
     title: string;
     startX: number;
     /** 1, or -1 right to left, where the handle grows the widget leftward. */
@@ -154,10 +117,50 @@ export function DashboardGrid({
     scrollOffsetY: number;
   } | null>(null);
 
-  // Scrolls the page (or an inner scroll container) while a drag sits near the
-  // top or bottom edge, so a widget can be dragged to an off-screen part of
-  // the grid. Fed from dragover/pointermove; stopped on every drag ending.
-  const autoScroll = useDragAutoScroll(gridRef);
+  // The node the current drag started from: the dragged widget, a link, image,
+  // or selected Text node inside it, or the Add widget sheet item.
+  const dragSourceRef = useRef<Node | null>(null);
+
+  const endDrag = useCallback(() => {
+    dragSourceRef.current = null;
+    setDraggedId(null);
+    setAddDragId(null);
+    setDropIndicator(null);
+  }, []);
+
+  const endResize = useCallback(() => {
+    resizeSessionRef.current = null;
+    setResizePreview(null);
+  }, []);
+
+  const isResizing = resizePreview !== null;
+  const isDragging = draggedId !== null || addDragId !== null;
+  let autoScrollGesture: AutoScrollGesture | null = null;
+  if (isDragging) autoScrollGesture = "drag";
+  else if (isResizing) autoScrollGesture = "pointer";
+  const gestureActive = autoScrollGesture !== null;
+
+  // Any render can take a gesture's source out of the document mid-gesture,
+  // this grid's or a widget's own: the server layout arriving while the page
+  // loads, a widget's rows refreshing under a dragged link, or Customize
+  // ending under a resize. Its dragend or pointerup then never reaches React,
+  // so the gesture ends here. A browser drag itself goes on, but the grid no
+  // longer accepts it. The check runs after each batch of DOM changes, so a
+  // node React moves (removed and inserted again) doesn't count.
+  useEffect(() => {
+    if (!gestureActive) return;
+    const observer = new MutationObserver(() => {
+      if (dragSourceRef.current?.isConnected === false) endDrag();
+      if (resizeSessionRef.current?.handle.isConnected === false) endResize();
+    });
+    observer.observe(document.body, { childList: true, subtree: true });
+    return () => observer.disconnect();
+  }, [endDrag, endResize, gestureActive]);
+
+  // Scrolls the page (or an inner scroll container) while a drag or resize
+  // sits near the top or bottom edge, so a widget can be dragged to an
+  // off-screen part of the grid. It runs for as long as one of them is active.
+  const { update: updateAutoScroll } = useDragAutoScroll(gridRef, autoScrollGesture);
 
   const setWidgetCollapsed = useCallback((id: WidgetId, collapsed: boolean) => {
     setCollapsedIds((prev) => {
@@ -179,18 +182,21 @@ export function DashboardGrid({
       if (!isCustomizing) return;
       const id = findWidgetIdFromEvent(event);
       if (!id) return;
+      // One gesture at a time: a link or image inside a widget stays draggable
+      // while another pointer resizes.
+      if (resizeSessionRef.current) {
+        event.preventDefault();
+        return;
+      }
       event.dataTransfer.effectAllowed = "move";
       event.dataTransfer.setData("text/plain", id);
+      // The native target: a selection drag starts from a Text node, which
+      // React reports as its parent element.
+      dragSourceRef.current = event.nativeEvent.target as Node;
       setDraggedId(id);
     },
     [findWidgetIdFromEvent, isCustomizing],
   );
-
-  const handleDragEnd = useCallback(() => {
-    autoScroll.stop();
-    setDraggedId(null);
-    setDropIndicator(null);
-  }, [autoScroll]);
 
   /** True when the drag carries the Add-widget sheet's payload type. */
   const isAddDrag = useCallback(
@@ -210,7 +216,10 @@ export function DashboardGrid({
       const host = (event.target as HTMLElement).closest<HTMLElement>("[data-widget-id]");
       if (!host) return null;
       const rect = host.getBoundingClientRect();
-      // "Before" is the start side: the left half, or the right half right to left.
+      // Above the widget (its pill, or the gap over it in Customize mode) is
+      // before it. Otherwise "before" is the start side: the left half, or the
+      // right half right to left.
+      if (event.clientY < rect.top) return { id: overId, edge: "before" };
       const leftHalf = event.clientX < rect.left + rect.width / 2;
       return { id: overId, edge: leftHalf !== (dir === "rtl") ? "before" : "after" };
     },
@@ -244,13 +253,11 @@ export function DashboardGrid({
         setDropIndicator((prev) =>
           prev?.id === indicator?.id && prev?.edge === indicator?.edge ? prev : indicator,
         );
-        autoScroll.update(event.clientY);
         return;
       }
       if (!draggedId) return;
       event.preventDefault();
       event.dataTransfer.dropEffect = "move";
-      autoScroll.update(event.clientY);
       // Over the trailing area a reorder appends, exactly like a sheet add;
       // the indicator is the "after" edge of the last widget unless the
       // dragged widget already is the last one.
@@ -266,20 +273,18 @@ export function DashboardGrid({
         prev?.id === target.id && prev.edge === target.edge ? prev : target,
       );
     },
-    [autoScroll, draggedId, entries, isAddDrag, resolveDropEdge],
+    [draggedId, entries, isAddDrag, resolveDropEdge],
   );
 
   const handleDrop = useCallback(
     (event: DragEvent<HTMLElement>) => {
-      autoScroll.stop();
       if (isAddDrag(event)) {
         event.preventDefault();
         // The payload is authoritative; the state id is the fallback for a
         // dataTransfer that cannot round-trip custom types.
         const payloadId = event.dataTransfer.getData(WIDGET_ADD_DRAG_TYPE) as WidgetId;
         const id = payloadId || addDragId;
-        setAddDragId(null);
-        setDropIndicator(null);
+        endDrag();
         if (!id) return;
         const beforeId = resolveBeforeId(event);
         addWidget(id, beforeId);
@@ -308,14 +313,13 @@ export function DashboardGrid({
         // position for mouse users.
         moveWidget(draggedId, null);
       }
-      setDraggedId(null);
-      setDropIndicator(null);
+      endDrag();
     },
     [
       addDragId,
       addWidget,
-      autoScroll,
       draggedId,
+      endDrag,
       entries,
       findWidgetIdFromEvent,
       isAddDrag,
@@ -338,15 +342,20 @@ export function DashboardGrid({
       // menu and never delivers the matching pointerup, which would leave the
       // resize session stuck.
       if (!event.isPrimary || event.button !== 0) return;
+      // One gesture at a time: a mouse press is primary even while a touch
+      // resizes or drags.
+      if (resizeSessionRef.current || dragSourceRef.current) return;
       const widget = getDashboardWidget(id);
       event.preventDefault();
       event.stopPropagation();
       event.currentTarget.setPointerCapture(event.pointerId);
       const gridWidth = gridRef.current?.getBoundingClientRect().width ?? 0;
-      const gapPx = readGapPx(gridRef.current);
+      const gapPx = readColumnGapPx(gridRef.current);
       const columnUnit = gridWidth > 0 ? (gridWidth + gapPx) / GRID_COLUMNS : 1;
       resizeSessionRef.current = {
         id,
+        handle: event.currentTarget,
+        pointerId: event.pointerId,
         title: t(widget.titleKey),
         startX: event.clientX,
         inlineSign: isRightToLeft(event.currentTarget) ? -1 : 1,
@@ -354,7 +363,7 @@ export function DashboardGrid({
         startSpan: currentSpan,
         startRows: currentRows,
         columnUnit,
-        rowUnit: readRowHeightPx(gridRef.current) + gapPx,
+        rowUnit: readRowHeightPx(gridRef.current) + readRowGapPx(gridRef.current),
         minSpan: widget.minSpan,
         maxSpan: widget.maxSpan,
         minRows: widget.minRows,
@@ -419,24 +428,22 @@ export function DashboardGrid({
   const handleResizePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       const session = resizeSessionRef.current;
-      if (!session) return;
+      if (session?.pointerId !== event.pointerId) return;
       session.latestClientX = event.clientX;
       session.latestClientY = event.clientY;
       applyResizePreview();
       // A widget can be taller than the viewport, so growing it needs the same
       // edge auto-scroll a reorder drag gets.
-      autoScroll.update(event.clientY, handleResizeAutoScrolled);
+      updateAutoScroll(event.clientY, handleResizeAutoScrolled);
     },
-    [applyResizePreview, autoScroll, handleResizeAutoScrolled],
+    [applyResizePreview, handleResizeAutoScrolled, updateAutoScroll],
   );
 
   const handleResizePointerEnd = useCallback(
     (event: ReactPointerEvent<HTMLButtonElement>) => {
       const session = resizeSessionRef.current;
-      if (!session) return;
-      autoScroll.stop();
-      resizeSessionRef.current = null;
-      setResizePreview(null);
+      if (session?.pointerId !== event.pointerId) return;
+      endResize();
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
         event.currentTarget.releasePointerCapture(event.pointerId);
       }
@@ -450,7 +457,7 @@ export function DashboardGrid({
         }),
       );
     },
-    [autoScroll, resizeWidget, t],
+    [endResize, resizeWidget, t],
   );
 
   const handleMoveKeyDown = useCallback(
@@ -460,6 +467,9 @@ export function DashboardGrid({
       const forward = key === "ArrowRight" || key === "ArrowDown";
       if (!backward && !forward) return;
       event.preventDefault();
+      // One gesture at a time: a pointer press on a resize handle leaves focus
+      // on this button, and reordering would cut that resize short.
+      if (resizeSessionRef.current) return;
       const index = entries.findIndex((entry) => entry.id === id);
       if (index === -1) return;
       const nextIndex = backward ? index - 1 : index + 1;
@@ -497,6 +507,9 @@ export function DashboardGrid({
       const rowStep = event.key === "ArrowUp" ? -1 : event.key === "ArrowDown" ? 1 : undefined;
       if (columnStep === undefined && rowStep === undefined) return;
       event.preventDefault();
+      // One gesture at a time: a pointer holding a handle owns the size, and
+      // its release would overwrite the step anyway.
+      if (resizeSessionRef.current) return;
       const widget = getDashboardWidget(id);
       const nextSpan = clamp(currentSpan + (columnStep ?? 0), widget.minSpan, widget.maxSpan);
       const nextRows = clamp(currentRows + (rowStep ?? 0), widget.minRows, widget.maxRows);
@@ -514,8 +527,6 @@ export function DashboardGrid({
     [resizeWidget, t],
   );
 
-  const isResizing = resizePreview !== null;
-
   return (
     <>
       <span aria-live="polite" role="status" className="sr-only">
@@ -523,9 +534,9 @@ export function DashboardGrid({
       </span>
       <div
         ref={gridRef}
-        className="admin-widget-grid"
+        className={cn("admin-widget-grid", isCustomizing && CUSTOMIZE_GRID_CLASS)}
         onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
+        onDragEnd={endDrag}
         onDragOver={handleDragOver}
         onDrop={handleDrop}
       >
@@ -595,7 +606,23 @@ export function DashboardGrid({
                     />
                   )}
 
-                  <div className="border-border bg-background/95 absolute end-3 -top-3 z-20 flex items-center gap-0.5 rounded-full border px-1 py-0.5 shadow-md backdrop-blur">
+                  {/* The gap above the widget belongs to it while something is
+                      dragged, so a drop there lands before it instead of at
+                      the end of the dashboard, where drops on the grid's own
+                      space go. It is the row gap's height and reaches half the
+                      column gap (0.875rem in app.css) to each side, so the
+                      areas of neighbors meet where the gaps cross. */}
+                  {isDragging && (
+                    <div
+                      aria-hidden="true"
+                      className="absolute -inset-x-1.75 bottom-full h-(--customize-row-gap)"
+                    />
+                  )}
+
+                  {/* Above the widget, in the gap CUSTOMIZE_GRID_CLASS makes
+                      room for, so it never covers the widget's label, icon,
+                      or links. */}
+                  <div className="border-border bg-background/95 absolute end-3 bottom-full z-20 flex items-center gap-0.5 rounded-full border px-1 py-0.5 shadow-md backdrop-blur">
                     <button
                       type="button"
                       aria-label={t("web.admin.dashboard.grid.moveLabel", { title })}
@@ -617,15 +644,17 @@ export function DashboardGrid({
                   </div>
 
                   {/* One handle for both axes, straddling the bottom-right
-                      corner. Column spans (and row heights) only apply from lg
-                      up, so the handle is hidden below that. */}
+                      corner. Column spans (and row heights) only apply in the
+                      12-column layout, from lg and 1024px up (see
+                      .admin-widget-grid in app.css), so the handle is hidden
+                      below that. */}
                   {canResize && (
                     <button
                       type="button"
                       aria-label={t("web.admin.dashboard.grid.resizeLabel", { title })}
                       title={t("web.admin.dashboard.grid.resizeHint")}
                       className={cn(
-                        "border-border bg-background/95 hover:border-primary hover:bg-primary/30 focus-visible:ring-ring absolute -end-1.5 -bottom-1.5 z-20 hidden h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-[4px] border shadow-md focus-visible:ring-2 focus-visible:outline-none lg:block rtl:cursor-nesw-resize",
+                        "border-border bg-background/95 hover:border-primary hover:bg-primary/30 focus-visible:ring-ring absolute -end-1.5 -bottom-1.5 z-20 hidden h-3.5 w-3.5 cursor-nwse-resize touch-none rounded-[4px] border shadow-md focus-visible:ring-2 focus-visible:outline-none lg:min-[1024px]:block rtl:cursor-nesw-resize",
                         isWidgetResizing && "border-primary bg-primary/30",
                       )}
                       onPointerDown={(event) =>
@@ -693,17 +722,18 @@ export function DashboardGrid({
                   // a specific spot; clicking (the keyboard path) appends.
                   draggable
                   onDragStart={(event) => {
+                    if (resizeSessionRef.current) {
+                      event.preventDefault();
+                      return;
+                    }
                     event.dataTransfer.setData(WIDGET_ADD_DRAG_TYPE, widget.id);
                     event.dataTransfer.effectAllowed = "copy";
+                    dragSourceRef.current = event.currentTarget;
                     setAddDragId(widget.id);
                   }}
-                  onDragEnd={() => {
-                    // Fires for cancelled and completed drags alike; the drop
-                    // handler has already applied any placement by now.
-                    autoScroll.stop();
-                    setAddDragId(null);
-                    setDropIndicator(null);
-                  }}
+                  // Fires for cancelled and completed drags alike; the drop
+                  // handler has already applied any placement by now.
+                  onDragEnd={endDrag}
                 >
                   <span className="bg-primary/10 text-primary flex h-6 w-6 flex-shrink-0 items-center justify-center rounded-md">
                     <Plus className="h-3.5 w-3.5" />

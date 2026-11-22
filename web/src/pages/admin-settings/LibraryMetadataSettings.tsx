@@ -235,6 +235,7 @@ export default function LibraryMetadataSettings() {
               value={form.getValue(REALTIME_MONITORING_KEY) || "true"}
               onChange={(value) => form.setValue(REALTIME_MONITORING_KEY, value)}
               restartRequired={restartKeys.has(REALTIME_MONITORING_KEY)}
+              managedByEnv={form.envVar(REALTIME_MONITORING_KEY)}
             />
           )}
           <SettingField
@@ -439,7 +440,7 @@ export default function LibraryMetadataSettings() {
                   "web.admin.settings.libraryMetadata.subtitleSync.capacity.description",
                 )}
                 dirty={form.isDirty("subtitles.sync_node_capacity")}
-                value={form.getValue("subtitles.sync_node_capacity") || "1"}
+                value={form.getValue("subtitles.sync_node_capacity")}
                 onChange={(value) => form.setValue("subtitles.sync_node_capacity", value)}
                 restartRequired={restartKeys.has("subtitles.sync_node_capacity")}
               />

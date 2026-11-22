@@ -42,6 +42,82 @@ func (r *PgExecutionRepository) Insert(ctx context.Context, result taskmanager.E
 	return nil
 }
 
+// StartRun leases a run in progress in task_execution_leases.
+func (r *PgExecutionRepository) StartRun(ctx context.Context, taskKey string) (int64, error) {
+	var id int64
+	err := r.pool.QueryRow(ctx, `
+		INSERT INTO task_execution_leases (task_key, started_at, heartbeat_at)
+		VALUES ($1, clock_timestamp(), clock_timestamp())
+		RETURNING id`, taskKey,
+	).Scan(&id)
+	if err != nil {
+		return 0, fmt.Errorf("leasing task run: %w", err)
+	}
+	return id, nil
+}
+
+// RenewRun moves a lease's heartbeat to the database's current time.
+func (r *PgExecutionRepository) RenewRun(ctx context.Context, leaseID int64) (bool, error) {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE task_execution_leases SET heartbeat_at = clock_timestamp() WHERE id = $1`, leaseID)
+	if err != nil {
+		return false, fmt.Errorf("renewing task run lease: %w", err)
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// FinishRun inserts the finished run and deletes its lease in one statement.
+// A lease another server already recorded as interrupted is gone; the run is
+// still inserted, so its real outcome is kept next to the interrupted entry.
+// Without its lease, an identical entry means an earlier attempt committed
+// unacknowledged, so a retry inserts nothing.
+func (r *PgExecutionRepository) FinishRun(ctx context.Context, leaseID int64, result taskmanager.ExecutionResult) error {
+	_, err := r.pool.Exec(ctx, `
+		WITH released AS (DELETE FROM task_execution_leases WHERE id = $8 RETURNING id)
+		INSERT INTO task_executions (task_key, started_at, completed_at, status, error_message, result_data, duration_ms)
+		SELECT $1, $2, $3, $4, $5, $6, $7
+		WHERE EXISTS (SELECT 1 FROM released)
+		   OR NOT EXISTS (
+			SELECT 1 FROM task_executions
+			WHERE task_key = $1 AND started_at = $2 AND completed_at = $3 AND status = $4)`,
+		result.TaskKey, result.StartedAt, result.CompletedAt,
+		result.Status, result.ErrorMessage, result.ResultData, result.DurationMs, leaseID,
+	)
+	if err != nil {
+		return fmt.Errorf("finishing task run: %w", err)
+	}
+	return nil
+}
+
+// ReconcileStaleRuns moves each lease whose heartbeat is older than
+// staleAfter by the database clock into task_executions as an interrupted
+// failure that ends at its last heartbeat. Deleting the lease and inserting
+// its entry is one statement, so two servers reconciling at once record each
+// run once.
+func (r *PgExecutionRepository) ReconcileStaleRuns(ctx context.Context, staleAfter time.Duration) ([]string, error) {
+	rows, err := r.pool.Query(ctx, `
+		WITH stale AS (
+			DELETE FROM task_execution_leases
+			WHERE heartbeat_at < clock_timestamp() - $1 * interval '1 microsecond'
+			RETURNING task_key, started_at, heartbeat_at
+		)
+		INSERT INTO task_executions (task_key, started_at, completed_at, status, error_message, duration_ms)
+		SELECT task_key, started_at, heartbeat_at, 'failed', $2,
+			(EXTRACT(EPOCH FROM (heartbeat_at - started_at)) * 1000)::BIGINT
+		FROM stale
+		RETURNING task_key`,
+		staleAfter.Microseconds(), taskmanager.InterruptedExecutionMessage,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("reconciling stale task runs: %w", err)
+	}
+	keys, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("reconciling stale task runs: %w", err)
+	}
+	return keys, nil
+}
+
 func (r *PgExecutionRepository) GetLatest(ctx context.Context, taskKey string) (*taskmanager.ExecutionResult, error) {
 	var result taskmanager.ExecutionResult
 	err := r.pool.QueryRow(ctx, `

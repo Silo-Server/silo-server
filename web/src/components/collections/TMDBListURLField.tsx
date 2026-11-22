@@ -32,6 +32,7 @@ export function TMDBListURLField({
     <div className="space-y-2">
       <Label htmlFor={id}>{label ?? t("web.collections.tmdbListUrl.label")}</Label>
       <Input
+        dir="ltr"
         id={id}
         value={value}
         onChange={(event) => onChange(event.target.value)}

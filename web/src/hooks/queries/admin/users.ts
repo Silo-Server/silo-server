@@ -9,7 +9,7 @@ import {
   getAdminDevice,
   resetAdminDeviceLearnedLimit,
 } from "@/api/v2/adminDevices";
-import { V2ProblemError } from "@/api/v2/request";
+import { readableErrorText, V2ProblemError } from "@/api/v2/request";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { captureProfileRequestContext } from "@/api/client";
@@ -33,6 +33,7 @@ import {
 export { adminUserFromV2 } from "@/api/v2/adminUsers";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { adminKeys } from "../keys";
+import { settingWriteOptions, toastSettingWriteError } from "../settingWriteOffline";
 import { useAdminUserProfiles } from "./history";
 import { toast } from "sonner";
 import { t } from "@/i18n";
@@ -317,6 +318,7 @@ export function useUpdateAdminUserSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: async ({
       userId,
@@ -337,9 +339,7 @@ export function useUpdateAdminUserSetting() {
       });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.common.users.settingSaveFailed"),
-      );
+      toastSettingWriteError(err, t("web.admin.common.users.settingSaveFailed"));
     },
   });
 }
@@ -348,6 +348,7 @@ export function useDeleteAdminUserSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: async ({
       userId,
@@ -373,9 +374,7 @@ export function useDeleteAdminUserSetting() {
       });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.common.users.settingResetFailed"),
-      );
+      toastSettingWriteError(err, t("web.admin.common.users.settingResetFailed"));
     },
   });
 }
@@ -448,6 +447,7 @@ export function useUpdateAdminUserDeviceSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: async ({
       userId,
@@ -477,9 +477,7 @@ export function useUpdateAdminUserDeviceSetting() {
       });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.common.users.deviceOverrideSaveFailed"),
-      );
+      toastSettingWriteError(err, t("web.admin.common.users.deviceOverrideSaveFailed"));
     },
   });
 }
@@ -488,6 +486,7 @@ export function useDeleteAdminUserDeviceSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: ({
       userId,
@@ -514,9 +513,7 @@ export function useDeleteAdminUserDeviceSetting() {
       });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.common.users.deviceOverrideResetFailed"),
-      );
+      toastSettingWriteError(err, t("web.admin.common.users.deviceOverrideResetFailed"));
     },
   });
 }
@@ -531,6 +528,7 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: async ({
       userId,
@@ -558,16 +556,15 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
             completed++;
             continue;
           }
+          // A failure without a readable reason (no connection) gets none: the
+          // count already says how far the reset got.
           throw new Error(
             t("web.admin.common.users.resetAllStopped", {
               count: keys.length,
               count_text: keys.length,
               completed: completed,
-              reason:
-                err instanceof Error
-                  ? err.message
-                  : t("web.admin.common.users.resetAllRemainingFailed"),
-            }),
+              reason: readableErrorText(err, ""),
+            }).trimEnd(),
           );
         }
       }
@@ -582,7 +579,7 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
     },
     onError: (err, variables) => {
       invalidateAdminDeviceCaches(queryClient, variables.userId, authority);
-      toast.error(err instanceof Error ? err.message : t("web.admin.common.users.resetAllFailed"));
+      toastSettingWriteError(err, t("web.admin.common.users.resetAllFailed"));
     },
   });
 }

@@ -34,10 +34,6 @@ concurrent additions and removals may change later pages. A missing configured
 local seed directory returns an empty listing; a missing explicitly browsed
 directory returns not found.
 
-These are web administration utilities. The Apple and Android clients have no
-callers for them, and the Jellyfin compatibility surface has no equivalent catalog
-seed or administrator filesystem operation.
-
 ## Catalog item listing
 
 `GET /api/v2/admin/catalog/items` (`listAdminCatalogItems`) lets an administrator,
@@ -156,9 +152,7 @@ when items carry the stored metadata above and the listing accepts
 `include_people`, `item_file_paths`, true when this caller may send
 `include_file_paths`, `item_posters`, true when items carry `poster_url` under
 that rule, and `item_metadata_reset`, true when
-`POST /api/v2/admin/items/{id}/refresh-metadata` accepts `mode: "reset"`. The
-listing and the events have no Apple, Android, or Jellyfin compatibility
-callers; Jellyfin clients read the catalog through their own item queries.
+`POST /api/v2/admin/items/{id}/refresh-metadata` accepts `mode: "reset"`.
 
 ## Export and import
 
@@ -171,7 +165,6 @@ callers; Jellyfin clients read the catalog through their own item queries.
 | `POST /api/v2/admin/catalog/export-jobs/{id}/publish` | `200` with a saved signed download URL, or `409` when storage cannot presign |
 | `GET /api/v2/admin/jobs/capabilities` | Whether artifact download and public links are supported |
 | `GET /api/v2/admin/jobs/{id}/artifact` | Streams a completed job's artifact to a signed capability |
-| `GET /api/v2/admin/catalog/search/status` | Current catalog search runtime status |
 
 Export requests use JSON `{}` for the entire catalog or `library_ids` containing
 opaque string IDs. Direct export declares `application/gzip` as its success
@@ -234,10 +227,32 @@ unreachable answers `503`.
 Read `download_url` from the job rather than constructing this URL. An S3-backed
 server returns a presigned storage URL there instead, and both forms are opaque.
 
-Search status retains the existing runtime/provider/index information, uses UTC
-millisecond instants, and represents `last_processed_event_id` as a string. Its
-task links and media-type coverage groups are finite collections. These transfer
-and status operations have no Apple, Android, or Jellyfin compatibility callers.
+## Catalog search status
+
+`GET /api/v2/admin/catalog/search/status` (`getAdminCatalogSearchStatus`)
+requires an acting administrator and reports the configured search provider, the
+provider currently answering requests, Meilisearch health, index state, semantic
+readiness, and links to the search maintenance tasks. Instants are UTC with
+millisecond precision, `last_processed_event_id` is a string, and the task links
+and media-type coverage groups are finite collections. A server without the
+status service answers `503`.
+
+`active_provider` describes the route requests actually take; it is not merely
+the configured provider. `degraded` and the optional `degraded_reason` explain
+temporary fallback or keyword-only operation. `index.rebuild_required` is true
+when the active index's document schema does not match the current search
+settings, or when Meilisearch no longer has it (for example after its data
+directory was emptied); in that case `index.document_count` is 0 and searches
+use PostgreSQL, while `meilisearch.healthy` still reports whether Meilisearch
+itself answers. A status read learns that the index is missing from the
+semantic capability probe, so it can take up to five minutes to show.
+
+Background search maintenance runs at startup and every minute: it rebuilds a
+missing or stale index, applies changed index settings to a current one in
+place (not a rebuild, so not `rebuild_required`), then resumes incremental
+event sync. When the prior index is known to have the same document and media
+scope, Meilisearch continues serving keyword search while the replacement is
+built; otherwise searches use PostgreSQL.
 
 ## Literary editions and matches
 
@@ -269,8 +284,7 @@ links editions and then records the decision in a separate write; failure of
 that write can leave the editions linked. There is no whole-operation transaction
 or durable request replay receipt. All four mutations are non-retryable: after
 an uncertain result, inspect current state before deciding whether to submit again.
-These administration routes have no existing web, Apple, Android, or Jellyfin
-compatibility callers. The viewer literary-work endpoint remains unchanged.
+The viewer literary-work endpoint is separate.
 
 ## Person curation
 
@@ -289,8 +303,7 @@ no optimistic concurrency or durable replay guarantee.
 
 Both operations require acting-administrator authorization, remain registered
 when unavailable, and are non-retryable. Existing web editor actions disable
-mutation retries and authentication replay. Apple, Android, and Jellyfin have
-no corresponding administrator callers.
+mutation retries and authentication replay.
 
 ## Metadata translation jobs
 
@@ -326,8 +339,8 @@ to the authorized content ID before invoking the service; a mismatch returns
 promise that a running job has already stopped. Existing terminal jobs are a no-op.
 
 Enqueue and cancellation have no durable request replay receipt. The web enqueue
-mutation disables both mutation retries and authentication replay. No existing
-web cancel control, native administrator caller, or Jellyfin equivalent exists.
+mutation disables both mutation retries and authentication replay. The web has
+no cancel control.
 
 ### Library prewarm
 
@@ -524,8 +537,8 @@ would run online reports `already_running` while local analysis runs. Successful
 notifications.
 
 The operations are non-retryable. The web re-detection actions disable mutation
-retries and authentication replay. No native administrator caller or matching
-Jellyfin action exists; playback marker reads remain separate.
+retries and authentication replay. Playback marker reads are separate; see
+[markers-api.md](markers-api.md).
 
 ## Seek preview administration
 
@@ -586,9 +599,7 @@ enabled, opted-in video library. All three return `503` `dependency_unavailable`
 when the service is unconfigured, and `500` `internal_error` on an unexpected service
 failure, using the common Problem response. Ordinary profiles receive `403`
 `permission_denied`; authentication failures use the common `401` problems.
-Web administration uses these operations. Apple, Android, and Jellyfin have
-no corresponding administration callers; their playback preview reads are
-separate.
+Playback preview reads are separate.
 
 ## Marker edit history
 
@@ -604,8 +615,7 @@ Audit, file, account and API-key IDs are opaque strings. Timestamps are canonica
 UTC instants. Before/after snapshots use `start_seconds` and `end_seconds`; an
 absent snapshot means no marker existed on that side of the edit. Existing admin
 attribution and request audit fields remain available. The web history views
-preserve string IDs and adapt absent snapshots for display. Native clients and
-Jellyfin have no corresponding administration callers.
+preserve string IDs and adapt absent snapshots for display.
 
 ## Marker providers
 
@@ -624,7 +634,6 @@ contribution statistics. It returns `200` with `valid: true` and typed statistic
 or `valid: false` and a generic error without the provider's raw error text.
 Providers that cannot submit return a validation Problem. All three operations
 require acting-administrator access. Web mutations disable both retry layers.
-No native client or Jellyfin administration caller requires migration.
 
 ## Marker contributions
 
@@ -649,8 +658,7 @@ bind the operation, account/profile/access scope, file, limit and sort. This is
 live history: a row updated during traversal may move ahead of the current page;
 there is no snapshot or lossless synchronization guarantee. File IDs are strings,
 instants are canonical UTC, and the explicitly named millisecond fields retain
-their existing units. No
-first-party web/native or Jellyfin administration callers were found.
+their existing units.
 
 ## File grouping repair
 
@@ -673,8 +681,7 @@ account IDs and canonical watched-at instants.
 existing merge and best-effort target refresh. Neither mutation supplies a
 whole-request replay receipt; both are non-retryable. The split web action
 disables mutation retries and authentication replay, including dry runs. All
-three operations require acting-administrator access. No native or Jellyfin
-administration caller was found.
+three operations require acting-administrator access.
 
 Explicit split/merge and match/apply re-check each existing source and destination
 against the current transaction's complete library memberships before identity or
@@ -735,8 +742,7 @@ corrects moves to the ID its new identity derives (see
 Callers holding the old ID should switch to the returned one. Apply records the
 choice on the item: later refreshes keep it when a local `.nfo` names another
 title, instead of re-matching to the file's `<uniqueid>`. Neither web mutation automatically retries or refreshes
-and replays authentication. These administration flows have web consumers; Apple, Android and
-Jellyfin have no corresponding caller in the migration inventory.
+and replays authentication.
 
 ### Unmatched files
 
@@ -745,7 +751,7 @@ an extra association. Acting administrators receive `items` and `page`; file and
 library IDs are strings. `limit` defaults to 50 and accepts 1–200. SQL applies the
 ID-ascending keyset and limit before scanning rows. Signed cursors bind the
 operation, authority and page size. This is a live collection: concurrently
-matched files may disappear. No current web, native or Jellyfin consumer needs migration for this route.
+matched files may disappear.
 
 ### Item image selection
 
@@ -798,8 +804,7 @@ episode-to-still coercion, parent/season/episode cache identity, immutable uploa
 transactional catalog publication and orphan-GC scheduling after publication
 failure. Success returns the stored path, thumbhash and available revision/display
 URL. This is synchronous and may fail after upload; it is not a persisted job
-or replay-safe operation. Both web retry layers are disabled. No native or Jellyfin caller is present in
-the migration inventory.
+or replay-safe operation. Both web retry layers are disabled.
 
 `POST /api/v2/admin/items/{id}/images/upload` takes a multipart form with
 `type` (`poster`, `backdrop` or `logo`) and `image`, a JPEG, PNG or WebP file

@@ -459,7 +459,7 @@ function RegisterRelayRow({
             <AlertDialogAction
               disabled={pending}
               onClick={() => void clearRelay()}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {pending
                 ? t("web.admin.settings.notifications.relay.clearing")
@@ -593,10 +593,13 @@ function DiscordAppCredentials({
   savedClientId,
   sensitiveConfigured,
   restartKeys,
+  envVar,
 }: {
   savedClientId: string;
   sensitiveConfigured: string[];
   restartKeys: ReturnType<typeof useRestartKeys>;
+  /** The variable that sets a key from the server's environment, if any. */
+  envVar: (key: string) => string | undefined;
 }) {
   const t = useT();
   const authority = captureProfileRequestContext();
@@ -611,22 +614,37 @@ function DiscordAppCredentials({
   const [testing, setTesting] = useState(false);
   const [confirmClear, setConfirmClear] = useState(false);
 
-  const clientId = clientIdDraft ?? savedClientId;
+  // The server refuses a save of a key its environment sets, so those keys
+  // stay out of every save and clear this card sends. A draft typed before
+  // the environment took its key over is ignored where it is read, so the
+  // field, the invite link and the saves all use the environment's value.
+  const editableKeys = DISCORD_APP_KEYS.filter((key) => envVar(key) == null);
+  const editable = (key: string) => editableKeys.includes(key);
+  const clientId = editable("discord.client_id") ? (clientIdDraft ?? savedClientId) : savedClientId;
+  const secretDraft = editable("discord.client_secret") ? clientSecret : "";
+  const tokenDraft = editable("discord.bot_token") ? botToken : "";
   const configuredKeys = new Set(sensitiveConfigured);
   const secretConfigured = configuredKeys.has("discord.client_secret");
   const tokenConfigured = configuredKeys.has("discord.bot_token");
   const ready = savedClientId.trim() !== "" && secretConfigured && tokenConfigured;
   const unsaved =
-    clientId !== savedClientId || clientSecret.trim() !== "" || botToken.trim() !== "";
+    clientId !== savedClientId || secretDraft.trim() !== "" || tokenDraft.trim() !== "";
   // The card's drafts live outside useSettingsForm, so the navigation guard
   // and the reload prompt only see them through this report.
   useReportUnsavedChanges(unsaved);
-  const anyStored = savedClientId.trim() !== "" || secretConfigured || tokenConfigured;
+  const stored: Record<string, boolean> = {
+    "discord.client_id": savedClientId.trim() !== "",
+    "discord.client_secret": secretConfigured,
+    "discord.bot_token": tokenConfigured,
+  };
+  const anyStoredEditable = editableKeys.some((key) => stored[key]);
+  const updates: Record<string, string> = {};
+  if (clientId !== savedClientId) updates["discord.client_id"] = clientId;
+  if (secretDraft.trim() !== "") updates["discord.client_secret"] = secretDraft;
+  if (tokenDraft.trim() !== "") updates["discord.bot_token"] = tokenDraft;
+  const nothingToSave = Object.keys(updates).length === 0;
 
   async function save() {
-    const updates: Record<string, string> = { "discord.client_id": clientId };
-    if (clientSecret.trim() !== "") updates["discord.client_secret"] = clientSecret;
-    if (botToken.trim() !== "") updates["discord.bot_token"] = botToken;
     try {
       await updateSettings.mutateAsync(updates);
       setClientIdDraft(null);
@@ -641,11 +659,7 @@ function DiscordAppCredentials({
 
   async function clearAll() {
     try {
-      await updateSettings.mutateAsync({
-        "discord.client_id": "",
-        "discord.client_secret": "",
-        "discord.bot_token": "",
-      });
+      await updateSettings.mutateAsync(Object.fromEntries(editableKeys.map((key) => [key, ""])));
       setClientIdDraft(null);
       setClientSecret("");
       setBotToken("");
@@ -705,38 +719,43 @@ function DiscordAppCredentials({
           onChange={setClientIdDraft}
           description={t("web.admin.settings.notifications.discord.fromOAuth2Page")}
           restartRequired={restartKeys.has("discord.client_id")}
+          managedByEnv={envVar("discord.client_id")}
         />
       </div>
       <InviteBotRow clientId={clientId} />
       <div className="settings-field-list">
         <SecretField
           label={t("web.admin.settings.notifications.discord.clientSecret")}
-          value={clientSecret}
+          value={secretDraft}
           configured={secretConfigured}
           onChange={setClientSecret}
           hint={t("web.admin.settings.notifications.discord.fromOAuth2Page")}
           restartRequired={restartKeys.has("discord.client_secret")}
+          managedByEnv={envVar("discord.client_secret")}
         />
         <SecretField
           label={t("web.admin.settings.notifications.discord.botToken")}
-          value={botToken}
+          value={tokenDraft}
           configured={tokenConfigured}
           onChange={setBotToken}
           hint={t("web.admin.settings.notifications.discord.fromBotPage")}
           restartRequired={restartKeys.has("discord.bot_token")}
+          managedByEnv={envVar("discord.bot_token")}
         />
       </div>
       <div className="flex flex-wrap items-center gap-2 py-3">
-        <Button
-          type="button"
-          size="sm"
-          onClick={() => void save()}
-          disabled={updateSettings.isPending}
-        >
-          {updateSettings.isPending
-            ? t("web.admin.settings.notifications.discord.saving")
-            : t("common.save")}
-        </Button>
+        {editableKeys.length > 0 && (
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void save()}
+            disabled={updateSettings.isPending || nothingToSave}
+          >
+            {updateSettings.isPending
+              ? t("web.admin.settings.notifications.discord.saving")
+              : t("common.save")}
+          </Button>
+        )}
         <Button
           type="button"
           size="sm"
@@ -748,7 +767,7 @@ function DiscordAppCredentials({
             ? t("web.admin.settings.notifications.discord.testing")
             : t("web.admin.settings.notifications.discord.testToken")}
         </Button>
-        {anyStored && (
+        {anyStoredEditable && (
           <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmClear(true)}>
             {t("web.admin.settings.notifications.discord.clearCredentials")}
           </Button>
@@ -786,7 +805,7 @@ function DiscordAppCredentials({
           <AlertDialogFooter>
             <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
               onClick={() => {
                 void clearAll();
                 setConfirmClear(false);
@@ -858,9 +877,6 @@ export default function NotificationsAdminSettings() {
   const isOn = (key: string) => toggleValue(key) === "true";
   const setToggle = (key: string) => (value: boolean) =>
     form.setValue(key, value ? "true" : "false");
-  // Numeric settings fall back to their server-side defaults when unset;
-  // surface the effective default instead of an empty input.
-  const numberValue = (key: string, fallback: string) => form.getValue(key) || fallback;
   const needsRestart = (key: string) => restartKeys.has(key);
   const anyDirty = (keys: string[]) => keys.some(form.isDirty);
 
@@ -1001,6 +1017,7 @@ export default function NotificationsAdminSettings() {
                   label={t("web.admin.settings.notifications.relay.url")}
                   description={t("web.admin.settings.notifications.relay.urlDescription")}
                   type="text"
+                  dir="ltr"
                   value={pushRelayURL}
                   onChange={(v) => setPushRelayURLDraft(v)}
                   restartRequired={needsRestart("notifications.push_relay_url")}
@@ -1087,7 +1104,7 @@ export default function NotificationsAdminSettings() {
                   description={t("web.admin.settings.notifications.digestHourDescription")}
                   unit={t("web.admin.common.units.hourRange")}
                   type="number"
-                  value={numberValue("notifications.email.digest_hour", "8")}
+                  value={form.getValue("notifications.email.digest_hour")}
                   onChange={(v) => form.setValue("notifications.email.digest_hour", v)}
                   restartRequired={needsRestart("notifications.email.digest_hour")}
                 />
@@ -1118,6 +1135,7 @@ export default function NotificationsAdminSettings() {
               savedClientId={form.getValue("discord.client_id")}
               sensitiveConfigured={form.sensitiveConfigured}
               restartKeys={restartKeys}
+              envVar={form.envVar}
             />
             <SettingsSubheading>
               {t("web.admin.settings.notifications.discord.delivery")}
@@ -1163,7 +1181,7 @@ export default function NotificationsAdminSettings() {
                   description={t("web.admin.settings.notifications.digestHourDescription")}
                   unit={t("web.admin.common.units.hourRange")}
                   type="number"
-                  value={numberValue("notifications.discord.digest_hour", "8")}
+                  value={form.getValue("notifications.discord.digest_hour")}
                   onChange={(v) => form.setValue("notifications.discord.digest_hour", v)}
                   restartRequired={needsRestart("notifications.discord.digest_hour")}
                 />
@@ -1193,7 +1211,7 @@ export default function NotificationsAdminSettings() {
               <SettingField
                 label={t("web.admin.settings.notifications.webhooks.perPerson")}
                 type="number"
-                value={numberValue("notifications.webhooks.max_per_profile", "10")}
+                value={form.getValue("notifications.webhooks.max_per_profile")}
                 onChange={(v) => form.setValue("notifications.webhooks.max_per_profile", v)}
                 restartRequired={needsRestart("notifications.webhooks.max_per_profile")}
               />
@@ -1205,10 +1223,7 @@ export default function NotificationsAdminSettings() {
                 description={t("web.admin.settings.notifications.webhooks.deliveriesDescription")}
                 unit={t("web.admin.settings.notifications.webhooks.perMinute")}
                 type="number"
-                value={numberValue(
-                  "notifications.webhooks.deliveries_per_minute_per_profile",
-                  "60",
-                )}
+                value={form.getValue("notifications.webhooks.deliveries_per_minute_per_profile")}
                 onChange={(v) =>
                   form.setValue("notifications.webhooks.deliveries_per_minute_per_profile", v)
                 }
@@ -1278,7 +1293,7 @@ export default function NotificationsAdminSettings() {
                   )}
                   unit={t("web.admin.settings.notifications.unit.seconds")}
                   type="number"
-                  value={numberValue("notifications.server_channels.batch_seconds", "300")}
+                  value={form.getValue("notifications.server_channels.batch_seconds")}
                   onChange={(v) => form.setValue("notifications.server_channels.batch_seconds", v)}
                   restartRequired={needsRestart("notifications.server_channels.batch_seconds")}
                 />

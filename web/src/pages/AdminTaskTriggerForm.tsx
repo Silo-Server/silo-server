@@ -38,6 +38,25 @@ interface TriggerFormRowProps {
   onRemove: () => void;
 }
 
+// The trigger's type, weekday, and time fields share one width. 10rem holds the
+// widest time format measured (Amharic, 159 px at 16 px text) and the longest
+// weekday name ("Segunda-feira"). A field whose text needs more grows to fit it:
+// a longer label ("Przy uruchomieniu"), or a minimum font size larger than the
+// browser's default font size, which rem follows. It stops at the column's width,
+// so one long label can't push the Remove button out of view.
+const TRIGGER_FIELD_WIDTH = "w-full sm:w-fit sm:min-w-40 sm:max-w-full";
+
+// Sized for the widest "None" placeholder measured, Croatian "Bez ograničenja"
+// (167 px at 16 px text and 152 px at 14 px in Firefox), beside the number
+// spinners Firefox and Safari always draw: about 11.5em. Plus Jakarta Sans's cap
+// height is about 0.75em, so 15.5cap is the same width; change both together.
+// A browser minimum font size moves ic and cap in Firefox, but only cap in
+// Chromium, and em in neither, so where cap is supported the box takes the
+// larger of the two. Other browsers keep 11.5em. The box stops at its column's
+// width.
+const MAX_RUNTIME_INPUT_WIDTH =
+  "w-full sm:w-[11.5em] sm:supports-[width:1cap]:w-[max(11.5ic,15.5cap)] sm:max-w-full";
+
 type IntervalUnit = "seconds" | "minutes" | "hours";
 
 const UNIT_MS: Record<IntervalUnit, number> = {
@@ -74,6 +93,20 @@ function draftToMs(text: string, unit: IntervalUnit): number | undefined {
   return Number.isFinite(ms) && ms >= 1 && ms <= MAX_INTERVAL_MS ? ms : undefined;
 }
 
+interface MaxRuntimeDraft {
+  // The max_runtime_ms this draft was read from or last sent to onChange.
+  ms: number | undefined;
+  text: string;
+}
+
+// Shows a stored limit in minutes, rounded to five decimals so a millisecond
+// count that isn't a round number of minutes doesn't fill the box with a long
+// float. Five decimals of a minute is 0.6 ms, so the text still rounds back to
+// the same millisecond count.
+function maxRuntimeToDraft(ms: number | undefined): MaxRuntimeDraft {
+  return { ms, text: ms == null ? "" : String(Number((ms / 60_000).toFixed(5))) };
+}
+
 export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowProps) {
   const t = useT();
   // The box and the unit select show what was typed and picked, not the unit
@@ -88,10 +121,19 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
     setIntervalDraft({ ms, text, unit });
     onChange({ ...trigger, interval_ms: ms });
   };
+  // The Max runtime box shows what was typed, so "1.23456" isn't rewritten to
+  // the minutes its rounded millisecond count works out to.
+  const [maxRuntimeDraft, setMaxRuntimeDraft] = useState(() =>
+    maxRuntimeToDraft(trigger.max_runtime_ms),
+  );
+  if (maxRuntimeDraft.ms !== trigger.max_runtime_ms) {
+    // max_runtime_ms changed outside this row, so show the new value.
+    setMaxRuntimeDraft(maxRuntimeToDraft(trigger.max_runtime_ms));
+  }
 
   return (
     <div className="surface-panel-subtle flex flex-col gap-3 rounded-xl p-3 sm:flex-row sm:items-start">
-      <div className="flex-1 space-y-2">
+      <div className="min-w-0 flex-1 space-y-2">
         <Select
           value={trigger.type}
           onValueChange={(v) => {
@@ -105,7 +147,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
             onChange(next);
           }}
         >
-          <SelectTrigger className="w-full sm:w-[160px]">
+          <SelectTrigger className={TRIGGER_FIELD_WIDTH}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -118,7 +160,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
         </Select>
 
         {trigger.type === "interval" && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <Input
               type="number"
               min={1}
@@ -131,7 +173,7 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
               value={intervalDraft.unit}
               onValueChange={(u) => updateInterval(intervalDraft.text, u as IntervalUnit)}
             >
-              <SelectTrigger className="w-full sm:w-[120px]">
+              <SelectTrigger className="w-full sm:w-fit sm:max-w-full sm:min-w-30">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -152,19 +194,19 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
         {trigger.type === "daily" && (
           <Input
             type="time"
-            className="w-full sm:w-[140px]"
+            className={TRIGGER_FIELD_WIDTH}
             value={trigger.time_of_day ?? "00:00"}
             onChange={(e) => onChange({ ...trigger, time_of_day: e.target.value })}
           />
         )}
 
         {trigger.type === "weekly" && (
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
             <Select
               value={String(trigger.day_of_week ?? 0)}
               onValueChange={(v) => onChange({ ...trigger, day_of_week: parseInt(v, 10) })}
             >
-              <SelectTrigger className="w-full sm:w-[140px]">
+              <SelectTrigger className={TRIGGER_FIELD_WIDTH}>
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -177,39 +219,50 @@ export function TriggerFormRow({ trigger, onChange, onRemove }: TriggerFormRowPr
             </Select>
             <Input
               type="time"
-              className="w-full sm:w-[140px]"
+              className={TRIGGER_FIELD_WIDTH}
               value={trigger.time_of_day ?? "00:00"}
               onChange={(e) => onChange({ ...trigger, time_of_day: e.target.value })}
             />
           </div>
         )}
 
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <label className="text-muted-foreground text-xs whitespace-nowrap">
+        {/* At large text sizes the label wraps above the box instead of widening the
+            row past its panel; the box and its unit stay together. */}
+        <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+          <label className="text-muted-foreground text-xs text-balance break-words">
             {t("web.admin.tasks.detail.maxRuntimeLabel")}
           </label>
-          <Input
-            type="number"
-            min={0}
-            step="any"
-            className="w-full sm:w-[100px]"
-            placeholder={t("web.admin.tasks.detail.maxRuntimeNone")}
-            value={trigger.max_runtime_ms != null ? trigger.max_runtime_ms / 60_000 : ""}
-            onChange={(e) => {
-              // Fractional minutes keep sub-minute limits saved through the API.
-              // A typed 0 stays 0 (no limit) so "0.5" can be entered; only an
-              // empty field clears it.
-              const raw = e.target.value;
-              onChange({
-                ...trigger,
-                max_runtime_ms:
-                  raw === "" ? undefined : Math.max(0, Math.round(Number(raw) * 60_000)),
-              });
-            }}
-          />
-          <span className="text-muted-foreground text-xs">
-            {t("web.admin.tasks.detail.maxRuntimeUnit")}
-          </span>
+          <div className="flex min-w-0 flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
+            <Input
+              type="number"
+              min={0}
+              step="any"
+              className={MAX_RUNTIME_INPUT_WIDTH}
+              placeholder={t("web.admin.tasks.detail.maxRuntimeNone")}
+              value={maxRuntimeDraft.text}
+              onChange={(e) => {
+                // Fractional minutes keep sub-minute limits saved through the API.
+                // A typed 0 stays 0 (no limit) so "0.5" can be entered; only an
+                // empty field clears it.
+                const raw = e.target.value;
+                const ms = raw === "" ? undefined : Math.max(0, Math.round(Number(raw) * 60_000));
+                // A negative entry is saved as 0, so show the 0 that Save sends.
+                setMaxRuntimeDraft({ ms, text: Number(raw) < 0 ? "0" : raw });
+                onChange({ ...trigger, max_runtime_ms: ms });
+              }}
+              onBlur={() => {
+                // An entry under half a millisecond, such as "0.000008" or "-0",
+                // saves as 0 (no limit). Show that 0 once the admin leaves the box,
+                // not while they type, so "0.00001" can still be entered.
+                if (maxRuntimeDraft.ms === 0 && maxRuntimeDraft.text !== "0") {
+                  setMaxRuntimeDraft({ ms: 0, text: "0" });
+                }
+              }}
+            />
+            <span className="text-muted-foreground text-xs">
+              {t("web.admin.tasks.detail.maxRuntimeUnit")}
+            </span>
+          </div>
         </div>
       </div>
 

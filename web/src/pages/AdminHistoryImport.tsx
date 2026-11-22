@@ -99,33 +99,33 @@ import { numberText, useT, type MessageKey } from "@/i18n";
 const STATUS_CONFIG = {
   queued: {
     icon: Clock,
-    color: "text-info",
+    color: "text-info-label",
     bg: "bg-info/10 border-info/20",
     label: "web.admin.historyImport.status.queued",
   },
   running: {
     icon: Loader2,
-    color: "text-warning",
+    color: "text-warning-label",
     bg: "bg-warning/10 border-warning/20",
     label: "web.admin.historyImport.status.running",
     spin: true,
   },
   canceling: {
     icon: Loader2,
-    color: "text-warning",
+    color: "text-warning-label",
     bg: "bg-warning/10 border-warning/20",
     label: "web.admin.historyImport.status.canceling",
     spin: true,
   },
   completed: {
     icon: CheckCircle2,
-    color: "text-success",
+    color: "text-success-label",
     bg: "bg-success/10 border-success/20",
     label: "web.admin.historyImport.status.completed",
   },
   failed: {
     icon: XCircle,
-    color: "text-destructive",
+    color: "text-destructive-label",
     bg: "bg-destructive/10 border-destructive/20",
     label: "web.admin.historyImport.status.failed",
   },
@@ -336,6 +336,7 @@ function SourceDialog({
           <div className="space-y-1.5">
             <Label htmlFor="src-url">{t("web.admin.historyImport.sourceDialog.serverUrl")}</Label>
             <Input
+              dir="ltr"
               id="src-url"
               placeholder={hints.url}
               value={baseURL}
@@ -666,7 +667,7 @@ function TokenDialog({
           )}
         </div>
         {conflict ? <ImportEditorConflict onReload={reload} /> : null}
-        <DialogFooter className="gap-2">
+        <DialogFooter className="gap-2 sm:flex-wrap">
           {source.has_admin_token && (
             <Button
               variant="destructive"

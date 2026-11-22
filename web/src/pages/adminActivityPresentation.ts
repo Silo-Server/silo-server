@@ -133,25 +133,25 @@ const ACTIVITY_METHOD_META: Record<string, ActivityMethodStyle> = {
     label: "web.common.activity.method.direct.label",
     description: "web.common.activity.method.direct.description",
     swatchClass: "bg-success",
-    badgeClass: "bg-success/10 text-success border-success/15",
+    badgeClass: "bg-success/10 text-success-label border-success/15",
   },
   remux: {
     label: "web.common.activity.method.remux.label",
     description: "web.common.activity.method.remux.description",
     swatchClass: "bg-info",
-    badgeClass: "bg-info/10 text-info border-info/15",
+    badgeClass: "bg-info/10 text-info-label border-info/15",
   },
   direct_stream: {
     label: "web.common.activity.method.directStream.label",
     description: "web.common.activity.method.directStream.description",
     swatchClass: "bg-warning",
-    badgeClass: "bg-warning/10 text-warning border-warning/15",
+    badgeClass: "bg-warning/10 text-warning-label border-warning/15",
   },
   transcode: {
     label: "web.common.activity.method.transcode.label",
     description: "web.common.activity.method.transcode.description",
     swatchClass: "bg-destructive",
-    badgeClass: "bg-destructive/10 text-destructive border-destructive/15",
+    badgeClass: "bg-destructive/10 text-destructive-label border-destructive/15",
   },
 };
 
@@ -288,15 +288,16 @@ export function formatToneMapSummary(session: AdminSession): ToneMapSummary | nu
   }
 }
 
-// Bitrate units (Mbps, kbps) are written the same way in every language.
+// Bitrate units (Mbps, kbps) are written the same way in every language. A
+// no-break space keeps the unit on its number's line when a narrow cell wraps.
 export function formatSessionBitrate(kbps?: number | null): string | null {
   if (!kbps || kbps <= 0) {
     return null;
   }
   if (kbps >= 1000) {
-    return `${formatDecimal(kbps / 1000, 1)} Mbps`;
+    return `${formatDecimal(kbps / 1000, 1)}\u00a0Mbps`;
   }
-  return `${Math.round(kbps)} kbps`;
+  return `${Math.round(kbps)}\u00a0kbps`;
 }
 
 export interface SessionBitrate {
@@ -699,26 +700,39 @@ function formatContainer(container?: string): string | null {
   return trimmed ? trimmed.toUpperCase() : null;
 }
 
+type EpisodeSession = AdminSession & {
+  series_title: string;
+  season_number: number;
+  episode_number: number;
+};
+
+export function isEpisodeSession(session: AdminSession): session is EpisodeSession {
+  return Boolean(
+    session.series_title && session.season_number != null && session.episode_number != null,
+  );
+}
+
+/**
+ * The stream's main line: the show for an episode, as other media apps do, since
+ * an episode's own title doesn't say which show it is. The subtitle carries the
+ * episode.
+ */
 export function getPlaybackSessionTitle(session: AdminSession): string {
-  if (session.series_title && session.season_number != null && session.episode_number != null) {
-    return session.media_title || `S${session.season_number}E${session.episode_number}`;
+  if (isEpisodeSession(session)) {
+    return session.series_title;
   }
   return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
 }
 
 export function getPlaybackSessionSubtitle(session: AdminSession): string | null {
-  if (session.series_title && session.season_number != null && session.episode_number != null) {
+  if (isEpisodeSession(session)) {
     const code = t("web.detail.episodeCode", {
       season: codeNumber(session.season_number),
       episode: codeNumber(session.episode_number),
     });
-    return t("web.common.activity.subtitle.episode", {
-      code,
-      series: session.series_title,
-    });
-  }
-  if (session.media_type === "movie") {
-    return t("web.common.activity.subtitle.movie");
+    return session.media_title
+      ? t("web.common.activity.subtitle.episodeTitle", { code, title: session.media_title })
+      : code;
   }
   if (session.media_type === "series" || session.media_type === "episode") {
     return t("web.common.activity.subtitle.series");
