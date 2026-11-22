@@ -449,6 +449,12 @@
       "value": "Влезте чрез входа на вашата мрежа, за да продължите."
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Този възел е зададен от конфигурацията за внедряване на сървъра. Премахнете го оттам и рестартирайте API сървърите, за да го управлявате тук."
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -13612,7 +13618,7 @@
             },
             {
               "type": 0,
-              "value": " не може да се възстанови – ще разшири достъпа, затова този сървър запазва по-строгите си стойности"
+              "value": " не може да се възстанови – ще разшири достъпа, затова този сървър запазва собствените си по-строги стойности"
             }
           ]
         },
@@ -13727,6 +13733,40 @@
             {
               "type": 0,
               "value": " не могат да се възстановят – друг акаунт тук влиза със същото потребителско име или имейл"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не може да се възстанови – средата на този сървър задава различаващите се настройки или част от съответната връзка"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " не могат да се възстановят – средата на този сървър задава различаващите се настройки или част от съответната връзка"
             }
           ]
         }
@@ -14259,6 +14299,40 @@
       "value": "Адресът на услуга се променя без данните ѝ за вход в резервното копие, затова възстановяването ги изчиства тук и изключва услугата, докато не бъдат въведени отново."
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настройка запазва текущата си стойност, защото средата на този сървър я задава или задава част от връзката ѝ."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " настройки запазват текущите си стойности, защото средата на този сървър ги задава или задава част от връзката им."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -14711,8 +14785,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Скриване"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14861,8 +14961,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Показване"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15571,14 +15697,30 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Избрано е и следното, необходимо за избраното от вас: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Избрани са и следните, необходими за избраното от вас: "
             },
             {
               "type": 1,
@@ -15606,21 +15748,35 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Изборът е премахнат и от следното, което зависи от премахнатото от вас: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Изборът е премахнат и от следните, които зависят от премахнатото от вас: "
             },
             {
               "type": 1,
@@ -15648,9 +15804,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -17089,6 +17243,12 @@
       "value": "Друг акаунт тук влиза със същото потребителско име или имейл."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Средата на този сървър задава различаващите се настройки или част от връзката им, затова този сървър запазва текущите си стойности."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -17631,6 +17791,154 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Фоново изображение"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " елемент от колекцията"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " елемента от колекцията"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Заменена колекция"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Конфигурация"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Описание"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Включване"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Препоръчване"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Ограничение на елементите"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Сортиране на елементите"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Библиотеки"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Позиция"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Постер"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Ред на сортиране"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Източник"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "График на синхронизиране"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Заглавие"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Превод на заглавието"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Тип"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Видимост"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Само в уеб"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -18163,6 +18471,16 @@
     {
       "type": 0,
       "value": " (запазено: по-строго)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (запазено: среда)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -19227,6 +19545,20 @@
       "value": "В часовата зона на сървъра."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "В часовата зона на сървъра. Във вашата часова зона това е "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -20119,14 +20451,22 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "данните му не можаха да се прочетат"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "данните им не можаха да се прочетат"
             }
           ]
         },
@@ -20138,9 +20478,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -20187,20 +20525,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Скриване на акаунтите"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване на акаунта"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване на акаунтите"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване на акаунтите"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Скриване на файловете"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване на файла"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване на файловете"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване на файловете"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Скриване на файлове"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване на файл"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване на файлове"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Скриване на файлове"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20263,6 +20679,346 @@
     {
       "type": 0,
       "value": "Те са посочени в базата данни, но не са намерени в хранилището; възстановяванията ги пропускат."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " елемент на брандинга"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " елемента на брандинга"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " фон на колекция"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " фона на колекции"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " плакат на колекция"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " плаката на колекции"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " изтеглен файл със субтитри"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " изтеглени файла със субтитри"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " плакат на библиотека"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " плаката на библиотеки"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " изображение за наслагване"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " изображения за наслагване"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " плакат на лична колекция"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " плаката на лични колекции"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " аватар на профил"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " аватара на профили"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " качен файл с обложка"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " качени файла с обложки"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " качен файл със субтитри"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " качени файла със субтитри"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -20509,14 +21265,26 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "не можа да се прочете частта му: "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "не можа да се прочете частта им: "
             },
             {
               "type": 1,
@@ -20536,9 +21304,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -20553,8 +21319,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Показване на акаунтите"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на акаунта"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на акаунтите"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на акаунтите"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20593,26 +21385,86 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Показване на файловете"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на файла"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на файловете"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на файловете"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Показване на файлове"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на файл"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на файлове"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Показване на файлове"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "данните му са твърде големи за комплекта за възстановяване"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "данните им са твърде големи за комплекта за възстановяване"
             }
           ]
         },
@@ -20624,9 +21476,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -28499,6 +29349,12 @@
       "value": "неуспешно"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Задачата е неуспешна. Вижте администраторската диагностика за подробности."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -30510,7 +31366,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Поток от наскоро започнати сесии за възпроизвеждане"
+      "value": "Последните пускания във всички акаунти"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32143,6 +32999,72 @@
     {
       "type": 0,
       "value": "Не можа да се зареди активността."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " пусна "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " пусна "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -45306,6 +46228,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Сканиранията и опресняванията на метаданните се показват тук, докато се изпълняват."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Няма активни сканирания или опреснявания"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Всички ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Скриване на опашката"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " друга библиотека"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " други библиотеки"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Опреснявания на метаданни"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Опресняват се метаданните…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Преглед на опашката"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Висока"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Ниска"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Средна"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -45744,6 +46774,30 @@
       "value": "Потвърждаване на изчистването на празни корени"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Проверка"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Няма елементи, чакащи в опашката за съпоставяне на метаданни."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Няма записани пропуснати корени."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Няма записани остарели външни ID."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -45780,6 +46834,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Редактиране"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Все още няма конфигурирани библиотеки."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -45832,6 +46898,12 @@
       "value": "Скриване на пътищата"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Без активност"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -45866,6 +46938,12 @@
       "value": "Частично сканиране"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Попълване на липсващите или замяна на всички метаданни"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -45878,6 +46956,12 @@
       "value": "Недостъпен корен"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Сканиране"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -45888,6 +46972,12 @@
     {
       "type": 0,
       "value": "Показване на пътищата"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Спиране"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -45906,6 +46996,22 @@
     {
       "type": 0,
       "value": "Проверка на монтираните устройства"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Проверка дали всички папки на библиотеката са достъпни"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Преглед на активните сканирания в библиотеката "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -46009,7 +47115,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Управление на корените и сканиранията на библиотеките. Импортирането и експортирането на каталога вече са в раздела „Поддръжка“."
+      "value": "Управление на медийните папки, наблюдение на сканиранията и решаване на проблемите със съпоставянето."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -46488,6 +47594,56 @@
       "value": "Остарели външни ID"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " активна"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " активни"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Активност на сканирането"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Състояние на каталога"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Библиотеки"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -46930,6 +48086,24 @@
     {
       "type": 0,
       "value": "Търсене в игнорираните елементи по заглавие, библиотека или тип…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Нееднозначно"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Изчакващо"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Несъпоставено"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -49576,6 +50750,12 @@
       "value": "Въведете адреса на сървъра, за да завършите настройките."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ключът е зададен от конфигурацията за внедряване на сървъра"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50492,6 +51672,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Възелът е зададен от конфигурацията за внедряване на сървъра. Премахнете го оттам и рестартирайте API сървърите, за да го изтриете тук."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -53109,6 +54295,114 @@
       "value": "Генерирането е спряно. Запазените препоръки остават видими в „Откриване“, докато сървърът не се рестартира."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Класират се профилите ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Извличат се списъците от TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Проверяват се заглавията и се създават ембединги ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Изчистено е "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " изтекло заглавие"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Изчистени са "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " изтекли заглавия"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53141,6 +54435,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Разрешете конфликта със заключването на ембединга по-долу, преди да създавате препоръки в „Откриване“."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Първо стартирайте заданието „Ембединги“, за да има Silo вектори на библиотеката за сравнение."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Свържете доставчик на ембединги в страницата „ИИ услуги“, преди да създавате препоръки в „Откриване“."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Все още няма профили с вкусови профили. Стартирайте „Вкусови профили“, след като в профилите има гледани или оценени заглавия."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -55007,6 +56325,32 @@
       "value": "Остава празен, докато препоръките в „Откриване“ не бъдат включени в Администриране → Препоръки."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Препоръчаните редове остават празни, докато препоръките в „Откриване“ не бъдат включени в "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Администриране → Препоръки"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Изключено в „Препоръки“"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56493,6 +57837,12 @@
       "value": "Новите редове се добавят най-долу в „Откриване“"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Отваряне на настройките в „Препоръки“"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56505,6 +57855,12 @@
       "value": "Емисията на MDBList не съдържа сортирането, запазено на страницата на списъка. Изберете това, което се показва там."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Вашият профил все още няма препоръки в „Откриване“. Стартирайте препоръките в „Откриване“ или гледайте и оценете няколко заглавия, за да видите преглед на този ред."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56515,6 +57871,12 @@
     {
       "type": 0,
       "value": "Изберете списък или поставете връзката към него, за да видите заглавията му."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Включете препоръките в „Откриване“ в Администриране → Препоръки, за да видите преглед на този ред."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -60249,6 +61611,12 @@
       "value": "Проверката на връзката е неуспешна."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Не можа да се провери дали средата на сървъра задава тази настройка. Презаредете страницата, за да я редактирате."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60803,6 +62171,30 @@
     {
       "type": 0,
       "value": "Неуспешно обновяване на канала"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Презаредете, за да видите текущите стойности. Ако нещо на тази страница се е променило или сте редактирали запазена парола или ключ, всички ваши промени се отменят; в противен случай се запазват."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Презареждане"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Не можаха да се презаредят настройките. Опитайте отново."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Настройките са променени другаде"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -66273,6 +67665,24 @@
       "value": "Преминаването към друг модел изисква нулиране на ембедингите, което изтрива всички тях. Друг доставчик, обслужващ същия модел, влиза в сила след рестартиране."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Добавяне в „Откриване“"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Препоръчаните редове не можаха да се добавят към страницата „Откриване“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Препоръчаните редове са добавени към страницата „Откриване“."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66295,6 +67705,44 @@
     {
       "type": 0,
       "value": "Колко заглавия, които не са в библиотеката, сървърът пази, за да препоръчва от тях. Всяко се проверява в TMDB и за него се създава ембединг. Създаването на ембединги обикновено е евтино, но по-голям брой може да струва повече или да отнеме повече време в зависимост от доставчика на ембединги и използва повече място за съхранение."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Вашата страница „Откриване“ все още не показва редове с препоръки."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Включете опцията „Активиране на препоръките“ по-горе и рестартирайте сървъра, за да могат да се изпълняват препоръките в „Откриване“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Заявките в момента са изключени. Включете ги в "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Настройки за заявки"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", за да могат зрителите да виждат страницата „Откриване“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Отваряне на страницата „Откриване“"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75485,6 +76933,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Хранилището не може да се премести тук, докато средата задава настройки за хранилището ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Първо премахнете тези променливи и рестартирайте всички API сървъри."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76621,6 +78083,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Този график идва от настройките за резервни копия. Променете го в "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Сървър › Резервни копия"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -76923,10 +78405,66 @@
       "value": "Скорошни грешки"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Опресняването е неуспешно. Вижте администраторската диагностика за подробности."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Преглед на текущия график"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -77371,6 +78909,18 @@
     {
       "type": 0,
       "value": "Нов опит за уебхукове на Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Прочита отново заглавната част на MKV файловете с ASS субтитри, сканирани преди Silo да изключва вградените шрифтове от битрейта, така че да не се транскодират заради битрейт, който не предават поточно."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Коригиране на битрейта на файлове с вградени шрифтове"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -86894,25 +88444,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Не можа да се влезе в телевизора. Опитайте отново."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Проверете дали приложението ви показва"
+      "value": "Не можа да се одобри входът. Опитайте отново."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Проверете дали телевизорът ви показва"
+      "value": "Проверете дали този код съвпада"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Въведете кода от телевизора или приложението"
+      "value": "Въведете кода, показан на устройството ви"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86924,13 +88468,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Влезте с акаунта си в телевизор или друго устройство."
+      "value": "Вход в телевизор, приложение или друго устройство."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Вход в телевизор"
+      "value": "Одобряване на входа"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86950,13 +88494,13 @@
     },
     {
       "type": 0,
-      "value": ", за да одобрите телевизор. Само от самия акаунт може да се влезе в телевизор."
+      "value": ", за да одобрите този вход. Само от самия акаунт могат да се одобряват устройства."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Спрете да преглеждате като този потребител, за да одобрите телевизор. Само от самия акаунт може да се влезе в телевизор."
+      "value": "Спрете да преглеждате като този потребител, за да одобрите този вход. Само от самия акаунт могат да се одобряват устройства."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86974,39 +88518,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Не намерихме този код. Проверете кода на телевизора си."
+      "value": "Не намерихме този код. Проверете кода и опитайте отново."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Не сега"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "По-старите приложения за телевизор показват вместо това "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Одобрявайте само устройство, което е пред вас в момента."
+      "value": "Отхвърляне"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Одобрявайте само телевизор, който е пред вас в момента."
+      "value": "Одобрявайте само ако сами сте започнали входа."
     }
   ],
   "web.auth.activate.playOn": [
@@ -87032,7 +88556,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Всеки, който използва този телевизор, може да избира от вашите профили. Профилите с PIN остават заключени."
+      "value": "Така устройството получава достъп до профилите ви. Профилите с PIN остават заключени."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -87079,6 +88603,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Заявено "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -87092,7 +88626,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Този телевизор спря да чака. Започнете отново от телевизора."
+      "value": "Това устройство спря да чака. Започнете входа отново от него."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -87101,10 +88635,38 @@
       "value": "Този вход беше отхвърлен."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Готово. Извършва се вход на "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "…"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Входът на "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " е извършен."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Този код изтече. Телевизорът ви показва нов. Използвайте него."
+      "value": "Този код е изтекъл. Генерирайте нов код на устройството и опитайте отново."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -87188,25 +88750,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Входът на този телевизор вече е завършен."
+      "value": "В това устройство вече е извършен вход."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Този телевизор е одобрен и завършва входа."
+      "value": "Това устройство е одобрено и завършва входа."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Готово. Телевизорът ви влиза."
+      "value": "Готово. Извършва се вход в устройството ви…"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Входът на телевизора ви е завършен."
+      "value": "Входът в устройството ви е извършен."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87250,7 +88812,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Да влезе ли устройството "
+      "value": "Да се разреши ли вход на "
     },
     {
       "type": 1,
@@ -87264,7 +88826,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Да влезе ли това устройство?"
+      "value": "Да се разреши ли вход на това устройство?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87284,13 +88846,13 @@
     },
     {
       "type": 0,
-      "value": ", за да одобрите този телевизор."
+      "value": ", за да одобрите този вход."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Вход на телевизора"
+      "value": "Одобряване на входа"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88336,7 +89898,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Не можа да се извърши вход на устройството. Опитайте отново."
+      "value": "Не можа да се одобри входът. Опитайте отново."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -109468,6 +111030,12 @@
       "value": "Показва"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Управлява се от този сървър. Какво показва, не може да се променя тук; добавете собствен ред, за да изберете какво да показва."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -109782,6 +111350,12 @@
       "value": "Превежда се…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Скриване на редовете на сървъра, добавени след този експорт:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109800,6 +111374,12 @@
     {
       "type": 0,
       "value": ", като заменят разделите, които сте добавили тук преди. Промените ви в разделите на този сървър се запазват."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Редовете на този сървър са се променили, откакто този файл е експортиран, затова изберете по-долу редовете, които да се скрият."
     }
   ],
   "web.home.layout.checking": [
@@ -109850,6 +111430,26 @@
     {
       "type": 0,
       "value": "Включва „Скриване на гледаните елементи“."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Скрива избраните редове в: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", без да променя другите ви редове там."
     }
   ],
   "web.home.layout.import": [
@@ -109954,6 +111554,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -110162,6 +111780,12 @@
     {
       "type": 0,
       "value": "Раздел без име"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Скриване на редовете на сървъра, които не са в този файл:"
     }
   ],
   "web.home.page.customize": [
@@ -113121,6 +114745,12 @@
     {
       "type": 0,
       "value": "Основен банер · Само в уеб"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Сървър"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -126757,6 +128387,16 @@
       "value": "Към страница 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Към страница "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -126847,6 +128487,20 @@
     {
       "type": 0,
       "value": "Страници със заглавия за заявка за добавяне"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Страница "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " е след края на тези резултати."
     }
   ],
   "web.requests.toAdd.series": [
@@ -128439,6 +130093,12 @@
     {
       "type": 0,
       "value": "Четене на известията на профила при пристигането им и маркирането им като прочетени."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Преглед на това, което се възпроизвежда в момента в профила или във всички профили на акаунта, когато ключът не посочва профил: заглавие, позиция, състояние на пауза, устройство и начин на възпроизвеждане. Без управление на възпроизвеждането и без мрежови данни."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

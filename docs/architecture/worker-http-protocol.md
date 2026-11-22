@@ -546,7 +546,9 @@ Transcode nodes have no rolling upgrade across the change to node keys. An
 older API server or proxy signs for a transcode node with the shared secret,
 which a current node refuses, and a current API server signs for an older node
 with its node key, which that node cannot verify. Stop the transcode nodes,
-upgrade the API servers and proxies, issue each transcode node a key, then
+upgrade the API servers and proxies, issue each transcode node a key (a node
+the API servers [declare](transcode-nodes.md#declared-nodes) is adopted with
+that issued key; only a new id can take a generated one), then
 start the upgraded nodes with `SILO_CORE_URL` and `SILO_NODE_KEY` (see
 [transcode nodes](transcode-nodes.md#failure-behavior)). Until a node has a key, placement
 gives it no work, and a node still running an older binary answers health

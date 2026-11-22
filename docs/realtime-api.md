@@ -172,6 +172,29 @@ unmanaged download's `download` event, reaches no socket. Settings events name
 the changed key and scope; they do not carry its value. Channel eligibility,
 snapshots and socket authority/lifetime checks are unchanged.
 
+### Playback stop events
+
+A playback stop that writes progress, history, or watched state for episodes
+in the same file publishes a `user_state.changed` event on the `user_state`
+channel after those writes. This includes stops through the Jellyfin-compatible
+playback API. The event itself is delivered through the native v2 events socket
+to the account and profile that owns the play.
+
+```json
+{"type":"event","channel":"user_state","event":"user_state.changed","event_id":"01J…","timestamp":"2026-11-19T23:42:54Z","data":{"profile_id":"profile-1","content_id":"episode-1","series_id":"series-1","change":"progress","playback_stopped":true}}
+```
+
+`content_id` names the movie or episode that was playing. `series_id` is
+present when the server resolves the episode's series. `playback_stopped` is
+an optional boolean. Ordinary progress changes, including progress sync, omit
+it. An already-settled replay that changes no watch state emits no event.
+
+When `playback_stopped` is true, clients can refresh Continue Watching and
+Next Up promptly instead of waiting for their ordinary progress refresh
+interval. Read the current rows from the Home sections API. Socket delivery is
+best effort, so clients should also re-read when they reconnect or return to
+Home after being away.
+
 ### Catalog item changes
 
 On the `catalog` channel, `catalog.item.changed` reports a change to one item.

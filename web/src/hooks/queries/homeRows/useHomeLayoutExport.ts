@@ -13,10 +13,10 @@ import {
 import { SETTING_KEYS } from "@/lib/settingsContract";
 
 const HOME_PREFERENCE_KEYS = [SETTING_KEYS.HOME_HIDE_WATCHED_ITEMS] as const;
-// Page reads during export run this many at a time.
+// Page reads during export and import run this many at a time.
 const READ_BATCH = 4;
 
-async function readInBatches<T, R>(items: readonly T[], read: (item: T) => Promise<R>) {
+export async function readInBatches<T, R>(items: readonly T[], read: (item: T) => Promise<R>) {
   const results: R[] = [];
   for (let start = 0; start < items.length; start += READ_BATCH) {
     results.push(...(await Promise.all(items.slice(start, start + READ_BATCH).map(read))));
@@ -104,11 +104,18 @@ export function useHomeLayoutExport(): HomeLayoutExport {
         ...libraries.map((library) => ({ scope: "library" as const, libraryId: library.id })),
       ];
       const pages = await readInBatches(sources, async (source) => {
-        const result = await v2("GET /api/v2/profile/sections", {
-          query: layoutPageQuery(source.scope, source.libraryId),
-          profileContext,
-        });
-        return { ...source, overrides: result.items };
+        const query = layoutPageQuery(source.scope, source.libraryId);
+        // The tokens are optional: without them the page still exports, and
+        // an import of it offers no rows to hide.
+        const [result, baseline] = await Promise.all([
+          v2("GET /api/v2/profile/sections", { query, profileContext }),
+          v2("GET /api/v2/profile/sections/baseline", { query, profileContext }).catch(() => null),
+        ]);
+        return {
+          ...source,
+          overrides: result.items,
+          serverSectionTokens: baseline?.section_tokens,
+        };
       });
       const exportedAt = new Date();
       const file = buildHomeLayoutFile({

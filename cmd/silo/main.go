@@ -104,7 +104,9 @@ import (
 	_ "github.com/Silo-Server/silo-server/internal/metadata/nfo"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodebuild"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
+	"github.com/Silo-Server/silo-server/internal/nodeinstall"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
@@ -131,6 +133,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/server"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/storagetransition"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
@@ -157,7 +160,9 @@ import (
 	siloweb "github.com/Silo-Server/silo-server/web"
 )
 
-const serverModeTranscode = "transcode"
+// nodeBuildOnly is what a node build answers anything but a transcode node
+// run or a "silo node" subcommand.
+const nodeBuildOnly = "this silo build runs only as a transcode node: install it with `silo node install`, or set MODE=transcode"
 
 // serverModeProxy is MODE for a proxy node.
 const serverModeProxy = "proxy"
@@ -522,7 +527,7 @@ func keptSubtitleStore(stores blobstore.Stores, assetsS3 *s3client.Client) blobs
 func configureOperationalLogging(
 	ctx context.Context,
 	pool *pgxpool.Pool,
-	settingsRepo catalog.SettingsStore,
+	settingsRepo serversettings.SettingsStore,
 	logStreamHub *logstream.Hub,
 	filteredHandler slog.Handler,
 	nodeID string,
@@ -645,7 +650,7 @@ func librarySettingsCleaner(pool *pgxpool.Pool, stores userstore.UserStoreProvid
 // provider registry, once. Every API node may run it; the settings lock makes
 // the first one do the work and the rest find nothing left to convert. A
 // failure leaves those jobs unconfigured rather than stopping the server.
-func convertLegacyAIProviders(ctx context.Context, settings *catalog.EncryptedSettingsRepo) {
+func convertLegacyAIProviders(ctx context.Context, settings *serversettings.EncryptedSettingsRepo) {
 	converted := false
 	var unconverted []string
 	err := settings.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
@@ -671,7 +676,7 @@ func convertLegacyAIProviders(ctx context.Context, settings *catalog.EncryptedSe
 // mismatch gets the fix and this key's check value, which the GCM error alone
 // does not point to.
 func settingsLoadError(err error, secretKey []byte) string {
-	if !errors.Is(err, catalog.ErrSecretKeyMismatch) {
+	if !errors.Is(err, serversettings.ErrSecretKeyMismatch) {
 		return fmt.Sprintf("loading settings: %v", err)
 	}
 	check, cerr := secret.KeyCheckValue(secretKey)
@@ -682,10 +687,10 @@ func settingsLoadError(err error, secretKey []byte) string {
 		"This server's SECRET_KEY has check value %s. "+
 		"Every API server and proxy node that uses this database needs the SECRET_KEY it was encrypted with; "+
 		"a transcode node's node key is a different credential. Restore the original key and restart. "+
-		"To compare keys, run: printf %%s \"$SECRET_KEY\" | silo secret check", err, check)
+		"To compare keys, run: printf %%s \"$SECRET_KEY\" | silo secret check (or: silo secret check --file \"$SECRET_KEY_FILE\")", err, check)
 }
 
-func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *catalog.EncryptedSettingsRepo) {
+func runCredentialBackfills(ctx context.Context, pool *pgxpool.Pool, cipher *secret.Cipher, settings *serversettings.EncryptedSettingsRepo) {
 	settingsN, err := settings.BackfillSensitiveSettings(ctx)
 	if err != nil {
 		slog.ErrorContext(ctx, "secret backfill: sensitive settings", "component", "app", "error", err)
@@ -783,22 +788,28 @@ func applyBootstrapOverrides(cfg *config.Config, bc *config.BootstrapConfig) {
 // here and the values in effect. REDIS_URL names the database number too, so
 // redis.db is one of them and reports the number in use. With a value the
 // parser cannot read, a server that stays up has only the event bus connected,
-// to a bare address and on database 0.
-func addRedisBootstrapSettings(redisURL string, configured map[string]bool, values, vars map[string]string) {
+// to a bare address and on database 0. redisURLVar is the variable that
+// supplied it: REDIS_URL, or REDIS_URL_FILE.
+func addRedisBootstrapSettings(redisURL, redisURLVar string, configured map[string]bool, values, vars map[string]string) {
 	if redisURL == "" {
 		return
 	}
 	configured["redis.url"] = true
 	values["redis.url"] = redisURL
-	vars["redis.url"] = "REDIS_URL"
+	vars["redis.url"] = redisURLVar
 	configured[config.RedisDBSettingKey] = true
-	vars[config.RedisDBSettingKey] = "REDIS_URL"
+	vars[config.RedisDBSettingKey] = redisURLVar
 	db, _ := (config.RedisConfig{URL: redisURL}).Database()
 	values[config.RedisDBSettingKey] = strconv.Itoa(db)
 }
 
 // main starts the Silo server or a requested maintenance command.
 func main() {
+	// A node build has no image processing or web app, so it runs no
+	// subcommand but its own; flags still reach the transcode node.
+	if nodebuild.Node && len(os.Args) > 1 && os.Args[1] != "node" && !strings.HasPrefix(os.Args[1], "-") {
+		log.Fatal(nodeBuildOnly)
+	}
 	var storageAdmission *pglock.NodeAdmission
 	// The admission session is detached from the pool and lives until process
 	// exit. Worker Stop methods do not all wait for in-flight writes, so closing
@@ -842,6 +853,13 @@ func main() {
 		return
 	}
 
+	if len(os.Args) > 1 && os.Args[1] == "node-key" {
+		if err := runNodeKeyCommand(os.Args[2:], os.Stdout); err != nil {
+			log.Fatalf("node-key: %v", err)
+		}
+		return
+	}
+
 	if len(os.Args) > 1 && os.Args[1] == "plugins" {
 		if err := runPluginRecoveryCommand(context.Background(), os.Args[2:], os.Stdout); err != nil {
 			log.Fatalf("plugins: %v", err)
@@ -859,6 +877,14 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "secret" {
 		if err := runSecretCommand(os.Args[2:], os.Stdin, os.Stdout); err != nil {
 			log.Fatal(err)
+		}
+		return
+	}
+
+	if len(os.Args) > 1 && os.Args[1] == "node" {
+		if err := nodeinstall.Run(os.Args[2:], os.Stdin, os.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "silo node: %v\n", err)
+			os.Exit(1)
 		}
 		return
 	}
@@ -896,6 +922,9 @@ func main() {
 		runTranscodeNode()
 		return
 	}
+	if nodebuild.Node {
+		log.Fatal(nodeBuildOnly)
+	}
 
 	// Step 1: Bootstrap from .env
 	bc, err := config.LoadBootstrap(*envFile)
@@ -930,11 +959,24 @@ func main() {
 	// SILO_DB_MAX_CONNECTIONS sizes it.
 	isPrimaryNode := bc.Mode == "integrated" || bc.Mode == "api" || bc.Mode == ""
 	var envSettings config.EnvSettings
+	// The deployment document (SILO_CONFIG or SILO_CONFIG_FILE) is read with
+	// them: its AI providers are stored with the environment's settings, and
+	// its plugins section goes to the provisioning writer once plugins load.
+	var deploymentDocument *plugins.ProvisionDocument
+	var declaredAIProviders deploymentAIProviders
 	if isPrimaryNode && !*migrateOnly && !*migrateStatus && *migrateDownTo < 0 {
-		envSettings, err = config.ReadEnvSettings(os.Getenv)
+		envSettings, err = config.ReadEnvSettings(os.Getenv, serversettings.SensitiveSettingKeys)
 		if err != nil {
 			log.Fatalf("%v", err)
 		}
+		if deploymentDocument, err = plugins.ReadProvisionDocument(); err != nil {
+			log.Fatalf("read deployment configuration: %v", err)
+		}
+		providers, declared, err := deploymentDocument.DeclaredAIProviders()
+		if err != nil {
+			log.Fatalf("%s: %v", deploymentDocument.Variable(), err)
+		}
+		declaredAIProviders = deploymentAIProviders{declared: declared, providers: providers, variable: deploymentDocument.Variable()}
 	}
 
 	// Step 2: Connect to PostgreSQL (bootstrap pool sized by
@@ -976,9 +1018,22 @@ func main() {
 	// server's, back up the database when migrations are pending, then
 	// migrate (database.MigrateAtStartup, docs/architecture/backups.md).
 	migrationWait := database.MigrationWait()
+	// That backup takes one setting from the environment, SILO_BACKUP_ENABLED,
+	// on every server that migrates (an API server has already refused an
+	// invalid value), so a migration job's other variables can't stop it or
+	// drop that one.
+	backupEnv, backupEnvErr := config.ReadEnvSettings(func(name string) string {
+		if name == config.BackupEnabledEnvVar {
+			return os.Getenv(name)
+		}
+		return ""
+	}, nil)
+	if backupEnvErr != nil {
+		slog.Warn("the backup before migrations uses the stored backup.enabled", "error", backupEnvErr)
+	}
 	startupMigrations := database.StartupOptions{
 		Wait:          migrationWait,
-		BeforeMigrate: beforeMigrateBackup(bc, pool, dataCipher, migrationWait),
+		BeforeMigrate: beforeMigrateBackup(bc, pool, dataCipher, migrationWait, backupEnv),
 	}
 
 	if *migrateOnly {
@@ -1006,7 +1061,7 @@ func main() {
 	// every consumer (config.LoadFromDB, admin, ABS, watchers) transparently sees
 	// plaintext while sensitive keys rest as ciphertext. The settings backfill
 	// (run after migrations, before this GetAll) is wired further below.
-	settingsRepo := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
+	settingsRepo := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), dataCipher)
 	if isPrimaryNode {
 		// Read once before the backfills: under a wrong SECRET_KEY they would
 		// encrypt plaintext credentials with that key, leaving rows the right
@@ -1047,7 +1102,7 @@ func main() {
 	// The settings the environment sets win over the stored ones. Cluster-wide
 	// ones are stored so the admin UI and the other servers see the values in
 	// effect; per-process ones only overlay this process's settings.
-	envSettings, envChangedKeys, err := applyEnvSettings(ctx, settingsRepo, settings, envSettings, bc.RedisURL)
+	envSettings, envChangedKeys, err := applyEnvSettings(ctx, settingsRepo, settings, envSettings, declaredAIProviders, bc.RedisURL)
 	if err != nil {
 		log.Fatalf("%v", err)
 	}
@@ -1092,7 +1147,7 @@ func main() {
 	}
 	// Re-wrap with the encrypting decorator so the recreated pool's settings repo
 	// still encrypts/decrypts — no raw settings repo may escape into later wiring.
-	settingsRepo = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), dataCipher)
+	settingsRepo = serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), dataCipher)
 	// One reader for access.unrated_content, shared by every scope resolver and
 	// the recommendations engine: forgetting the builder call at a construction
 	// site fails silently (unrated titles hidden, no error).
@@ -1433,7 +1488,7 @@ func main() {
 	bootstrapSensitiveConfigured := map[string]bool{}
 	bootstrapSensitiveValues := map[string]string{}
 	bootstrapEnvVars := map[string]string{}
-	addRedisBootstrapSettings(bc.RedisURL, bootstrapSensitiveConfigured, bootstrapSensitiveValues, bootstrapEnvVars)
+	addRedisBootstrapSettings(bc.RedisURL, bc.RedisURLVar, bootstrapSensitiveConfigured, bootstrapSensitiveValues, bootstrapEnvVars)
 	addEnvSettingLocks(envSettings, bootstrapSensitiveConfigured, bootstrapSensitiveValues, bootstrapEnvVars)
 
 	// Shared Redis client for components needing raw Redis beyond the event
@@ -1671,6 +1726,10 @@ func main() {
 		nodeRepo := nodepool.NewRepository(pool)
 		deps.NodeRepo = nodeRepo
 
+		// Before the first pool and credential loads, so both see the
+		// declared nodes.
+		provisionTranscodeNodes(appCtx, pool, dataCipher, eventBus)
+
 		proxyPool := nodepool.NewProxyPool()
 		transcodePool := nodepool.NewTranscodePool()
 
@@ -1812,7 +1871,7 @@ func main() {
 		// Read the identity rows under the settings mutation lock, so a commit
 		// already in progress finishes before the check. The rows are plain,
 		// so an unreadable encrypted setting cannot block a rejoin.
-		identityRows := catalog.NewServerSettingsRepo(pool)
+		identityRows := serversettings.NewServerSettingsRepo(pool)
 		storageAdmission.SetRejoinCheck(func(ctx context.Context) error {
 			err := identityRows.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
 				return nil, blobstore.CheckRecordedLocation(current, assetsIdentity, privateIdentity)
@@ -2053,12 +2112,17 @@ func main() {
 			installer,
 			plugins.NewHostAdapter(pluginHost),
 		)
-		provisionDocument, err := plugins.ReadProvisionDocument()
-		if err != nil {
-			log.Fatalf("read plugin provisioning: %v", err)
+		// A frontend server provisions plugins but stores no settings from
+		// its environment, so it reads the document here.
+		if bc.Mode == "frontend" {
+			if deploymentDocument, err = plugins.ReadProvisionDocument(); err != nil {
+				log.Fatalf("read deployment configuration: %v", err)
+			}
 		}
-		if provisionDocument != nil {
-			pluginProvisionWriter = plugins.NewProvisionWriter(deps.DB, repositoryStore, installationStore, installer, catalogService, runtimeConfigStore, pluginService, provisionDocument,
+		// A deployment document without a plugins section leaves plugin
+		// installations as they are, as no document does.
+		if deploymentDocument.DeclaresPlugins() {
+			pluginProvisionWriter = plugins.NewProvisionWriter(deps.DB, repositoryStore, installationStore, installer, catalogService, runtimeConfigStore, pluginService, deploymentDocument,
 				metadata.ApplyProvisionedMetadataPlacement)
 			runtimeConfigStore.SetProvisionWriter(pluginProvisionWriter)
 			deps.PluginProvisionStatus = runtimeConfigStore.ListProvisionStatus
@@ -2703,6 +2767,20 @@ func main() {
 		defer policySystem.Stop()
 	}
 
+	// Build a viewer scope resolver using the current userStoreProvider (raw
+	// for notifications before wrapping below, wrapped for downstream callers).
+	newViewerResolver := func(users access.UserRepository, tokens access.ProfileTokenValidator) scopeResolver {
+		if policySystem != nil {
+			return policy.NewViewerResolver(users, userStoreProvider, tokens, policySystem.PDP(), accessGroupStore).
+				WithUnratedContentPolicy(unratedContent).
+				WithAdminDefaults(adminDefaults)
+		}
+		// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
+		return access.NewResolver(users, userStoreProvider, tokens, accessGroupStore).
+			WithUnratedContentPolicy(unratedContent).
+			WithAdminDefaults(adminDefaults)
+	}
+
 	// White-label branding: one service shared by the API (public read + admin
 	// upload), the frontend handler (index.html title, favicon, manifest), the
 	// artwork reconcile task, and outgoing email. It is built before the
@@ -2726,13 +2804,7 @@ func main() {
 	if deps.DB != nil && userStoreProvider != nil {
 		userRepo := auth.NewUserRepository(deps.DB)
 		profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
-		var notificationScopes notifications.ScopeResolver
-		if policySystem != nil {
-			notificationScopes = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		} else {
-			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-			notificationScopes = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		}
+		notificationScopes := newViewerResolver(userRepo, profileTokens)
 		notificationSystem = notifications.NewSystem(
 			deps.DB,
 			settingsRepo,
@@ -2849,15 +2921,7 @@ func main() {
 		historyIdentity := watchstate.NewStableIdentityResolver(itemRepo, episodeRepo, catalog.NewProviderIDRepository(deps.DB))
 		// A sync's episodes follow what the profile may open, as any viewer
 		// read does, so it resolves scope the same way.
-		var watchProviderScopes interface {
-			Resolve(context.Context, access.ResolveInput) (access.Scope, error)
-		}
-		if policySystem != nil {
-			watchProviderScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent)
-		} else {
-			// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path.
-			watchProviderScopes = access.NewResolver(auth.NewUserRepository(deps.DB), userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent)
-		}
+		watchProviderScopes := newViewerResolver(auth.NewUserRepository(deps.DB), nil)
 		watchProviderLibrary := catalog.NewLibraryItemRepository(deps.DB)
 		watchProviderService.
 			WithMatcher(historyimport.NewMatcher(historyRepo)).
@@ -3076,12 +3140,7 @@ func main() {
 			// Cached rows are built under the scope the API resolves for the
 			// profile's own requests, so reads do not filter them down.
 			recUserRepo := auth.NewUserRepository(deps.DB)
-			if policySystem != nil {
-				recEngine.WithScopeResolver(policy.NewViewerResolver(recUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults))
-			} else {
-				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				recEngine.WithScopeResolver(access.NewResolver(recUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults))
-			}
+			recEngine.WithScopeResolver(newViewerResolver(recUserRepo, nil))
 		}
 		deps.Recommender = recEngine
 		deps.CatalogSearchVectorizer = recEngine
@@ -3322,13 +3381,7 @@ func main() {
 			// Imports fill their item limit with titles their owner profile
 			// can access. Scheduled syncs start with the task manager below,
 			// so the owner resolver is wired here, not in the router.
-			var ownerScopes scopeResolver
-			if policySystem != nil {
-				ownerScopes = policy.NewViewerResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			} else {
-				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				ownerScopes = access.NewResolver(auth.NewUserRepository(deps.DB), deps.UserStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			}
+			ownerScopes := newViewerResolver(auth.NewUserRepository(deps.DB), nil)
 			userSync := usercollections.NewService(deps.UserStoreProvider, collItemRepo, libraryItemRepo, usercollections.NewOwnerAccess(ownerScopes), nil, slog.Default())
 			userSync.TMDBCollections = collectionService.TMDBCollections
 			// Syncs refresh collages and start with the task manager below,
@@ -3744,13 +3797,7 @@ func main() {
 		if userStoreProvider != nil {
 			userRepo := auth.NewUserRepository(deps.DB)
 			profileTokens := access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
-			var reconcileResolver scopeResolver
-			if policySystem != nil {
-				reconcileResolver = policy.NewViewerResolver(userRepo, userStoreProvider, profileTokens, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			} else {
-				// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-				reconcileResolver = access.NewResolver(userRepo, userStoreProvider, profileTokens, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-			}
+			reconcileResolver := newViewerResolver(userRepo, profileTokens)
 			requestReconcileSvc.SetEntitlementResolver(scopeEntitlementResolver{resolver: reconcileResolver})
 		}
 		if notificationSystem != nil {
@@ -3907,12 +3954,7 @@ func main() {
 		if deps.ImageResolver != nil {
 			absDetailSvc.SetImageResolver(deps.ImageResolver)
 		}
-		var absScopeResolver scopeResolver
-		if policySystem != nil {
-			absScopeResolver = policy.NewViewerResolver(absUserRepo, userStoreProvider, nil, policySystem.PDP(), accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		} else {
-			absScopeResolver = access.NewResolver(absUserRepo, userStoreProvider, nil, accessGroupStore).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-		}
+		absScopeResolver := newViewerResolver(absUserRepo, nil)
 		absHDeps := audiobooks.ABSHandlerDeps{
 			Pool:     deps.DB,
 			Items:    absItemRepo,
@@ -4351,24 +4393,8 @@ func main() {
 			// user-disabled libraries, and rating/quality ceilings apply to
 			// the compat API exactly as they do to the native API.
 			if userStoreProvider != nil {
-				var compatScopeResolver jellycompat.ScopeResolver
-				if policySystem != nil {
-					compatScopeResolver = policy.NewViewerResolver(
-						userRepo,
-						userStoreProvider,
-						nil, // profile tokens unused: compat login already verifies PINs
-						policySystem.PDP(),
-						accessGroupStore,
-					).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-				} else {
-					// Legacy resolver: proxy/test wiring without a policy system. Production integrated/api modes always take the policy path. Removed with the legacy cleanup phase.
-					compatScopeResolver = access.NewResolver(
-						userRepo,
-						userStoreProvider,
-						nil, // profile tokens unused: compat login already verifies PINs
-						accessGroupStore,
-					).WithUnratedContentPolicy(unratedContent).WithAdminDefaults(adminDefaults)
-				}
+				// profile tokens unused: compat login already verifies PINs
+				compatScopeResolver := newViewerResolver(userRepo, nil)
 				compatDeps.AccessFilterFn = jellycompat.NewScopeAccessFilter(compatScopeResolver)
 				compatDeps.PlaybackScopeResolver = compatScopeResolver
 			}
@@ -4448,7 +4474,7 @@ func main() {
 			lanDiscoveryDone = make(chan struct{})
 			go func() {
 				defer close(lanDiscoveryDone)
-				advertiseOnLAN(lanCtx, apiListener.Addr(), serveridentity.New(catalog.NewServerSettingsRepo(pool)), brandingSvc)
+				advertiseOnLAN(lanCtx, apiListener.Addr(), serveridentity.New(serversettings.NewServerSettingsRepo(pool)), brandingSvc)
 			}()
 		}
 		if pluginProvisionWriter != nil {
@@ -5554,11 +5580,11 @@ func (r scopeEntitlementResolver) resolveScope(ctx context.Context, userID int, 
 	})
 }
 
-// audiobooksSettingsAdapter bridges catalog.ServerSettingsRepo (which
+// audiobooksSettingsAdapter bridges serversettings.ServerSettingsRepo (which
 // exposes Get) to the audiobooks.SettingsReader interface (which
 // requires GetString). The two signatures are identical modulo name.
 type audiobooksSettingsAdapter struct {
-	repo catalog.SettingsStore
+	repo serversettings.SettingsStore
 }
 
 func (a *audiobooksSettingsAdapter) GetString(ctx context.Context, key string) (string, error) {

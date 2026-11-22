@@ -594,6 +594,10 @@
           "id": {
             "type": "string"
           },
+          "managed_by_env_var": {
+            "description": "The variable in the server's environment that declares this provider, such as SILO_CONFIG_FILE, when the deployment declares it. Updating or deleting such a provider is 422 validation_failed with code managed_by_environment.",
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -4031,6 +4035,7 @@
             "type": "string"
           },
           "local_username": {
+            "description": "The matched account's username, or its email when it has none",
             "type": "string"
           },
           "match": {
@@ -4120,8 +4125,21 @@
             "type": "string"
           },
           "changes": {
-            "description": "A template collection's fields the admin changed from the template's defaults that a restore writes here: title, description, visibility, featured, sort order, item sort, source, sync schedule, poster, backdrop",
+            "description": "What a restore writes to a template collection here: the fields the admin changed from the template's defaults, and libraries when it adds the collection to more of them",
             "items": {
+              "enum": [
+                "title",
+                "description",
+                "visibility",
+                "featured",
+                "sort_order",
+                "item_sort",
+                "source",
+                "sync_schedule",
+                "poster",
+                "backdrop",
+                "libraries"
+              ],
               "type": "string"
             },
             "type": "array"
@@ -4232,8 +4250,21 @@
         "additionalProperties": false,
         "properties": {
           "changes": {
-            "description": "What a restore replaces in the section here: title, position, featured, item limit, enabled, web only, configuration, and N collection items",
+            "description": "What a restore replaces in the section here",
             "items": {
+              "enum": [
+                "type",
+                "title",
+                "title_translation",
+                "position",
+                "featured",
+                "item_limit",
+                "enabled",
+                "web_only",
+                "collection_replaced",
+                "configuration",
+                "collection_items"
+              ],
               "type": "string"
             },
             "type": "array"
@@ -4249,6 +4280,11 @@
           "local_id": {
             "description": "The matching section here: the same id on the server that took the backup, else the one section of the page with the same type and title",
             "type": "string"
+          },
+          "missing_collection_items": {
+            "description": "With the collection_items change: the items of the backup's collection, in this server's catalog, that the section's collection here lacks and a restore adds",
+            "format": "int64",
+            "type": "integer"
           },
           "scope": {
             "enum": [
@@ -4351,7 +4387,8 @@
               "kept_stricter",
               "unverified_backup",
               "over_restore_budget",
-              "needs_primary_profile"
+              "needs_primary_profile",
+              "managed_by_environment"
             ],
             "type": "string"
           },
@@ -4871,7 +4908,8 @@
               "kept_stricter",
               "unverified_backup",
               "over_restore_budget",
-              "needs_primary_profile"
+              "needs_primary_profile",
+              "managed_by_environment"
             ],
             "type": "string"
           },
@@ -5201,14 +5239,15 @@
             "type": "boolean"
           },
           "status": {
-            "description": "on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores",
+            "description": "on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores; managed_by_environment: this server's environment sets it, or sets another setting of the outside-service connection it belongs to (mail's SMTP settings, for example), so a restore never writes it and this server keeps its value",
             "enum": [
               "on_this_server",
               "differs",
               "needs_another_key",
               "kept_stricter",
               "cleared",
-              "unverified_backup"
+              "unverified_backup",
+              "managed_by_environment"
             ],
             "type": "string"
           }
@@ -14231,6 +14270,10 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "deployment_managed": {
+            "description": "The API servers' deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE) lists this transcode node and supplies its key. issueAdminNodeKey and deleteAdminNode refuse it with node_deployment_managed until an API server starts with a document that no longer lists it (nodes: {} releases every node). An API server started with neither variable set leaves it managed. Requires the deployment_nodes node capability.",
+            "type": "boolean"
+          },
           "download_artifact_dir_override": {
             "description": "This node's own prepared-download directory; absent when inherited.",
             "type": "string"
@@ -14378,6 +14421,7 @@
           "drain_requested",
           "drain_state",
           "key_issued",
+          "deployment_managed",
           "env_managed"
         ],
         "type": "object"
@@ -14387,6 +14431,10 @@
         "properties": {
           "allowed": {
             "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "deployment_nodes": {
+            "description": "API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed. An API server that starts with a document no longer listing a node releases it (nodes: {} releases every node); one started with neither variable set changes nothing.",
             "type": "boolean"
           },
           "drain": {
@@ -14430,6 +14478,7 @@
           "node_keys",
           "source_access",
           "env_declarations",
+          "deployment_nodes",
           "revision",
           "state",
           "allowed"
@@ -19323,6 +19372,10 @@
           "guarded_configuration": {
             "type": "boolean"
           },
+          "request_posters": {
+            "description": "Whether admin request reads return poster_url, a path on this server that serves the request's TMDB poster (getAdminRequestPoster)",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -19353,6 +19406,7 @@
           "routing_series_status",
           "discover_layout",
           "discover_list_order",
+          "request_posters",
           "revision",
           "state",
           "allowed"
@@ -19393,9 +19447,17 @@
             ],
             "format": "int64",
             "type": "integer"
+          },
+          "requests_enabled": {
+            "description": "Whether the server-wide requests switch is on; the queue still answers while it is off",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
+          "requests_enabled",
           "needs_approval",
           "in_progress",
           "failed",
@@ -22974,6 +23036,11 @@
             "minLength": 1,
             "type": "string"
           },
+          "episode_number": {
+            "description": "Episode number for an episode that still exists; absent otherwise",
+            "format": "int64",
+            "type": "integer"
+          },
           "last_attempt_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -22995,10 +23062,20 @@
             "format": "int64",
             "type": "integer"
           },
+          "season_number": {
+            "description": "Season number for a season or episode that still exists; absent otherwise",
+            "format": "int64",
+            "type": "integer"
+          },
+          "series_title": {
+            "description": "Series title for a season or episode that still exists; absent otherwise",
+            "type": "string"
+          },
           "target_type": {
             "type": "string"
           },
           "title": {
+            "description": "The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target has no title or no longer exists",
             "type": "string"
           },
           "type": {
@@ -40866,6 +40943,14 @@
             "description": "TMDB image path",
             "type": "string"
           },
+          "poster_url": {
+            "description": "Admin request reads only (listAdminRequests and the admin request actions): the poster as a root-relative path on this server, getAdminRequestPoster, which serves the TMDB poster through the server. Fetch it with the credentials that read the row. It does not expire. Absent when the request has no TMDB poster, and on a server that cannot fetch posters (the admin request capabilities then report request_posters false)",
+            "examples": [
+              "/api/v2/admin/requests/1834729/poster"
+            ],
+            "format": "uri-reference",
+            "type": "string"
+          },
           "provider": {
             "examples": [
               "tmdb"
@@ -48790,6 +48875,88 @@
         ],
         "type": "object"
       },
+      "ProfileSectionBaseline": {
+        "additionalProperties": false,
+        "properties": {
+          "section_tokens": {
+            "description": "Opaque server-keyed tokens, bound to the acting profile, for every server section on this page in a library the profile is allowed (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically. Rows tied to libraries the profile isn't allowed are left out.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "visible_sections": {
+            "description": "Pre-override active server sections the acting profile's access policy permits, in display order",
+            "items": {
+              "$ref": "#/components/schemas/ProfileSectionBaselineRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "section_tokens",
+          "visible_sections"
+        ],
+        "type": "object"
+      },
+      "ProfileSectionBaselineRow": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "examples": [
+              "s-continue-watching"
+            ],
+            "type": "string"
+          },
+          "section_type": {
+            "description": "The recipe; the set is extensible",
+            "examples": [
+              "continue_watching"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "The server's title for this row before any profile overrides",
+            "examples": [
+              "Continue Watching"
+            ],
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
+            ],
+            "type": "string"
+          },
+          "token": {
+            "description": "Opaque server-keyed token identifying this server section on this page for the acting profile, for layout export and import comparisons",
+            "examples": [
+              "m3s9R1pQv8fK2nL7wX4yZA"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "section_type",
+          "title",
+          "token"
+        ],
+        "type": "object"
+      },
       "ProfileSectionFlags": {
         "additionalProperties": false,
         "properties": {
@@ -48800,10 +48967,18 @@
               true
             ],
             "type": "boolean"
+          },
+          "home_layout_baseline": {
+            "description": "True when this server serves getProfileSectionBaseline, so a home layout export can record the server's rows and an import on this server can offer to hide rows added since.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
-          "allow_profile_custom_sections"
+          "allow_profile_custom_sections",
+          "home_layout_baseline"
         ],
         "type": "object"
       },
@@ -65313,7 +65488,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Disconnect a provider and discard its key. A provider a job uses cannot be deleted.",
+        "summary": "Disconnect a provider and discard its key. A provider a job uses cannot be deleted, and one the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment.",
         "tags": [
           "admin-ai"
         ],
@@ -65505,7 +65680,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request.",
+        "summary": "Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request. A provider the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment.",
         "tags": [
           "admin-ai"
         ],
@@ -105170,6 +105345,16 @@
             },
             "description": "Not Acceptable"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "412": {
             "content": {
               "application/problem+json": {
@@ -125771,6 +125956,141 @@
           "admin"
         ],
         "x-silo-class": "acting_admin",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/requests/{id}/poster": {
+      "get": {
+        "operationId": "getAdminRequestPoster",
+        "parameters": [
+          {
+            "description": "The request",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/*": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Poster bytes"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such request, the request has no TMDB poster, or TMDB refused or failed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Poster fetches are busy or not configured; retry after Retry-After"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read a media request's poster through the server, from the path admin request reads return in poster_url.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-raw-protocol": "artwork-image",
+        "x-silo-raw-reason": "Poster bytes bypass JSON encoding.",
         "x-silo-service-backed": true
       }
     },
@@ -208397,6 +208717,181 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/profile/sections/baseline": {
+      "get": {
+        "operationId": "getProfileSectionBaseline",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The page the overrides apply to",
+            "explode": false,
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "default": "home",
+              "description": "The page the overrides apply to",
+              "enum": [
+                "home",
+                "library"
+              ],
+              "examples": [
+                "home"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library; required when scope is library and refused otherwise",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "The library; required when scope is library and refused otherwise",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileSectionBaseline"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get one page's pre-override server section baseline for home layout export and import.",
+        "tags": [
+          "profile_sections"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/profile/sections/flags": {
       "get": {
         "operationId": "getProfileSectionFlags",
@@ -251875,6 +252370,7 @@
               "qsv",
               "vaapi",
               "nvenc",
+              "videotoolbox",
               "none"
             ],
             "type": "string"

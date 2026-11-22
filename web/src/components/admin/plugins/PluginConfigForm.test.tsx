@@ -47,6 +47,18 @@ describe("PluginConfigForm secrets", () => {
     expect(screen.getByLabelText("Api Key")).toHaveAttribute("type", "password");
   });
 
+  it.each([
+    ["a secret textarea", field("token", "Token", "TEXTAREA", { secret: true })],
+    ["a multiline password", field("token", "Token", "PASSWORD", { multiline: true, rows: 6 })],
+  ])("masks %s in a single-line input", (_name, token) => {
+    render(
+      <PluginConfigForm schema={{ ...schema, admin_form: { fields: [token] } }} onSave={vi.fn()} />,
+    );
+
+    expect(screen.getByLabelText("Token")).toHaveAttribute("type", "password");
+    expect(screen.queryByRole("textbox", { name: "Token" })).toBeNull();
+  });
+
   it("shows redacted saved state and only clears through an explicit action", async () => {
     const onSave = vi.fn();
     render(

@@ -4497,6 +4497,12 @@ export interface StreamNode {
    */
   key_issued?: boolean;
   /**
+   * The API servers' deployment configuration lists this transcode node and
+   * supplies its key, so the key is not issued and the node is not deleted
+   * here. Absent on older servers.
+   */
+  deployment_managed?: boolean;
+  /**
    * How this transcode node reads source media: through its own library
    * mount, or over HTTP from the API servers. Absent on proxies and on older
    * servers.
