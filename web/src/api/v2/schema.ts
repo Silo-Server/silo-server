@@ -20602,7 +20602,7 @@ export interface components {
       auth_bindings: components["schemas"]["AdminPluginAuthBinding"][];
       available_version?: string;
       capabilities: components["schemas"]["AdminPluginCapability"][];
-      /** @description True when POST config/test contacts the provider for this plugin: a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics can still answer that checks are not supported. */
+      /** @description True when POST config/test contacts the provider for this plugin: a plugin declaring configuration_check, a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics, or a plugin declaring configuration_check without serving it, can still answer that checks are not supported. */
       connection_check_supported: boolean;
       /**
        * Format: date-time

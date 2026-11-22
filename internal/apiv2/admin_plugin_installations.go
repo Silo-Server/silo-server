@@ -272,7 +272,7 @@ type AdminPluginInstallation struct {
 	CreatedAt          Instant                        `json:"created_at"`
 	UpdatedAt          Instant                        `json:"updated_at"`
 
-	ConnectionCheckSupported bool `json:"connection_check_supported" doc:"True when POST config/test contacts the provider for this plugin: a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics can still answer that checks are not supported."`
+	ConnectionCheckSupported bool `json:"connection_check_supported" doc:"True when POST config/test contacts the provider for this plugin: a plugin declaring configuration_check, a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics, or a plugin declaring configuration_check without serving it, can still answer that checks are not supported."`
 }
 
 type AdminPluginCatalogInput struct {
