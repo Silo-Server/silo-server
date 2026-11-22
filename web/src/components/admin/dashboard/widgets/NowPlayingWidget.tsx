@@ -12,6 +12,7 @@ import {
   formatPlaybackPosition,
   getPlaybackSessionSubtitle,
   getSessionClientLabel,
+  isEpisodeSession,
 } from "@/pages/adminActivityPresentation";
 import type { AdminSession } from "@/api/types";
 import { formatRelativeTime } from "@/lib/date";
@@ -225,14 +226,10 @@ function useFittedCardCount(cardCount: number) {
 // measures either way.
 function StreamCard({ session, showPoster }: { session: AdminSession; showPoster: boolean }) {
   const t = useT();
-  const isEpisode =
-    session.series_title && session.season_number != null && session.episode_number != null;
+  const isEpisode = isEpisodeSession(session);
+  // The show leads for an episode; the episode line follows it.
   const title = isEpisode
-    ? session.media_title ||
-      t("web.admin.dashboard.widgets.nowPlaying.episodeFallback", {
-        season: String(session.season_number),
-        episode: String(session.episode_number),
-      })
+    ? session.series_title
     : session.media_title ||
       t("web.admin.dashboard.widgets.nowPlaying.fileFallback", {
         id: session.media_file_id,
