@@ -24,7 +24,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/fspath"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -2655,8 +2654,12 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	// point, matching the native playback persistence rule.
 	if positionSeconds > 0 && h.storeProvider != nil && playSession.ItemID != "" {
 		if store, storeErr := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID); storeErr == nil {
-			version, identified := playedSourceVersion(playSession, req.MediaSourceID)
-			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, float64(version.Duration), h.versionThresholds(r.Context(), version, identified))
+			source, identified := reportedSource(playSession, req.MediaSourceID)
+			duration := 0.0
+			if source != nil {
+				duration = float64(source.Version.Duration)
+			}
+			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, duration, h.sourceThresholds(r.Context(), source, identified))
 			if err == nil && completed {
 				refreshTasteProfile = true
 			}
@@ -3981,7 +3984,7 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 		if sourceFromRoute && int64(version.FileID) != routeFileID {
 			continue
 		}
-		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx))}, allow4KTranscode)
+		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx)), episode: detail.Type == "episode"}, allow4KTranscode)
 		sources = append(sources, source)
 	}
 
@@ -4200,21 +4203,21 @@ func mediaSourceByFileID(session *PlaybackSession, fileID int) *PlaybackMediaSou
 	return nil
 }
 
-// playedSourceVersion returns the version whose runtime and end credits a
-// progress report is judged against: the played version (see
-// playedMediaSource), whose runtime is 0 when it has none, or the first listed
-// version with a runtime when no version can be identified. identified
-// reports which of the two it is.
-func playedSourceVersion(session *PlaybackSession, mediaSourceID string) (version catalog.FileVersion, identified bool) {
+// reportedSource returns the source whose runtime and end credits a progress
+// report is judged against: the played version (see playedMediaSource), whose
+// runtime is 0 when it has none, or the first listed version with a runtime
+// when no version can be identified. identified reports which of the two it
+// is; nil when the play lists neither.
+func reportedSource(session *PlaybackSession, mediaSourceID string) (source *PlaybackMediaSource, identified bool) {
 	if source := playedMediaSource(session, mediaSourceID); source != nil {
-		return source.Version, true
+		return source, true
 	}
 	for _, source := range session.MediaSources {
 		if source.Version.Duration > 0 {
-			return source.Version, false
+			return &source, false
 		}
 	}
-	return catalog.FileVersion{}, false
+	return nil, false
 }
 
 func findMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMediaSource {

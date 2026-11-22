@@ -66,7 +66,10 @@ const (
 )
 
 type playbackInfoRequest struct {
-	serverBitrateCapKbps                int
+	serverBitrateCapKbps int
+	// episode says the item is an episode, which picks its end-credits
+	// window (see PlaybackMediaSource.EndCreditsStart).
+	episode                             bool
 	streamLocation                      string
 	SiloSeekReanchor                    bool            `json:"SiloSeekReanchor"`
 	UserID                              string          `json:"UserId"`
@@ -471,17 +474,15 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 	return t
 }
 
-// versionThresholds is playbackThresholds with the end credits of version,
-// whose runtime a report's position is measured against. identified is false
-// when the version is only a guess at what plays (the first listed one), whose
-// credits could belong to another cut; the percentage rule alone applies then.
-// A play session doesn't record whether its item is a movie or an episode, so
-// credits in either kind's end window count.
-func (h *PlaybackHandler) versionThresholds(ctx context.Context, version catalog.FileVersion, identified bool) userstore.ProgressThresholds {
+// sourceThresholds is playbackThresholds with the end credits of source, the
+// version whose runtime a report's position is measured against. identified
+// is false when source is only a guess at what plays (the first listed one),
+// whose credits could belong to another cut; the percentage rule alone
+// applies then.
+func (h *PlaybackHandler) sourceThresholds(ctx context.Context, source *PlaybackMediaSource, identified bool) userstore.ProgressThresholds {
 	t := h.playbackThresholds(ctx)
-	if identified {
-		t.CreditsStartSeconds = markers.EndCreditsStart(version.EffectiveMarkerSegments(), float64(version.Duration),
-			markers.CreditsLimitsFor(false), markers.CreditsLimitsFor(true))
+	if identified && source != nil {
+		t.CreditsStartSeconds = source.EndCreditsStart
 	}
 	return t
 }
@@ -2528,6 +2529,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "PlaybackUnavailable", "Item does not have playable media")
 		return
 	}
+	req.episode = detail.Type == "episode"
 
 	routeItemID := h.codec.EncodeStringID(EncodedIDItem, detail.ContentID)
 	if pathMediaSourceID != "" {
@@ -3112,6 +3114,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	return PlaybackMediaSource{
 		ServerBitrateCapKbps:       req.serverBitrateCapKbps,
 		StreamLocation:             req.streamLocation,
+		EndCreditsStart:            markers.CreditsLimitsFor(!req.episode).EndCreditsStart(version.EffectiveMarkerSegments(), float64(version.Duration)),
 		CanBurnSubtitle:            enableTranscoding && (maxBitrate <= 0 || targetBitrateKbps >= compatMinEncodeKbps) && (allow4KTranscode || !is4KResolution(version.Resolution)) && canEncodeOutput,
 		TargetBitrateKbps:          max(targetBitrateKbps, 0),
 		TargetResolution:           targetResolution,

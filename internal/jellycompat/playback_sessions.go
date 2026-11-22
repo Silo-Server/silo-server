@@ -126,10 +126,15 @@ type PlaybackMediaSource struct {
 	TargetAudioChannels      int
 	// TargetVideoCodec fixes encoded HLS codec during PlaybackInfo negotiation.
 	// Empty values are legacy H.264 sessions.
-	TargetVideoCodec     string
-	ID                   string
-	FileID               int
-	Version              catalog.FileVersion
+	TargetVideoCodec string
+	ID               string
+	FileID           int
+	Version          catalog.FileVersion
+	// EndCreditsStart is where Version's end credits start, or 0 without any:
+	// reaching it finishes the item (markers.CreditsLimits.EndCreditsStart). PlaybackInfo
+	// resolves it with the item's kind and every marker occurrence, which a
+	// session reloaded from the durable store no longer has.
+	EndCreditsStart      float64
 	SupportsDirectPlay   bool
 	SupportsDirectStream bool
 	SupportsTranscoding  bool

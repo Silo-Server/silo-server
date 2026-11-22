@@ -8,7 +8,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
@@ -82,18 +81,17 @@ func (h *PlaybackHandler) compatScrobbleEvent(
 	if !identified {
 		source = firstMediaSource(playSession)
 	}
-	var version catalog.FileVersion
+	duration := 0.0
 	if source != nil {
-		version = source.Version
+		duration = float64(source.Version.Duration)
 	}
-	duration := float64(version.Duration)
 	position := compatScrobblePosition(playSession, upstreamSession)
 	if positionOverride != nil {
 		position = *positionOverride
 	}
 	completed := false
 	if action == compatScrobbleStop && duration > 0 {
-		_, completed, _ = userstore.ResolveProgressState(position, duration, h.versionThresholds(scrobbleCtx, version, identified))
+		_, completed, _ = userstore.ResolveProgressState(position, duration, h.sourceThresholds(scrobbleCtx, source, identified))
 	}
 	event := watchsync.ResolveScrobbleIdentity(scrobbleCtx, h.StableIdentityResolver, watchsync.ScrobbleEvent{
 		PlaybackSessionID: upstreamSession.ID,
