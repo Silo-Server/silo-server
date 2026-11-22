@@ -99,3 +99,18 @@ func LogAdjustments(ctx context.Context, adjustments []Adjustment) {
 		)
 	}
 }
+
+// Knob describes a startup knob. Allowed is absent for numeric byte requests.
+type Knob struct {
+	Env, Default string
+	Allowed      []string
+}
+
+// Knobs returns read-only metadata in startup parse order. Each call returns
+// fresh slices; defaults and choices use the same constants as Parse.
+func Knobs() []Knob {
+	return []Knob{
+		{Env: EnvTCPCongestion, Default: string(TCPCongestionBBR), Allowed: []string{string(TCPCongestionBBR), string(TCPCongestionOff)}},
+		{Env: EnvTCPSendBuffer, Default: strconv.Itoa(DefaultTCPSendBuffer)},
+	}
+}
