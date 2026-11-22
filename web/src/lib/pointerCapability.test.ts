@@ -131,6 +131,35 @@ describe("initPointerCapability", () => {
     expect(document.documentElement.getAttribute(ATTR)).toBe("false");
   });
 
+  it("drops the click from a press that began on a hidden hover-only control", () => {
+    // A hybrid last used with a mouse hides `.pointer-reveal` controls, which
+    // still take hits. A touch there clears the flag and reveals the control
+    // before the tap's click arrives, so the click would run an action the user
+    // never saw.
+    start(true);
+    document.dispatchEvent(pointer("mouse"));
+    const control = document.createElement("button");
+    control.className = "pointer-reveal";
+    control.style.opacity = "0";
+    const activated = vi.fn();
+    control.addEventListener("click", activated);
+    document.body.append(control);
+    try {
+      control.dispatchEvent(pointer("touch", "pointerdown"));
+      control.style.opacity = "1";
+      control.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+      expect(activated).not.toHaveBeenCalled();
+
+      // Keyboard activation, and a press on the control once it shows, still work.
+      control.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 0 }));
+      control.dispatchEvent(pointer("touch", "pointerdown"));
+      control.dispatchEvent(new MouseEvent("click", { bubbles: true, detail: 1 }));
+      expect(activated).toHaveBeenCalledTimes(2);
+    } finally {
+      control.remove();
+    }
+  });
+
   it("does not throw when matchMedia is unavailable", () => {
     expect(() => start(undefined)).not.toThrow();
     expect(document.documentElement.getAttribute(ATTR)).toBe("false");

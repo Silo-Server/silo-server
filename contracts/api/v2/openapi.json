@@ -4035,6 +4035,7 @@
             "type": "string"
           },
           "local_username": {
+            "description": "The matched account's username, or its email when it has none",
             "type": "string"
           },
           "match": {
@@ -23031,6 +23032,11 @@
             "minLength": 1,
             "type": "string"
           },
+          "episode_number": {
+            "description": "Episode number for an episode that still exists; absent otherwise",
+            "format": "int64",
+            "type": "integer"
+          },
           "last_attempt_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -23052,10 +23058,20 @@
             "format": "int64",
             "type": "integer"
           },
+          "season_number": {
+            "description": "Season number for a season or episode that still exists; absent otherwise",
+            "format": "int64",
+            "type": "integer"
+          },
+          "series_title": {
+            "description": "Series title for a season or episode that still exists; absent otherwise",
+            "type": "string"
+          },
           "target_type": {
             "type": "string"
           },
           "title": {
+            "description": "The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target has no title or no longer exists",
             "type": "string"
           },
           "type": {
@@ -252350,6 +252366,7 @@
               "qsv",
               "vaapi",
               "nvenc",
+              "videotoolbox",
               "none"
             ],
             "type": "string"

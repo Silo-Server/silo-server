@@ -216,7 +216,7 @@ func (c *Consumer) insertBatch(ctx context.Context, entries []Entry) error {
 			logstream.SafeText(e.PlaybackSessionID), logstream.SafeText(e.ClientIP), logstream.SafeText(e.NodeID),
 			string(logstream.SafeJSON(attrsJSON)))
 	}
-	b.WriteString(" RETURNING id, timestamp, level, component, message, COALESCE(request_id, ''), user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(client_ip::text, ''), COALESCE(node_id, ''), attrs")
+	b.WriteString(" RETURNING id, timestamp, level, component, message, COALESCE(request_id, ''), user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(host(client_ip), ''), COALESCE(node_id, ''), attrs")
 
 	rows, err := c.pool.Query(ctx, b.String(), args...)
 	if err != nil {

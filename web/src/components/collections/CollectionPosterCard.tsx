@@ -43,13 +43,20 @@ export function CollectionPosterCard({
   const { loaded, onLoad, onError } = useImageLoaded(collection.poster_url);
 
   const isUserCollection = kind === "user_collections";
+  const showPin = pinnable && !isUserCollection && libraryId !== undefined;
   const href = buildCollectionCatalogHref(collection, isUserCollection, libraryId);
   // A card with its own meta line draws it below the link instead.
   let subline: ReactNode = null;
   if (ownerName) {
     subline = (
-      <div className="text-muted-foreground truncate text-xs">
-        {t("web.collections.posterCard.byOwner", { owner: ownerName })}
+      <div className="text-muted-foreground flex overflow-hidden text-xs whitespace-pre">
+        {t("web.collections.posterCard.byOwner", {
+          owner: (
+            <span dir="auto" className="truncate">
+              {ownerName}
+            </span>
+          ),
+        })}
       </div>
     );
   } else if (meta === undefined && isUserCollection) {
@@ -82,7 +89,14 @@ export function CollectionPosterCard({
               className="text-muted-foreground flex h-full w-full flex-col items-center justify-center gap-1 p-3 text-center text-sm"
             >
               {isUserCollection && <User className="h-5 w-5 opacity-60" />}
-              <span className="line-clamp-3 font-medium">{collection.title}</span>
+              {/* The spacers keep the title below the pin (top-2 plus a 36 px chip)
+                  and above the count. With them the title never shrinks, so on a
+                  card too short for all of it the spacers give way first. */}
+              {showPin ? <div className="h-7 shrink" /> : null}
+              <span className={`line-clamp-3 font-medium ${showPin ? "shrink-0" : ""}`}>
+                {collection.title}
+              </span>
+              {showPin && meta === undefined ? <div className="h-3 shrink" /> : null}
             </div>
           )}
           {meta === undefined ? (
@@ -92,7 +106,9 @@ export function CollectionPosterCard({
           ) : null}
         </div>
         <div className="px-0.5 pt-2.5">
-          <div className="truncate text-[0.8125rem] font-semibold">{collection.title}</div>
+          <div dir="auto" className="bidi-text truncate text-[0.8125rem] font-semibold">
+            {collection.title}
+          </div>
           {subline}
         </div>
       </ViewTransitionLink>
@@ -113,9 +129,7 @@ export function CollectionPosterCard({
           {handle}
         </div>
       ) : null}
-      {pinnable && !isUserCollection && libraryId !== undefined ? (
-        <SidebarPinButton collection={collection} libraryId={libraryId} />
-      ) : null}
+      {showPin ? <SidebarPinButton collection={collection} libraryId={libraryId} /> : null}
     </div>
   );
 }
@@ -151,16 +165,17 @@ function SidebarPinButton({
             label: collection.title,
           });
         }}
-        className={`absolute start-2 top-2 rounded-lg p-1.5 backdrop-blur-sm transition-all ${
+        // The dark poster chip of the collection actions menu, at the same size.
+        className={`absolute start-2 top-2 flex size-8 items-center justify-center rounded-[10px] backdrop-blur-sm transition-all max-lg:size-9 ${
           pinned
             ? "bg-primary/90 text-primary-foreground"
-            : "bg-background/50 text-foreground pointer-reveal group-hover/card:opacity-100"
+            : "pointer-reveal bg-black/55 text-white group-hover/card:opacity-100 hover:bg-black/70"
         }`}
         title={pinLabel}
         aria-label={pinLabel}
         aria-describedby={titleId}
       >
-        {pinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+        {pinned ? <PinOff className="size-4" /> : <Pin className="size-4" />}
       </button>
     </>
   );

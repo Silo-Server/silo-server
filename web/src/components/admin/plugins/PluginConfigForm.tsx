@@ -19,6 +19,7 @@ import {
 import { SchemaForm } from "./SchemaForm";
 import {
   buildSchemaValues,
+  isSecretField,
   parseFieldTypes,
   type BuildSchemaValuesOptions,
 } from "./schemaFormUtils";
@@ -91,7 +92,7 @@ export function PluginConfigForm({
     return {
       ...base,
       fields: base.fields.map((field) =>
-        configured.has(field.key) && (field.secret || field.control === "PASSWORD")
+        configured.has(field.key) && isSecretField(field)
           ? { ...field, placeholder: t("web.admin.plugins.configForm.savedSecretPlaceholder") }
           : field,
       ),

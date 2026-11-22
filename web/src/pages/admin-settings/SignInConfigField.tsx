@@ -1,7 +1,13 @@
 import { useId } from "react";
+import { Direction } from "radix-ui";
 
 import type { PluginAdminFormField } from "@/api/types";
-import { effectiveValue } from "@/components/admin/plugins/schemaFormUtils";
+import {
+  effectiveValue,
+  isSecretField,
+  rendersMultiline,
+  textDirection,
+} from "@/components/admin/plugins/schemaFormUtils";
 import { useT } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,10 +67,12 @@ export function SignInConfigField({
   description,
 }: SignInConfigFieldProps) {
   const t = useT();
+  const pageDir = Direction.useDirection();
   const id = `${idPrefix}-${field.key}`;
   const descriptionId = useId();
   const value = effectiveValue(field, values);
-  const secret = field.secret || field.control === "PASSWORD";
+  const text = String(value ?? "");
+  const secret = isSecretField(field);
   const hint = description ?? field.description;
   const noteId = useId();
   const describedBy =
@@ -84,11 +92,10 @@ export function SignInConfigField({
     );
   } else if (field.control === "SELECT") {
     const options = field.options ?? [];
-    const current = String(value ?? "");
     const toItem = (item: string) => (item === "" ? EMPTY_OPTION_VALUE : item);
     control = (
       <Select
-        value={toItem(current)}
+        value={toItem(text)}
         disabled={managed}
         onValueChange={(next) => onChange(next === EMPTY_OPTION_VALUE ? "" : next)}
       >
@@ -106,13 +113,14 @@ export function SignInConfigField({
         </SelectContent>
       </Select>
     );
-  } else if (field.control === "TEXTAREA" || field.multiline) {
+  } else if (rendersMultiline(field)) {
     control = (
       <textarea
         id={id}
+        dir={textDirection(pageDir, text, field.placeholder, false)}
         disabled={managed}
         rows={field.rows && field.rows > 0 ? field.rows : 3}
-        value={String(value ?? "")}
+        value={text}
         placeholder={field.placeholder}
         onChange={(event) => onChange(event.target.value)}
         aria-describedby={describedBy}
@@ -124,18 +132,19 @@ export function SignInConfigField({
       />
     );
   } else {
+    const placeholder =
+      secret && secretSaved && (managed || !clearing)
+        ? t("web.admin.settings.signIn.configField.secretSavedPlaceholder")
+        : field.placeholder;
     control = (
       <Input
         id={id}
+        dir={textDirection(pageDir, text, placeholder, secret)}
         disabled={managed}
         type={secret ? "password" : field.control === "NUMBER" ? "number" : "text"}
         autoComplete={secret ? "new-password" : "off"}
-        value={String(value ?? "")}
-        placeholder={
-          secret && secretSaved && (managed || !clearing)
-            ? t("web.admin.settings.signIn.configField.secretSavedPlaceholder")
-            : field.placeholder
-        }
+        value={text}
+        placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
         aria-describedby={describedBy}
         className={field.control === "NUMBER" ? SETTINGS_NUMBER_WIDTH : SETTINGS_CONTROL_WIDTH}

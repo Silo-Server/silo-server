@@ -38,7 +38,12 @@ export function TaskStatusBadge({ result, className }: TaskStatusBadgeProps) {
       {completedWithErrors ? t("web.admin.common.taskStatus.completedWithErrors") : statusLabel}
     </Badge>
   );
-  const errorMessage = result.error_message?.trim();
+  // The server sends a fixed English sentence for every failed run and keeps
+  // the cause in its diagnostics, so the status says it here.
+  const errorMessage =
+    result.status === "failed"
+      ? t("web.admin.common.taskStatus.failedDetails")
+      : result.error_message?.trim();
 
   if (!errorMessage) {
     return badge;
