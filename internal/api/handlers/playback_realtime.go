@@ -359,16 +359,16 @@ type realtimeResultKey struct {
 	commandID string
 }
 
-// awaitRealtimeResult registers interest in the player's completed result for
-// one command. The returned channel closes when that result arrives; release
+// awaitRealtimeResult registers interest in the player's result for one
+// command. The returned channel receives that result's status; release
 // removes the registration. Register before the command is written, so a
 // result that arrives before the caller starts waiting is not missed.
-func (h *PlaybackHandler) awaitRealtimeResult(sessionID, commandID string) (<-chan struct{}, func()) {
+func (h *PlaybackHandler) awaitRealtimeResult(sessionID, commandID string) (<-chan playback.RealtimeResultStatus, func()) {
 	key := realtimeResultKey{sessionID: sessionID, commandID: commandID}
-	answered := make(chan struct{})
+	answered := make(chan playback.RealtimeResultStatus, 1)
 	h.realtimeCommandMu.Lock()
 	if h.realtimeResultWaiters == nil {
-		h.realtimeResultWaiters = map[realtimeResultKey]chan struct{}{}
+		h.realtimeResultWaiters = map[realtimeResultKey]chan playback.RealtimeResultStatus{}
 	}
 	h.realtimeResultWaiters[key] = answered
 	h.realtimeCommandMu.Unlock()
@@ -381,12 +381,13 @@ func (h *PlaybackHandler) awaitRealtimeResult(sessionID, commandID string) (<-ch
 	}
 }
 
-// signalRealtimeResult wakes the waiter for this session's command, if any.
-func (h *PlaybackHandler) signalRealtimeResult(sessionID, commandID string) {
+// signalRealtimeResult hands the result's status to the waiter for this
+// session's command, if any. The first result wins.
+func (h *PlaybackHandler) signalRealtimeResult(sessionID, commandID string, status playback.RealtimeResultStatus) {
 	key := realtimeResultKey{sessionID: sessionID, commandID: commandID}
 	h.realtimeCommandMu.Lock()
 	if answered, ok := h.realtimeResultWaiters[key]; ok {
-		close(answered)
+		answered <- status // buffered for one, and removed before a second
 		delete(h.realtimeResultWaiters, key)
 	}
 	h.realtimeCommandMu.Unlock()

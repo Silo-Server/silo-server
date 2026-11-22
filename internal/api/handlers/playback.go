@@ -292,9 +292,9 @@ type PlaybackHandler struct {
 	realtimeCommandMu             sync.Mutex
 	realtimeCommands              map[string]playbackCommandRecord
 	// realtimeResultWaiters holds the commands an administrator request is
-	// waiting on a player's completed result for, keyed by session and command
+	// waiting on a player's result for, keyed by session and command
 	// (playback_realtime.go). Guarded by realtimeCommandMu.
-	realtimeResultWaiters map[realtimeResultKey]chan struct{}
+	realtimeResultWaiters map[realtimeResultKey]chan playback.RealtimeResultStatus
 	// tm owns the transcode-session lifecycle (live map, recipe cards, and
 	// restart reconstruct) shared with the jellycompat handler. The handler
 	// delegates all transcode-session and recipe operations to it.

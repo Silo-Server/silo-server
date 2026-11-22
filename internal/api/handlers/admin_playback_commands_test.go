@@ -529,8 +529,8 @@ func TestUnansweredMessageStaysDispatchedWithoutDelayingOtherSessions(t *testing
 		if got.err != nil || got.view.Outcome != AdminPlaybackCommandApplied || got.view.Delivery != AdminPlaybackDeliveryDispatched {
 			t.Fatalf("%s message = %+v, %v", name, got.view, got.err)
 		}
-		if got.elapsed < documentedMessageWait {
-			t.Fatalf("%s message answered after %v, before the player had its wait", name, got.elapsed)
+		if waited := got.elapsed >= documentedMessageWait; waited != (name == "silent") {
+			t.Fatalf("%s message answered after %v; only a silent player gets the whole wait", name, got.elapsed)
 		}
 	}
 }

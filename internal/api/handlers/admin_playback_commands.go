@@ -282,7 +282,7 @@ func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in Admin
 	if requiresLivePlaybackControl(in.Name) && (session == nil || !session.HasRealtimeConnection) {
 		return AdminPlaybackCommandView{}, ErrAdminPlaybackRealtimeRequired
 	}
-	var answered <-chan struct{}
+	var answered <-chan playback.RealtimeResultStatus
 	if in.Name == playback.CommandDisplayMessage {
 		var release func()
 		answered, release = h.playback.awaitRealtimeResult(in.SessionID, in.CommandID)
@@ -316,20 +316,24 @@ func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in Admin
 // other sessions' lane writes. The wait does not follow the caller's context:
 // it is short, and stopping early would report a healthy player as
 // unconfirmed.
-func awaitMessageResult(answer *adminPlaybackMessageAnswer, answered <-chan struct{}) {
+func awaitMessageResult(answer *adminPlaybackMessageAnswer, answered <-chan playback.RealtimeResultStatus) {
 	defer close(answer.done)
-	answer.delivery = AdminPlaybackDeliveryAcknowledged
+	answer.delivery = AdminPlaybackDeliveryDispatched
 	timer := time.NewTimer(adminPlaybackMessageResultWait)
 	defer timer.Stop()
+	var status playback.RealtimeResultStatus
 	select {
-	case <-answered:
+	case status = <-answered:
 	case <-timer.C:
 		// select picks at random when the answer lands with the deadline.
 		select {
-		case <-answered:
+		case status = <-answered:
 		default:
-			answer.delivery = AdminPlaybackDeliveryDispatched
 		}
+	}
+	// A rejection ends the wait at once and stays "dispatched".
+	if status == playback.RealtimeResultStatusCompleted {
+		answer.delivery = AdminPlaybackDeliveryAcknowledged
 	}
 }
 
