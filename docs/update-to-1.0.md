@@ -335,9 +335,13 @@ these changes against the same server contract before native migration ratificat
 | Stored timestamps and dates | Handle a `500` Problem when persisted data cannot be represented by the declared date/time contract. Do not depend on malformed stored values becoming empty, omitted or fabricated dates. |
 | Mutation receipts | Do not require an `ETag` on a historical receipt. Read the canonical resource before an edit that requires a current validator; a receipt is not proof of its current version. |
 
-Regenerate native clients from the final OpenAPI document, then update handwritten
-adapters and decoding fixtures. The schema names below replace ambiguous domain
-names; operation IDs remain unchanged.
+Regenerate OpenAPI-generated clients (such as the web app's
+`web/src/api/v2/schema.ts` and third-party generated clients) from the final
+OpenAPI document. For the handwritten Apple and Android clients
+([api-contract.md](architecture/api-contract.md#apple-and-android)), sync their
+decoding fixtures and update any affected handwritten models or adapters. The
+schema names below replace ambiguous domain names; operation IDs remain
+unchanged.
 
 | Previous schema | Native schema | Affected operation or representation |
 | --- | --- | --- |
