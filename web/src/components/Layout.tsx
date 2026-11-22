@@ -500,6 +500,16 @@ export default function Layout({ children }: LayoutProps) {
           <SheetContent
             side="left"
             showCloseButton={false}
+            onCloseAutoFocus={(event) => {
+              // Radix runs this after the drawer has gone, so focus that was
+              // inside it is back on the body. Anything else was focused by
+              // the page just chosen (the catalog's search field), so keep it
+              // there rather than pulling it back to Open menu.
+              const active = document.activeElement;
+              if (active && active !== document.body && active !== document.documentElement) {
+                event.preventDefault();
+              }
+            }}
             className="w-[260px] border-e-0 p-0 sm:max-w-[260px]"
           >
             <SheetHeader className="sr-only">
