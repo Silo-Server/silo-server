@@ -549,7 +549,9 @@ A limit is recorded when a start or replan carries
 - **Contradicted lowerings**: a lowering more than 10 times below the
   connection's current reading plans at its own figure, or at a lower stored
   limit, but is not recorded, so a stall the server caused (a disk spinning
-  up) does not cap the next titles. A `provider:` key always records. See [playback protocol v3](../architecture/playback-protocol-v3.md#buffering-quality-native-v2).
+  up) does not cap the next titles. A `provider:` key skips only this reading
+  check; a stall the server's own transcode paced, or whose cause is unknown,
+  is still not recorded. See [playback protocol v3](../architecture/playback-protocol-v3.md#buffering-quality-native-v2).
 - **Lifetime**: `LEARNED_LIMIT_TTL = 24 hours` from the most recent
   observation, so one bad evening does not cap a week. A changed home IP
   address simply starts a new key. That fails toward the source, and a new
