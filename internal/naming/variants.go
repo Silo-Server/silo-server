@@ -129,44 +129,54 @@ func parseVariantHints(filePath string, libraryType string, libraryRoots ...stri
 	}
 
 	hints := &VariantHints{}
-	parts := strings.Split(cleanPath, "/")
 	baseName := path.Base(cleanPath)
 	baseNoExt := strings.TrimSuffix(baseName, path.Ext(baseName))
-	parentBase := ""
-	if len(parts) > 1 {
-		parentBase = parts[len(parts)-2]
-	}
 
-	for i := len(parts) - 2; i >= 0; i-- {
-		if match := plexEditionTagRe.FindStringSubmatch(parts[i]); match != nil {
-			hints.EditionRaw = strings.TrimSpace(match[1])
-			hints.EditionKey = normalizeEditionKey(hints.EditionRaw)
-			hints.EditionSource = "plex_tag_folder"
-			hints.EditionConfidence = floatPtr(1.0)
-			break
+	seriesLibrary := normalizeInferLibraryType(libraryType) == seriesContentType
+	libraryRoot := deepestContainingLibraryRoot(cleanPath, libraryRoots)
+	directories := directorySegmentsWithinRoot(cleanPath, libraryRoot)
+
+	// Scope folder edition checks to directories below the containing library
+	// root. When no containing root is known, check only the immediate parent
+	// directory so ancestor mount paths cannot stamp editions onto items.
+	var editionDirs []string
+	if libraryRoot != "" {
+		editionDirs = directories
+	} else if parent := path.Dir(cleanPath); parent != "." && parent != "/" {
+		if parentBase := path.Base(parent); parentBase != "" && parentBase != "." && parentBase != "/" {
+			editionDirs = []string{parentBase}
 		}
 	}
-	if hints.EditionKey == "" {
-		if match := plexEditionTagRe.FindStringSubmatch(baseNoExt); match != nil {
-			hints.EditionRaw = strings.TrimSpace(match[1])
-			hints.EditionKey = normalizeEditionKey(hints.EditionRaw)
+	itemFolder := ""
+	if len(editionDirs) > 0 {
+		itemFolder = editionDirs[len(editionDirs)-1]
+	}
+
+	if match := plexEditionTagRe.FindStringSubmatch(baseNoExt); match != nil {
+		raw := strings.TrimSpace(match[1])
+		if key := normalizeEditionKey(raw); key != "" {
+			hints.EditionRaw = raw
+			hints.EditionKey = key
 			hints.EditionSource = "plex_tag_file"
 			hints.EditionConfidence = floatPtr(1.0)
 		}
 	}
 	if hints.EditionKey == "" {
-		for i := len(parts) - 2; i >= 0; i-- {
-			if raw, key := parseEditionHeuristic(parts[i], "", 0); key != "" {
-				hints.EditionRaw = raw
-				hints.EditionKey = key
-				hints.EditionSource = "heuristic_folder"
-				hints.EditionConfidence = floatPtr(0.7)
-				break
+		for i := len(editionDirs) - 1; i >= 0; i-- {
+			if match := plexEditionTagRe.FindStringSubmatch(editionDirs[i]); match != nil {
+				raw := strings.TrimSpace(match[1])
+				if key := normalizeEditionKey(raw); key != "" {
+					hints.EditionRaw = raw
+					hints.EditionKey = key
+					hints.EditionSource = "plex_tag_folder"
+					hints.EditionConfidence = floatPtr(1.0)
+					break
+				}
 			}
 		}
 	}
 	if hints.EditionKey == "" {
-		folderTitle, folderYear, _ := parseInferFolderTitleYear(parentBase)
+		folderTitle, folderYear, _ := parseInferFolderTitleYear(itemFolder)
 		if raw, key := parseEditionHeuristic(baseNoExt, folderTitle, folderYear); key != "" {
 			hints.EditionRaw = raw
 			hints.EditionKey = key
@@ -175,7 +185,7 @@ func parseVariantHints(filePath string, libraryType string, libraryRoots ...stri
 		}
 	}
 	if hints.EditionKey == "" {
-		folderTitle, folderYear, _ := parseInferFolderTitleYear(parentBase)
+		folderTitle, folderYear, _ := parseInferFolderTitleYear(itemFolder)
 		if stem := parseInferMovieStem(baseNoExt, folderTitle, folderYear); stem.Title != "" {
 			if _, raw, key, ok := comparisonSafeEditionSuffix(stem.Title); ok {
 				hints.EditionRaw = raw
@@ -185,10 +195,17 @@ func parseVariantHints(filePath string, libraryType string, libraryRoots ...stri
 			}
 		}
 	}
+	// Limit folder heuristics to the immediate item folder so grouping folders
+	// inside a library (such as "Film Noir") do not label unrelated movies.
+	if hints.EditionKey == "" && itemFolder != "" {
+		if raw, key := parseEditionHeuristic(itemFolder, "", 0); key != "" {
+			hints.EditionRaw = raw
+			hints.EditionKey = key
+			hints.EditionSource = "heuristic_folder"
+			hints.EditionConfidence = floatPtr(0.7)
+		}
+	}
 
-	seriesLibrary := normalizeInferLibraryType(libraryType) == seriesContentType
-	libraryRoot := deepestContainingLibraryRoot(cleanPath, libraryRoots)
-	directories := directorySegmentsWithinRoot(cleanPath, libraryRoot)
 	allowNumericSeason := seriesLibrary && (libraryRoot == "" || len(directories) > 1)
 	if token, ok := parseEpisodeToken(baseNoExt, directories, libraryRoot != "", allowNumericSeason, seriesLibrary); ok && token.episodeEnd > token.episode {
 		hints.PresentationKind = "multi_episode"
