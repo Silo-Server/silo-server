@@ -58,6 +58,9 @@ const ServerActivity = lazy(() => import("@/components/ServerActivity"));
 // Settings swap the app sidebar for their own; it loads with the settings pages.
 const UserSettingsSidebar = lazy(() => import("@/components/settings/UserSettingsSidebar"));
 
+// Tailwind's `lg`: the desktop sidebar shows and the phone header hides.
+const DESKTOP_MEDIA_QUERY = "(min-width: 64rem)";
+
 /**
  * The lazily loaded activity indicator. Layout wraps every page, so a chunk
  * that fails to load leaves the indicator out instead of breaking the page.
@@ -131,7 +134,7 @@ export default function Layout({ children }: LayoutProps) {
   const itemRouteLocation = `${location.pathname}${location.search}`;
   // Breakpoint changes naturally cause other layout renders; navigation only
   // needs the viewport value at the moment it is attempted.
-  const hasDesktopSidebar = window.matchMedia("(min-width: 64rem)").matches;
+  const hasDesktopSidebar = window.matchMedia(DESKTOP_MEDIA_QUERY).matches;
   const isSearchLandingRoute =
     location.pathname === "/catalog" &&
     (() => {
@@ -391,6 +394,17 @@ export default function Layout({ children }: LayoutProps) {
     };
   }, [mobileHeaderHidden]);
 
+  // The phone menu has no place on a desktop-width window: its Open menu
+  // button is hidden there, and the sidebar it duplicates is showing.
+  useEffect(() => {
+    const desktopMedia = window.matchMedia(DESKTOP_MEDIA_QUERY);
+    const closeMobileNavigation = (event: MediaQueryListEvent) => {
+      if (event.matches) setMobileOpen(false);
+    };
+    desktopMedia.addEventListener("change", closeMobileNavigation);
+    return () => desktopMedia.removeEventListener("change", closeMobileNavigation);
+  }, []);
+
   return (
     <SidebarItemNavigationProvider
       begin={beginItemNavigation}
@@ -505,9 +519,14 @@ export default function Layout({ children }: LayoutProps) {
               // inside it is back on the body. Anything else was focused by
               // the page just chosen (the catalog's search field), so keep it
               // there rather than pulling it back to Open menu.
+              // At desktop width Open menu is hidden, so focus goes to the
+              // main content instead, as in the admin area.
               const active = document.activeElement;
               if (active && active !== document.body && active !== document.documentElement) {
                 event.preventDefault();
+              } else if (window.matchMedia(DESKTOP_MEDIA_QUERY).matches) {
+                event.preventDefault();
+                document.getElementById("main-content")?.focus({ preventScroll: true });
               }
             }}
             className="w-[260px] border-e-0 p-0 sm:max-w-[260px]"
