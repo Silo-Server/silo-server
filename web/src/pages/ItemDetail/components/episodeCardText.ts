@@ -7,6 +7,7 @@ import {
 import { formatDate } from "@/lib/datetime";
 import { formatRuntimeMinutes } from "@/lib/mediaFormat";
 import { t } from "@/i18n";
+import { episodeOwnTitle } from "../itemDetailLayout";
 
 type EpisodeIdentity = Pick<
   EpisodeListItem,
@@ -15,7 +16,8 @@ type EpisodeIdentity = Pick<
 
 /**
  * First caption line, "S01E02 · Pilot", in two parts: the code with its
- * separator, and the title. The code alone when the episode has no title.
+ * separator, and the title. The code alone when the episode has no title of
+ * its own (none, or the server's "Episode N" default).
  */
 export function episodeCardTitleParts(
   episode: EpisodeIdentity,
@@ -24,7 +26,7 @@ export function episodeCardTitleParts(
   prefix: string;
   title?: string;
 } {
-  const title = episode.title?.trim();
+  const title = episodeOwnTitle(episode.episode_number, episode.title);
   if (labelsEpisodesByAirDate(episodeLabels)) {
     // The air date is on the line below, so the title leads on its own; an
     // untitled episode shows the date (or its code when undated).
@@ -43,7 +45,7 @@ export function episodeCardTitleParts(
  */
 export function episodeCardSpokenTitle(episode: EpisodeIdentity, episodeLabels?: string): string {
   const episodeNumber = episode.episode_number;
-  const title = episode.title?.trim();
+  const title = episodeOwnTitle(episode.episode_number, episode.title);
   if (labelsEpisodesByAirDate(episodeLabels)) {
     return title || formatEpisodeLabel({ ...episode, episode_labels: episodeLabels });
   }

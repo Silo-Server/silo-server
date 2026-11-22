@@ -31,7 +31,7 @@ import { clampTaskProgress, formatTaskProgress } from "@/lib/taskProgress";
 import { useServerText, useT, type MessageKey, type Translate } from "@/i18n";
 import { TASK_CATEGORY_LABELS, taskText } from "@/lib/taskText";
 import { TriggerFormRow } from "./AdminTaskTriggerForm";
-import { seasonDisplayName } from "./ItemDetail/itemDetailLayout";
+import { episodeOwnTitle, seasonDisplayName } from "./ItemDetail/itemDetailLayout";
 import { formatEpisodeCode } from "@/lib/episodeCardLabels";
 
 const EM_DASH = "—";
@@ -90,13 +90,14 @@ function refreshSampleTitle(t: Translate, entry: RefreshDebtSample): string {
   if (season == null) return entry.title || entry.content_id;
   const series = entry.series_title;
   const episode = entry.episode_number;
-  if (episode != null && entry.title) {
+  const episodeTitle = episode == null ? undefined : episodeOwnTitle(episode, entry.title);
+  if (episode != null && episodeTitle) {
     // One message rather than one nested in another: a right-to-left interface
     // isolates each placeholder, and a nested message's isolate reads left to right.
     const code = formatEpisodeCode(season, episode);
     return series
-      ? t("web.admin.tasks.detail.sampleSeriesEpisode", { series, code, title: entry.title })
-      : t("web.admin.tasks.detail.sampleEpisode", { code, title: entry.title });
+      ? t("web.admin.tasks.detail.sampleSeriesEpisode", { series, code, title: episodeTitle })
+      : t("web.admin.tasks.detail.sampleEpisode", { code, title: episodeTitle });
   }
   const name =
     episode == null ? seasonDisplayName(season, entry.title) : formatEpisodeCode(season, episode);
