@@ -373,6 +373,10 @@
 ./internal/taskmanager/tasks TestReconcileSkipsWhileAnotherReconcileRunsPostgres
 ./internal/taskmanager/repository TestPgExecutionRepositoryPruneReportsBatchLimit
 
+# A task run whose server stops renewing its lease is recorded once, as an
+# interrupted failure ending at its last heartbeat; a renewed lease is kept.
+./internal/taskmanager/repository TestPgExecutionRepositoryRecordsStaleRunLeasesAsInterrupted
+
 # A plugin scheduled task's firing runs on one API server: of claims taken at
 # once one wins, a server whose timer fires seconds later (across an interval
 # slot boundary too) loses, and a startup firing runs once per cluster start.

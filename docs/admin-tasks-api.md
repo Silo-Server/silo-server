@@ -126,12 +126,15 @@ New completions appear after restarting history; loaded pages do not silently
 expand into a whole-history read. Live last-execution summaries have no saved ID;
 persisted history entries have opaque string IDs.
 
-In-flight runs are tracked in `task_executions` with an owner identity and
-periodic heartbeat and stay hidden from history reads until finished. If a
-process crashes before completing a run, any API server reconciles rows whose
-heartbeat has expired to `failed` without affecting active runs on healthy
-peers. Graceful shutdown cancels active runs and waits briefly so their final
-status is persisted before exit.
+History holds finished runs only. While a run is in progress its server holds
+a lease on it in `task_execution_leases` and renews it every 30 seconds. When a
+lease goes three minutes without renewal by the database clock (the server
+crashed or was killed), any API server records the run as `failed` with the
+message `Interrupted: the server stopped before the task finished`, ending at
+its last renewal. A graceful shutdown cancels runs in progress, records them
+the same way, and waits up to five seconds for those writes. The admin API
+reports these as ordinary failures. A task's interval counts from its last run
+that wasn't interrupted, so a run cut off by a restart runs again once due.
 
 `GET /api/v2/admin/tasks/refresh_metadata/metrics` returns typed queue counters
 and at most ten entries per sample list. Other tasks return 404. A sample's

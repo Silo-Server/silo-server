@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -122,72 +123,70 @@ func TestPgExecutionRepositoryPruneReportsBatchLimit(t *testing.T) {
 	}
 }
 
-func TestPgExecutionRepositoryTracksRunningExcludesFromReadsAndReconcilesStale(t *testing.T) {
+// A run lease that stops being renewed becomes one interrupted failure that
+// ends at its last heartbeat; a renewed lease is left alone and is recorded,
+// and released, when its run finishes.
+func TestPgExecutionRepositoryRecordsStaleRunLeasesAsInterrupted(t *testing.T) {
 	pool := taskHistoryTestPool(t)
 	repo := NewPgExecutionRepository(pool)
-	key := taskKey(t, pool, "in_flight")
-	now := time.Now().UTC().Truncate(time.Microsecond)
-	completedAt := now.Add(-10 * time.Minute)
-	completedID := insertTaskExecution(t, pool, key, completedAt)
-
+	key := taskKey(t, pool, "leases")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM task_execution_leases WHERE task_key = $1`, key)
+	})
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Fresh running row owned by peer A must stay invisible to history reads and Prune.
-	liveID, err := repo.Start(ctx, key, now.Add(-30*time.Second), "peer-a")
+	liveID, err := repo.StartRun(ctx, key)
 	if err != nil {
-		t.Fatalf("Start live: %v", err)
+		t.Fatalf("StartRun live: %v", err)
 	}
-	if err := repo.Heartbeat(ctx, liveID, "peer-a", now); err != nil {
-		t.Fatalf("Heartbeat live: %v", err)
+	staleID, err := repo.StartRun(ctx, key)
+	if err != nil {
+		t.Fatalf("StartRun stale: %v", err)
+	}
+	var lastBeat time.Time
+	if err := pool.QueryRow(ctx, `
+		UPDATE task_execution_leases
+		SET started_at = now() - interval '20 minutes', heartbeat_at = now() - interval '10 minutes'
+		WHERE id = $1 RETURNING heartbeat_at`, staleID).Scan(&lastBeat); err != nil {
+		t.Fatalf("aging stale lease: %v", err)
+	}
+	if held, err := repo.RenewRun(ctx, liveID); err != nil || !held {
+		t.Fatalf("RenewRun live = (%v, %v), want (true, nil)", held, err)
 	}
 
-	// Stale running row owned by dead peer B.
-	staleID, err := repo.Start(ctx, key, now.Add(-15*time.Minute), "peer-b")
+	keys, err := repo.ReconcileStaleRuns(ctx, 3*time.Minute)
 	if err != nil {
-		t.Fatalf("Start stale: %v", err)
+		t.Fatalf("ReconcileStaleRuns: %v", err)
 	}
-
+	if !slices.Equal(keys, []string{key}) {
+		t.Fatalf("ReconcileStaleRuns keys = %v, want [%s]", keys, key)
+	}
 	latest, err := repo.GetLatest(ctx, key)
-	if err != nil || latest == nil || latest.ID != completedID {
-		t.Fatalf("GetLatest = (%#v, %v), want completed ID %d", latest, err, completedID)
+	if err != nil || latest == nil {
+		t.Fatalf("GetLatest = (%#v, %v)", latest, err)
 	}
-	listed, err := repo.List(ctx, key, 10)
-	if err != nil || len(listed) != 1 || listed[0].ID != completedID {
-		t.Fatalf("List = (%#v, %v), want only completed ID %d", listed, err, completedID)
+	if !latest.IsInterrupted() || !latest.CompletedAt.Equal(lastBeat) || latest.DurationMs != (10*time.Minute).Milliseconds() {
+		t.Fatalf("interrupted run = %#v, want failed %q ending at %v after 10m", latest, taskmanager.InterruptedExecutionMessage, lastBeat)
 	}
-	paged, err := repo.ListPage(ctx, key, time.Time{}, 0, 10)
-	if err != nil || len(paged) != 1 || paged[0].ID != completedID {
-		t.Fatalf("ListPage = (%#v, %v), want only completed ID %d", paged, err, completedID)
+	if held, err := repo.RenewRun(ctx, staleID); err != nil || held {
+		t.Fatalf("RenewRun reconciled = (%v, %v), want (false, nil)", held, err)
 	}
-
-	reconciled, err := repo.ReconcileStale(ctx, now.Add(-3*time.Minute), now, "Interrupted: server process stopped before the task finished")
-	if err != nil {
-		t.Fatalf("ReconcileStale: %v", err)
-	}
-	if reconciled < 1 {
-		t.Fatalf("ReconcileStale count = %d, want >= 1", reconciled)
+	if keys, err := repo.ReconcileStaleRuns(ctx, 3*time.Minute); err != nil || len(keys) != 0 {
+		t.Fatalf("second ReconcileStaleRuns = (%v, %v), want nothing", keys, err)
 	}
 
-	// Stale row is now visible as failed; live row is still running and excluded.
-	latest, err = repo.GetLatest(ctx, key)
-	if err != nil || latest == nil || latest.ID != staleID || latest.Status != "failed" {
-		t.Fatalf("GetLatest after reconcile = (%#v, %v), want stale ID %d failed", latest, err, staleID)
+	finished := taskmanager.ExecutionResult{
+		TaskKey: key, StartedAt: time.Now().Add(-time.Second), CompletedAt: time.Now(), Status: "completed", DurationMs: 1000,
 	}
-
-	// Live peer finishes its own row in place.
-	updated, err := repo.Finish(ctx, liveID, "peer-a", taskmanager.ExecutionResult{
-		TaskKey:     key,
-		StartedAt:   now.Add(-30 * time.Second),
-		CompletedAt: now.Add(time.Second),
-		Status:      "completed",
-		DurationMs:  31000,
-	})
-	if err != nil || !updated {
-		t.Fatalf("Finish live = (%v, %v), want (true, nil)", updated, err)
+	if err := repo.FinishRun(ctx, liveID, finished); err != nil {
+		t.Fatalf("FinishRun: %v", err)
 	}
-	latest, err = repo.GetLatest(ctx, key)
-	if err != nil || latest == nil || latest.ID != liveID || latest.Status != "completed" {
-		t.Fatalf("GetLatest after Finish = (%#v, %v), want live ID %d completed", latest, err, liveID)
+	if latest, err := repo.GetLatest(ctx, key); err != nil || latest == nil || latest.Status != "completed" {
+		t.Fatalf("GetLatest after FinishRun = (%#v, %v), want completed", latest, err)
+	}
+	var leases int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM task_execution_leases WHERE task_key = $1`, key).Scan(&leases); err != nil || leases != 0 {
+		t.Fatalf("leases left = (%d, %v), want 0", leases, err)
 	}
 }
