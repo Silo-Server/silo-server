@@ -190,33 +190,41 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 		// A bridge progress report may have updated the live session without
 		// a sequenced native sample. Preserve its final resume position.
 		final = &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: session.Position, IsPaused: session.IsPaused}
-	} else if !sentAt.IsZero() && record.LastSample != nil {
-		if anchor, ok := h.realtimeStopAnchor(ctx, session, record); ok {
-			// The file bounds the final sample. A short budget keeps a slow
-			// catalog read from holding up the stop write; the result looks
-			// it up again after finalization if this one fails.
-			fileCtx, cancelFile := context.WithTimeout(ctx, realtimeStopReadBudget)
-			file, fileErr = h.loadFileByPreferredID(fileCtx, requestedMediaFileID(session), session.MediaFileID)
-			cancelFile()
+	} else if record.LastSample != nil && record.StoppedAt == nil {
+		// The anchor also brings the copy up to a report another replica
+		// accepted, which the play's history needs even without an estimate.
+		if anchor, ok := h.realtimeStopAnchor(ctx, session, record); ok && !sentAt.IsZero() {
 			duration := session.TimelineDuration
-			if duration <= 0 && fileErr == nil && file != nil {
-				duration = float64(file.Duration)
+			if duration <= 0 {
+				// The file bounds the final sample. A short budget keeps a
+				// slow catalog read from holding up the stop write; the
+				// result looks it up again after finalization if this one
+				// fails.
+				fileCtx, cancelFile := context.WithTimeout(ctx, realtimeStopReadBudget)
+				file, fileErr = h.loadFileByPreferredID(fileCtx, requestedMediaFileID(session), session.MediaFileID)
+				cancelFile()
+				if fileErr == nil && file != nil {
+					duration = float64(file.Duration)
+				}
 			}
 			final = playedSinceLastReport(record, anchor, sentAt, duration)
 			if final != nil {
 				// The finalizer judges the final sample against the
-				// measurement it was estimated from, whatever a second read
-				// of the save would find.
+				// measurement it was estimated from, even if a second read
+				// of the save fails or finds nothing newer.
 				session.Watch = anchor
 			}
 		}
 	}
+	// The stop write gets its own budget, whatever the reads above took.
+	writeCtx, cancelWrite := context.WithTimeout(parent, stopFinalizationLease)
+	defer cancelWrite()
 	var receipt playback.StopReceiptV3
 	for range 3 {
 		// The CAS is idempotent for one stop id, so a retry after an
 		// ambiguous failure replays the stored receipt.
-		receipt, _, err = store.StopAttempt(ctx, session.ID, adminStopID(session.ID), final)
-		if err == nil || errors.Is(err, playback.ErrSessionNotFound) || ctx.Err() != nil {
+		receipt, _, err = store.StopAttempt(writeCtx, session.ID, adminStopID(session.ID), final)
+		if err == nil || errors.Is(err, playback.ErrSessionNotFound) || writeCtx.Err() != nil {
 			break
 		}
 	}
@@ -318,9 +326,8 @@ func (h *PlaybackHandler) realtimeStopAnchor(ctx context.Context, session *playb
 	last := record.LastSample
 	switch {
 	case seen:
-		// A confirmed pause leaves the measurement's time where it was, so
-		// the copy's pause state is the one that shows it. A newer report,
-		// adopted below, supersedes it.
+		// The measurement records a pause too (playedSinceLastReport checks
+		// it); this keeps a paused copy from estimating even if it doesn't.
 		if session.IsPaused {
 			return anchor, false
 		}
@@ -328,9 +335,9 @@ func (h *PlaybackHandler) realtimeStopAnchor(ctx context.Context, session *playb
 		return anchor, false
 	default:
 		anchor.Observe(last.Position, last.IsPaused, record.SampleAcceptedAt)
-		session.Position, session.IsPaused = last.Position, last.IsPaused
 		if !fromSave {
 			session.Watch = anchor
+			session.Position, session.IsPaused = last.Position, last.IsPaused
 		}
 	}
 	return anchor, anchor.Measured

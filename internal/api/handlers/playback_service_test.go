@@ -4,7 +4,6 @@ import (
 	"context"
 	jsonv2 "encoding/json/v2"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -1783,37 +1782,58 @@ func TestRealtimeConfirmedStopCreditsPlayAfterTheLastReport(t *testing.T) {
 // TestRealtimeConfirmedStopAfterAPendingPauseAddsNothing covers a stop the
 // player confirms while its confirmation of an administrator's pause is still
 // being applied: the stop's snapshot doesn't show the pause, so nothing past
-// the last report is credited.
+// the last report is credited. A report another replica accepted is still
+// measured.
 func TestRealtimeConfirmedStopAfterAPendingPauseAddsNothing(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		f := newPlaybackServiceFixture(t)
-		admin := &recordingPlaybackAdminStore{}
-		f.handler.AdminStore = admin
-		f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
-		if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 900}); err != nil {
-			t.Fatal(err)
-		}
-		time.Sleep(7 * time.Second) //nolint:forbidigo // advances the synctest clock from the report to the pause and stop
-		// Hold the pause's worker before it applies the pause.
-		unlock := f.handler.progressSideEffectLock(f.session.ID)
-		for _, command := range []struct {
-			id   string
-			name playback.CommandName
-		}{{"cmd-pause", playback.CommandPause}, {"cmd-stop", playback.CommandStop}} {
-			f.handler.rememberRealtimeCommand(command.id, f.session.ID, command.name)
-			if err := f.handler.handleRealtimeClientMessage(f.session.ID, realtimeResultMessage(t, f.session.ID, command.id, playback.RealtimeResultStatusCompleted)); err != nil {
-				t.Fatal(err)
-			}
-		}
-		unlock()
-		synctest.Wait()
-		if len(admin.history) != 1 {
-			t.Fatalf("admin history = %+v, want one row", admin.history)
-		}
-		if row := admin.history[0]; row.Watch.PlayedSeconds != 0 || row.EndPositionSeconds != 900 {
-			t.Fatalf("played %v s ending at %v, want 0 s ending at 900", row.Watch.PlayedSeconds, row.EndPositionSeconds)
-		}
-	})
+	for _, tc := range []struct {
+		name string
+		// elsewhere: another replica accepted a report at 910 s ten seconds
+		// after the session's own report at 900 s.
+		elsewhere   bool
+		played, end float64
+	}{
+		{name: "report seen here", played: 0, end: 900},
+		{name: "report accepted elsewhere", elsewhere: true, played: 10, end: 910},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				f := newPlaybackServiceFixture(t)
+				admin := &recordingPlaybackAdminStore{}
+				f.handler.AdminStore = admin
+				f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+				if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 900}); err != nil {
+					t.Fatal(err)
+				}
+				if tc.elsewhere {
+					time.Sleep(10 * time.Second) //nolint:forbidigo // advances the synctest clock to the other replica's report
+					store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+					if _, err := store.ApplyProgress(f.ctx, f.session.ID, playback.ProgressSampleV3{Sequence: 2, Position: 910}); err != nil {
+						t.Fatal(err)
+					}
+				}
+				time.Sleep(7 * time.Second) //nolint:forbidigo // advances the synctest clock to the pause and stop
+				// Hold the pause's worker before it applies the pause.
+				unlock := f.handler.progressSideEffectLock(f.session.ID)
+				for _, command := range []struct {
+					id   string
+					name playback.CommandName
+				}{{"cmd-pause", playback.CommandPause}, {"cmd-stop", playback.CommandStop}} {
+					f.handler.rememberRealtimeCommand(command.id, f.session.ID, command.name)
+					if err := f.handler.handleRealtimeClientMessage(f.session.ID, realtimeResultMessage(t, f.session.ID, command.id, playback.RealtimeResultStatusCompleted)); err != nil {
+						t.Fatal(err)
+					}
+				}
+				unlock()
+				synctest.Wait()
+				if len(admin.history) != 1 {
+					t.Fatalf("admin history = %+v, want one row", admin.history)
+				}
+				if row := admin.history[0]; row.Watch.PlayedSeconds != tc.played || row.EndPositionSeconds != tc.end {
+					t.Fatalf("played %v s ending at %v, want %v s ending at %v", row.Watch.PlayedSeconds, row.EndPositionSeconds, tc.played, tc.end)
+				}
+			})
+		})
+	}
 }
 
 // TestRealtimeConfirmedStopKeepsANewerSavedMeasurement covers a confirmed
@@ -1823,15 +1843,25 @@ func TestRealtimeConfirmedStopAfterAPendingPauseAddsNothing(t *testing.T) {
 // started over at that report, even when the save can't be read a second time
 // while the stop is finalized.
 func TestRealtimeConfirmedStopKeepsANewerSavedMeasurement(t *testing.T) {
-	for _, readOnce := range []bool{false, true} {
-		t.Run(fmt.Sprintf("read once %v", readOnce), func(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// readOnce: the save can be read one time. failFirst: the first read
+		// fails, so nothing is estimated and the play ends at the report.
+		readOnce, failFirst bool
+		played, end         float64
+	}{
+		{name: "read every time", played: 907, end: 907},
+		{name: "read once", readOnce: true, played: 907, end: 907},
+		{name: "first read fails", failFirst: true, played: 900, end: 900},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			synctest.Test(t, func(t *testing.T) {
 				f := newPlaybackServiceFixture(t)
 				start := time.Now()
 				var saved playback.WatchTime
 				saved.Observe(0, false, start)
 				saved.Observe(880, false, start.Add(880*time.Second))
-				admin := &onceSavedWatchAdminStore{savedWatchAdminStore: savedWatchAdminStore{watch: saved}, once: readOnce}
+				admin := &onceSavedWatchAdminStore{savedWatchAdminStore: savedWatchAdminStore{watch: saved}, once: tc.readOnce, failFirst: tc.failFirst}
 				f.handler.AdminStore = admin
 				f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
 				time.Sleep(890 * time.Second) //nolint:forbidigo // advances the synctest clock to the other replica's report
@@ -1849,8 +1879,8 @@ func TestRealtimeConfirmedStopKeepsANewerSavedMeasurement(t *testing.T) {
 				if len(admin.history) != 1 {
 					t.Fatalf("admin history = %+v, want one row", admin.history)
 				}
-				if row := admin.history[0]; row.Watch.PlayedSeconds != 907 || row.EndPositionSeconds != 907 {
-					t.Fatalf("played %v s ending at %v, want 907 s ending at 907: measured on from the save", row.Watch.PlayedSeconds, row.EndPositionSeconds)
+				if row := admin.history[0]; row.Watch.PlayedSeconds != tc.played || row.EndPositionSeconds != tc.end {
+					t.Fatalf("played %v s ending at %v, want %v s ending at %v: measured on from the save", row.Watch.PlayedSeconds, row.EndPositionSeconds, tc.played, tc.end)
 				}
 			})
 		})
@@ -1858,15 +1888,18 @@ func TestRealtimeConfirmedStopKeepsANewerSavedMeasurement(t *testing.T) {
 }
 
 // onceSavedWatchAdminStore is a savedWatchAdminStore whose save, with once,
-// can be read only one time.
+// can be read only one time, and whose first read, with failFirst, fails.
 type onceSavedWatchAdminStore struct {
 	savedWatchAdminStore
-	once  bool
-	reads int
+	once, failFirst bool
+	reads           int
 }
 
 func (s *onceSavedWatchAdminStore) SessionWatch(ctx context.Context, id string) (playback.WatchTime, bool, error) {
 	s.reads++
+	if s.failFirst && s.reads == 1 {
+		return playback.WatchTime{}, false, errors.New("store unavailable")
+	}
 	if s.once && s.reads > 1 {
 		return playback.WatchTime{}, false, nil
 	}
