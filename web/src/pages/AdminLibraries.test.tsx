@@ -9,6 +9,8 @@ const mocks = vi.hoisted(() => ({
   refreshJobs: [] as AdminJob[] | undefined,
   refreshJobsPending: false,
   refreshJobsError: false,
+  refreshJobsHasNextPage: false,
+  refreshJobsFetchNextPage: vi.fn(),
   refreshJobsRestart: vi.fn(),
   unmatchedTotal: 0 as number | undefined,
   unmatchedError: false,
@@ -95,9 +97,9 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
     data: mocks.refreshJobs,
     isPending: mocks.refreshJobsPending,
     isError: mocks.refreshJobsError,
-    hasNextPage: false,
+    hasNextPage: mocks.refreshJobsHasNextPage,
     isFetchingNextPage: false,
-    fetchNextPage: vi.fn(),
+    fetchNextPage: mocks.refreshJobsFetchNextPage,
     restart: mocks.refreshJobsRestart,
   }),
   useReorderLibraries: () => ({ mutate: vi.fn(), isPending: false }),
@@ -251,6 +253,8 @@ describe("AdminLibraries layout", () => {
     mocks.refreshJobs = [];
     mocks.refreshJobsPending = false;
     mocks.refreshJobsError = false;
+    mocks.refreshJobsHasNextPage = false;
+    mocks.refreshJobsFetchNextPage.mockReset();
     mocks.refreshJobsRestart.mockReset();
     mocks.unmatchedTotal = 12;
     mocks.unmatchedError = false;
@@ -394,6 +398,14 @@ describe("AdminLibraries layout", () => {
     expect(screen.queryByText("No scans running")).not.toBeInTheDocument();
 
     mocks.refreshJobsError = false;
+    mocks.refreshJobs = [];
+    mocks.refreshJobsHasNextPage = true;
+    cleanup();
+    renderPage("/admin/libraries?tab=activity");
+    fireEvent.click(screen.getByRole("button", { name: "Load older refresh jobs" }));
+    expect(mocks.refreshJobsFetchNextPage).toHaveBeenCalledTimes(1);
+
+    mocks.refreshJobsHasNextPage = false;
     mocks.refreshJobs = [
       {
         id: "job-queued-1",

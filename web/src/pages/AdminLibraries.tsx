@@ -1,3 +1,4 @@
+import { JobPageControls } from "@/components/admin/JobPageControls";
 import { Fragment, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useSortableAccessibility } from "@/hooks/useSortableAccessibility";
 import { useEventChannel } from "@/components/realtimeEventsContext";
@@ -492,7 +493,6 @@ function LibrariesPage() {
             refreshEntries={activeRefreshEntries}
             refreshJobsLoading={refreshJobsQuery.isPending && refreshJobsQuery.data === undefined}
             refreshJobsError={refreshJobsQuery.isError}
-            onRetryRefreshJobs={() => void refreshJobsQuery.restart()}
             selectedLibraryID={activityLibraryFilter}
             onSelectLibraryID={setActivityLibraryFilter}
             cancellingLibraryID={
@@ -501,6 +501,12 @@ function LibrariesPage() {
             cancellingJobID={cancellingJobID}
             onCancelScans={(libraryID) => cancelScansMutation.mutate(libraryID)}
             onCancelJob={cancelJob}
+            footer={
+              <JobPageControls
+                query={refreshJobsQuery}
+                label={t("web.admin.libraries.page.loadOlderRefreshJobs")}
+              />
+            }
           />
         </TabsContent>
 

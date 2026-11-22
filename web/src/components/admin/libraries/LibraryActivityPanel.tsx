@@ -188,45 +188,30 @@ export function LibraryActivityPanel({
   refreshEntries,
   refreshJobsLoading = false,
   refreshJobsError = false,
-  onRetryRefreshJobs,
   selectedLibraryID,
   onSelectLibraryID,
   cancellingLibraryID,
   cancellingJobID,
   onCancelScans,
   onCancelJob,
+  footer,
 }: {
   groups: LibraryScanGroup[];
   refreshEntries: LibraryRefreshEntry[];
   refreshJobsLoading?: boolean;
   refreshJobsError?: boolean;
-  onRetryRefreshJobs?: () => void;
   selectedLibraryID: number | null;
   onSelectLibraryID: (libraryID: number | null) => void;
   cancellingLibraryID: number | null;
   cancellingJobID: string | undefined;
   onCancelScans: (libraryID: number) => void;
   onCancelJob: (jobID: string) => void;
+  footer?: React.ReactNode;
 }) {
   const t = useT();
 
   const totalScans = groups.reduce((sum, group) => sum + group.scans.length, 0);
   const totalActive = totalScans + refreshEntries.length;
-
-  const refreshErrorAlert = refreshJobsError ? (
-    <div
-      role="alert"
-      className="surface-panel text-destructive flex flex-wrap items-center justify-center gap-2 rounded-2xl border-0 px-6 py-6 text-center text-sm"
-    >
-      {t("web.admin.common.jobPageControls.loadFailed", {
-        button: (chunks) => (
-          <Button variant="outline" size="sm" onClick={() => onRetryRefreshJobs?.()}>
-            {chunks}
-          </Button>
-        ),
-      })}
-    </div>
-  ) : null;
 
   // Build unique library filters covering both active scans and active metadata refreshes.
   const filterEntries = (() => {
@@ -268,8 +253,8 @@ export function LibraryActivityPanel({
       : refreshEntries.filter((entry) => entry.libraryID === effectiveFilter);
 
   if (totalActive === 0) {
-    if (refreshErrorAlert) {
-      return <div className="space-y-4">{refreshErrorAlert}</div>;
+    if (refreshJobsError) {
+      return <div className="space-y-4">{footer}</div>;
     }
     if (refreshJobsLoading) {
       return (
@@ -289,6 +274,7 @@ export function LibraryActivityPanel({
             {t("web.admin.libraries.activity.emptyDescription")}
           </p>
         </div>
+        {footer}
       </div>
     );
   }
@@ -405,7 +391,7 @@ export function LibraryActivityPanel({
         ))}
       </div>
 
-      {refreshErrorAlert}
+      {footer}
     </div>
   );
 }
