@@ -70,10 +70,8 @@ export function UnmatchedItemsSection({ embedded = false }: { embedded?: boolean
   // The listing is an infinite query that retains each loaded page's cursor:
   // `page` indexes the loaded pages, Next fetches only when the next page is
   // not loaded yet, and a refetch refreshes the loaded pages in place.
-  const { data, hasNextPage, fetchNextPage, isFetching } = useUnmatchedLibraryItems(
-    debouncedSearch,
-    ignoredView,
-  );
+  const { data, hasNextPage, fetchNextPage, isFetching, isError, refetch } =
+    useUnmatchedLibraryItems(debouncedSearch, ignoredView);
   // Unfiltered totals of both views, for the header count and for hiding the
   // section; each shares its cache entry with the listing while no search
   // is active.
@@ -233,7 +231,17 @@ export function UnmatchedItemsSection({ embedded = false }: { embedded?: boolean
           }}
         />
       </div>
-      {showTable ? (
+      {data === undefined && isError ? (
+        <div
+          role="alert"
+          className="border-border/40 bg-background/40 text-destructive flex flex-col items-center gap-3 rounded-xl border px-4 py-8 text-center text-sm"
+        >
+          <span>{t("web.admin.common.diagnosticsSection.countError")}</span>
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>
+            {t("common.retry")}
+          </Button>
+        </div>
+      ) : showTable ? (
         <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
           <Table>
             <TableHeader>

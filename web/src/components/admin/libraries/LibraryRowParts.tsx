@@ -25,6 +25,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { AdminTrickplayLibrary } from "@/hooks/queries/admin/trickplay";
 import { numberText, useT } from "@/i18n";
 import { formatRelativeTime } from "@/lib/date";
@@ -103,7 +104,6 @@ export function LibraryStatusBadges({
                 ? "border-success/35 bg-success/10 text-success hover:bg-success/20"
                 : "border-border bg-secondary text-secondary-foreground hover:bg-accent",
             )}
-            aria-label={t("web.admin.libraries.list.viewScansFor", { name: library.name })}
             title={t("web.admin.libraries.list.viewScansFor", { name: library.name })}
             onClick={() => onViewActivity(library.id)}
           >
@@ -114,6 +114,10 @@ export function LibraryStatusBadges({
               </span>
             ) : null}
             {scanPillParts.join(SPACED_SEPARATOR)}
+            <span className="sr-only">
+              {SPACED_SEPARATOR}
+              {t("web.admin.libraries.list.viewScansFor", { name: library.name })}
+            </span>
           </button>
         ) : (
           <Badge variant="secondary" className="tabular-nums">
@@ -122,21 +126,35 @@ export function LibraryStatusBadges({
         )
       ) : null}
 
-      {activeRefreshJob ? (
-        onViewActivity ? (
-          <button
-            type="button"
-            className="border-primary/30 bg-primary/10 text-primary hover:bg-primary/20 inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors"
-            aria-label={t("web.admin.libraries.list.viewScansFor", { name: library.name })}
-            onClick={() => onViewActivity(library.id)}
-          >
-            <DatabaseBackup className="h-3 w-3 shrink-0" aria-hidden="true" />
-            {t("web.admin.libraries.activity.refreshingMetadata")}
-          </button>
-        ) : (
-          <Badge variant="secondary">{t("web.admin.libraries.activity.refreshingMetadata")}</Badge>
-        )
-      ) : null}
+      {activeRefreshJob
+        ? (() => {
+            const refreshRunning = activeRefreshJob.status === "running";
+            const refreshLabel = refreshRunning
+              ? t("web.admin.libraries.activity.refreshingMetadata")
+              : t("web.admin.libraries.activeWork.refreshQueued");
+            return onViewActivity ? (
+              <button
+                type="button"
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+                  refreshRunning
+                    ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/20"
+                    : "border-border bg-secondary text-secondary-foreground hover:bg-accent",
+                )}
+                onClick={() => onViewActivity(library.id)}
+              >
+                <DatabaseBackup className="h-3 w-3 shrink-0" aria-hidden="true" />
+                {refreshLabel}
+                <span className="sr-only">
+                  {SPACED_SEPARATOR}
+                  {library.name}
+                </span>
+              </button>
+            ) : (
+              <Badge variant="secondary">{refreshLabel}</Badge>
+            );
+          })()
+        : null}
 
       {library.scan_warning_code === "empty_root" ? (
         <Badge variant="destructive">{t("web.admin.libraries.list.emptyRootGuarded")}</Badge>
@@ -160,20 +178,46 @@ export function LibraryStatusBadges({
   );
 }
 
-/** Relative last-scanned time (with exact timestamp tooltip), plus any scan warning time. */
+/** Relative last-scanned time with an accessible popover for the exact timestamp, plus any scan warning time. */
 export function LibraryLastScanned({ row }: { row: LibraryRow }) {
   const t = useT();
   const { library } = row;
-  const exact = library.last_scanned_at ? formatDateTime(library.last_scanned_at) : null;
-  const relative = library.last_scanned_at
-    ? formatRelativeTime(library.last_scanned_at, { rounding: "floor", absoluteAfterDays: 30 })
+  const scannedAt = library.last_scanned_at;
+  const exact = scannedAt ? formatDateTime(scannedAt) : null;
+  const relative = scannedAt
+    ? formatRelativeTime(scannedAt, { rounding: "floor", absoluteAfterDays: 30 })
     : null;
+  const showExactPopover = exact !== null && relative !== null && relative !== exact;
 
   return (
     <div className="space-y-0.5">
-      <div className="tabular-nums" title={exact ?? undefined}>
-        {relative ?? exact ?? t("web.admin.libraries.list.neverScanned")}
-      </div>
+      {showExactPopover ? (
+        <Popover>
+          <PopoverTrigger asChild>
+            <button
+              type="button"
+              className="hover:text-foreground cursor-pointer text-start tabular-nums underline-offset-4 hover:underline focus-visible:underline"
+              title={exact}
+            >
+              <time dateTime={scannedAt ?? undefined}>{relative}</time>
+            </button>
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            className="w-auto min-w-0 px-2.5 py-1.5 text-xs tabular-nums"
+          >
+            <time dateTime={scannedAt ?? undefined}>{exact}</time>
+          </PopoverContent>
+        </Popover>
+      ) : (
+        <div className="tabular-nums">
+          {exact ? (
+            <time dateTime={scannedAt ?? undefined}>{exact}</time>
+          ) : (
+            t("web.admin.libraries.list.neverScanned")
+          )}
+        </div>
+      )}
       {library.scan_warning_at ? (
         <div className="text-destructive text-[11px]">
           {t("web.admin.libraries.list.warningAt", {

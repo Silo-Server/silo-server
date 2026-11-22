@@ -35,6 +35,9 @@ const SEPARATOR = "·";
 const SPACED_SEPARATOR = ` ${SEPARATOR} `;
 const EM_DASH = "—";
 const COMMA_SEPARATOR = ", ";
+const OPEN_PAREN = " (";
+const CLOSE_PAREN = ")";
+const SPACE = " ";
 const QUEUED_PREVIEW_LIMIT = 2;
 
 /** Calm single-line summary banner shown above the Libraries list while scans or refreshes run. */
@@ -50,6 +53,7 @@ export function LiveActivitySummaryStrip({
   const t = useT();
   const totalRunning = groups.reduce((sum, group) => sum + group.runningCount, 0);
   const totalQueued = groups.reduce((sum, group) => sum + group.queuedCount, 0);
+  const runningRefreshes = refreshEntries.filter((entry) => entry.job.status === "running").length;
   const totalRefreshes = refreshEntries.length;
 
   if (totalRunning === 0 && totalQueued === 0 && totalRefreshes === 0) {
@@ -74,30 +78,69 @@ export function LiveActivitySummaryStrip({
     );
   }
   if (totalRefreshes > 0 && headlineParts.length === 0) {
-    headlineParts.push(t("web.admin.libraries.activity.refreshingMetadata"));
+    headlineParts.push(
+      runningRefreshes > 0
+        ? t("web.admin.libraries.activity.refreshingMetadata")
+        : t("web.admin.libraries.activeWork.refreshQueued"),
+    );
   }
 
   const primaryGroup = groups[0];
-  let detailSummary = "";
+  const primaryRefresh = !primaryGroup ? refreshEntries[0] : undefined;
+  let detailSummary: React.ReactNode = null;
   if (primaryGroup) {
     const name = getLibraryScanGroupName(t, primaryGroup.library, primaryGroup.libraryID);
     const sampleTargets = primaryGroup.scans
       .slice(0, 2)
       .map((scan) => formatActiveScanTarget(scan));
-    const targetText = sampleTargets.length > 0 ? `${name} (${sampleTargets.join(", ")})` : name;
     const otherCount = groups.length - 1;
-    detailSummary =
-      otherCount > 0
-        ? `${targetText} ${t("web.admin.libraries.activity.moreLibraries", { count: otherCount })}`
-        : targetText;
-  } else if (refreshEntries[0]) {
-    const name = getLibraryScanGroupName(t, refreshEntries[0].library, refreshEntries[0].libraryID);
-    detailSummary = refreshEntries[0].job.message
-      ? `${name} ${SEPARATOR} ${refreshEntries[0].job.message}`
-      : name;
+    detailSummary = (
+      <>
+        <span dir="auto" className="bidi-text">
+          {name}
+        </span>
+        {sampleTargets.length > 0 ? (
+          <>
+            {OPEN_PAREN}
+            {sampleTargets.map((target, index) => (
+              <span key={`${target}-${index}`}>
+                {index > 0 ? COMMA_SEPARATOR : null}
+                <span dir="ltr">
+                  <PathText path={target} />
+                </span>
+              </span>
+            ))}
+            {CLOSE_PAREN}
+          </>
+        ) : null}
+        {otherCount > 0 ? (
+          <>
+            {SPACE}
+            {t("web.admin.libraries.activity.moreLibraries", { count: otherCount })}
+          </>
+        ) : null}
+      </>
+    );
+  } else if (primaryRefresh) {
+    const name = getLibraryScanGroupName(t, primaryRefresh.library, primaryRefresh.libraryID);
+    detailSummary = (
+      <>
+        <span dir="auto" className="bidi-text">
+          {name}
+        </span>
+        {primaryRefresh.job.message ? (
+          <>
+            {SPACED_SEPARATOR}
+            <span dir="auto" className="bidi-text">
+              {primaryRefresh.job.message}
+            </span>
+          </>
+        ) : null}
+      </>
+    );
   }
 
-  const isRunning = totalRunning > 0 || totalRefreshes > 0;
+  const isRunning = totalRunning > 0 || runningRefreshes > 0;
 
   return (
     <div
@@ -143,28 +186,47 @@ export function LiveActivitySummaryStrip({
 export function LibraryActivityPanel({
   groups,
   refreshEntries,
+  refreshJobsLoading = false,
+  refreshJobsError = false,
+  onRetryRefreshJobs,
   selectedLibraryID,
   onSelectLibraryID,
   cancellingLibraryID,
   cancellingJobID,
   onCancelScans,
   onCancelJob,
-  footer,
 }: {
   groups: LibraryScanGroup[];
   refreshEntries: LibraryRefreshEntry[];
+  refreshJobsLoading?: boolean;
+  refreshJobsError?: boolean;
+  onRetryRefreshJobs?: () => void;
   selectedLibraryID: number | null;
   onSelectLibraryID: (libraryID: number | null) => void;
   cancellingLibraryID: number | null;
   cancellingJobID: string | undefined;
   onCancelScans: (libraryID: number) => void;
   onCancelJob: (jobID: string) => void;
-  footer?: React.ReactNode;
 }) {
   const t = useT();
 
   const totalScans = groups.reduce((sum, group) => sum + group.scans.length, 0);
   const totalActive = totalScans + refreshEntries.length;
+
+  const refreshErrorAlert = refreshJobsError ? (
+    <div
+      role="alert"
+      className="surface-panel text-destructive flex flex-wrap items-center justify-center gap-2 rounded-2xl border-0 px-6 py-6 text-center text-sm"
+    >
+      {t("web.admin.common.jobPageControls.loadFailed", {
+        button: (chunks) => (
+          <Button variant="outline" size="sm" onClick={() => onRetryRefreshJobs?.()}>
+            {chunks}
+          </Button>
+        ),
+      })}
+    </div>
+  ) : null;
 
   // Build unique library filters covering both active scans and active metadata refreshes.
   const filterEntries = (() => {
@@ -206,6 +268,16 @@ export function LibraryActivityPanel({
       : refreshEntries.filter((entry) => entry.libraryID === effectiveFilter);
 
   if (totalActive === 0) {
+    if (refreshErrorAlert) {
+      return <div className="space-y-4">{refreshErrorAlert}</div>;
+    }
+    if (refreshJobsLoading) {
+      return (
+        <div className="surface-panel text-muted-foreground rounded-2xl border-0 px-6 py-12 text-center text-sm">
+          {t("common.loading")}
+        </div>
+      );
+    }
     return (
       <div className="space-y-4">
         <div className="surface-panel flex flex-col items-center justify-center gap-2 rounded-2xl border-0 px-6 py-12 text-center">
@@ -217,7 +289,6 @@ export function LibraryActivityPanel({
             {t("web.admin.libraries.activity.emptyDescription")}
           </p>
         </div>
-        {footer}
       </div>
     );
   }
@@ -228,6 +299,7 @@ export function LibraryActivityPanel({
         <div className="flex flex-wrap items-center gap-1.5">
           <button
             type="button"
+            aria-pressed={effectiveFilter === null}
             className={cn(
               "rounded-full border px-3 py-1 text-xs font-medium transition-colors max-lg:min-h-9",
               effectiveFilter === null
@@ -242,6 +314,7 @@ export function LibraryActivityPanel({
             <button
               key={entry.libraryID}
               type="button"
+              aria-pressed={effectiveFilter === entry.libraryID}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium tabular-nums transition-colors max-lg:min-h-9",
                 effectiveFilter === entry.libraryID
@@ -250,7 +323,9 @@ export function LibraryActivityPanel({
               )}
               onClick={() => onSelectLibraryID(entry.libraryID)}
             >
-              <span>{entry.name}</span>
+              <span dir="auto" className="bidi-text">
+                {entry.name}
+              </span>
               <span
                 className={cn(
                   "rounded-full px-1.5 py-px text-[10px]",
@@ -286,7 +361,9 @@ export function LibraryActivityPanel({
                   </div>
                   <div className="min-w-0 flex-1 space-y-0.5">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-sm font-semibold">{name}</span>
+                      <span dir="auto" className="bidi-text text-sm font-semibold">
+                        {name}
+                      </span>
                       <Badge variant="secondary" className="gap-1 text-[11px]">
                         <DatabaseBackup className="h-3 w-3" aria-hidden="true" />
                         {t("web.admin.libraries.activeWork.metadata")}
@@ -328,7 +405,7 @@ export function LibraryActivityPanel({
         ))}
       </div>
 
-      {footer}
+      {refreshErrorAlert}
     </div>
   );
 }
@@ -485,7 +562,7 @@ function ActivityLibraryCard({
                 </span>
               ) : null}
             </div>
-            {queuedScans.length > QUEUED_PREVIEW_LIMIT ? (
+            {queuedScans.length > QUEUED_PREVIEW_LIMIT || queueExpanded ? (
               <Button
                 variant="ghost"
                 size="sm"

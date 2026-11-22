@@ -7,6 +7,7 @@ import { MetadataMatcherQueuesSection } from "@/components/admin/libraries/Metad
 import { SkippedRootsSection } from "@/components/admin/libraries/SkippedRootsSection";
 import { StaleIDsSection } from "@/components/admin/libraries/StaleIDsSection";
 import { UnmatchedItemsSection } from "@/components/admin/libraries/UnmatchedItemsSection";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { numberText, useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 
@@ -14,6 +15,19 @@ import { cn } from "@/lib/utils";
 const ERROR_MARK = "!";
 
 type HealthSectionId = "unmatched" | "matcher" | "ambiguous" | "skipped" | "stale";
+
+function parseHealthSectionId(value: string): HealthSectionId {
+  if (
+    value === "unmatched" ||
+    value === "matcher" ||
+    value === "ambiguous" ||
+    value === "skipped" ||
+    value === "stale"
+  ) {
+    return value;
+  }
+  return "unmatched";
+}
 
 interface LazySectionStatus {
   count: number | undefined;
@@ -29,11 +43,15 @@ interface LazySectionStatus {
 export function LibraryCatalogHealthPanel({
   libraries,
   unmatchedCount,
+  unmatchedError = false,
   matcherCount,
+  matcherError = false,
 }: {
   libraries: Library[];
   unmatchedCount: number | undefined;
+  unmatchedError?: boolean;
   matcherCount: number | undefined;
+  matcherError?: boolean;
 }) {
   const t = useT();
   const [selected, setSelected] = useState<HealthSectionId>("unmatched");
@@ -69,6 +87,7 @@ export function LibraryCatalogHealthPanel({
       id: "unmatched",
       label: t("web.admin.libraries.unmatched.title"),
       count: unmatchedCount,
+      isError: unmatchedError,
       icon: <Search className="h-4 w-4 text-amber-500" aria-hidden="true" />,
       accentClass: "bg-amber-500/10",
     },
@@ -76,6 +95,7 @@ export function LibraryCatalogHealthPanel({
       id: "matcher",
       label: t("web.admin.common.libraryEditor.matcher.title"),
       count: matcherCount,
+      isError: matcherError,
       icon: <Wrench className="h-4 w-4 text-amber-500" aria-hidden="true" />,
       accentClass: "bg-amber-500/10",
     },
@@ -106,82 +126,76 @@ export function LibraryCatalogHealthPanel({
   ];
 
   return (
-    <div className="space-y-4">
-      <div
-        role="tablist"
+    <Tabs
+      value={selected}
+      onValueChange={(value) => setSelected(parseHealthSectionId(value))}
+      className="gap-4"
+    >
+      <TabsList
         aria-label={t("web.admin.libraries.tabs.health")}
-        className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5"
+        className="grid h-auto! w-full grid-cols-2 gap-2.5 bg-transparent p-0 sm:grid-cols-3 lg:grid-cols-5"
       >
-        {tiles.map((tile) => {
-          const isActive = selected === tile.id;
-          return (
-            <button
-              key={tile.id}
-              type="button"
-              role="tab"
-              aria-selected={isActive}
-              className={cn(
-                "surface-panel flex min-h-20 flex-col items-start justify-between gap-2 rounded-2xl border p-3.5 text-start transition-colors",
-                isActive
-                  ? "border-foreground/60 bg-secondary/50"
-                  : "hover:bg-surface-hover/50 border-border/50",
-              )}
-              onClick={() => setSelected(tile.id)}
-            >
-              <div className="flex w-full items-center justify-between gap-2">
-                {tile.isError ? (
-                  <span className="text-destructive text-lg leading-none font-bold tabular-nums">
-                    <span className="sr-only">
-                      {t("web.admin.common.diagnosticsSection.countError")}
-                    </span>
-                    <span aria-hidden="true">{ERROR_MARK}</span>
+        {tiles.map((tile) => (
+          <TabsTrigger
+            key={tile.id}
+            value={tile.id}
+            className="surface-panel hover:bg-surface-hover/50 border-border/50 data-[state=active]:border-foreground/60 data-[state=active]:bg-secondary/50 text-foreground flex h-auto min-h-20 w-full flex-col items-start justify-between gap-2 rounded-2xl border p-3.5 text-start whitespace-normal shadow-none transition-colors after:hidden"
+          >
+            <div className="flex w-full items-center justify-between gap-2">
+              {tile.isError ? (
+                <span className="text-destructive text-lg leading-none font-bold tabular-nums">
+                  <span className="sr-only">
+                    {t("web.admin.common.diagnosticsSection.countError")}
                   </span>
-                ) : tile.count !== undefined ? (
-                  <span
-                    className={cn(
-                      "text-xl leading-none font-bold tracking-tight tabular-nums",
-                      tile.count === 0 && "text-muted-foreground",
-                    )}
-                  >
-                    {numberText(tile.count)}
-                  </span>
-                ) : (
-                  <span className="text-muted-foreground text-xs font-medium">
-                    {t("web.admin.libraries.health.inspect")}
-                  </span>
-                )}
+                  <span aria-hidden="true">{ERROR_MARK}</span>
+                </span>
+              ) : tile.count !== undefined ? (
                 <span
                   className={cn(
-                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
-                    tile.accentClass,
+                    "text-xl leading-none font-bold tracking-tight tabular-nums",
+                    tile.count === 0 && "text-muted-foreground",
                   )}
                 >
-                  {tile.icon}
+                  {numberText(tile.count)}
                 </span>
-              </div>
-              <span className="text-xs leading-snug font-semibold">{tile.label}</span>
-            </button>
-          );
-        })}
-      </div>
+              ) : (
+                <span className="text-muted-foreground text-xs font-medium">
+                  {t("web.admin.libraries.health.inspect")}
+                </span>
+              )}
+              <span
+                className={cn(
+                  "flex h-7 w-7 shrink-0 items-center justify-center rounded-lg",
+                  tile.accentClass,
+                )}
+              >
+                {tile.icon}
+              </span>
+            </div>
+            <span className="text-xs leading-snug font-semibold">{tile.label}</span>
+          </TabsTrigger>
+        ))}
+      </TabsList>
 
-      {selected === "unmatched" ? <UnmatchedItemsSection embedded /> : null}
-      {selected === "matcher" ? (
+      <TabsContent value="unmatched" className="mt-0">
+        <UnmatchedItemsSection embedded />
+      </TabsContent>
+      <TabsContent value="matcher" className="mt-0">
         <MetadataMatcherQueuesSection libraries={libraries} embedded />
-      ) : null}
-      {selected === "ambiguous" ? (
+      </TabsContent>
+      <TabsContent value="ambiguous" className="mt-0">
         <AmbiguousRootsSection
           libraries={libraries}
           embedded
           onStatusChange={handleAmbiguousStatus}
         />
-      ) : null}
-      {selected === "skipped" ? (
+      </TabsContent>
+      <TabsContent value="skipped" className="mt-0">
         <SkippedRootsSection embedded onStatusChange={handleSkippedStatus} />
-      ) : null}
-      {selected === "stale" ? (
+      </TabsContent>
+      <TabsContent value="stale" className="mt-0">
         <StaleIDsSection embedded onStatusChange={handleStaleStatus} />
-      ) : null}
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 }

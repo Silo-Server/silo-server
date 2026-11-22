@@ -1,5 +1,4 @@
-import { JobPageControls } from "@/components/admin/JobPageControls";
-import { Fragment, useEffect, useMemo, useState, type ComponentProps } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { useSortableAccessibility } from "@/hooks/useSortableAccessibility";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import type { Library, LibraryRealtimeMonitoringEntry, ScanRun } from "@/api/types";
@@ -108,6 +107,7 @@ function LibrariesPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const activeTab = parseLibrariesTab(searchParams.get("tab"));
   const [activityLibraryFilter, setActivityLibraryFilter] = useState<number | null>(null);
+  const activityTabTriggerRef = useRef<HTMLButtonElement>(null);
 
   const {
     data: libraries = NO_LIBRARIES,
@@ -118,8 +118,10 @@ function LibrariesPage() {
   const { data: activeScans = NO_ACTIVE_SCANS } = useActiveScans();
   const { data: realtimeMonitoring } = useLibraryRealtimeMonitoring();
   const { data: trickplayLibraries } = useAdminTrickplayLibraries();
-  const unmatchedTotal = useUnmatchedLibraryItems("", false).data?.pages[0]?.total;
-  const { data: matcherQueues } = useLibraryMetadataMatchQueues();
+  const unmatchedQuery = useUnmatchedLibraryItems("", false);
+  const unmatchedTotal = unmatchedQuery.data?.pages[0]?.total;
+  const matcherQueuesQuery = useLibraryMetadataMatchQueues();
+  const matcherQueues = matcherQueuesQuery.data;
   const matcherTotal = useMemo(
     () =>
       matcherQueues ? matcherQueues.reduce((sum, queue) => sum + queue.total_count, 0) : undefined,
@@ -168,6 +170,8 @@ function LibrariesPage() {
   function openActivityForLibrary(libraryId: number | null) {
     setActivityLibraryFilter(libraryId);
     setActiveTab("activity");
+    // Move focus to the Activity tab trigger once the Libraries panel hides.
+    requestAnimationFrame(() => activityTabTriggerRef.current?.focus());
   }
 
   function openEditor(lib: Library, section: LibraryEditorSection = "general") {
@@ -283,7 +287,8 @@ function LibrariesPage() {
   const totalActiveScans = activeScanGroups.reduce((sum, group) => sum + group.scans.length, 0);
   const totalActiveWork = totalActiveScans + activeRefreshEntries.length;
   const hasRunningWork =
-    activeScanGroups.some((group) => group.runningCount > 0) || activeRefreshEntries.length > 0;
+    activeScanGroups.some((group) => group.runningCount > 0) ||
+    activeRefreshEntries.some((entry) => entry.job.status === "running");
 
   // Below lg the header buttons share rows at equal width and wrap as needed,
   // with Add Library on a row of its own; from lg they keep their natural size.
@@ -414,7 +419,11 @@ function LibrariesPage() {
             </span>
           </TabsTrigger>
 
-          <TabsTrigger value="activity" className="flex-none shrink-0 gap-2 max-lg:h-11">
+          <TabsTrigger
+            ref={activityTabTriggerRef}
+            value="activity"
+            className="flex-none shrink-0 gap-2 max-lg:h-11"
+          >
             {t("web.admin.libraries.tabs.activity")}
             {totalActiveWork > 0 ? (
               <span
@@ -481,6 +490,9 @@ function LibrariesPage() {
           <LibraryActivityPanel
             groups={activeScanGroups}
             refreshEntries={activeRefreshEntries}
+            refreshJobsLoading={refreshJobsQuery.isPending && refreshJobsQuery.data === undefined}
+            refreshJobsError={refreshJobsQuery.isError}
+            onRetryRefreshJobs={() => void refreshJobsQuery.restart()}
             selectedLibraryID={activityLibraryFilter}
             onSelectLibraryID={setActivityLibraryFilter}
             cancellingLibraryID={
@@ -489,12 +501,6 @@ function LibrariesPage() {
             cancellingJobID={cancellingJobID}
             onCancelScans={(libraryID) => cancelScansMutation.mutate(libraryID)}
             onCancelJob={cancelJob}
-            footer={
-              <JobPageControls
-                query={refreshJobsQuery}
-                label={t("web.admin.libraries.page.loadOlderRefreshJobs")}
-              />
-            }
           />
         </TabsContent>
 
@@ -502,7 +508,9 @@ function LibrariesPage() {
           <LibraryCatalogHealthPanel
             libraries={libraries}
             unmatchedCount={unmatchedTotal}
+            unmatchedError={unmatchedQuery.isError && unmatchedQuery.data === undefined}
             matcherCount={matcherTotal}
+            matcherError={matcherQueuesQuery.isError && matcherQueuesQuery.data === undefined}
           />
         </TabsContent>
       </Tabs>

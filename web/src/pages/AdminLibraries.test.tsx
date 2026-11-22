@@ -1,13 +1,22 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { Library, ScanRun } from "@/api/types";
+import type { AdminJob, Library, ScanRun } from "@/api/types";
 
 const mocks = vi.hoisted(() => ({
   libraries: [] as Library[],
   activeScans: [] as ScanRun[],
-  unmatchedTotal: 0,
-  matcherTotal: 0,
+  refreshJobs: [] as AdminJob[] | undefined,
+  refreshJobsPending: false,
+  refreshJobsError: false,
+  refreshJobsRestart: vi.fn(),
+  unmatchedTotal: 0 as number | undefined,
+  unmatchedError: false,
+  unmatchedRefetch: vi.fn(),
+  matcherTotal: 0 as number | undefined,
+  matcherPending: false,
+  matcherError: false,
+  matcherRefetch: vi.fn(),
   rootsCalls: [] as Array<{ enabled?: boolean }>,
   skippedCalls: [] as Array<{ enabled?: boolean }>,
   staleCalls: [] as Array<{ enabled?: boolean }>,
@@ -83,10 +92,13 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useLibraryCapabilities: () => ({ data: { trickplay: false } }),
   useLibraryRealtimeMonitoring: () => ({ data: { libraries: [] } }),
   useLibraryRefreshJobs: () => ({
-    data: [],
+    data: mocks.refreshJobs,
+    isPending: mocks.refreshJobsPending,
+    isError: mocks.refreshJobsError,
     hasNextPage: false,
     isFetchingNextPage: false,
     fetchNextPage: vi.fn(),
+    restart: mocks.refreshJobsRestart,
   }),
   useReorderLibraries: () => ({ mutate: vi.fn(), isPending: false }),
   useDeleteLibrary: () => ({ mutate: vi.fn(), isPending: false }),
@@ -102,24 +114,34 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
   useConfirmEmptyRootCleanup: () => ({ mutate: vi.fn(), isPending: false, variables: undefined }),
   useRefreshLibraryMetadata: () => ({ mutate: vi.fn(), isPending: false, variables: undefined }),
   useUnmatchedLibraryItems: () => ({
-    data: { pages: [{ items: [], total: mocks.unmatchedTotal, nextCursor: undefined }] },
+    data:
+      mocks.unmatchedTotal !== undefined
+        ? { pages: [{ items: [], total: mocks.unmatchedTotal, nextCursor: undefined }] }
+        : undefined,
     hasNextPage: false,
     fetchNextPage: vi.fn(),
     isFetching: false,
+    isError: mocks.unmatchedError,
+    refetch: mocks.unmatchedRefetch,
   }),
   useSetUnmatchedItemIgnored: () => ({ mutate: vi.fn(), isPending: false, variables: undefined }),
   useLibraryMetadataMatchQueues: () => ({
     data:
-      mocks.matcherTotal > 0
-        ? [
-            {
-              library_id: 1,
-              pending_count: mocks.matcherTotal,
-              parked_count: 0,
-              total_count: mocks.matcherTotal,
-            },
-          ]
-        : [],
+      mocks.matcherTotal === undefined
+        ? undefined
+        : mocks.matcherTotal > 0
+          ? [
+              {
+                library_id: 1,
+                pending_count: mocks.matcherTotal,
+                parked_count: 0,
+                total_count: mocks.matcherTotal,
+              },
+            ]
+          : [],
+    isPending: mocks.matcherPending,
+    isError: mocks.matcherError,
+    refetch: mocks.matcherRefetch,
   }),
   useLibraryMetadataMatchQueueDetail: () => ({
     data: undefined,
@@ -226,8 +248,17 @@ describe("AdminLibraries layout", () => {
         path: "/media/tv/Show/Season 02",
       }),
     ];
+    mocks.refreshJobs = [];
+    mocks.refreshJobsPending = false;
+    mocks.refreshJobsError = false;
+    mocks.refreshJobsRestart.mockReset();
     mocks.unmatchedTotal = 12;
+    mocks.unmatchedError = false;
+    mocks.unmatchedRefetch.mockReset();
     mocks.matcherTotal = 3;
+    mocks.matcherPending = false;
+    mocks.matcherError = false;
+    mocks.matcherRefetch.mockReset();
     mocks.rootsCalls = [];
     mocks.skippedCalls = [];
     mocks.staleCalls = [];
@@ -261,7 +292,11 @@ describe("AdminLibraries layout", () => {
     );
 
     // Clicking the library's live scan chip switches directly to Scan Activity for that library.
-    fireEvent.click(within(tvRow).getByRole("button", { name: "View active scans for TV Shows" }));
+    fireEvent.click(
+      within(tvRow).getByRole("button", {
+        name: /1 running.*1 queued.*View active scans for TV Shows/i,
+      }),
+    );
     expect(screen.getByRole("tab", { name: /Scan Activity/i })).toHaveAttribute(
       "aria-selected",
       "true",
@@ -281,14 +316,18 @@ describe("AdminLibraries layout", () => {
     expect(mocks.skippedCalls).toHaveLength(0);
     expect(mocks.staleCalls).toHaveLength(0);
 
-    fireEvent.click(screen.getByRole("tab", { name: /Ambiguous Roots/i }));
+    const ambiguousTab = screen.getByRole("tab", { name: /Ambiguous Roots/i });
+    fireEvent.mouseDown(ambiguousTab);
+    fireEvent.click(ambiguousTab);
     expect(mocks.rootsCalls.some((call) => call.enabled === true)).toBe(true);
     expect(mocks.skippedCalls).toHaveLength(0);
     // With multiple libraries, the tile stays on "Inspect" rather than showing
     // one library's count as a catalog-wide total.
-    expect(screen.getByRole("tab", { name: /Ambiguous Roots/i })).toHaveTextContent("Inspect");
+    expect(ambiguousTab).toHaveTextContent("Inspect");
 
-    fireEvent.click(screen.getByRole("tab", { name: /Stale External IDs/i }));
+    const staleTab = screen.getByRole("tab", { name: /Stale External IDs/i });
+    fireEvent.mouseDown(staleTab);
+    fireEvent.click(staleTab);
     expect(mocks.staleCalls.some((call) => call.enabled === true)).toBe(true);
   });
 
@@ -332,5 +371,66 @@ describe("AdminLibraries layout", () => {
       "data-initial-section",
       "general",
     );
+  });
+
+  it("waits for refresh jobs before showing the empty Scan Activity state and distinguishes queued refreshes", () => {
+    mocks.activeScans = [];
+    mocks.refreshJobs = undefined;
+    mocks.refreshJobsPending = true;
+    const { rerender } = renderPage("/admin/libraries?tab=activity");
+    expect(screen.getByText(/Loading/i)).toBeInTheDocument();
+    expect(screen.queryByText("No scans running")).not.toBeInTheDocument();
+
+    mocks.refreshJobsPending = false;
+    mocks.refreshJobsError = true;
+    rerender(
+      <MemoryRouter initialEntries={["/admin/libraries?tab=activity"]}>
+        <Routes>
+          <Route path="/admin/libraries" element={<AdminLibraries />} />
+        </Routes>
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText("No scans running")).not.toBeInTheDocument();
+
+    mocks.refreshJobsError = false;
+    mocks.refreshJobs = [
+      {
+        id: "job-queued-1",
+        job_type: "library_metadata_refresh",
+        status: "queued",
+        created_by_user_id: 1,
+        request_payload: { library_id: 1 },
+        result_payload: {},
+        message: "",
+        progress_current: 0,
+        progress_total: 0,
+        artifact_size_bytes: 0,
+        requested_at: new Date().toISOString(),
+      },
+    ];
+    cleanup();
+    renderPage("/admin/libraries");
+    expect(screen.getAllByText(/Refresh queued/i).length).toBeGreaterThan(0);
+    expect(screen.queryByText(/Refreshing metadata/i)).not.toBeInTheDocument();
+  });
+
+  it("shows error states with retry for Unmatched Items and Metadata Matcher when queries fail", () => {
+    mocks.unmatchedTotal = undefined;
+    mocks.unmatchedError = true;
+    mocks.matcherTotal = undefined;
+    mocks.matcherError = true;
+    renderPage("/admin/libraries?tab=health");
+
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mocks.unmatchedRefetch).toHaveBeenCalledTimes(1);
+
+    const matcherTab = screen.getByRole("tab", { name: /Metadata Matcher/i });
+    fireEvent.mouseDown(matcherTab);
+    fireEvent.click(matcherTab);
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(mocks.matcherRefetch).toHaveBeenCalledTimes(1);
   });
 });

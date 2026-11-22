@@ -101,7 +101,13 @@ export function MetadataMatcherQueuesSection({
   // Index into the loaded pages of the detail query; the query retains every
   // page's cursor so the periodic refetch refreshes them in place.
   const [detailPageIndex, setDetailPageIndex] = useState(0);
-  const { data: queues = [] } = useLibraryMetadataMatchQueues();
+  const {
+    data: rawQueues,
+    isPending: queuesPending,
+    isError: queuesError,
+    refetch: refetchQueues,
+  } = useLibraryMetadataMatchQueues();
+  const queues = rawQueues ?? [];
   // Passing null while collapsed disables the detail query entirely so a
   // hidden expansion does not keep polling the per-library endpoint.
   const {
@@ -215,7 +221,21 @@ export function MetadataMatcherQueuesSection({
   );
 
   const body =
-    queues.length === 0 ? (
+    rawQueues === undefined && queuesError ? (
+      <div
+        role="alert"
+        className="border-border/40 bg-background/40 text-destructive flex flex-col items-center gap-3 rounded-xl border px-4 py-8 text-center text-sm"
+      >
+        <span>{t("web.admin.common.diagnosticsSection.countError")}</span>
+        <Button variant="outline" size="sm" onClick={() => void refetchQueues()}>
+          {t("common.retry")}
+        </Button>
+      </div>
+    ) : rawQueues === undefined && queuesPending ? (
+      <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
+        {t("common.loading")}
+      </div>
+    ) : queues.length === 0 ? (
       <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
         {t("web.admin.libraries.health.matcherEmpty")}
       </div>
