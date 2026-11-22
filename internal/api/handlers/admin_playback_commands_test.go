@@ -413,8 +413,9 @@ func TestUnconfirmedPauseEndsTheAttemptAsAdministratorStop(t *testing.T) {
 // An administrator's stop is recorded as terminated whichever stop reaches
 // the attempt first: the player carrying it out may send its own stop before
 // it confirms. A stop the player refused leaves the viewer's later stop its
-// own, a refusal of an earlier stop leaves a later stop pending, and a viewer
-// stop with no administrator command stays a viewer stop.
+// own, a refusal of either of two stops leaves the other pending, and a
+// viewer stop with no administrator command, or during the fallback of a stop
+// the player has no socket to receive, stays a viewer stop.
 func TestAdministratorStopIsTerminatedWhicheverStopWins(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -423,12 +424,17 @@ func TestAdministratorStopIsTerminatedWhicheverStopWins(t *testing.T) {
 		// it confirms after its own stop unless refused.
 		stops   []string
 		refused []string
-		want    PlaybackEndReason
+		// noLane: the player has no control socket, so each stop waits for
+		// its fallback instead of reaching the player.
+		noLane bool
+		want   PlaybackEndReason
 	}{
-		{"player stops before confirming", []string{sequencedCommandA}, nil, PlaybackEndTerminated},
-		{"player refuses, viewer stops later", []string{sequencedCommandA}, []string{sequencedCommandA}, PlaybackEndStopped},
-		{"an earlier stop's refusal leaves the later one", []string{sequencedCommandA, sequencedCommandB}, []string{sequencedCommandA}, PlaybackEndTerminated},
-		{"viewer stop without a command", nil, nil, PlaybackEndStopped},
+		{"player stops before confirming", []string{sequencedCommandA}, nil, false, PlaybackEndTerminated},
+		{"player refuses, viewer stops later", []string{sequencedCommandA}, []string{sequencedCommandA}, false, PlaybackEndStopped},
+		{"an earlier stop's refusal leaves the later one", []string{sequencedCommandA, sequencedCommandB}, []string{sequencedCommandA}, false, PlaybackEndTerminated},
+		{"a later stop's refusal leaves the earlier one", []string{sequencedCommandA, sequencedCommandB}, []string{sequencedCommandB}, false, PlaybackEndTerminated},
+		{"viewer stop without a command", nil, nil, false, PlaybackEndStopped},
+		{"viewer stop before a stop's fallback", []string{sequencedCommandA}, nil, true, PlaybackEndStopped},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			control, _, hub, session := newAdminPlaybackControlTestHandler(t)
@@ -443,7 +449,11 @@ func TestAdministratorStopIsTerminatedWhicheverStopWins(t *testing.T) {
 			}); err != nil {
 				t.Fatal(err)
 			}
-			sequencedLane(t, control, hub, session)
+			delivery := AdminPlaybackDeliveryFallbackScheduled
+			if !tc.noLane {
+				sequencedLane(t, control, hub, session)
+				delivery = AdminPlaybackDeliveryDispatched
+			}
 			caller := PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation}
 			if _, err := h.ApplyProgressV2(newAuthorizedPlaybackContext(), caller, session.ID, PlaybackProgressCommand{Sequence: 1, Position: 600}); err != nil {
 				t.Fatal(err)
@@ -457,7 +467,7 @@ func TestAdministratorStopIsTerminatedWhicheverStopWins(t *testing.T) {
 			for i, commandID := range tc.stops {
 				in := sequencedInput(session.ID, commandID, int64(i+1), playback.CommandStop)
 				in.DeadlineMS = 10_000
-				if view, err := control.Command(t.Context(), in); err != nil || view.Delivery != AdminPlaybackDeliveryDispatched {
+				if view, err := control.Command(t.Context(), in); err != nil || view.Delivery != delivery {
 					t.Fatalf("stop = %+v, %v", view, err)
 				}
 			}

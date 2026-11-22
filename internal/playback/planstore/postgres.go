@@ -567,11 +567,13 @@ func (s *Postgres) MarkAdminStop(ctx context.Context, sessionID, commandID strin
 	return err
 }
 
-// ClearAdminStop withdraws commandID's mark, and no later command's.
-func (s *Postgres) ClearAdminStop(ctx context.Context, sessionID, commandID string) error {
+// ClearAdminStop withdraws commandID's mark, and no later command's. A
+// non-empty heir, another stop still pending, takes the mark over instead.
+func (s *Postgres) ClearAdminStop(ctx context.Context, sessionID, commandID, heir string) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE playback_v3_attempts SET admin_stop_command_id = NULL, admin_stop_requested_at = NULL
-		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND admin_stop_command_id = $2`, sessionID, commandID)
+		UPDATE playback_v3_attempts SET admin_stop_command_id = NULLIF($3::text, ''),
+		    admin_stop_requested_at = CASE WHEN $3::text = '' THEN NULL ELSE admin_stop_requested_at END
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND admin_stop_command_id = $2`, sessionID, commandID, heir)
 	return err
 }
 

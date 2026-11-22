@@ -372,11 +372,14 @@ func TestAdminStopMarkDB(t *testing.T) {
 		if err := store.CompleteReplan(ctx, session, "replan-1", lease.LeaseToken, base, json.RawMessage(`{}`), *record); err != nil {
 			t.Fatal(err)
 		}
+		if got := pendingAdminStop(t, ctx, pool, session); got != commandA {
+			t.Fatalf("after the replan the mark names %q, want %q", got, commandA)
+		}
 		// A second stop takes the mark over; the first one's refusal leaves it.
 		if err := store.MarkAdminStop(ctx, session, commandB); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.ClearAdminStop(ctx, session, commandA); err != nil {
+		if err := store.ClearAdminStop(ctx, session, commandA, ""); err != nil {
 			t.Fatal(err)
 		}
 		receipt, first, err := store.StopAttempt(ctx, session, uuid.NewString(), nil)
@@ -409,11 +412,48 @@ func TestAdminStopMarkDB(t *testing.T) {
 		if err := store.MarkAdminStop(ctx, session, commandA); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.ClearAdminStop(ctx, session, commandA); err != nil {
+		if err := store.ClearAdminStop(ctx, session, commandA, ""); err != nil {
 			t.Fatal(err)
 		}
 		if receipt, _, err := store.StopAttempt(ctx, session, uuid.NewString(), nil); err != nil || receipt.AdminStopRequested {
 			t.Fatalf("client stop = %+v, %v; want no administrator stop pending", receipt, err)
 		}
 	})
+}
+
+// TestAdminStopMarkHandedBackDB: a later stop takes the mark over from an
+// earlier one still pending, and withdrawing the later one hands the mark
+// back, so the earlier stop's player still records the administrator's end.
+func TestAdminStopMarkHandedBackDB(t *testing.T) {
+	const commandA, commandB = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
+	ctx, pool, store, session := newLifecycleAttemptDB(t)
+	if err := store.MarkAdminStop(ctx, session, commandA); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.MarkAdminStop(ctx, session, commandB); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ClearAdminStop(ctx, session, commandB, commandA); err != nil {
+		t.Fatal(err)
+	}
+	if got := pendingAdminStop(t, ctx, pool, session); got != commandA {
+		t.Fatalf("after B's refusal the mark names %q, want %q", got, commandA)
+	}
+	if receipt, _, err := store.StopAttempt(ctx, session, uuid.NewString(), nil); err != nil || !receipt.AdminStopRequested {
+		t.Fatalf("client stop = %+v, %v; want the earlier administrator stop pending", receipt, err)
+	}
+}
+
+// pendingAdminStop is the command that holds the attempt's administrator stop
+// mark, or "".
+func pendingAdminStop(t *testing.T, ctx context.Context, pool *pgxpool.Pool, session string) string {
+	t.Helper()
+	var commandID *string
+	if err := pool.QueryRow(ctx, `SELECT admin_stop_command_id FROM playback_v3_attempts WHERE session_id = $1`, session).Scan(&commandID); err != nil {
+		t.Fatal(err)
+	}
+	if commandID == nil {
+		return ""
+	}
+	return *commandID
 }

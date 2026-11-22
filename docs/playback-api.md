@@ -339,7 +339,8 @@ another server does the same. The admin log records the reason of the stop
 that won the row. A client stop that wins within 30 seconds of an
 administrator's stop being sent to the player, while that stop is still
 pending, records the administrator's end (`terminated`): the player is
-carrying it out. A stop the player refused is no longer pending.
+carrying it out. A stop the player refused, or one that could not be sent
+(including to a player with no control socket), is not pending.
 
 A session an administrator ends without the player confirming it (a stop,
 pause or resume the player did not answer before its deadline, or a

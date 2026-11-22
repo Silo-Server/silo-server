@@ -616,16 +616,24 @@ func (s *MemoryPlanStoreV3) MarkAdminStop(_ context.Context, sessionID, commandI
 	return nil
 }
 
-// ClearAdminStop withdraws commandID's mark, and no later command's.
-func (s *MemoryPlanStoreV3) ClearAdminStop(_ context.Context, sessionID, commandID string) error {
+// ClearAdminStop withdraws commandID's mark, and no later command's. A
+// non-empty heir, another stop still pending, takes the mark over instead.
+func (s *MemoryPlanStoreV3) ClearAdminStop(_ context.Context, sessionID, commandID, heir string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, record := s.findAttemptLocked(sessionID); record == nil || record.StoppedAt != nil {
 		return nil
 	}
-	if s.adminStops[sessionID].commandID == commandID {
-		delete(s.adminStops, sessionID)
+	pending, ok := s.adminStops[sessionID]
+	if !ok || pending.commandID != commandID {
+		return nil
 	}
+	if heir == "" {
+		delete(s.adminStops, sessionID)
+		return nil
+	}
+	pending.commandID = heir
+	s.adminStops[sessionID] = pending
 	return nil
 }
 
