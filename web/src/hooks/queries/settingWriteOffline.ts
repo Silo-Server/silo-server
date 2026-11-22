@@ -42,10 +42,9 @@ export function refusedOffline(error: unknown): boolean {
 }
 
 /**
- * Tells the user a preference change made offline wasn't saved, for callers
- * that show the change at once and report no save error of their own. Other
- * failures stay with the caller's existing handling. Returns whether the
- * write was refused offline, so it is certain nothing was stored.
+ * Tells the user a preference change made offline wasn't saved, once for a
+ * burst of them. Other failures stay with the caller's own handling. Returns
+ * whether the write was refused offline, so it is certain nothing was stored.
  */
 export function reportOfflineSettingFailure(error: unknown): boolean {
   if (!refusedOffline(error)) return false;
