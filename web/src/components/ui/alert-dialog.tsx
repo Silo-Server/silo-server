@@ -56,13 +56,14 @@ function AlertDialogContent({
           // it from the start edge, which the dialog scrolls back to, instead of
           // overflowing past an edge it can't reach.
           "group/alert-dialog-content bg-background data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 overlay-scroll fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-4rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border p-6 wrap-anywhere shadow-lg data-[size=sm]:max-w-xs data-[size=default]:sm:max-w-lg",
-          // Below sm, a default-size button's label wraps when it's too long for
-          // the dialog (a phone with the largest text size) instead of widening
-          // it. This reaches every button in the dialog: footer buttons, plain
-          // Buttons, ones nested in a group, and ones in the body such as a
-          // conflict's reload button. min-h-9 keeps a one-line button at its
-          // usual height; py-1.5 pads a wrapped one.
+          // Below sm, a default- or sm-size button's label wraps when it's too
+          // long for the dialog (a phone with the largest text size) instead of
+          // widening it. This reaches every button in the dialog: footer buttons,
+          // plain Buttons, ones nested in a group, and ones in the body such as
+          // a conflict's reload button. min-h keeps a one-line button at its
+          // usual height; the smaller padding pads a wrapped one.
           "max-sm:[&_[data-variant][data-size=default]]:h-auto max-sm:[&_[data-variant][data-size=default]]:min-h-9 max-sm:[&_[data-variant][data-size=default]]:py-1.5 max-sm:[&_[data-variant][data-size=default]]:text-center max-sm:[&_[data-variant][data-size=default]]:whitespace-normal",
+          "max-sm:[&_[data-variant][data-size=sm]]:h-auto max-sm:[&_[data-variant][data-size=sm]]:min-h-8 max-sm:[&_[data-variant][data-size=sm]]:py-1 max-sm:[&_[data-variant][data-size=sm]]:text-center max-sm:[&_[data-variant][data-size=sm]]:whitespace-normal",
           className,
         )}
         {...props}

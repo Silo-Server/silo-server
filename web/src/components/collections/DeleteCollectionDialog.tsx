@@ -145,8 +145,9 @@ export function DeleteCollectionDialog({
           <p className="text-muted-foreground text-sm sm:grow sm:basis-32">
             {t("web.collections.deleteDialog.footer")}
           </p>
-          {/* The buttons stack below sm and wrap below the note when they don't
-              fit beside it, as in ConfirmDialog. */}
+          {/* The buttons stack below sm, and from sm up move below the note when
+              they don't fit beside it and wrap when they don't fit side by side,
+              as in ConfirmDialog. */}
           <div className="flex w-full flex-col-reverse gap-2 sm:ms-auto sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
             <AlertDialogCancel disabled={isPending}>{t("common.cancel")}</AlertDialogCancel>
             <Button
