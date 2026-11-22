@@ -371,11 +371,12 @@ export default function HeroBanner({
         pressing.current = false;
         release("hover");
       }}
-      onMouseDown={() => {
+      onMouseDown={(e) => {
         // A screen reader's simulated click has no pointer over the hero.
         if (!pointerInside.current) return;
         pressing.current = true;
-        pressHold();
+        // A right or middle click leaves a keyboard user's focus in place.
+        if (e.button === 0) pressHold();
       }}
       onMouseUp={endPress}
       onContextMenu={endPress}

@@ -53,6 +53,17 @@ async function tabToNext(u: ReturnType<typeof userEvent.setup>) {
   expect(document.activeElement).toBe(nextButton);
 }
 
+/** A mouse crossing the hero's edge: browsers send pointer and mouse events. */
+function pointerEnter(hero: HTMLElement) {
+  fireEvent.pointerEnter(hero, { pointerType: "mouse" });
+  fireEvent.mouseEnter(hero);
+}
+
+function pointerLeave(hero: HTMLElement) {
+  fireEvent.pointerLeave(hero, { pointerType: "mouse" });
+  fireEvent.mouseLeave(hero);
+}
+
 function wait(ms: number) {
   act(() => {
     vi.advanceTimersByTime(ms);
@@ -72,15 +83,15 @@ describe("HeroBanner hover and focus hold", () => {
   it("stays held while keyboard focus is inside after the pointer leaves", async () => {
     const hero = show();
     await tabToNext(userEvent.setup());
-    fireEvent.pointerEnter(hero);
-    fireEvent.pointerLeave(hero);
+    pointerEnter(hero);
+    pointerLeave(hero);
     wait(20000);
     expect(announced()).toBe("Slide 1");
   });
 
   it("stays held under the pointer after focus leaves", async () => {
     const hero = show();
-    fireEvent.pointerEnter(hero);
+    pointerEnter(hero);
     const u = userEvent.setup();
     await tabToNext(u);
     await u.tab();
@@ -93,8 +104,8 @@ describe("HeroBanner hover and focus hold", () => {
     const hero = show();
     const u = userEvent.setup();
     await tabToNext(u);
-    fireEvent.pointerEnter(hero);
-    fireEvent.pointerLeave(hero);
+    pointerEnter(hero);
+    pointerLeave(hero);
     await u.tab();
     wait(8100);
     expect(announced()).toBe("Slide 2");
@@ -111,7 +122,7 @@ describe("HeroBanner hover and focus hold", () => {
       await tabToNext(u);
       await u.click(screen.getByRole("button", { name: button }));
       expect(announced()).toBe(afterClick);
-      fireEvent.pointerLeave(hero);
+      pointerLeave(hero);
       wait(8100);
       expect(announced()).toBe(afterLeave);
     },
@@ -120,10 +131,10 @@ describe("HeroBanner hover and focus hold", () => {
   it("resumes when the pointer leaves after a right-click on the Play link", async () => {
     const hero = show();
     const u = userEvent.setup();
-    fireEvent.pointerEnter(hero);
+    pointerEnter(hero);
     await u.pointer({ keys: "[MouseRight]", target: screen.getByRole("link", { name: /play/i }) });
     expect(hero.contains(document.activeElement)).toBe(true);
-    fireEvent.pointerLeave(hero);
+    pointerLeave(hero);
     wait(8100);
     expect(announced()).toBe("Slide 2");
   });
@@ -153,7 +164,9 @@ describe("HeroBanner hover and focus hold", () => {
     fireEvent.mouseUp(nextButton);
     fireEvent.click(nextButton);
     expect(announced()).toBe("Slide 2");
-    fireEvent.pointerLeave(hero);
+    wait(20000);
+    expect(announced()).toBe("Slide 2");
+    pointerLeave(hero);
     wait(8100);
     expect(announced()).toBe("Slide 3");
   });
@@ -171,21 +184,21 @@ describe("HeroBanner hover and focus hold", () => {
     expect(announced()).toBe("Slide 2");
     wait(20000);
     expect(announced()).toBe("Slide 2");
-    fireEvent.pointerLeave(hero);
+    pointerLeave(hero);
     wait(8100);
     expect(announced()).toBe("Slide 3");
   });
 
   it("holds a later keyboard focus after a drag that started in the hero", async () => {
     const hero = show();
-    fireEvent.pointerEnter(hero);
+    pointerEnter(hero);
     const title = screen.getByRole("heading", { name: "Slide 1" });
     fireEvent.mouseDown(title);
     fireEvent.dragEnd(title);
     // One Shift+Tab from the page lands straight on Next slide.
     await userEvent.setup().tab({ shift: true });
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Next slide" }));
-    fireEvent.pointerLeave(hero);
+    pointerLeave(hero);
     wait(20000);
     expect(announced()).toBe("Slide 1");
   });
@@ -206,5 +219,18 @@ describe("HeroBanner hover and focus hold", () => {
     expect(hero.contains(document.activeElement)).toBe(false);
     wait(8100);
     expect(announced()).toBe("Slide 3");
+  });
+
+  it("stays held after a right-click on the focused control and the pointer leaving", async () => {
+    const hero = show();
+    pointerEnter(hero);
+    await tabToNext(userEvent.setup());
+    const nextButton = screen.getByRole("button", { name: "Next slide" });
+    fireEvent.mouseDown(nextButton, { button: 2 });
+    fireEvent.contextMenu(nextButton);
+    fireEvent.mouseUp(nextButton, { button: 2 });
+    pointerLeave(hero);
+    wait(20000);
+    expect(announced()).toBe("Slide 1");
   });
 });
