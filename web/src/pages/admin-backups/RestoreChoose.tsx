@@ -22,14 +22,17 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
-import { useAppLanguage, useT } from "@/i18n";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
+import { exactAmount, useAppLanguage, useT } from "@/i18n";
 import { pendingCount } from "@/lib/profileDataTypes";
+import { cn } from "@/lib/utils";
 import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
 
 import { OmittedAccounts } from "./BackupWarningDetails";
 import { Disclosure } from "./Disclosure";
-import { ItemRow, SameRow, type ToggleKeys } from "./RestoreRows";
+import { PlanSentences } from "./RestoreReview";
+import { BreakableKey, ItemRow, SameRow, type ToggleKeys } from "./RestoreRows";
 import { AccountRow, DataTypesPanel } from "./RestoreUsers";
 import {
   FILTER_THRESHOLD,
@@ -41,6 +44,7 @@ import {
   libraryNames,
   matchesFilter,
   nothingToRestoreText,
+  rowLibrary,
   rowSecondary,
   sectionProgress,
   stateCountsLabel,
@@ -65,8 +69,10 @@ import {
   type SelectionKeys,
 } from "./restoreModel";
 
-/** Between the never-restored setting keys. */
-const KEY_SEPARATOR = ", ";
+/** After each never-restored setting key but the last, kept on the key's line. */
+const KEY_COMMA = ",";
+/** Between the never-restored setting keys, where a line may break. */
+const KEY_GAP = " ";
 
 const BAR_COLORS: Record<ItemState, string> = {
   differs: "bg-[var(--settings-accent)]",
@@ -167,7 +173,7 @@ function SectionIndex({
               onClick={() => scrollToSection(section.id)}
               className="hover:bg-accent focus-visible:ring-ring/50 flex w-full items-baseline justify-between gap-3 rounded-md px-2 py-1 text-start text-[13px] outline-none focus-visible:ring-[3px]"
             >
-              <span className="truncate">{t(SECTION_TITLES[section.id])}</span>
+              <span className="min-w-0 wrap-anywhere">{t(SECTION_TITLES[section.id])}</span>
               <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
                 {sectionProgress(section, selection)}
               </span>
@@ -217,7 +223,8 @@ function Rows({ sectionId, items, selection, onToggle, names, withLibrary = fals
             item={item}
             checked={selection.has(itemKey(sectionId, item.id))}
             onToggle={onToggle}
-            secondary={rowSecondary(item, names, withLibrary)}
+            secondary={rowSecondary(item, names)}
+            library={withLibrary ? rowLibrary(item, names) : null}
           />
         ),
       )}
@@ -234,19 +241,27 @@ function LibraryGroupRows({
   useT();
   const listId = useId();
   const [open, setOpen] = useState(true);
+  const [textRef, textOverflows] = useOverflowsInline<HTMLSpanElement>(name);
   return (
     <div className="pt-2">
       <Disclosure
         open={open}
         onOpenChange={setOpen}
         controls={listId}
-        className="text-foreground gap-1.5 text-[13px] font-medium"
+        className="text-foreground max-w-full gap-1.5 text-[13px] font-medium"
       >
         {/* One run of text, so the count follows the name's last word. A name
             with no spaces still breaks to fit. The name keeps its own direction,
             so a name in another script can't pull the count across it. The count
-            is an inline block, so it moves to the next line whole. */}
-        <span className="wrap-anywhere">
+            is an inline block, so it moves to the next line whole. The button and
+            the text stay within the row. Only a name still wider than the row after
+            wrapping, such as one long run of joined emoji, is clipped sideways at
+            the row's end edge, as in ProfileRow (RestoreUsers.tsx). */}
+        <span
+          ref={textRef}
+          title={name}
+          className={cn("min-w-0 wrap-anywhere", textOverflows && OVERFLOW_CLIP)}
+        >
           {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- a space, not text */}
           <span className="bidi-text me-1">{name}</span>{" "}
           <span className="text-muted-foreground inline-block font-normal tabular-nums">
@@ -283,7 +298,7 @@ function BlockedGroupRows({ group, ...rows }: Omit<RowsProps, "items"> & { group
             open
               ? "web.admin.backups.restore.choose.hideThem"
               : "web.admin.backups.restore.choose.showThem",
-            { count: group.items.length },
+            { amount: exactAmount(group.items.length) },
           )}
         </Disclosure>
       </div>
@@ -320,7 +335,12 @@ function SameRows({
           className="bg-background/60 mt-1.5 max-h-80 overflow-y-auto rounded-md border px-3 py-1"
         >
           {items.map((item) => (
-            <SameRow key={item.id} item={item} secondary={rowSecondary(item, names, true)} />
+            <SameRow
+              key={item.id}
+              item={item}
+              secondary={rowSecondary(item, names)}
+              library={rowLibrary(item, names)}
+            />
           ))}
         </ul>
       ) : null}
@@ -346,16 +366,27 @@ function NeverRestored({ keys }: { keys: readonly string[] }) {
             open
               ? "web.admin.backups.restore.choose.hideThem"
               : "web.admin.backups.restore.choose.showThem",
-            { count: keys.length },
+            { amount: exactAmount(keys.length) },
           )}
         </Disclosure>
       </div>
       {open ? (
-        <p id={listId} className="text-muted-foreground ps-5 pt-1 text-xs leading-relaxed">
-          {neverRestoredSettings(keys).map((key, position) => (
+        <p
+          id={listId}
+          className="text-muted-foreground ps-5 pt-1 text-xs leading-relaxed break-words"
+        >
+          {neverRestoredSettings(keys).map((key, position, entries) => (
             <span key={key}>
-              {position > 0 ? KEY_SEPARATOR : null}
-              <code className="font-mono">{key}</code>
+              {position > 0 ? KEY_GAP : null}
+              {/* Whole on a line when it fits. A longer key wraps at its dots and
+                  underscores with its later lines indented; text-pretty avoids a
+                  short last line where the browser supports it. */}
+              <span className="inline-block max-w-full ps-[1ch] -indent-[1ch] text-pretty">
+                <code className="font-mono">
+                  <BreakableKey value={key} />
+                </code>
+                {position < entries.length - 1 ? KEY_COMMA : null}
+              </span>
             </span>
           ))}
         </p>
@@ -426,7 +457,7 @@ function SectionBlock({
     ) : null;
 
   return (
-    <div id={sectionAnchor(section.id)} className="scroll-mt-24 lg:scroll-mt-6">
+    <div id={sectionAnchor(section.id)} className="scroll-mt-24 lg:scroll-mt-16">
       <SettingsGroup
         title={t(SECTION_TITLES[section.id])}
         description={
@@ -466,7 +497,7 @@ function SectionBlock({
                   showAll
                     ? "web.admin.backups.restore.choose.hideThem"
                     : "web.admin.backups.restore.choose.showThem",
-                  { count: section.items.length },
+                  { amount: exactAmount(section.items.length) },
                 )}
               </Disclosure>
             </div>
@@ -537,6 +568,30 @@ export interface RestoreChooseProps {
   onReview: () => void;
 }
 
+/**
+ * A callback ref and whether its box currently scrolls. It watches the box and
+ * its first child, so it measures again when the box resizes or the content
+ * inside a capped box grows. Chromium and Firefox let the keyboard focus a box
+ * that scrolls; WebKit doesn't, so the box asks for focus itself, and only
+ * while it has something to scroll.
+ */
+function useScrolls() {
+  const [scrolls, setScrolls] = useState(false);
+  const ref = useCallback((element: HTMLElement | null) => {
+    if (!element || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() =>
+      setScrolls(element.scrollHeight > element.clientHeight),
+    );
+    observer.observe(element);
+    if (element.firstElementChild) observer.observe(element.firstElementChild);
+    return () => {
+      observer.disconnect();
+      setScrolls(false);
+    };
+  }, []);
+  return [ref, scrolls] as const;
+}
+
 /** Step 1: what differs, and what to bring back, with the plan so far beside it. */
 export function RestoreChoose({
   set,
@@ -549,6 +604,8 @@ export function RestoreChoose({
   const t = useT();
   const index = useMemo(() => indexItems(set), [set]);
   const [notice, setNotice] = useState<string | null>(null);
+  const [noticeRef, noticeScrolls] = useScrolls();
+  const [noticeTextRef, noticeOverflows] = useOverflowsInline<HTMLSpanElement>(notice);
   const libraries = useAdminLibraries();
   const names = useMemo(() => libraryNames(set, libraries.data ?? []), [set, libraries.data]);
   const plan = restorePlan(set, selection, dataTypes);
@@ -639,40 +696,71 @@ export function RestoreChoose({
         ))}
       </div>
 
+      {/* Pinned below the admin shell's activity control and any
+          impersonation banner. The height cap leaves room for both, for any
+          background playback bar, and for the 6rem of page padding below this
+          grid: without that, the end of the page pushes the panel back up
+          under the control. A longer summary scrolls on its own, above
+          Review. min-w-0: on a narrow screen the summary shares the sections'
+          column, so a sentence it can't wrap would otherwise widen every
+          section past the screen. */}
       <aside
         aria-labelledby="restore-summary-heading"
-        className="surface-panel-subtle h-fit space-y-4 rounded-xl p-5 lg:sticky lg:top-6"
+        className="surface-panel-subtle h-fit min-w-0 space-y-4 rounded-xl p-5 lg:sticky lg:top-[calc(4rem+var(--impersonation-banner-height))] lg:flex lg:max-h-[calc(100dvh-10rem-var(--impersonation-banner-height)-var(--playback-bar-clearance,0px))] lg:flex-col"
       >
-        <SectionIndex sections={set.sections} selection={selection} variant="list" />
-        <h2 id="restore-summary-heading" className="text-[15px] font-semibold tracking-tight">
-          {t("web.admin.backups.restore.choose.summaryHeading")}
-        </h2>
-        {plan.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            {t("web.admin.backups.restore.choose.nothingChosen")}
+        {/* The 4px inset keeps the section buttons' focus rings clear of this
+            box's clipping edge. The fade covers only the box's bottom padding,
+            so it shows just while more of the summary scrolls on below. Its
+            outsized shrink factor makes it give up its height before the
+            notice does; flexbox shares overflow by weight, and a smaller one
+            still trims the notice by a fraction of a pixel, enough to scroll. */}
+        <div className="overlay-scroll space-y-4 lg:-mx-1 lg:-mt-1 lg:mb-0 lg:min-h-0 lg:shrink-[100000] lg:overflow-y-auto lg:[mask-image:linear-gradient(to_bottom,black_calc(100%_-_1rem),transparent)] lg:px-1 lg:pt-1 lg:pb-4">
+          <SectionIndex sections={set.sections} selection={selection} variant="list" />
+          <h2 id="restore-summary-heading" className="text-[15px] font-semibold tracking-tight">
+            {t("web.admin.backups.restore.choose.summaryHeading")}
+          </h2>
+          {plan.length === 0 ? (
+            <p className="text-muted-foreground text-sm">
+              {t("web.admin.backups.restore.choose.nothingChosen")}
+            </p>
+          ) : (
+            <PlanSentences sentences={plan.flatMap((group) => group.sentences)} />
+          )}
+          <p className="text-muted-foreground text-[13px] leading-relaxed">
+            {t("web.admin.backups.restore.choose.recoveryPoint")}
           </p>
-        ) : (
-          <ul className="list-disc space-y-1.5 ps-5 text-sm">
-            {plan.flatMap((group) =>
-              group.sentences.map((sentence, position) => (
-                <li key={`${group.section}-${position}`}>
-                  {t("web.admin.backups.restore.plan.sentence", { sentence })}
-                </li>
-              )),
-            )}
-          </ul>
-        )}
-        {notice ? (
-          <p role="status" className="text-[13px] text-amber-600 dark:text-amber-400">
-            {notice}
-          </p>
-        ) : null}
-        <p className="text-muted-foreground text-[13px] leading-relaxed">
-          {t("web.admin.backups.restore.choose.recoveryPoint")}
-        </p>
-        <Button className="w-full" disabled={selection.size === 0} onClick={onReview}>
-          {t("web.admin.backups.restore.choose.review")}
-        </Button>
+        </div>
+        {/* Outside the scrolling box, so the notice shows beside Review however
+            far the summary is scrolled. The rule marks where the summary ends.
+            A long notice scrolls within 8rem, so the summary keeps its room; in
+            a window too short for both, it shrinks further and Review keeps
+            its row. A scroll box clips on every side, so the notice holds
+            0.25em above and below for marks that reach past its first and
+            last lines. Its height cap grows by that room, so the text still
+            gets 8rem, and its margins take the room back, the bottom one
+            being space-y-4's 1rem less the padding. */}
+        <div className="lg:border-border/60 space-y-4 lg:flex lg:min-h-0 lg:flex-col lg:border-t lg:pt-4">
+          {notice ? (
+            <p
+              ref={noticeRef}
+              role="status"
+              tabIndex={noticeScrolls ? 0 : undefined}
+              className="overlay-scroll focus-visible:outline-ring -mx-[0.25em] rounded-sm px-[0.25em] text-[13px] wrap-anywhere text-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 lg:-mt-[0.25em] lg:mb-[calc(1rem-0.25em)] lg:max-h-[calc(8rem+0.5em)] lg:min-h-0 lg:overflow-y-auto lg:py-[0.25em] dark:text-amber-400"
+            >
+              {/* A block child, so useScrolls sees the text grow. Only while a
+                  name can't wrap to fit, such as a run of joined emoji, does it
+                  clip sideways; a clip on the notice itself would still let
+                  script and find-in-page scroll it. The notice's padding holds
+                  the clip's start room. */}
+              <span ref={noticeTextRef} className={cn("block", noticeOverflows && OVERFLOW_CLIP)}>
+                {notice}
+              </span>
+            </p>
+          ) : null}
+          <Button className="w-full lg:shrink-0" disabled={selection.size === 0} onClick={onReview}>
+            {t("web.admin.backups.restore.choose.review")}
+          </Button>
+        </div>
       </aside>
     </div>
   );

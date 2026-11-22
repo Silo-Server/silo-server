@@ -967,6 +967,20 @@ grouped by the admin page that edits each key: a key or prefix with its class.
   it and turns the service off (`email.enabled`) instead of sending this
   server's secret to the backup's address. The preview marks those settings
   `cleared`, and the secrets are expected unchanged under the settings lock.
+- A setting this server's environment sets (`internal/config/env_settings.go`)
+  is never written: the admin settings write path refuses it
+  (`managed_by_environment`, `AdminHandler.EnvironmentSetting`). A stored
+  one gets the environment's value back at the next start anyway; a
+  process one (`scanner.workers`, `matcher.workers`) is never stored, so
+  the row stays as other API servers read it. The preview compares the
+  backup with the environment's value (`RestoreTargets.EnvironmentValue`),
+  marks a difference `managed_by_environment`, and restores the rest of the
+  page. An outside-service connection the environment sets any setting of
+  (`outboundBundles`, the units the full restore carries) keeps every
+  setting of it as it is (`keepEnvironmentBundles`), so a restore never
+  pairs the environment's SMTP transport, address, or password with the
+  backup's. The server that runs the restore job plans it again with its own
+  environment, so the report says what that server did.
 - A backup this server cannot authenticate restores no setting that
   connects to an outside service (class `external_service`) and no plugin
   configuration, whatever the admin confirmed: the preview marks them
@@ -2036,7 +2050,7 @@ fails on one in no list or in two, and on a listed name that is not a table,
 so a new table needs a decision before it ships; a layer that adds one
 classifies it.
 
-Sensitive settings (`catalog.SensitiveSettingKeys`) are classified the same
+Sensitive settings (`serversettings.SensitiveSettingKeys`) are classified the same
 way in `internal/backup/settings_secrets.go`. The signing keys Silo
 generates for the tokens it issues (`auth.jwt_secret`, which signs sessions,
 download and artwork links, backup object links, OAuth state, and cursors,

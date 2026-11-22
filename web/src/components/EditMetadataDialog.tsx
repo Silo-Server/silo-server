@@ -252,10 +252,11 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
         onClick={() => toggleLock(metadataField)}
         className={cn(
           "inline-flex items-center gap-1 text-[10px] transition-colors",
-          // Unlocked stays quieter than the amber locked state but keeps 3:1
-          // on the dialog surface: the icon is the only visible sign it's a control.
+          // Unlocked keeps 3:1 on the dialog surface (the icon is the only visible
+          // sign it's a control) and stays quieter than locked amber, also in high
+          // contrast mode, which brightens the muted colour.
           isLocked
-            ? "text-amber-500/80 hover:text-amber-500"
+            ? "text-amber-500 hover:text-amber-400"
             : "text-muted-foreground/70 hover:text-muted-foreground",
         )}
         title={
@@ -280,8 +281,10 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
           showCloseButton
         >
           {/* Header */}
-          <DialogHeader className="border-border/10 shrink-0 flex-row items-center justify-between border-b px-5 py-4 pe-12">
-            <div className="flex items-center gap-2.5">
+          {/* The chip and lock count wrap to their own lines on a narrow phone, so
+              the title keeps its whole words instead of breaking mid-word. */}
+          <DialogHeader className="border-border/10 shrink-0 flex-row flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-b px-5 py-4 pe-12">
+            <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
               <DialogTitle className="text-[15px] font-semibold">
                 {t("web.item.dialog.editMetadataTitle")}
               </DialogTitle>

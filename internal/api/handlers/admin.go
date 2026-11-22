@@ -38,6 +38,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/s3client"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
@@ -744,8 +745,8 @@ type UpdateItemMetadataRequest struct {
 
 // sensitiveSettingKeys is the audited allowlist of secret-bearing settings
 // keys, shared with the at-rest encryption decorator so redaction and
-// encryption can never drift apart. See catalog.SensitiveSettingKeys.
-var sensitiveSettingKeys = catalog.SensitiveSettingKeys
+// encryption can never drift apart. See serversettings.SensitiveSettingKeys.
+var sensitiveSettingKeys = serversettings.SensitiveSettingKeys
 
 // machineManagedSettingKeys contains durable internal state that shares the
 // server_settings store but is not part of the administrator settings API.
@@ -1493,10 +1494,20 @@ func redisDBRow(active map[string]string, value string) string {
 // exception: REDIS_URL keeps a server up whose saved number it cannot start
 // with, and the clear is how that number is removed.
 func (h *AdminHandler) environmentRefusesSave(key, value string) bool {
-	if !h.BootstrapSensitiveConfigured[key] {
+	if _, set := h.EnvironmentSetting(key); !set {
 		return false
 	}
 	return key != config.RedisDBSettingKey || strings.TrimSpace(value) != ""
+}
+
+// EnvironmentSetting is the value the process environment supplies for key;
+// set is false when it supplies none. A save of such a key is refused
+// (environmentRefusesSave), and a selective restore keeps it.
+func (h *AdminHandler) EnvironmentSetting(key string) (value string, set bool) {
+	if !h.BootstrapSensitiveConfigured[key] {
+		return "", false
+	}
+	return h.BootstrapSensitiveValues[key], true
 }
 
 func shouldPersistAdminSetting(stored map[string]string, key, normalized string, effectiveChanged bool) bool {

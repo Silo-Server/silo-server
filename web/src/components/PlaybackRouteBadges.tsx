@@ -12,11 +12,11 @@ const SEPARATOR = "·";
  * so there it takes the boosted muted color instead.
  */
 const LABEL_CLASS =
-  "text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-(--font-weight-ui)";
+  "text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-normal";
 
 const BADGE_COLORS: Record<ActivityRouteNode["kind"], string> = {
-  transcode: "border-warning/25 bg-warning/10 text-warning",
-  proxy: "border-info/25 bg-info/10 text-info",
+  transcode: "border-warning/25 bg-warning/10 text-warning-label",
+  proxy: "border-info/25 bg-info/10 text-info-label",
   server: "border-primary/10 bg-primary/5 text-primary",
   legacy: "border-primary/10 bg-primary/5 text-primary",
 };
@@ -114,7 +114,7 @@ export function PlaybackRouteBadges({
                 <span aria-hidden="true">{SEPARATOR}</span>
               </>
             ) : null}
-            <span className="truncate">
+            <span dir="auto" className="truncate">
               {node.kind === "server" ? t("web.player.routeBadge.apiServer") : node.name}
             </span>
           </span>

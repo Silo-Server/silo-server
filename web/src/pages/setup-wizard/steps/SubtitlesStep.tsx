@@ -166,7 +166,7 @@ function ProviderRow({
     status = (
       <SettingFieldStatus tone="warn">
         {/* A live region, so a failed reload's new message is announced. */}
-        <span role="status" className="min-w-0 [overflow-wrap:anywhere]">
+        <span role="status">
           {draft.loadFailed
             ? t("web.admin.settings.providers.subtitles.loadFailed")
             : t("web.admin.settings.providers.subtitles.saveNotConfirmed")}

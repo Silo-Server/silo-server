@@ -764,7 +764,9 @@ function describeImportJob(t: Translate, job: AdminJob): ReactNode {
   const label = (job.request_payload as { source_label?: string }).source_label;
   // The server's label: the remote URL, a file name, or "Export job <id>", untranslated.
   return label ? (
-    <PathText value={label} />
+    <bdi dir="ltr">
+      <PathText path={label} />
+    </bdi>
   ) : (
     t("web.admin.catalogMaintenance.imports.seedFallback")
   );

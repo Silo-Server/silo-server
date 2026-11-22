@@ -14813,10 +14813,18 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gizle"
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -14832,9 +14840,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14991,10 +14997,18 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Göster"
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -15010,9 +15024,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15729,14 +15741,30 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Seçtikleriniz için gerekli olduğundan bu da seçildi: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Seçtikleriniz için gerekli olduklarından bunlar da seçildi: "
             },
             {
               "type": 1,
@@ -15764,21 +15792,35 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "Seçimini kaldırdıklarınıza ihtiyaç duyduğundan bunun da seçimi kaldırıldı: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Seçimini kaldırdıklarınıza ihtiyaç duyduklarından bunların da seçimi kaldırıldı: "
             },
             {
               "type": 1,
@@ -15806,9 +15848,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -20387,10 +20427,18 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "verileri okunamadı"
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -20406,9 +20454,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -20609,6 +20655,346 @@
     {
       "type": 0,
       "value": "Bu dosyalara veritabanında başvuruluyor ancak depolama alanında bulunamadılar; geri yüklemeler bunları dışarıda bırakır."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " marka öğesi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " marka öğesi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon arka planı"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon arka planı"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon posteri"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " koleksiyon posteri"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " indirilen altyazı"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " indirilen altyazı"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kitaplık posteri"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kitaplık posteri"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kaplama görseli"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kaplama görseli"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kişisel koleksiyon posteri"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kişisel koleksiyon posteri"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profil avatarı"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profil avatarı"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " yüklenen görsel dosyası"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " yüklenen görsel dosyası"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " yüklenen altyazı"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " yüklenen altyazı"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -20875,10 +21261,22 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "şu kısım okunamadı: "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -20902,9 +21300,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -21057,10 +21453,18 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "verileri geri yükleme seti için çok büyük"
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -21076,9 +21480,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -45242,6 +45644,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Taramalar ve meta veri yenilemeleri çalışırken burada görünür."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Etkin tarama veya yenileme yok"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Tümü ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Kuyruğu gizle"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " diğer kitaplık"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " diğer kitaplık"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Meta veri yenilemeleri"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Meta veriler yenileniyor"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Kuyruğu görüntüle"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Yüksek"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Düşük"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Orta"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -45672,6 +46182,30 @@
       "value": "Boş kök temizliğini onayla"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "İncele"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Meta veri eşleştirici kuyruğunda bekleyen öğe yok."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Kaydedilmiş atlanan kök yok."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Kaydedilmiş geçersiz harici kimlik yok."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -45708,6 +46242,18 @@
     {
       "type": 0,
       "value": " kitaplığını düzenle"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Düzenle"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Henüz yapılandırılmış kitaplık yok."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -45760,6 +46306,12 @@
       "value": "Yolları gizle"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Boşta"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -45794,6 +46346,12 @@
       "value": "Kısmi tarama"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Eksik meta verileri doldur veya tümünü değiştir"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -45806,6 +46364,12 @@
       "value": "Köke erişilemiyor"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Tara"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -45816,6 +46380,12 @@
     {
       "type": 0,
       "value": "Yolları göster"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Durdur"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -45834,6 +46404,22 @@
     {
       "type": 0,
       "value": "Bağlama noktalarını doğrula"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Tüm kitaplık klasörlerine erişilebildiğini denetle"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " kitaplığının etkin taramalarını görüntüle"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -45937,7 +46523,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Kitaplık köklerini ve taramalarını yönetin. Katalog içe/dışa aktarma artık Bakım altında."
+      "value": "Medya klasörlerini yönetin, taramaları izleyin ve eşleştirme sorunlarını çözün."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -46412,6 +46998,56 @@
       "value": "Geçersiz harici kimlikler"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktif"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktif"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Tarama etkinliği"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Katalog durumu"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Kitaplıklar"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -46854,6 +47490,24 @@
     {
       "type": 0,
       "value": "Yok sayılan öğelerde başlığa, kitaplığa veya türe göre ara…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Belirsiz"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Beklemede"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Eşleşmedi"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -125921,6 +126575,20 @@
       "value": "1. sayfaya dön"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Sayfa "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " öğesine git"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -126011,6 +126679,20 @@
     {
       "type": 0,
       "value": "Eklenmesini iste sayfaları"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Sayfa "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ", bu sonuçların sonundan sonra geliyor."
     }
   ],
   "web.requests.toAdd.series": [
@@ -127551,6 +128233,12 @@
     {
       "type": 0,
       "value": "Profilin bildirimlerini geldikçe okuma ve okundu olarak işaretleme."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Profilde şu anda neyin oynatıldığını görme; anahtar bir profil belirtmiyorsa hesaptaki tüm profillerde: içerik, konum, duraklatılma durumu, cihaz ve oynatma yöntemi. Oynatma denetimi veya ağ ayrıntıları içermez."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

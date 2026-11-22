@@ -97,7 +97,8 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
       </ViewTransitionLink>
       <ViewTransitionLink to={href} className="block px-1 pt-3">
         <div
-          className={`truncate text-[14px] font-semibold tracking-tight ${watched ? "text-muted-foreground" : ""}`}
+          dir="auto"
+          className={`bidi-text truncate text-[14px] font-semibold tracking-tight ${watched ? "text-muted-foreground" : ""}`}
         >
           {event.title}
         </div>

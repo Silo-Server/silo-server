@@ -15896,10 +15896,10 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -15907,7 +15907,7 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -15923,9 +15923,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16110,10 +16108,10 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -16121,7 +16119,7 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -16137,9 +16135,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -16960,10 +16956,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -16979,7 +16975,7 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -17011,17 +17007,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17037,7 +17031,7 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -17069,9 +17063,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -22308,10 +22300,10 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22319,7 +22311,7 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22335,9 +22327,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -22574,6 +22564,466 @@
     {
       "type": 0,
       "value": "Sunt menționate în baza de date, dar nu au fost găsite în spațiul de stocare; restaurările le omit."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " element de branding"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elemente de branding"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de elemente de branding"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fundal de colecție"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fundaluri de colecție"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de fundaluri de colecție"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " poster de colecție"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postere de colecție"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de postere de colecție"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " subtitrare descărcată"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " subtitrări descărcate"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de subtitrări descărcate"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " poster de bibliotecă"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postere de bibliotecă"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de postere de bibliotecă"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " imagine de suprapunere"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " imagini de suprapunere"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de imagini de suprapunere"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " poster de colecție personală"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postere de colecții personale"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de postere de colecții personale"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatar de profil"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avataruri de profil"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de avataruri de profil"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fișier de imagine încărcat"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " fișiere de imagine încărcate"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de fișiere de imagine încărcate"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " subtitrare încărcată"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " subtitrări încărcate"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " de subtitrări încărcate"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -22904,10 +23354,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22919,7 +23369,7 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22943,9 +23393,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -23114,10 +23562,10 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -23125,7 +23573,7 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -23141,9 +23589,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -51245,6 +51691,129 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Scanările și reîmprospătările metadatelor apar aici cât timp rulează."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Nu există scanări sau reîmprospătări active"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Toate ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Ascundeți coada"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ încă "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotecă"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ încă "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " biblioteci"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ încă "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de biblioteci"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Reîmprospătări ale metadatelor"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Se reîmprospătează metadatele…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Vedeți coada"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Ridicată"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Scăzută"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Medie"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -51755,6 +52324,30 @@
       "value": "Confirmați curățarea rădăcinilor goale"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Inspectați"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Niciun element nu așteaptă în coada de potrivire a metadatelor."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Nu s-au înregistrat rădăcini omise."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Nu s-au înregistrat ID-uri externe învechite."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -51791,6 +52384,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Editați"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Nu există încă biblioteci configurate."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -51854,6 +52459,12 @@
       "value": "Ascundeți căile"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Inactivă"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -51888,6 +52499,12 @@
       "value": "Scanare parțială"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Completați metadatele lipsă sau înlocuiți toate metadatele"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -51900,6 +52517,12 @@
       "value": "Rădăcină inaccesibilă"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Scanați"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -51910,6 +52533,12 @@
     {
       "type": 0,
       "value": "Afișați căile"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Opriți"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -51928,6 +52557,22 @@
     {
       "type": 0,
       "value": "Verificați montările"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Verificați dacă toate dosarele bibliotecii sunt accesibile"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Vedeți scanările active pentru biblioteca "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -52031,7 +52676,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Gestionați rădăcinile și scanările bibliotecilor. Importul/exportul catalogului se află acum în Întreținere."
+      "value": "Gestionați dosarele media, monitorizați scanările și rezolvați problemele de potrivire."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -52590,6 +53235,67 @@
       "value": "ID-uri externe învechite"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sarcină activă"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sarcini active"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " de sarcini active"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Activitate de scanare"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Starea catalogului"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Biblioteci"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -53056,6 +53762,24 @@
     {
       "type": 0,
       "value": "Căutați elementele ignorate după titlu, bibliotecă sau tip…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Ambiguu"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "În așteptare"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Nepotrivit"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -138749,6 +139473,16 @@
       "value": "Înapoi la pagina 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Accesați pagina "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -138839,6 +139573,20 @@
     {
       "type": 0,
       "value": "Paginile secțiunii Solicitați adăugarea"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Pagina "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " depășește sfârșitul acestor rezultate."
     }
   ],
   "web.requests.toAdd.series": [
@@ -140556,6 +141304,12 @@
     {
       "type": 0,
       "value": "Citiți notificările profilului pe măsură ce sosesc și marcați-le ca citite."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Vedeți ce se redă chiar acum în profil sau, dacă cheia nu indică niciun profil, în toate profilurile contului: titlul, poziția, starea de pauză, dispozitivul și metoda de redare. Fără controlul redării și fără detalii despre rețea."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

@@ -71,7 +71,9 @@ function jobDescription(job: AdminJob, t: Translate) {
       // The server's label: the remote URL, a file name, or "Export job <id>", untranslated.
       const label = payload.source_label as string | undefined;
       return label ? (
-        <PathText value={label} />
+        <bdi dir="ltr">
+          <PathText path={label} />
+        </bdi>
       ) : (
         t("web.admin.common.jobHistory.target.catalogSeed")
       );

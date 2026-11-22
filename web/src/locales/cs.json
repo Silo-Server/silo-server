@@ -17043,10 +17043,10 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17054,15 +17054,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Skrýt je"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -17078,9 +17070,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17301,10 +17291,10 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -17312,15 +17302,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Zobrazit je"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -17336,9 +17318,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -18271,10 +18251,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -18290,23 +18270,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Vybráno také: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ". Jsou potřeba pro váš výběr."
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -18338,17 +18302,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -18364,23 +18326,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Z výběru odebráno také: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ". Vyžadují odebrané položky."
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -18412,9 +18358,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -24317,10 +24261,10 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24328,15 +24272,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "jejich data nešlo přečíst"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -24352,9 +24288,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -24627,6 +24561,586 @@
     {
       "type": 0,
       "value": "Databáze na ně odkazuje, ale v úložišti nebyly nalezeny; obnovení je vynechá."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " soubor brandingu"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " soubory brandingu"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " souboru brandingu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " souborů brandingu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pozadí kolekce"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pozadí kolekcí"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pozadí kolekce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pozadí kolekcí"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakát kolekce"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakáty kolekcí"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakátu kolekce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakátů kolekcí"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " soubor stažených titulků"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " soubory stažených titulků"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " souboru stažených titulků"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " souborů stažených titulků"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakát knihovny"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakáty knihoven"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakátu knihovny"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakátů knihoven"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " obrázek překryvu"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " obrázky překryvů"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " obrázku překryvu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " obrázků překryvů"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakát osobní kolekce"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakáty osobních kolekcí"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakátu osobní kolekce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakátů osobních kolekcí"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatar profilu"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatary profilů"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avataru profilu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatarů profilů"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nahraný obrázek"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nahrané obrázky"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nahraného obrázku"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nahraných obrázků"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " soubor nahraných titulků"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " soubory nahraných titulků"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " souboru nahraných titulků"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " souborů nahraných titulků"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -25077,10 +25591,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -25092,19 +25606,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "u nich nešlo přečíst: "
-            },
-            {
-              "type": 1,
-              "value": "part"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -25128,9 +25630,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -25315,10 +25815,10 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -25326,15 +25826,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "jejich data jsou pro sadu pro obnovení příliš velká"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -25350,9 +25842,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -56892,6 +57382,144 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Probíhající skenování a obnovení metadat se zobrazí zde."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Žádná aktivní skenování ani obnovení"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Vše ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Skrýt frontu"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " další knihovna"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " další knihovny"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " další knihovny"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dalších knihoven"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Obnovení metadat"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Obnovování metadat"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Zobrazit frontu"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Vysoká"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Nízká"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Střední"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -57474,6 +58102,30 @@
       "value": "Potvrdit vyčištění prázdných kořenů"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Zkontrolovat"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Ve frontě přiřazování metadat nečekají žádné položky."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Nejsou zaznamenány žádné přeskočené kořeny."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Nejsou zaznamenána žádná zastaralá externí ID."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -57510,6 +58162,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Upravit"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Zatím nejsou nastaveny žádné knihovny."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -57584,6 +58248,12 @@
       "value": "Skrýt cesty"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Nečinná"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -57618,6 +58288,12 @@
       "value": "Částečné skenování"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Doplnit chybějící nebo nahradit všechna metadata"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -57630,6 +58306,12 @@
       "value": "Kořen nedostupný"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Skenovat"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -57640,6 +58322,12 @@
     {
       "type": 0,
       "value": "Zobrazit cesty"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Zastavit"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -57658,6 +58346,22 @@
     {
       "type": 0,
       "value": "Ověřit připojení úložišť"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Zkontrolovat, zda jsou dostupné všechny složky knihovny"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Zobrazit aktivní skenování knihovny "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -57761,7 +58465,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Spravujte kořeny knihoven a skenování. Import a export katalogu jsou nyní v sekci Údržba."
+      "value": "Spravujte složky s médii, sledujte skenování a řešte problémy s přiřazováním."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -58416,6 +59120,78 @@
       "value": "Zastaralá externí ID"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivní"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivní"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivní"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivních"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Aktivita skenování"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Stav katalogu"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Knihovny"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -58906,6 +59682,24 @@
     {
       "type": 0,
       "value": "Hledat v ignorovaných položkách podle názvu, knihovny nebo typu…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Nejednoznačné"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Čeká na spárování"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Nespárováno"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -150031,6 +150825,16 @@
       "value": "Zpět na stránku 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Přejít na stránku "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -150121,6 +150925,20 @@
     {
       "type": 0,
       "value": "Stránky sekce Vyžádat přidání"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Stránka "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " je až za koncem těchto výsledků."
     }
   ],
   "web.requests.toAdd.series": [
@@ -152013,6 +152831,12 @@
     {
       "type": 0,
       "value": "Číst oznámení profilu, jakmile přijdou, a označovat je jako přečtená."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Zjistit, co se právě přehrává v profilu, nebo ve všech profilech účtu, pokud klíč žádný profil neurčuje: titul, pozice, pozastavení, zařízení a způsob přehrávání. Bez ovládání přehrávání a bez podrobností o síti."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

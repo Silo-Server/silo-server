@@ -36,6 +36,7 @@ import {
   jellyfinUsernameIssue,
   resolveSiloSignIn,
 } from "./connectApps";
+import { getInitial } from "@/lib/text";
 
 type AppKind = "silo" | "jellyfin";
 
@@ -179,7 +180,7 @@ function ProfilePicker({
               <Avatar className="h-6 w-6">
                 {profile.avatar_url ? <AvatarImage src={profile.avatar_url} alt="" /> : null}
                 <AvatarFallback className="text-xs font-semibold">
-                  {profile.name.charAt(0).toUpperCase()}
+                  {getInitial(profile.name)}
                 </AvatarFallback>
               </Avatar>
               {profile.name}
