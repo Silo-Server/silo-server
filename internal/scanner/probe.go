@@ -719,7 +719,10 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 func audioVideoSpan(raw *ffprobeOutput, formatDuration float64) (float64, bool) {
 	tolerance := max(trackSpanToleranceSeconds, formatDuration*trackSpanRelativeTolerance)
 	formatStart := parseFloat(raw.Format.StartTime)
-	var audioVideo, accountedEnd float64
+	// accountedEnd is the latest end among the tracks that account for the
+	// container duration, and nearEnd the latest among those that end within
+	// trackSpanToleranceSeconds of it.
+	var audioVideo, accountedEnd, nearEnd float64
 	hasVideo := false
 	for _, stream := range raw.Streams {
 		length, known := trackLength(stream)
@@ -735,6 +738,9 @@ func audioVideoSpan(raw *ffprobeOutput, formatDuration float64) (float64, bool) 
 			// Attached pictures carry no timeline.
 		case known && (math.Abs(formatDuration-length) <= tolerance || math.Abs(formatDuration-end) <= tolerance):
 			accountedEnd = max(accountedEnd, end)
+			if math.Abs(formatDuration-end) <= trackSpanToleranceSeconds {
+				nearEnd = max(nearEnd, end)
+			}
 		}
 	}
 	shortfall := formatDuration - audioVideo
@@ -743,9 +749,10 @@ func audioVideoSpan(raw *ffprobeOutput, formatDuration float64) (float64, bool) 
 	}
 	// A shortfall inside the tolerance needs a track that ends with the
 	// container, within 5 s before or after it, not just within the relative
-	// tolerance (72 s on a two-hour file): otherwise video and audio tags that understate a long file by
-	// seconds would shorten it whenever a subtitle ends a little after them.
-	if shortfall <= tolerance && math.Abs(formatDuration-accountedEnd) > trackSpanToleranceSeconds {
+	// tolerance (72 s on a two-hour file): otherwise video and audio tags
+	// that understate a long file by seconds would shorten it whenever a
+	// subtitle ends a little after them.
+	if shortfall <= tolerance && nearEnd <= audioVideo {
 		return 0, false
 	}
 	return audioVideo, true

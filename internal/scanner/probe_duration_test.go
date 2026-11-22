@@ -55,14 +55,17 @@ func TestDurationFromProbeMetadataIgnoresSubtitleStretch(t *testing.T) {
 		format   string
 		audio    string
 		subtitle string
-		want     int
+		// second is another subtitle track, when set.
+		second string
+		want   int
 	}{
-		{"subtitle stretches by seconds", "154.390000", "00:02:30.000000000", "00:02:34.390000000", 150},
-		{"a partial last second stays listed", "154.390000", "00:02:30.900000000", "00:02:34.390000000", 151},
-		{"subtitle ends before the video", "152.000000", "00:02:30.000000000", "00:02:28.000000000", 152},
-		{"nothing accounts for the stretch", "154.390000", "00:02:30.000000000", "00:02:00.000000000", 154},
-		{"a subtitle ending well before a long container", "7200.000000", "01:59:20.000000000", "01:59:21.000000000", 7200},
-		{"a subtitle ending well after a long container", "7200.000000", "01:59:20.000000000", "02:00:40.000000000", 7200},
+		{"subtitle stretches by seconds", "154.390000", "00:02:30.000000000", "00:02:34.390000000", "", 150},
+		{"a partial last second stays listed", "154.390000", "00:02:30.900000000", "00:02:34.390000000", "", 151},
+		{"subtitle ends before the video", "152.000000", "00:02:30.000000000", "00:02:28.000000000", "", 152},
+		{"nothing accounts for the stretch", "154.390000", "00:02:30.000000000", "00:02:00.000000000", "", 154},
+		{"a subtitle ending well before a long container", "7200.000000", "01:59:20.000000000", "01:59:21.000000000", "", 7200},
+		{"a subtitle ending well after a long container", "7200.000000", "01:59:20.000000000", "02:00:40.000000000", "", 7200},
+		{"a subtitle ending with the container beside one ending later", "3600.000000", "00:59:30.000000000", "01:00:00.000000000", "01:00:20.000000000", 3570},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			raw := &ffprobeOutput{
@@ -72,6 +75,9 @@ func TestDurationFromProbeMetadataIgnoresSubtitleStretch(t *testing.T) {
 					tagged("audio", tt.audio),
 					tagged("subtitle", tt.subtitle),
 				},
+			}
+			if tt.second != "" {
+				raw.Streams = append(raw.Streams, tagged("subtitle", tt.second))
 			}
 			got, ok := durationFromProbeMetadata(raw)
 			if !ok || got != tt.want {
