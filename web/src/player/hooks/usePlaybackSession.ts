@@ -1877,6 +1877,7 @@ export function usePlaybackSession(
         planRef.current.effective_media_file_id !== planRef.current.requested_media_file_id;
       const clearMeteredEstimate = leavingMetered && keptEstimateRef.current !== undefined;
       if (!qualityChanged && !capChanged && !clearMeteredEstimate && !reselectSiblingOnUnmetered) {
+        activePlanTierRef.current = activeNetworkTierRef.current;
         return;
       }
 

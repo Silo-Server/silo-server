@@ -1028,6 +1028,70 @@ describe("usePlaybackSession quality changes", () => {
 
     unmount();
   });
+
+  it("keeps later Wi-Fi step-down estimates after a no-op cellular-to-Wi-Fi transition", async () => {
+    let replanCount = 0;
+    const fetchMock = sessionFetch(() => {
+      replanCount += 1;
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: `plan:wifi-noop-${replanCount}`,
+            plan_attempt_key: `v3:wifi-noop-${replanCount}`,
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ tier }: { tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          null,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: { tier: "metered" as "unmetered" | "metered" | "low_data" },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Switching from uncapped cellular to uncapped Wi-Fi on the requested file needs no replan.
+    rerender({ tier: "unmetered" });
+    await Promise.resolve();
+    expect(bodiesTo("/playback/session-1/replan")).toHaveLength(0);
+
+    // A later Wi-Fi stall step-down estimate must survive a track change on Wi-Fi.
+    act(() => result.current.setKeptEstimate(4_000));
+    act(() => result.current.switchAudioTrack(1, 30));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+    expect(bodiesTo("/playback/session-1/replan")[0]).toMatchObject({
+      operation: "track_change",
+      bandwidth_estimate_kbps: 4_000,
+    });
+
+    unmount();
+  });
 });
 
 describe("usePlaybackSession initial bitmap subtitles", () => {
