@@ -278,11 +278,12 @@ export default function HeroBanner({
       if (!section || section.contains(event.target as Node)) return;
       if (!section.contains(document.activeElement)) release("focus");
     };
-    document.addEventListener("focusin", releaseIfOutside);
-    document.addEventListener("pointerdown", releaseIfOutside);
+    // Capture, so a control elsewhere that stops its press still counts.
+    document.addEventListener("focusin", releaseIfOutside, true);
+    document.addEventListener("pointerdown", releaseIfOutside, true);
     return () => {
-      document.removeEventListener("focusin", releaseIfOutside);
-      document.removeEventListener("pointerdown", releaseIfOutside);
+      document.removeEventListener("focusin", releaseIfOutside, true);
+      document.removeEventListener("pointerdown", releaseIfOutside, true);
     };
   }, [holds.focus, release]);
 

@@ -247,8 +247,12 @@ describe("HeroBanner hover and focus hold", () => {
     await tabToNext(userEvent.setup());
     // Removing a focused element moves focus to the body with no blur.
     const activeElement = vi.spyOn(document, "activeElement", "get").mockReturnValue(document.body);
-    fireEvent.pointerDown(document.body);
+    // A control elsewhere on the page that keeps its press to itself.
+    const elsewhere = document.body.appendChild(document.createElement("button"));
+    elsewhere.addEventListener("pointerdown", (event) => event.stopPropagation());
+    fireEvent.pointerDown(elsewhere);
     activeElement.mockRestore();
+    elsewhere.remove();
     wait(8100);
     expect(announced()).toBe("Slide 2");
   });
