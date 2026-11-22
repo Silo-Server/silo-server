@@ -80,7 +80,7 @@ var restoredDataTables = strings.Fields(`
 
 // serverStateTables describe the running server rather than its data.
 var serverStateTables = strings.Fields(`
-	abs_author_counts_refresh admin_dashboard_layout_revisions audiobook_group_stats_refresh admin_jobs anime_ids_refresh backup_restore_items
+	abs_author_counts_refresh admin_dashboard_layout_revisions attachment_bitrate_backfill_state audiobook_group_stats_refresh admin_jobs anime_ids_refresh backup_restore_items
 	api_client_usage_hourly artwork_revision_gc_candidates artwork_revision_gc_dormant_cursor
 	audiobook_item_file_stats autoscan_events autoscan_webhook_deliveries blob_gc_queue
 	catalog_item_change_drain catalog_item_change_events catalog_search_index_state

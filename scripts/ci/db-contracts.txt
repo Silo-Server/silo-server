@@ -62,6 +62,8 @@
 ./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
 ./internal/scanner TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB
 ./internal/scanner TestHDR10PlusBackfillWaitsADayAfterANoFrameReadDB
+./internal/scanner TestAttachmentBitrateBackfillRecomputesFontHeavyFilesOnceDB
+./internal/scanner TestAttachmentBitrateBackfillResumesAfterStorageStallDB
 ./internal/scanner TestRescanKeepsSidecarsItCouldNotListDB
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
