@@ -134,6 +134,12 @@ func OpenSegmentWithRecovery(
 
 	// Throttler + exit monitor re-arm via the session's restart hook.
 	lease, err = session.WaitForOpenSegmentContext(ctx, segmentName, postRestartSegmentWaitTimeout)
+	if errors.Is(err, ErrSegmentNotFound) && session.pastEndOfStream(segNum) {
+		// The restart started past the media's end, read nothing and
+		// finished: a seek into the playlist's tail before any FFmpeg of the
+		// session had reached the end.
+		return nil, ErrPastEndOfStream
+	}
 	if err == nil && opts.CopyLookaheadTimeout > 0 && session.IsCopyVideo() {
 		// Copy-mode seeks can resume as soon as the target segment exists, but
 		// that sometimes leaves the player one segment away from stalling while

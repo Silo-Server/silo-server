@@ -1118,8 +1118,10 @@ end, and the session keeps its last segment as the media's last. A video
 segment request past that segment answers `200` with an empty body and the
 segment's media type. That request never waits and never restarts FFmpeg,
 because a restart past the end writes nothing and the player would request the
-segment again. A player steps over the empty segments to the end of the
-playlist. FFmpeg also exits 0 when a read fails mid-file, such as a relayed
+segment again. A seek into that tail before any FFmpeg of the session has
+reached the end restarts FFmpeg there once; it reads nothing, exits 0, and the
+request answers the same empty segment. A player steps over the empty segments
+to the end of the playlist. FFmpeg also exits 0 when a read fails mid-file, such as a relayed
 source that closes early, but it logs that demux error first. Such an FFmpeg,
 or one that exits with an error or is killed, has not reached the end, so a
 request past its output restarts it as before. A keyframe-planned copy remux

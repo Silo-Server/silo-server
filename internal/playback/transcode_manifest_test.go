@@ -986,6 +986,53 @@ func TestSegmentRecoveryAfterFFmpegExits(t *testing.T) {
 	}
 }
 
+// A seek into the playlist's tail before any FFmpeg of the session reached
+// the end restarts FFmpeg there. It reads nothing and exits 0, and the
+// request must end the stream rather than answer not found, which the player
+// retries into another restart.
+func TestSegmentRestartPastEndOfStreamEndsTheStream(t *testing.T) {
+	dir := t.TempDir()
+	script := filepath.Join(t.TempDir(), "ffmpeg")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := &TranscodeSession{
+		outputDir: dir,
+		opts: TranscodeOpts{
+			SessionID:        "sess-tail",
+			FFmpegPath:       script,
+			OutputDir:        dir,
+			TargetCodecVideo: "h264",
+			SegmentDuration:  2,
+		},
+	}
+	t.Cleanup(func() {
+		s.StopThrottler()
+		_ = s.Close()
+	})
+	restarts := 0
+	name := "seg_00076.ts"
+	_, err := OpenSegmentWithRecovery(context.Background(), s, name, SegmentRecoveryOptions{
+		Restart: func(ctx context.Context, segNum int, _ time.Time) (SegmentRecoveryTarget, bool, error) {
+			restarts++
+			if err := s.Restart(ctx, float64(segNum*2), segNum); err != nil {
+				return SegmentRecoveryTarget{}, false, err
+			}
+			return SegmentRecoveryTarget{SeekSeconds: float64(segNum * 2), StartSegmentNumber: segNum}, true, nil
+		},
+	})
+	if restarts != 1 {
+		t.Fatalf("restarts = %d, want 1", restarts)
+	}
+	rec := httptest.NewRecorder()
+	if !ServePastEndOfStream(rec, name, err) {
+		t.Fatalf("err = %v, want the end of the stream", err)
+	}
+	if rec.Code != http.StatusOK || rec.Body.Len() != 0 {
+		t.Fatalf("end of stream = %d (%d bytes), want an empty 200", rec.Code, rec.Body.Len())
+	}
+}
+
 // A check already past its progress read when Stop runs must not pause
 // FFmpeg: the throttler that replaced this one never saw the pause, so it
 // would not resume it.
