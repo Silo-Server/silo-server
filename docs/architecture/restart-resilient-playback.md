@@ -250,8 +250,10 @@ one exception. The recipe may come from hardware whose GPU decodes the source,
 so when this GPU's decoder rejects it (FFmpeg's `Hardware is lacking required
 capabilities` from NVDEC, its AV1 decoder's `doesn't support hardware
 accelerated AV1 decoding`, or `Impossible to convert between the formats
-supported by the filter` when no GPU decoder took the source) the reconstruct
-moves to CPU decode with GPU encode, then software, in the same directory.
+supported by the filter`, which a QSV or VAAPI graph prints when no GPU decoder
+took the source; any filter-format failure with that line counts) the
+reconstruct moves to CPU decode with GPU encode, then software, in the same
+directory.
 FFmpeg is stopped as soon as it prints the AV1 line, because that decoder has
 no software path and would otherwise read the whole input before exiting.
 Ownership re-binds to the live authenticated caller and refuses `userID==0` /

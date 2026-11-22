@@ -7,11 +7,11 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/procgroup"
+	"github.com/Silo-Server/silo-server/internal/procgroup/procgrouptest"
 )
 
 const startupTestManifest = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nseg_00000.ts\n#EXT-X-ENDLIST\n"
@@ -603,7 +603,8 @@ func TestStartReadyTranscodeDecodesOnCPUWhenQSVOrVAAPICannotDecode(t *testing.T)
 }
 
 // assertProcessGone fails unless the process whose pid pidFile holds has
-// exited, allowing a moment for an orphan to be reaped.
+// exited. Where nothing reaps orphans, a killed child stays a zombie, which
+// procgrouptest.RequireExited counts as exited.
 func assertProcessGone(t *testing.T, pidFile string) {
 	t.Helper()
 	data, err := os.ReadFile(pidFile)
@@ -614,22 +615,7 @@ func assertProcessGone(t *testing.T, pidFile string) {
 	if err != nil {
 		t.Fatalf("parse pid %q: %v", data, err)
 	}
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return
-	}
-	// An orphan's exit has no event to wait on, so poll until it is reaped.
-	deadline := time.After(2 * time.Second)
-	poll := time.NewTicker(20 * time.Millisecond)
-	defer poll.Stop()
-	for process.Signal(syscall.Signal(0)) == nil {
-		select {
-		case <-deadline:
-			_ = process.Kill()
-			t.Fatalf("the stopped attempt's child process %d is still running", pid)
-		case <-poll.C:
-		}
-	}
+	procgrouptest.RequireExited(t, pid)
 }
 
 // Windows Media Video 7 and 8 and the Microsoft MPEG-4 variants have no GPU
