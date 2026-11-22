@@ -17,11 +17,16 @@ starts one check or joins the check already in flight. Each check has a fifteen-
 second timeout, and the settings read that starts a check has its own fifteen-second
 timeout, so a request that must read settings and start a check can take about
 thirty seconds. Canceling the request stops its wait, not the shared check.
-A missing service answers `503 dependency_unavailable`.
+A missing service, or a settings read that fails or runs out of time, answers
+`503 dependency_unavailable` with `Retry-After`.
 
 A successful response contains `enabled` and a `hosts` array with the API host
 only. Each host has `host` (the existing `NetworkAccessHostRef`, ID `api`),
 `checked_at` (an Instant), `features`, `knobs`, and, after binding, `listeners`.
+Each API process keeps its own result. With several API replicas behind a load
+balancer, the replica that answers reports its own process under the same `api`
+host, so consecutive reads can come from different replicas. The response does
+not yet identify the replica.
 Generated [OpenAPI](../contracts/api/v2/openapi.json) defines the exact schemas
 and additive feature, state, and reason vocabularies.
 
