@@ -3,6 +3,8 @@ package backup
 import (
 	"slices"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 // SettingKind is how a restore treats one server setting. Every setting
@@ -35,7 +37,7 @@ const (
 // in "." or "_"). The AI sign-in mode and models are this server's choice
 // among what its own AI providers and ChatGPT account offer, which only
 // they can validate.
-var serverSpecificSettings = strings.Fields(`
+var serverSpecificSettings = append(strings.Fields(`
 	server.identity_id server.public_url server.local_url server.web_media_url
 	database. redis. userdb. storage. artwork. s3. backup. setup.
 	auth.jwt_secret audiobooks.abs.jwt_secret
@@ -50,7 +52,8 @@ var serverSpecificSettings = strings.Fields(`
 	jellyfin_compat.public_url jellyfin_compat.web_install_dir
 	recommendations.embedding_provider_id recommendations.embedding_lock recommendations.policy_marked_generation
 	media_images. chapter_thumbnails. ui.dashboard.hidden_attention
-`)
+	direct_connections.
+`), plugins.ProvisionRestoreHoldKey)
 
 // restoredSettings are the keys and prefixes restored as the backup has
 // them.

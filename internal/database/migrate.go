@@ -214,6 +214,7 @@ func goMigrations() []*goose.Migration {
 		externalSubtitleNameBackfillMigration(),
 		blobGCQueueChapterFileIndexMigration(),
 		contentRatingAgeRederiveMigration(),
+		isbn13BackfillMigration(),
 	}
 }
 

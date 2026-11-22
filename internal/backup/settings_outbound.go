@@ -13,6 +13,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mail"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 // settingOff is a switch setting turned off.
@@ -174,13 +175,13 @@ func carryOutboundSettings(ctx context.Context, loader DatabaseLoader, dbURL, li
 // (SettingKindServerSpecific), deleting one the live server does not have
 // so its default applies: they describe this server, whichever deployment
 // the backup came from, as a selective restore never writes them. Signing
-// keys a restore rotates (rotatedSettings) keep their new values. It
-// returns how many settings it changed.
+// keys a restore rotates (rotatedSettings) and the plugin provisioning hold
+// keep their new values. It returns how many settings it changed.
 func (l PGLoader) CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string) (int, error) {
 	serverSpecific := func(key string) bool {
 		kind, ok := SettingKindOf(key)
 		_, rotated := rotatedSettings[key]
-		return ok && kind == SettingKindServerSpecific && !rotated
+		return ok && kind == SettingKindServerSpecific && !rotated && key != plugins.ProvisionRestoreHoldKey
 	}
 	live, err := allSettingsAt(ctx, liveURL, serverSpecific)
 	if err != nil {

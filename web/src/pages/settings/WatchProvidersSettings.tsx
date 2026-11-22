@@ -342,7 +342,7 @@ function APIKeyBlock({
           placeholder={t("web.settings.watchProviders.apiKey.placeholder")}
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          className="font-mono"
+          className="placeholder:font-ui font-mono"
         />
         <Button
           type="button"

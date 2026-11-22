@@ -17,6 +17,7 @@ import {
 } from "@/player/utils/trackPreferenceWrites";
 
 import { itemKeys } from "./keys";
+import { settingWriteOptions } from "./settingWriteOffline";
 
 // Track preferences feed the effective defaults on item details; a
 // series-keyed preference feeds every episode's detail, so invalidate broadly.
@@ -32,6 +33,11 @@ export function invalidateItemDetails(queryClient: QueryClient): Promise<unknown
  * writes for the same title and dimension, so the viewer's last choice is the
  * one that sticks. The profile is captured now: a write that waits in line
  * still goes out for the profile that made the choice.
+ *
+ * The hooks that call this refuse a choice made offline before it gets here
+ * (settingWriteOptions) rather than let it wait in line: an earlier request
+ * can stay pending until the browser reconnects, and the choice would then
+ * replace a newer one made in another browser.
  */
 export function runOrderedPreferenceWrite<T>(
   dimension: TrackPreferenceDimension,
@@ -63,6 +69,7 @@ export function useSetAudioPreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...settingWriteOptions,
     mutationFn: ({ prefId, trackIndex, track }: SetAudioPreferenceInput) =>
       runOrderedPreferenceWrite("audio", prefId, (profileContext) =>
         v2("PUT /api/v2/audio-prefs/{series_id}", {
@@ -91,6 +98,7 @@ export function useDeleteAudioPreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...settingWriteOptions,
     mutationFn: (prefId: string) =>
       runOrderedPreferenceWrite("audio", prefId, (profileContext) =>
         v2("DELETE /api/v2/audio-prefs/{series_id}", {

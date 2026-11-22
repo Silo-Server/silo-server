@@ -1266,120 +1266,17 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	const compatLogComponent = "jellycompat"
 	segmentName := name + "." + ext
-	segmentLease, err := transcodeSession.OpenSegment(segmentName)
-	if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
-		segNum, parseErr := playback.ParseSegmentNumber(name)
-		if parseErr == nil {
-			now := time.Now()
-			decision := transcodeSession.SegmentRecoveryDecision(segNum, now)
-			lastProducedAgeMS := int64(-1)
-			if !decision.Progress.LastProducedAt.IsZero() {
-				lastProducedAgeMS = now.Sub(decision.Progress.LastProducedAt).Milliseconds()
-			}
-			slog.InfoContext(r.Context(), "transcode segment missing", "component", "jellycompat",
-				"segment", segmentName,
-				"requested_segment", segNum,
-				"produced_head", decision.Progress.ProducedHead,
-				"last_requested_segment", decision.Progress.LastRequestedSegment,
-				"start_segment_number", decision.Progress.StartSegmentNumber,
-				"last_produced_age_ms", lastProducedAgeMS,
-				"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-				"reason", decision.Reason,
-				"play_session", playSessionFingerprint(playSessionID),
-				"session", playSession.UpstreamSessionID,
-				"playback_session_id", playSession.UpstreamSessionID,
-			)
-			if decision.Wait {
-				slog.InfoContext(r.Context(), "transcode segment wait", "component", "jellycompat",
-					"segment", segmentName,
-					"requested_segment", segNum,
-					"produced_head", decision.Progress.ProducedHead,
-					"last_requested_segment", decision.Progress.LastRequestedSegment,
-					"start_segment_number", decision.Progress.StartSegmentNumber,
-					"last_produced_age_ms", lastProducedAgeMS,
-					"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-					"reason", decision.Reason,
-					"play_session", playSessionFingerprint(playSessionID),
-					"session", playSession.UpstreamSessionID,
-					"playback_session_id", playSession.UpstreamSessionID,
-				)
-				segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, decision.WaitTimeout)
-				if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
-					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "jellycompat",
-						"segment", segmentName,
-						"requested_segment", segNum,
-						"produced_head", decision.Progress.ProducedHead,
-						"last_requested_segment", decision.Progress.LastRequestedSegment,
-						"start_segment_number", decision.Progress.StartSegmentNumber,
-						"last_produced_age_ms", lastProducedAgeMS,
-						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-						"reason", decision.Reason,
-						"play_session", playSessionFingerprint(playSessionID),
-						"session", playSession.UpstreamSessionID,
-						"playback_session_id", playSession.UpstreamSessionID,
-					)
-				}
-			}
-
-			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
-				target, ok, restartErr := h.tm.RestartSegmentLocked(
-					r.Context(),
-					playSession.UpstreamSessionID,
-					transcodeSession,
-					segNum,
-					decision.Progress.GenerationStartedAt,
-				)
-				// A restart skipped because the request ended is not a failure.
-				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
-					slog.ErrorContext(r.Context(), "restart transcode at missing segment", "component", "jellycompat",
-						"error", restartErr,
-						"segment", segmentName,
-						"play_session", playSessionFingerprint(playSessionID),
-						"session", playSession.UpstreamSessionID,
-						"playback_session_id", playSession.UpstreamSessionID,
-					)
-				}
-
-				// Copy-mode with an unresolved seek target (ok=false, no error)
-				// means the manifest can't place this segment yet. Don't restart
-				// at a fabricated position; surface ErrSegmentNotFound so the
-				// client retries while the session keeps producing manifest.
-				// Mirrors the transcode-node guard in
-				// internal/transcodenode/server.go.
-				if !ok && restartErr == nil && transcodeSession.IsCopyVideo() {
-					err = playback.ErrSegmentNotFound
-				}
-
-				if restartErr != nil {
-					err = restartErr
-				} else if ok {
-					slog.InfoContext(r.Context(), "transcode seek restart", "component", "jellycompat",
-						"segment", segmentName,
-						"requested_segment", segNum,
-						"produced_head", decision.Progress.ProducedHead,
-						"last_requested_segment", decision.Progress.LastRequestedSegment,
-						"start_segment_number", decision.Progress.StartSegmentNumber,
-						"last_produced_age_ms", lastProducedAgeMS,
-						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-						"reason", decision.Reason,
-						"seek_seconds", target.SeekSeconds,
-						"stream_origin_seconds", target.StreamOriginSeconds,
-						"resolved_start_segment", target.StartSegmentNumber,
-						"play_session", playSessionFingerprint(playSessionID),
-						"session", playSession.UpstreamSessionID,
-						"playback_session_id", playSession.UpstreamSessionID,
-					)
-
-					segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 30*time.Second)
-				}
-			}
-		} else if transcodeSession.IsRunning() {
-			// Non-numbered segment (e.g. init.mp4 for fMP4 HLS).
-			// Wait briefly — the init segment is written almost immediately.
-			segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 10*time.Second)
-		}
-	}
+	segmentLease, err := playback.OpenSegmentWithRecovery(r.Context(), transcodeSession, segmentName, playback.SegmentRecoveryOptions{
+		SessionID:         playSession.UpstreamSessionID,
+		Component:         compatLogComponent,
+		PlaySession:       playSessionFingerprint(playSessionID),
+		SegmentNumberName: name,
+		Restart: func(ctx context.Context, segNum int, seenGeneration time.Time) (playback.SegmentRecoveryTarget, bool, error) {
+			return h.tm.RestartSegmentLocked(ctx, playSession.UpstreamSessionID, transcodeSession, segNum, seenGeneration)
+		},
+	})
 	if err != nil {
 		if r.Context().Err() != nil {
 			// net/http also ends the context of a client that only

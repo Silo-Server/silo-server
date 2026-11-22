@@ -26,9 +26,11 @@ func DeriveOAuthStateSecret(jwtSecret []byte) []byte {
 // as the literal `state` query parameter — verification on /callback both
 // authenticates the request as ours and recovers install_id + expiry.
 type StatePayload struct {
-	Nonce     string    `json:"n"`
-	InstallID string    `json:"i"`
-	ExpiresAt time.Time `json:"e"`
+	Nonce        string    `json:"n"`
+	InstallID    string    `json:"i"`
+	ExpiresAt    time.Time `json:"e"`
+	CapabilityID string    `json:"c,omitempty"`
+	CallbackMode string    `json:"m,omitempty"`
 }
 
 // SignState returns a self-contained signed state of the form

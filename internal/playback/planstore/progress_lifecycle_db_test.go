@@ -9,7 +9,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 // TestProgressCommitsLifecycleStateDB pins the ordering the lifecycle events
@@ -76,6 +79,140 @@ func TestProgressCommitsLifecycleStateDB(t *testing.T) {
 	if err != nil || first || receipt.StopID != stopID || receipt.Accepted == nil || receipt.Accepted.Sequence != 5 {
 		t.Fatalf("stop after expiry = %+v first=%v err=%v; want the expiry's receipt at sequence 5", receipt, first, err)
 	}
+}
+
+func TestLatePlaybackProgressCannotOverwriteFinalStopDB(t *testing.T) {
+	ctx, pool, attempts, session := newLifecycleAttemptDB(t)
+	attempt, err := attempts.GetAttempt(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := notifications.WrapUserStoreProvider(pgstore.NewPostgresProvider(pool), &notifications.System{})
+	store, err := provider.ForUser(ctx, attempt.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: attempt.ProfileID, Name: "Viewer"}); err != nil {
+		t.Fatal(err)
+	}
+	writer, ok := store.(userstore.SequencedPlaybackProgressWriter)
+	if !ok {
+		t.Fatal("production user-store wrapper lost the sequenced progress writer")
+	}
+	const mediaID = "movie:stop-fence"
+	const duration = 3600
+	thresholds := userstore.ProgressThresholds{}
+	hints := userstore.VersionHints{FileID: attempt.RequestedMediaFileID}
+	assertPosition := func(want float64) {
+		t.Helper()
+		saved, err := store.GetProgress(ctx, attempt.ProfileID, mediaID)
+		if err != nil || saved == nil || saved.PositionSeconds != want {
+			t.Fatalf("saved progress = %+v, %v, want %v", saved, err, want)
+		}
+	}
+	if _, err := attempts.ApplyProgress(ctx, session, playback.ProgressSampleV3{Sequence: 1, Position: 600}); err != nil {
+		t.Fatal(err)
+	}
+	writeHeartbeat := func(wantWritten bool) {
+		t.Helper()
+		written, _, err := writer.WriteSequencedPlaybackProgress(ctx, session, 1, attempt.ProfileID, mediaID, 600, duration, thresholds, hints)
+		if err != nil || written != wantWritten {
+			t.Fatalf("heartbeat write = %v, %v, want %v", written, err, wantWritten)
+		}
+	}
+	writeHeartbeat(true)
+	assertPosition(600)
+
+	// Another replica wins the stop and stores its final position while
+	// the first replica still has an accepted heartbeat to persist.
+	final := playback.ProgressSampleV3{Sequence: 2, Position: 900}
+	stopID := "c2c87108-1bb1-4d1b-b25d-c37d928a9bd7"
+	if _, first, err := attempts.StopAttempt(ctx, session, stopID, &final); err != nil || !first {
+		t.Fatalf("stop was not accepted: first=%v, %v", first, err)
+	}
+	if err := store.SetProgress(ctx, attempt.ProfileID, mediaID, final.Position, duration, thresholds); err != nil {
+		t.Fatal(err)
+	}
+	writeHeartbeat(false)
+	assertPosition(900)
+}
+
+func TestPlaybackStopCommitsResumeAndEpisodeSpanOnceDB(t *testing.T) {
+	ctx, pool, attempts, session := newLifecycleAttemptDB(t)
+	attempt, err := attempts.GetAttempt(ctx, session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := notifications.WrapUserStoreProvider(pgstore.NewPostgresProvider(pool), &notifications.System{})
+	store, err := provider.ForUser(ctx, attempt.UserID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: attempt.ProfileID, Name: "Viewer"}); err != nil {
+		t.Fatal(err)
+	}
+
+	const first = "episode:span-start"
+	const second = "episode:span-end"
+	history := userstore.WatchHistoryEntry{
+		ID: uuid.NewString(), ProfileID: attempt.ProfileID, MediaItemID: first, DurationSeconds: 3600,
+		Completed: true, Source: userstore.WatchHistorySourcePlayback,
+	}
+	spanHistory := history
+	spanHistory.MediaItemID = second
+	stop := userstore.PlaybackStopWrite{
+		Entry: history, PositionSeconds: 3590, Hints: userstore.VersionHints{FileID: attempt.RequestedMediaFileID},
+		ReplayUntil:    time.Now().Add(time.Hour),
+		SpannedTargets: []userstore.MarkWatchedTarget{{MediaItemID: second}},
+		SpannedHistory: []userstore.WatchHistoryEntry{spanHistory},
+	}
+	assertHistoryCount := func(want int) {
+		t.Helper()
+		var count int
+		err := pool.QueryRow(ctx, "SELECT count(*) FROM user_watch_history WHERE user_id = $1", attempt.UserID).Scan(&count)
+		if err != nil || count != want {
+			t.Fatalf("history count = %d, %v, want %d", count, err, want)
+		}
+	}
+	// The duplicate ID fails during the span's history insert, after both
+	// progress writes. None of those writes may survive that failure.
+	if _, _, err := userstore.CommitPlaybackStop(ctx, store, stop); err == nil {
+		t.Fatal("expected span history insert to fail")
+	}
+	for _, id := range []string{first, second} {
+		if saved, err := store.GetProgress(ctx, attempt.ProfileID, id); err != nil || saved != nil {
+			t.Fatalf("failed stop left %s progress: %+v, %v", id, saved, err)
+		}
+	}
+	assertHistoryCount(0)
+
+	stop.SpannedHistory[0].ID = uuid.NewString()
+	spanned, replay, err := userstore.CommitPlaybackStop(ctx, store, stop)
+	if err != nil || replay || len(spanned) != 1 {
+		t.Fatalf("retried stop changed %d span entries, replay=%v, err=%v", len(spanned), replay, err)
+	}
+	for _, id := range []string{first, second} {
+		if saved, err := store.GetProgress(ctx, attempt.ProfileID, id); err != nil || saved == nil || !saved.Completed || saved.PositionSeconds != 0 {
+			t.Fatalf("successful stop left %s progress: %+v, %v", id, saved, err)
+		}
+	}
+	assertHistoryCount(2)
+
+	// History removal can happen after commit and before the receipt is saved.
+	// A replay must preserve the removal and the next play's resume point.
+	if err := store.RemoveHistoryItems(ctx, attempt.ProfileID, []string{first}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetProgress(ctx, attempt.ProfileID, first, 600, 3600, stop.Thresholds); err != nil {
+		t.Fatal(err)
+	}
+	if _, replay, err := userstore.CommitPlaybackStop(ctx, store, stop); err != nil || !replay {
+		t.Fatalf("committed stop replay = %v, %v", replay, err)
+	}
+	if saved, err := store.GetProgress(ctx, attempt.ProfileID, first); err != nil || saved == nil || saved.PositionSeconds != 600 {
+		t.Fatalf("stop replay changed newer resume point: %+v, %v", saved, err)
+	}
+	assertHistoryCount(1)
 }
 
 // newLifecycleAttemptDB saves a live attempt and a playing native lifecycle

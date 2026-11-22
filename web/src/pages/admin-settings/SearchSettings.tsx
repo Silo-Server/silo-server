@@ -174,6 +174,7 @@ export default function SearchSettings() {
                 value={form.getValue(MEILI_URL_KEY)}
                 onChange={(value) => form.setValue(MEILI_URL_KEY, value)}
                 hint={MEILI_URL_EXAMPLE}
+                dir="ltr"
                 disabled={!meiliEnabled || connectionUnknown}
                 managedByEnv={form.envVar(MEILI_URL_KEY)}
                 restartRequired={restartKeys.has(MEILI_URL_KEY)}
@@ -248,8 +249,9 @@ export default function SearchSettings() {
                   value={form.getValue("catalog.search.meilisearch.index") || "silo_media_items"}
                   onChange={(value) => form.setValue("catalog.search.meilisearch.index", value)}
                   description={t("web.admin.settings.search.meili.index.description")}
-                  disabled={!meiliEnabled}
+                  disabled={!meiliEnabled || connectionUnknown}
                   restartRequired={restartKeys.has("catalog.search.meilisearch.index")}
+                  managedByEnv={form.envVar("catalog.search.meilisearch.index")}
                 />
                 <SettingField
                   label={t("web.admin.settings.search.meili.timeout.label")}

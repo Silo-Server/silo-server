@@ -26,6 +26,12 @@ func TestUpsertAuthBindingAllowsOneEnabledProvider(t *testing.T) {
 	time.Sleep(time.Millisecond) // distinct plugin ids
 	second := seedResidentQueryInstallation(t, pool, true)
 
+	if _, err := pool.Exec(ctx, `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+		VALUES ($1, 'auth_provider.v1', 'oidc', '{"auth_modes":["oauth2"]}'),
+		       ($2, 'auth_provider.v1', 'ldap', '{"auth_modes":["password"]}')`, first, second); err != nil {
+		t.Fatal(err)
+	}
+
 	if err := configs.UpsertAuthBinding(ctx, AuthBinding{InstallationID: first, CapabilityID: "oidc", Enabled: true}); err != nil {
 		t.Fatal(err)
 	}

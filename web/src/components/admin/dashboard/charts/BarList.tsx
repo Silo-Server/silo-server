@@ -82,7 +82,7 @@ export function BarList({
             </span>
             <span className="relative min-w-0 flex-1 truncate" title={item.label}>
               {item.to ? (
-                <Link to={item.to} className="hover:text-primary transition-colors">
+                <Link to={item.to} className="hover:text-primary transition-colors hover:underline">
                   {item.label}
                 </Link>
               ) : (

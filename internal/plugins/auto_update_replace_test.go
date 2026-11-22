@@ -20,7 +20,6 @@ func TestAutoUpdateServiceRefusedPackageLeavesPluginRunning(t *testing.T) {
 			resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/tmdb", Checksum: "deadbeef"},
 		},
 		&fakeAutoUpdateInstaller{replaceErr: packageError(errors.New("binary checksum mismatch"), "refused"), events: &events},
-		&fakeAutoUpdateHost{events: &events},
 		nil,
 		nil,
 	)
@@ -50,7 +49,6 @@ func TestAutoUpdateServiceSkipsInstallationReplacedDuringDownload(t *testing.T) 
 			resolved: &ResolvedCatalogInstall{RepositoryID: 7, ArchiveURL: "https://plugins.example.test/tmdb", Checksum: "deadbeef"},
 		},
 		&fakeAutoUpdateInstaller{events: &events},
-		&fakeAutoUpdateHost{events: &events},
 		nil,
 		nil,
 	)
@@ -121,7 +119,7 @@ func TestAutoUpdateServiceRecordsRefusedUpdates(t *testing.T) {
 			}
 			service := NewAutoUpdateService(
 				&fakeAutoUpdateRepositories{list: []*Repository{{ID: 7, Enabled: true}}},
-				installations, catalog, &fakeAutoUpdateInstaller{replaceErr: tt.replaceErr}, &fakeAutoUpdateHost{}, nil, nil,
+				installations, catalog, &fakeAutoUpdateInstaller{replaceErr: tt.replaceErr}, nil, nil,
 			)
 			summary, err := service.Check(context.Background(), AutoUpdateOptions{})
 			if err != nil {
@@ -184,7 +182,6 @@ func TestAutoUpdateServiceKeepsUpdatesPinnedToInstallationRepository(t *testing.
 		installations,
 		catalog,
 		&fakeAutoUpdateInstaller{},
-		&fakeAutoUpdateHost{},
 		nil,
 		nil,
 	)
@@ -220,7 +217,6 @@ func TestAutoUpdateServiceDoesNotAttachUploadsToCatalogRepositories(t *testing.T
 			Manifest:     &pluginv1.PluginManifest{PluginId: "silo.requests.arr", Version: "2.0.0"},
 		}}},
 		&fakeAutoUpdateInstaller{},
-		&fakeAutoUpdateHost{},
 		nil,
 		nil,
 	)
@@ -294,8 +290,8 @@ type fakeAutoUpdateCatalog struct {
 	resolveRequests []InstallCatalogRequest
 }
 
-func (f *fakeAutoUpdateCatalog) Fetch(context.Context) ([]CatalogEntry, error) {
-	return f.entries, nil
+func (f *fakeAutoUpdateCatalog) fetchSnapshot(context.Context) (catalogSnapshot, error) {
+	return catalogSnapshot{entries: f.entries}, nil
 }
 
 func (f *fakeAutoUpdateCatalog) ResolveInstall(_ context.Context, request InstallCatalogRequest) (*ResolvedCatalogInstall, error) {
@@ -337,15 +333,4 @@ func (f *fakeAutoUpdateInstaller) PrepareCatalogReplacement(_ context.Context, e
 		recordTestEvent(f.events, "apply")
 		return &InstallResult{Installation: existing}, nil
 	}}, nil
-}
-
-type fakeAutoUpdateHost struct {
-	stopped []int
-	events  *[]string
-}
-
-func (f *fakeAutoUpdateHost) Stop(installationID int) error {
-	recordTestEvent(f.events, "stop")
-	f.stopped = append(f.stopped, installationID)
-	return nil
 }

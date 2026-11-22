@@ -78,15 +78,41 @@ export default function PlaybackSettings() {
   const hwDevice = form.getValue("playback.hw_device");
   const hwDeviceEnv = form.envVar("playback.hw_device");
   const selectedDevices = parseHWDeviceList(hwDevice);
-  const deviceRows = buildHWDeviceRows(hwDetection.data, hwDevice);
-  const detectedPaths = deviceRows.filter((row) => row.detected).map((row) => row.path);
+  // Saved paths keep their rows when the draft drops them, so switching off a
+  // device that detection doesn't list leaves its row in place. A toggle orders
+  // the list saved paths first, in their saved order, so switching a device
+  // back on restores the saved list.
+  const savedDevices = parseHWDeviceList(form.getPersistedValue("playback.hw_device"));
+  const deviceRows = buildHWDeviceRows(hwDetection.data, [...savedDevices, hwDevice].join(","));
+  const deviceOrder = [
+    ...savedDevices,
+    ...deviceRows.map((row) => row.path).filter((path) => !savedDevices.includes(path)),
+  ];
   // Balancing is QSV/VAAPI-only: NVENC addresses GPUs by CUDA index/UUID, so
   // the multi-select picker is hidden for it (the server uses the first
   // configured entry).
   const isNvenc =
     hwAccel === "nvenc" || (hwAccel === "auto" && hwDetection.data?.resolved === "nvenc");
   const inventoriesDiverge = nodeInventoriesDiverge(hwDetection.data);
-  const showDevicePicker = hwAccel !== "none" && !isNvenc && deviceRows.length > 0;
+  // A device choice staged before switching acceleration keeps the picker in
+  // view, so Save never writes a value the admin can't see. Under a mode the
+  // picker doesn't apply to, it only takes the list back toward the saved one:
+  // any device can be switched off, and only saved devices on. NVENC reads the
+  // setting as a CUDA device, so render paths can't be added there.
+  const devicePickerApplies = hwAccel !== "none" && !isNvenc;
+  const hwDeviceDirty = form.isDirty("playback.hw_device");
+  const showDevicePicker = deviceRows.length > 0 && (devicePickerApplies || hwDeviceDirty);
+  const deviceChanged = (path: string) =>
+    selectedDevices.includes(path) !== savedDevices.includes(path);
+  // A staged list can match the saved devices and differ only in order, as
+  // after a refresh; its selected rows then carry the change.
+  const orderOnlyDraft = hwDeviceDirty && !deviceRows.some((row) => deviceChanged(row.path));
+  const deviceKeptForEdit = (path: string) =>
+    !devicePickerApplies &&
+    (deviceChanged(path) || (orderOnlyDraft && selectedDevices.includes(path)));
+  const deviceSwitchLocked = (path: string) =>
+    hwDeviceEnv != null ||
+    (!devicePickerApplies && !selectedDevices.includes(path) && !savedDevices.includes(path));
 
   const nodes = useAdminNodes();
   const trickplayExecution =
@@ -133,8 +159,12 @@ export default function PlaybackSettings() {
   const anyDirty = (keys: readonly string[]) => keys.some((key) => isDirty(key));
   const allRestart = (keys: readonly string[]) => keys.every((key) => restartKeys.has(key));
 
+  // Each of these rows also stays in view, marked as changed, while it holds
+  // an unsaved edit after its switch is turned off.
   const throttleOn = form.getValue("enable_transcode_throttle") === "true";
+  const throttleSecondsKept = !throttleOn && isDirty("transcode_throttle_seconds");
   const allow4KTranscode = form.getValue("allow_4k_transcode") === "true";
+  const preferLowerKept = !allow4KTranscode && isDirty("playback.prefer_lower_version_transcode");
   // Every advanced transcoding key has one row, except the device picker,
   // which renders only when it applies.
   const transcodingAdvancedCount = TRANSCODING_ADVANCED_KEYS.length - (showDevicePicker ? 0 : 1);
@@ -279,9 +309,10 @@ export default function PlaybackSettings() {
             onChange={(v) => form.setValue("allow_4k_transcode", v)}
             restartRequired={restartKeys.has("allow_4k_transcode")}
           />
-          {allow4KTranscode && (
+          {(allow4KTranscode || preferLowerKept) && (
             <SettingField
               label={t("web.admin.settings.playback.transcoding.preferLower")}
+              dirty={preferLowerKept}
               type="toggle"
               description={t("web.admin.settings.playback.transcoding.preferLowerDescription")}
               value={form.getValue("playback.prefer_lower_version_transcode")}
@@ -319,9 +350,10 @@ export default function PlaybackSettings() {
             onChange={(v) => form.setValue("enable_transcode_throttle", v)}
             restartRequired={restartKeys.has("enable_transcode_throttle")}
           />
-          {throttleOn && (
+          {(throttleOn || throttleSecondsKept) && (
             <SettingField
               label={t("web.admin.settings.playback.transcoding.bufferAhead")}
+              dirty={throttleSecondsKept}
               type="number"
               unit={t("web.admin.settings.playback.unitSeconds")}
               value={form.getValue("transcode_throttle_seconds")}
@@ -390,6 +422,7 @@ export default function PlaybackSettings() {
                 {deviceRows.map((row, index) => (
                   <SettingFieldRow
                     key={row.path}
+                    dirty={deviceKeptForEdit(row.path)}
                     // One note for the whole device list, on its first row.
                     managedByEnv={index === 0 ? hwDeviceEnv : undefined}
                     label={
@@ -399,7 +432,9 @@ export default function PlaybackSettings() {
                     }
                     description={
                       <>
-                        <span className="block font-mono">{row.path}</span>
+                        <span className="block font-mono">
+                          <span dir="ltr">{row.path}</span>
+                        </span>
                         {row.missingOnNodes.length > 0 && (
                           <span className="mt-0.5 block text-amber-500">
                             {t("web.admin.settings.playback.devices.missingOnNodes", {
@@ -413,17 +448,28 @@ export default function PlaybackSettings() {
                     <Switch
                       checked={selectedDevices.includes(row.path)}
                       aria-label={row.description}
-                      disabled={hwDeviceEnv != null}
-                      onCheckedChange={() =>
-                        form.setValue(
-                          "playback.hw_device",
-                          toggleHWDevice(
-                            form.getValue("playback.hw_device"),
-                            row.path,
-                            detectedPaths,
-                          ),
-                        )
-                      }
+                      disabled={deviceSwitchLocked(row.path)}
+                      onCheckedChange={() => {
+                        const next = toggleHWDevice(
+                          form.getValue("playback.hw_device"),
+                          row.path,
+                          deviceOrder,
+                        );
+                        // Back to the saved devices stages the saved string
+                        // itself, so the form can tell it undoes the edit
+                        // however that string is spaced, and keeps it staged
+                        // while a save settles. An unset value is never in
+                        // the snapshot, so outside a save that draft is
+                        // dropped directly.
+                        const saved = form.getPersistedValue("playback.hw_device");
+                        if (next !== savedDevices.join(",")) {
+                          form.setValue("playback.hw_device", next);
+                        } else if (saved === "" && !form.isSaving) {
+                          form.resetValue("playback.hw_device");
+                        } else {
+                          form.setValue("playback.hw_device", saved);
+                        }
+                      }}
                     />
                   </SettingFieldRow>
                 ))}

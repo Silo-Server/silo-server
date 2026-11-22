@@ -276,6 +276,35 @@ link and answers `404` until the image cache has stored it. Proxied bytes carry
 `Cache-Control: private, max-age=300`; the redirect is `no-store`, since its
 target is a signed URL with its own lifetime.
 
+### Admin request posters
+
+A media request's title is usually not in the library, so its poster has no
+catalog item to cache it. Admin request reads (`GET /api/v2/admin/requests`
+and the admin approve, decline, cancel and retry responses) return
+`poster_url` on each request with a TMDB poster: the path
+`/api/v2/admin/requests/{id}/poster` (`getAdminRequestPoster`).
+`GET /api/v2/admin/requests/capabilities` reports `request_posters: true` when
+the server returns it.
+
+This URL follows a different rule from the catalog and session posters above:
+
+- It needs the credentials that read the row: an admin session, an admin API
+  key, or a key with the `admin:monitor:read` scope. Do not send those
+  credentials to the catalog and session poster URLs, which can be the artwork
+  store's own signed URLs.
+- It never expires, so a tool can store it with the request.
+
+The route downloads the request's TMDB poster (`w500`) through the server and
+answers `200` with its bytes, with the limits above: the shared download slots
+and five-minute memory, the 4 MiB cap, the image check, and the
+`auth_endpoints.item_poster` budget per client address. Each request also
+counts against the caller's account budget, as any authenticated request does.
+A missing request, a request without a TMDB poster and a failed download answer
+`404`; busy downloads answer
+`503` with `Retry-After`. The route reads the stored request only, so it keeps
+answering while requests are turned off. Silo's own request pages still load
+TMDB images directly.
+
 ## Season selectors without artwork
 
 `GET /api/v2/catalog/series/{id}/seasons?include_artwork=false` (`listSeriesSeasons`)

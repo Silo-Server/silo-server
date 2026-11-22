@@ -28,6 +28,11 @@
    at a `dir="ltr"` box (Tailwind's own variant matches anything inside an rtl
    root, and uses `:dir()`, which older browsers drop). */
 @custom-variant rtl (&:where([dir="rtl"], [dir="rtl"] *):not(:where([dir="ltr"], [dir="ltr"] *)));
+/* `dark:` means the Silo theme on screen is dark. Tailwind's own variant asks
+   the operating system (`prefers-color-scheme`), which picks the light-surface
+   shades over Cinema Dark whenever the system is set to light. List every dark
+   theme here; a theme left out gets the base shades. */
+@custom-variant dark (&:where([data-theme="midnight-cinema"], [data-theme="midnight-cinema"] *));
 
 /* ================================================================
    § 1  THEME BRIDGE — Tailwind ↔ CSS Custom Properties
@@ -52,6 +57,11 @@
   /* ── Interactive ─────────────────────────────────────────── */
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-primary-hover: var(--primary-hover);
+  /* Text in the primary color. An admin accent sets --primary-text to a
+     variant that reads on Cinema Dark's surfaces (lib/accentColor.ts); fills,
+     borders, and rings keep the accent itself. */
+  --text-color-primary: var(--primary-text, var(--primary));
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -60,6 +70,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
+  --color-destructive-fill: var(--destructive-fill);
 
   /* ── Status ────────────────────────────────────────────────── */
   --color-success: var(--success);
@@ -68,6 +79,10 @@
   --color-warning-foreground: var(--warning-foreground);
   --color-info: var(--info);
   --color-info-foreground: var(--info-foreground);
+  --color-success-label: var(--success-label);
+  --color-warning-label: var(--warning-label);
+  --color-info-label: var(--info-label);
+  --color-destructive-label: var(--destructive-label);
 
   /* ── Borders & Focus ─────────────────────────────────────── */
   --color-border: var(--border);
@@ -169,6 +184,10 @@
 
   /* ── Font Family ───────────────────────────────────────────── */
   --font-family-display: var(--font-display, var(--font-body));
+  /* The interface font, as `font-ui`. Tailwind's own `font-sans` is the system
+     stack. A `font-mono` field whose placeholder is translated prose adds
+     `placeholder:font-ui`: monospace fonts draw Arabic letters unjoined. */
+  --font-ui: var(--font-body);
 
   /* ── Hero Backdrop Defaults ─────────────────────────────────── */
   --hero-backdrop-brightness: 0.9;
@@ -228,15 +247,6 @@
   to {
     opacity: 1;
     transform: scale(1);
-  }
-}
-@keyframes pulse-opacity {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
   }
 }
 @keyframes fade-out {
@@ -467,7 +477,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .sidebar-inner,
   .sidebar-fade,
   .sidebar-main-stage,
-  .impersonation-banner {
+  .impersonation-banner,
+  .follows-sidebar-collapse {
     transition: none;
   }
   .player-breathe {
@@ -549,10 +560,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      --surface-raised   Elevated surface (modals, floating panels)
      --card             Card background (usually = surface)
      --primary          Primary accent/action color
+     --primary-hover    Hovered solid primary fill under --primary-foreground
      --secondary        Secondary element backgrounds
      --muted            Muted backgrounds
      --accent           Active/highlighted element backgrounds
-     --destructive      Danger/error color
+     --destructive      Danger/error text, icons, borders
+     --destructive-fill Solid danger fill under --destructive-foreground
+     --<status>-label   Status text on its own 10% tint or a surface
      --border           Default border color
      --sidebar          Sidebar background (often darkest surface)
    ================================================================ */
@@ -569,10 +583,21 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --warning-foreground: oklch(0.98 0.01 85);
     --info: oklch(0.7 0.15 250);
     --info-foreground: oklch(0.98 0.01 250);
+
+    /* Small status-coloured labels on a 10% tint of their own colour, such
+       as the play-method tags, or on a plain surface. Red falls below 4.5:1
+       on the tint (3.8:1 on a hovered row), so its label mixes toward
+       --contrast-boost. High
+       contrast lightens the surfaces under every label, so it mixes each
+       one further (see the block below). */
+    --success-label: var(--success);
+    --warning-label: var(--warning);
+    --info-label: var(--info);
+    --destructive-label: color-mix(in srgb, var(--contrast-boost) 25%, var(--destructive));
   }
 
   /* ── Contrast-adjustable tokens ─────────────────────────────
-     These seven tokens are the ones high contrast mode lightens.
+     These eight tokens are the ones high contrast mode lightens.
      Themes define the literal under `--<token>-base`; the semantic
      token is an alias. The indirection is required, not stylistic:
      a custom property whose value references itself is a dependency
@@ -592,6 +617,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --surface-hover: var(--surface-hover-base);
     --surface-raised: var(--surface-raised-base);
     --accent: var(--accent-base);
+    --destructive: var(--destructive-base);
   }
 
   /* ── Midnight Cinema ────────────────────────────────────── */
@@ -619,6 +645,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     /* Primary: white — for play buttons, key CTAs, active indicators */
     --primary: #e8e8ec;
     --primary-foreground: #141417;
+    /* The solid primary fill on hover: the primary faded a tenth toward the
+       page. An admin accent sets its own (web/src/lib/accentColor.ts), which
+       lightens instead when this fade would take its label below 4.5:1. */
+    --primary-hover: color-mix(in srgb, var(--primary) 90%, var(--background));
 
     /* Secondary & Muted: subtle surface variations */
     --secondary: #232328;
@@ -631,9 +661,16 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --accent-base: #232328;
     --accent-foreground: #e8e8ec;
 
-    /* Destructive: warm red for danger actions */
-    --destructive: #ef4444;
+    /* Destructive: warm red for danger actions. No single red works for both
+       of its jobs on this background. --destructive (set here as
+       --destructive-base; high contrast lightens it) is red text, icons and
+       borders on the dark surfaces (4.89:1 on --background, 4.51:1 on --card),
+       but white on it is only 3.76:1. Solid fills under a label (the
+       destructive button and badge) use --destructive-fill, and their label is
+       --destructive-foreground: 4.83:1. */
+    --destructive-base: #ef4444;
     --destructive-foreground: #ffffff;
+    --destructive-fill: #dc2626;
 
     /* Borders: barely visible, just enough structure */
     --border-base: #28282e;
@@ -705,24 +742,61 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   /* Code, paths, JSON and log text read left to right inside any page. Inline
      code takes its direction from its own text and keeps the page's direction
      for its margins (a logical margin resolves against the element's own
-     direction). */
+     direction). Code with a dir keeps the browser's isolate, because
+     plaintext would ignore the dir: a path marked left to right lays out
+     left to right even when its first folder is Arabic. */
   pre {
     direction: ltr;
     unicode-bidi: isolate;
   }
-  :is(code, kbd, samp) {
+  :is(code, kbd, samp):not([dir]) {
     unicode-bidi: plaintext;
   }
   /* Titles, names, taglines and overviews from metadata take their direction
      from their own text, so "56 Days" doesn't read "Days 56" in Arabic and an
      English sentence keeps its full stop and its ellipsis at the end. They
-     still line up with the page. Chromium knows only the prefixed keyword. */
+     still line up with the page. Chromium knows only the prefixed keyword.
+     Text cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
+     stylesheet) also takes dir="auto": plaintext leaves the element's own
+     direction at the page's, and Firefox and WebKit cut the text and draw the
+     "…" at that direction's end, so an English title in Arabic would lose its
+     start or its "…". */
   .bidi-text {
     unicode-bidi: plaintext;
     text-align: -webkit-match-parent;
   }
   @supports (text-align: match-parent) {
     .bidi-text {
+      text-align: match-parent;
+    }
+  }
+  /* Chromium draws a clamp's "…" past the end of a line that is aligned to the
+     end of its own direction, where the clamp's overflow hides it: an English
+     overview cut in Arabic ended with no "…". While the clamp cuts such text,
+     it aligns to its own start instead, and text that fits still lines up with
+     the page. CSS can't tell when a clamp cuts, so the component measures it
+     and sets data-clamp-cut (`useClampCut`). :dir() limits the rule to text
+     that runs the other way from the element it sits in; text that runs that
+     element's way is already at its start. Firefox and WebKit draw the "…"
+     correctly with the page's alignment, so they keep it: scroll-state
+     support stands in for Chromium here, and an engine that gains it later
+     would still show the "…". */
+  @supports (container-type: scroll-state) {
+    :dir(ltr) > .bidi-text[data-clamp-cut]:dir(rtl),
+    :dir(rtl) > .bidi-text[data-clamp-cut]:dir(ltr) {
+      text-align: start;
+    }
+  }
+  /* Text with a direction of its own in a block, such as a path or a name, whose
+     lines line up the way the text around it does: at the right on a right-to-left
+     page. An inherited `start` would resolve against the block's own `dir` instead.
+     Not named `text-*`, which `cn()` would take for a text color and drop the real
+     one. */
+  .align-with-page {
+    text-align: -webkit-match-parent;
+  }
+  @supports (text-align: match-parent) {
+    .align-with-page {
       text-align: match-parent;
     }
   }
@@ -781,6 +855,20 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     --surface-hover: color-mix(in srgb, var(--contrast-boost) 16%, var(--surface-hover-base));
     --surface-raised: color-mix(in srgb, var(--contrast-boost) 20%, var(--surface-raised-base));
     --accent: color-mix(in srgb, var(--contrast-boost) 14%, var(--accent-base));
+    /* Red text, icons and borders can sit on any surface above, so red
+       mixes far enough to keep 4.5:1 on the lightest, --surface-raised
+       (4.77:1). A red tint on --surface-raised drops red text to about
+       4:1; no red text sits there. */
+    --destructive: color-mix(in srgb, var(--contrast-boost) 65%, var(--destructive-base));
+    /* Status labels: success, warning and info each mix just far enough to
+       keep 5:1 on a hovered row (--surface-hover), the lightest surface
+       under one, so each keeps as much of its colour as it can. Red's tint
+       comes from the lightened --destructive above, so its label is that
+       red, at 4.75:1 on the tint over a hovered row. */
+    --success-label: color-mix(in srgb, var(--contrast-boost) 40%, var(--success));
+    --warning-label: color-mix(in srgb, var(--contrast-boost) 35%, var(--warning));
+    --info-label: color-mix(in srgb, var(--contrast-boost) 50%, var(--info));
+    --destructive-label: var(--destructive);
     --ambient-glow-opacity: 0.04;
   }
   html[data-high-contrast="true"] .surface-panel-subtle,
@@ -793,8 +881,24 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       inset 0 1px 0 rgb(255 255 255 / 0.08),
       0 12px 36px -24px rgb(0 0 0 / 0.75);
   }
+  /* Muted text keeps the boosted colour in every state. Without !important a
+     hover or selected colour would replace it, and some of those read worse
+     here than at rest: a brand accent on hover can drop to under 3:1, as can
+     destructive red on a ghost button's hover background. So a muted control
+     has to show its state some other way, such as a background or the
+     underline below. */
   html[data-high-contrast="true"] .text-muted-foreground {
     color: var(--muted-foreground) !important;
+  }
+  /* `hover:text-primary` can't be seen here: the rule above holds muted text
+     at its colour, and foreground text sits within a shade of the default
+     --primary (a brand accent may differ). Underline it instead, behind the
+     pointer gate the `hover` variant uses at the top of this file. The line
+     takes the foreground colour: in the link's own colour, a dark accent
+     would hide it under a title that keeps its own colour. */
+  html[data-high-contrast="true"]:where([data-fine-pointer="true"]) .hover\:text-primary:hover {
+    text-decoration-line: underline;
+    text-decoration-color: var(--foreground);
   }
   html[data-high-contrast="true"] .border-border,
   html[data-high-contrast="true"] .border-border\/50,
@@ -802,6 +906,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   html[data-high-contrast="true"] .border-border\/70,
   html[data-high-contrast="true"] .border-border\/80 {
     border-color: var(--border) !important;
+  }
+  html[data-text-weight="strong"] .font-normal {
+    font-weight: var(--font-weight-ui, 520) !important;
   }
   html[data-text-weight="strong"] .font-medium {
     font-weight: var(--font-weight-medium-ui, 600) !important;
@@ -1209,11 +1316,16 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
   /* ── Glass Surfaces ──────────────────────────────────────── */
   /* Frosted glass effect for floating controls, overlay panels.
-     Usage: <div class="glass">...</div>                        */
+     Usage: <div class="glass">...</div>
+     Put -webkit-backdrop-filter before backdrop-filter. `vite build` runs
+     this file through Lightning CSS, which drops a backdrop-filter that is
+     followed by its -webkit- form, leaving Chrome and Firefox with no blur.
+     In this order it ships both. `pnpm run budget:check` fails on a built
+     rule with only the -webkit- form. */
   .glass {
     background: color-mix(in srgb, var(--surface) 70%, transparent);
-    backdrop-filter: blur(20px) saturate(1.2);
     -webkit-backdrop-filter: blur(20px) saturate(1.2);
+    backdrop-filter: blur(20px) saturate(1.2);
     border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.06),
@@ -1222,8 +1334,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
   .glass-subtle {
     background: color-mix(in srgb, var(--surface) 40%, transparent);
-    backdrop-filter: blur(12px) saturate(1.1);
     -webkit-backdrop-filter: blur(12px) saturate(1.1);
+    backdrop-filter: blur(12px) saturate(1.1);
     border: 1px solid color-mix(in srgb, var(--border) 30%, transparent);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
   }
@@ -1264,8 +1376,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      an opaque color blend instead of sampling and blurring the backdrop. */
   .detail-action-bar .glass-subtle {
     background: color-mix(in srgb, var(--surface) 82%, var(--background));
-    backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   /* The detail overflow menu opens without an entrance transition so it is
@@ -1284,8 +1396,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05);
   }
 
+  /* An empty star's outline is a control boundary, so it needs 3:1 against
+     the pill: 3.7:1 on Cinema Dark, 5.6:1 in high contrast. It stays dimmer
+     than a filled star, which also differs in colour and fill. The removal
+     preview below dims every star on purpose while the pointer is on it. */
   .star-rating-star {
-    color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
+    color: color-mix(in srgb, var(--muted-foreground) 65%, transparent);
   }
 
   /* The stored rating is the resting state, so it survives a pointer that is
@@ -1308,7 +1424,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   :where(:root[data-fine-pointer="true"])
     .star-rating:not([data-suppress-preview]):has(.star-rating-star:hover)
     .star-rating-star {
-    color: color-mix(in srgb, var(--muted-foreground) 50%, transparent);
+    color: color-mix(in srgb, var(--muted-foreground) 65%, transparent);
   }
 
   :where(:root[data-fine-pointer="true"])
@@ -1354,8 +1470,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      (manga count/status pills) so the label stays legible. */
   .glass-chip {
     background: color-mix(in srgb, var(--surface) 78%, transparent);
-    backdrop-filter: blur(12px) saturate(1.1);
     -webkit-backdrop-filter: blur(12px) saturate(1.1);
+    backdrop-filter: blur(12px) saturate(1.1);
     border: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
     box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06);
   }
@@ -1372,8 +1488,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
   .glass-dark {
     background: color-mix(in srgb, var(--background) 80%, transparent);
-    backdrop-filter: blur(24px) saturate(1.3);
     -webkit-backdrop-filter: blur(24px) saturate(1.3);
+    backdrop-filter: blur(24px) saturate(1.3);
     border: 1px solid color-mix(in srgb, var(--border) 40%, transparent);
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.04),
@@ -1411,8 +1527,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     background: rgb(255 255 255 / 0.06);
     color: rgb(255 255 255 / 0.92);
     border: 1px solid rgb(255 255 255 / 0.1);
-    backdrop-filter: blur(14px) saturate(1.1);
     -webkit-backdrop-filter: blur(14px) saturate(1.1);
+    backdrop-filter: blur(14px) saturate(1.1);
     box-shadow:
       0 10px 30px -14px rgb(0 0 0 / 0.6),
       inset 0 1px 0 rgb(255 255 255 / 0.08);
@@ -1632,6 +1748,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     overflow: hidden;
     border-radius: var(--radius-xl);
     background-color: var(--surface);
+    /* A thumbhash placeholder is set inline with background-size: cover; a
+       repeating one tiles its opposite edge into the translucent border. */
+    background-repeat: no-repeat;
     border: 1px solid color-mix(in srgb, var(--border) 65%, transparent);
     box-shadow:
       inset 0 1px 0 rgb(255 255 255 / 0.05),
@@ -1727,8 +1846,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     background-color: color-mix(in srgb, var(--foreground) 8%, transparent);
     color: color-mix(in srgb, var(--foreground) 72%, var(--muted-foreground));
     border: 1px solid color-mix(in srgb, var(--border) 55%, transparent);
-    backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
   }
 
   /* ── Pill Button ─────────────────────────────────────────── */
@@ -1752,8 +1871,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     box-shadow: 0 16px 36px -20px color-mix(in srgb, var(--primary) 60%, transparent);
   }
   .pill-primary:hover {
-    filter: brightness(0.96);
     transform: translateY(-1px);
+  }
+  /* Mouse only, like the `hover:` variant: a tap leaves :hover stuck on touch. */
+  :where(:root[data-fine-pointer="true"]) .pill-primary:hover {
+    background-color: var(--primary-hover);
   }
   .pill-secondary {
     background-color: var(--secondary);
@@ -1766,8 +1888,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     background: color-mix(in srgb, var(--foreground) 12%, transparent);
     color: var(--foreground);
     border: 1px solid color-mix(in srgb, var(--border) 50%, transparent);
-    backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
   }
   .pill-glass:hover {
     background: color-mix(in srgb, var(--foreground) 18%, transparent);
@@ -1862,7 +1984,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     /* Mobile: non-sticky so the tabs scroll with the hero instead of hovering
        over it — stacking a sticky tab bar under the sticky top nav eats too
        much vertical space on narrow viewports. At lg+ the mobile top nav is
-       hidden, so we promote this header to sticky at top:0 there. */
+       hidden, so we promote this header to sticky at the top there, below the
+       impersonation banner when one shows. */
     position: relative;
     z-index: 20;
     display: flex;
@@ -1874,8 +1997,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     padding: 0.9rem 1rem;
     border-bottom: 1px solid transparent;
     background: color-mix(in srgb, var(--background) 82%, transparent);
-    backdrop-filter: blur(18px) saturate(1.15);
     -webkit-backdrop-filter: blur(18px) saturate(1.15);
+    backdrop-filter: blur(18px) saturate(1.15);
     border-bottom-color: color-mix(in srgb, var(--border) 55%, transparent);
     transition:
       background var(--duration-normal) var(--ease-default),
@@ -1885,20 +2008,20 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   @media (min-width: 1024px) {
     .library-marquee-header {
       position: sticky;
-      top: 0;
+      top: var(--impersonation-banner-height);
       z-index: 30;
     }
   }
   .library-marquee-header.is-overlay {
     background: transparent;
-    backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    backdrop-filter: none;
     border-bottom-color: transparent;
   }
   .library-marquee-header.is-overlay[data-scrolled="true"] {
     background: color-mix(in srgb, var(--background) 72%, transparent);
-    backdrop-filter: blur(18px) saturate(1.15);
     -webkit-backdrop-filter: blur(18px) saturate(1.15);
+    backdrop-filter: blur(18px) saturate(1.15);
     border-bottom-color: color-mix(in srgb, var(--border) 50%, transparent);
   }
   @media (min-width: 640px) {
@@ -2040,8 +2163,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     border-radius: 9999px;
     background: color-mix(in srgb, #fff 8%, transparent);
     border: 1px solid color-mix(in srgb, #fff 10%, transparent);
-    backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
   }
   .library-marquee-header:not(.is-overlay) .marquee-tab-bar {
     background: color-mix(in srgb, var(--foreground) 6%, transparent);
@@ -2065,10 +2188,14 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .library-marquee-header.is-overlay .marquee-tab-trigger {
     color: color-mix(in srgb, #fff 68%, transparent);
   }
-  .marquee-tab-trigger:hover {
+  /* Mouse only, like the `hover:` variant: a tap leaves :hover stuck on touch,
+     and a stuck tab reads as selected once the selection moves on. */
+  :where(:root[data-fine-pointer="true"]) .marquee-tab-trigger:hover {
     color: var(--foreground);
   }
-  .library-marquee-header.is-overlay .marquee-tab-trigger:hover {
+  :where(:root[data-fine-pointer="true"])
+    .library-marquee-header.is-overlay
+    .marquee-tab-trigger:hover {
     color: #fff;
   }
   .marquee-tab-trigger[data-state="active"] {
@@ -2179,8 +2306,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   .search-paint-surface {
     background: var(--background);
     border-color: color-mix(in srgb, var(--border) 72%, transparent);
-    backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
 
   /* Panel chrome only once there is a sidebar to enclose. Below this the
@@ -2302,19 +2429,29 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 
   /* Admin dashboard widget grid: single column on small screens, two columns
      on tablets (where .admin-widget-wide keeps the full row), and a 12-column
-     grid from lg up where each widget spans var(--widget-span) columns and
-     var(--widget-rows) fixed-height rows.
+     layout on wide screens where each widget spans var(--widget-span) columns
+     and var(--widget-rows) fixed-height rows.
 
-     Rows are only fixed from lg up. Below that the grid is one or two
-     content-sized columns, so a widget is already as narrow as it gets and a
-     row span picked for the wide layout would clip it — the same reason column
-     spans stop applying there. */
+     Rows are only fixed in the 12-column layout. Below it the grid is one or
+     two content-sized columns, so a widget is already as narrow as it gets and
+     a row span picked for the wide layout would clip it — the same reason
+     column spans stop applying there.
+
+     The 12-column layout needs both Tailwind's lg (64rem) and 1024px. Rem in a
+     media query follows the browser's default font size. With a larger
+     default, lg is past 1024px, and widgets' own lg: layouts (the Health
+     Strip's six columns) only fit their row from there. With a smaller one,
+     lg comes before 1024px, where the fixed 240px sidebar and the widgets'
+     px-sized text leave too little room for 12 columns. DashboardGrid's
+     resize handle and Now Playing's FIXED_ROWS_QUERY use the same pair, so the
+     handle shows exactly where spans and rows apply. */
   .admin-widget-grid {
     display: grid;
     grid-template-columns: 1fr;
     gap: 0.875rem;
     /* Height of one widget row. Declared here rather than in the media query so
-       DashboardGrid can read it back for a drag; it only takes effect at lg. */
+       DashboardGrid can read it back for a drag; it only takes effect in the
+       12-column layout. */
     --admin-row-h: 6.25rem;
   }
 
@@ -2324,10 +2461,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     min-width: 0;
   }
 
-  /* Plot area of a dashboard chart drawn with `fill`. From lg up it takes the
-     height the widget's fixed rows leave it. Below lg the rows are
-     content-sized, so there is no height to take and the plot would measure
-     0px; it keeps the 10rem a fixed-height chart gets instead. */
+  /* Plot area of a dashboard chart drawn with `fill`. In the 12-column layout
+     it takes the height the widget's fixed rows leave it. Below it the rows
+     are content-sized, so there is no height to take and the plot would
+     measure 0px; it keeps the 10rem a fixed-height chart gets instead. */
   .admin-chart-fill {
     flex: 1 1 0%;
     min-height: 10rem;
@@ -2362,7 +2499,9 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     background: transparent;
   }
 
-  @media (min-width: 640px) and (max-width: 1023px) {
+  /* No upper bound: the 12-column rule below sets every property this one
+     does, with the same specificity, so it has to stay after this block. */
+  @media (min-width: 640px) {
     .admin-widget-grid {
       grid-template-columns: repeat(2, 1fr);
     }
@@ -2376,7 +2515,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
   }
 
-  @media (min-width: 1024px) {
+  @media (min-width: 64rem) and (min-width: 1024px) {
     .admin-widget-grid {
       grid-template-columns: repeat(12, 1fr);
       grid-auto-rows: var(--admin-row-h);
@@ -2392,7 +2531,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
   }
 
-  @media (max-width: 639px) {
+  /* The admin page header's phone layout uses Tailwind's `sm` breakpoint, so
+     the `sm:` and `max-sm:` classes pages put in their header actions switch
+     at the same width. Rem in a media query follows the browser's default
+     font size, not the in-app text scale, so a px width here would disagree
+     with those classes whenever the browser's font size isn't 16px. */
+  @variant max-sm {
     .admin-shell .page-header {
       align-items: stretch;
     }
@@ -2429,21 +2573,19 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   }
 
   /* ── Live Badge ──────────────────────────────────────────── */
+  /* Static on purpose: pulsing the opacity of text this small drops it below
+     AA contrast. The label color is light enough to keep 4.5:1 where high
+     contrast lightens the surface under the badge (the Profiles panel and
+     the selected sidebar row). */
   .live-badge {
     margin-inline-start: auto;
     padding: 2px 8px;
     border-radius: 6px;
-    font-size: 10px;
+    font-size: 0.625rem;
     font-weight: 700;
     background: rgba(255, 60, 60, 0.12);
-    color: #f87171;
+    color: #fca5a5;
     border: 1px solid rgba(255, 60, 60, 0.2);
-    animation: pulse-opacity 2s ease-in-out infinite;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .live-badge {
-      animation: none;
-    }
   }
 
   /* ── Progress Bar ────────────────────────────────────────── */
@@ -2513,10 +2655,22 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      already hidden the sidebar (#1816).                               */
   :root {
     --app-sidebar-offset: 0px;
-    /* How far fixed page chrome (the collection editor's save bar) rises to
-       clear whichever background playback bar shows. usePlaybackBarHeight
-       measures each bar, bottom inset included, on the root while it shows. */
+    /* How far fixed chrome at the foot of a page rises, and how much the admin
+       shell pads the end of its pages, to clear whichever background playback
+       bar shows. useRootHeightProperty measures each bar, bottom inset
+       included, on the root while it shows. The audiobook bar's height stays
+       while Now Listening covers it, until playback ends. */
     --playback-bar-clearance: max(var(--watch-bar-height, 0px), var(--audiobook-bar-height, 0px));
+    /* The impersonation banner pins to the top of the viewport above every
+       route, and ImpersonationBanner measures its height here while it shows.
+       Anything else pinned near the top of the viewport (the phone headers,
+       the library tabs, sticky side columns, fixed corner controls) adds this
+       to its offset so the banner never covers it. The 0px default keeps
+       `top: var(--impersonation-banner-height)` valid without a banner. */
+    --impersonation-banner-height: 0px;
+    /* In-page jumps (skip links, scrollIntoView) land below the banner; each
+       target's own scroll margin still clears the header under it. */
+    scroll-padding-top: var(--impersonation-banner-height);
   }
   @media (min-width: 64rem) {
     :root[data-app-shell] {
@@ -2546,8 +2700,8 @@ html[data-navigation-direction]::view-transition-new(main-content) {
       color-mix(in srgb, var(--background) 94%, transparent),
       color-mix(in srgb, var(--background) 88%, transparent)
     );
-    backdrop-filter: blur(20px) saturate(1.3);
     -webkit-backdrop-filter: blur(20px) saturate(1.3);
+    backdrop-filter: blur(20px) saturate(1.3);
     border-bottom: 1px solid color-mix(in srgb, var(--impersonation-accent) 16%, var(--border));
     box-shadow:
       inset 0 1px 0 color-mix(in srgb, var(--impersonation-accent) 22%, transparent),
@@ -2569,30 +2723,39 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      compensation must follow whichever query actually changes the margin it is
      compensating for. `html[data-text-scale]` does not move it; rem in a media
      query resolves against the browser's default font size, not the root
-     element's. */
+     element's.
+
+     `.follows-sidebar-collapse` gives the same hold to other chrome mounted
+     above the routes that is placed from `--app-sidebar-offset`, such as the
+     background watch bar. The hold is the distance the element itself moves
+     when the offset snaps: the sidebar's full 196px for chrome pinned to its
+     edge, as the banner is. Chrome centred between the sidebar and the far
+     edge moves half that, so it sets `--sidebar-follow-shift: 98px`. */
   /* While the banner holds its previous offset it is translated right, so its
      right edge sits briefly past the viewport. Layout already clips its own
      subtree this way; the banner is mounted above it, so the app root needs the
      same treatment or that overhang becomes a document-level horizontal scroll
      for the length of the transition. `clip` rather than `hidden` so this never
      becomes a scroll container and the banner's `position: sticky` keeps
-     resolving against the viewport. */
+     resolving against the viewport. A fixed element's overhang never scrolls,
+     so `.follows-sidebar-collapse` needs no such clip. */
   #root {
     overflow-x: clip;
   }
 
   @media (min-width: 64rem) {
-    .impersonation-banner {
+    .impersonation-banner,
+    .follows-sidebar-collapse {
       transition: transform var(--duration-sidebar-collapse) var(--ease-sidebar-collapse);
     }
     :root[data-sidebar-collapsed="true"]:not([data-sidebar-visual-collapsed="true"])
-      .impersonation-banner {
-      transform: translateX(calc(196px * var(--dir-sign)));
+      :is(.impersonation-banner, .follows-sidebar-collapse) {
+      transform: translateX(calc(var(--sidebar-follow-shift, 196px) * var(--dir-sign)));
       transition: none;
     }
     :root:not([data-sidebar-collapsed="true"])[data-sidebar-visual-collapsed="true"]
-      .impersonation-banner {
-      transform: translateX(calc(-196px * var(--dir-sign)));
+      :is(.impersonation-banner, .follows-sidebar-collapse) {
+      transform: translateX(calc(var(--sidebar-follow-shift, 196px) * -1 * var(--dir-sign)));
       transition: none;
     }
   }
@@ -2690,5 +2853,20 @@ html[data-navigation-direction]::view-transition-new(main-content) {
 @media (min-width: 64rem) {
   .settings-section {
     padding-block: 1.75rem;
+  }
+}
+
+/* Arabic letters join, and letter-spacing pulls them apart. CSS Text 3 says not
+   to space cursive scripts: Chromium and Firefox skip it, Safari doesn't. Clear
+   it wherever the language is Arabic, which in the Arabic interface is the whole
+   page (<html lang>). Names and titles keep the interface language, so a tracked
+   element that shows them sets `data-cursive` when they hold Arabic-script text
+   (hasArabicScript in lib/direction). !important in @layer base outranks every
+   other letter-spacing: later layers' !important (Tailwind's `tracking-*!`),
+   unlayered rules such as setup-wizard.css, and inline styles. */
+@layer base {
+  :lang(ar),
+  [data-cursive] {
+    letter-spacing: normal !important;
   }
 }

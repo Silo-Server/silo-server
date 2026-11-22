@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 import { fixturePlanV3 } from "../protocol-v3.fixtures";
 import type { PlanV3 } from "../protocol-v3";
 import type { EngineCapabilities } from "./capabilities";
-import { resolveOriginalPlaybackRoute, type NativeOriginalSupport } from "./routing";
+import {
+  pageOriginProtocol,
+  resolveOriginalPlaybackRoute,
+  type NativeOriginalSupport,
+} from "./routing";
 
 const native: NativeOriginalSupport = {
   containers: ["mp4", "mkv"],
@@ -143,5 +147,98 @@ describe("resolveOriginalPlaybackRoute", () => {
     if (route.kind !== "engine") throw new Error(`route is ${route.kind}, want engine`);
     expect(route.source.url).toBe(streamUrl);
     expect(route.source.parallelRangeUrl).toBe(want);
+  });
+});
+
+describe("pageOriginProtocol", () => {
+  const origin = "https://app.example.test";
+  const same = (nextHopProtocol: string, startTime: number) => ({
+    name: `${origin}/assets/app.js`,
+    nextHopProtocol,
+    startTime,
+    redirectStart: 0,
+  });
+  // A same-origin URL that redirected, as a stored poster does to its signed storage URL: the name
+  // is the requested URL and the protocol is the one of the host it ended on.
+  const redirected = (nextHopProtocol: string, startTime: number) => ({
+    name: `${origin}/api/v2/items/i/poster`,
+    nextHopProtocol,
+    startTime,
+    redirectStart: startTime,
+  });
+  const cross = (nextHopProtocol: string, startTime: number) => ({
+    name: "https://media.example.test/api/v2/stream/s",
+    nextHopProtocol,
+    startTime,
+    redirectStart: 0,
+  });
+
+  it.each([
+    // On a repeat load the navigation entry's protocol is empty.
+    {
+      name: "a repeat visit takes a same-origin resource",
+      navigation: "",
+      resources: [same("http/1.1", 10)],
+      want: "http/1.1",
+    },
+    {
+      name: "the newest same-origin resource wins",
+      navigation: "",
+      resources: [same("h2", 10), same("http/1.1", 20)],
+      want: "http/1.1",
+    },
+    {
+      name: "the newest wins regardless of list order",
+      navigation: "",
+      resources: [same("http/1.1", 20), same("h2", 10)],
+      want: "http/1.1",
+    },
+    {
+      name: "an empty protocol is skipped",
+      navigation: "",
+      resources: [same("http/1.1", 10), same("", 20)],
+      want: "http/1.1",
+    },
+    {
+      name: "a cross-origin resource is ignored",
+      navigation: "",
+      resources: [cross("http/1.1", 10)],
+      want: "",
+    },
+    {
+      name: "an unparsable name is skipped",
+      navigation: "",
+      resources: [
+        { name: "not a url", nextHopProtocol: "http/1.1", startTime: 10, redirectStart: 0 },
+      ],
+      want: "",
+    },
+    {
+      name: "no resource falls back to the navigation",
+      navigation: "http/1.1",
+      resources: [],
+      want: "http/1.1",
+    },
+    { name: "nothing usable gives empty", navigation: "", resources: [], want: "" },
+    {
+      name: "the navigation protocol wins over a same-origin resource",
+      navigation: "http/1.1",
+      resources: [same("h2", 10)],
+      want: "http/1.1",
+    },
+    {
+      name: "a redirected same-origin resource is skipped for a direct one",
+      navigation: "",
+      resources: [same("http/1.1", 10), redirected("h2", 20)],
+      want: "http/1.1",
+    },
+    {
+      name: "a redirected same-origin resource alone gives empty",
+      navigation: "",
+      resources: [redirected("h2", 20)],
+      want: "",
+    },
+  ])("$name", ({ navigation, resources, want }) => {
+    expect(pageOriginProtocol(navigation, resources, origin)).toBe(want);
   });
 });

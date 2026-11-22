@@ -777,6 +777,7 @@ export default function HistoryImportSettings() {
               <div className="space-y-2">
                 <Label>{t("web.settings.historyImport.jellyfinServerUrl")}</Label>
                 <Input
+                  dir="ltr"
                   value={jellyfinServerURL}
                   onChange={(e) => setJellyfinServerURL(e.target.value)}
                   placeholder={JELLYFIN_URL_EXAMPLE}

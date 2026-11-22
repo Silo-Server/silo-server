@@ -3,8 +3,8 @@ package plugins
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -27,6 +27,7 @@ func TestSupervisedStartIsNotRecordedAsLazyFailure(t *testing.T) {
 	manifest := testPluginManifest(t, "silo.vpn", "1.0.0")
 	manifest.Capabilities = append(manifest.Capabilities, &pluginv1.CapabilityDescriptor{
 		Type: capability.NetworkAccessProvider, Id: "vpn", DisplayName: "VPN",
+		NetworkAccessProvider: &pluginv1.NetworkAccessProviderDescriptor{Provider: "vpn"},
 	})
 	installation := &Installation{
 		ID: 7, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(),
@@ -35,8 +36,8 @@ func TestSupervisedStartIsNotRecordedAsLazyFailure(t *testing.T) {
 	host := &countingHerdHost{startErr: errors.New("boom")}
 	service := &Service{installations: newFakeServiceInstallationStore(installation), host: host}
 
-	if _, err := service.start(context.Background(), 7, true); err == nil {
-		t.Fatal("start succeeded, want the start error")
+	if _, err := service.Start(t.Context(), 7); !errors.Is(err, host.startErr) {
+		t.Fatalf("Start returned %v, want the host start error", err)
 	}
 	if got := service.RuntimeStateOf(installation); got.State != ResidentStopped || got.LastError != "" {
 		t.Fatalf("RuntimeStateOf after supervised start failure = %+v, want stopped", got)
@@ -72,22 +73,35 @@ func TestFailedLazyStartMasksCredentialsInLastError(t *testing.T) {
 }
 
 func TestFailedLazyStartIsRecordedAgainstTheTriedSnapshot(t *testing.T) {
-	service, _, installation := newLazyStartService(t)
-	tried := *installation
-	tried.InstallPath = filepath.Join(t.TempDir(), "missing", "plugin")
-	service.installationCache = map[int]*Installation{7: &tried}
-
-	updated := *installation
-	updated.Version = "0.0.37"
-	service.installations = newFakeServiceInstallationStore(&updated)
-
-	if _, err := service.ensureClient(context.Background(), 7); err == nil {
-		t.Fatal("ensureClient succeeded, want the manifest load error")
+	service, _, tried := newLazyStartService(t)
+	host := &ctxCaptureHost{
+		entered: make(chan struct{}), proceed: make(chan struct{}),
+		startErr: errors.New("plugin handshake failed"),
 	}
-	if got := service.RuntimeStateOf(&tried); got.State != ResidentFailed {
+	service.host = host
+	release := sync.OnceFunc(func() { close(host.proceed) })
+	defer release()
+	done := make(chan error, 1)
+	go func() {
+		_, err := service.ensureClient(t.Context(), 7)
+		done <- err
+	}()
+	waitForLifecycleTestSignal(t, host.entered)
+	if err := service.installations.Update(t.Context(), 7, UpdateInstallationInput{Version: new("0.0.37")}); err != nil {
+		t.Fatal(err)
+	}
+	release()
+	if err := <-done; !errors.Is(err, host.startErr) {
+		t.Fatalf("ensureClient returned %v, want the host start error", err)
+	}
+	updated, err := service.installations.GetByID(t.Context(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := service.RuntimeStateOf(tried); got.State != ResidentFailed {
 		t.Fatalf("RuntimeStateOf for the tried release = %+v, want failed", got)
 	}
-	if got := service.RuntimeStateOf(&updated); got.State != ResidentStopped || got.LastError != "" {
+	if got := service.RuntimeStateOf(updated); got.State != ResidentStopped || got.LastError != "" {
 		t.Fatalf("RuntimeStateOf for the updated release = %+v, want stopped", got)
 	}
 }
