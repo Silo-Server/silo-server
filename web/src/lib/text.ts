@@ -1,3 +1,5 @@
+import { appLanguage } from "@/lib/appLocale";
+
 // Built once at load. Without the guard, a browser that lacks Intl.Segmenter
 // (Firefox before 125) would fail to load any page that imports this module.
 const graphemes =
@@ -25,11 +27,20 @@ export function leadingGraphemes(text: string, count: number): string {
 }
 
 /**
+ * The first `count` characters of `text`, upper-cased by the interface
+ * language's rules: Turkish makes "i" into "İ", as CSS `uppercase` does under
+ * the page's `lang`. Call it while rendering: it reads the current language.
+ */
+export function leadingInitials(text: string, count: number): string {
+  return leadingGraphemes(text, count).toLocaleUpperCase(appLanguage());
+}
+
+/**
  * The initial for an avatar without an image: the name's first character,
  * upper-cased, or "" when it has none.
  */
 export function getInitial(name: string): string {
-  return leadingGraphemes(name.trim(), 1).toUpperCase();
+  return leadingInitials(name.trim(), 1);
 }
 
 export function getInitials(name: string): string {
@@ -40,5 +51,5 @@ export function getInitials(name: string): string {
   if (parts.length >= 2 && first && last) {
     return getInitial(first) + getInitial(last);
   }
-  return leadingGraphemes(name, 2).toUpperCase();
+  return leadingInitials(name, 2);
 }

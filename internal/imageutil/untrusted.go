@@ -1,3 +1,5 @@
+//go:build !silo_node
+
 package imageutil
 
 /*

@@ -112,7 +112,7 @@ export function LoginSessionsPanel({
               "focus:outline-none",
               adminUser
                 ? "text-lg font-semibold tracking-tight"
-                : "text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance break-words hyphens-auto sm:text-[2rem]",
+                : "text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance break-words sm:text-[2rem]",
             )}
           >
             {t("web.settings.sessions.title")}

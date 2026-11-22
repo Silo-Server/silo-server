@@ -51,6 +51,9 @@ function Dialog({ row }: { row: HomeRow }) {
 - **Plurals:** one `plural` spanning the message,
   `{count, plural, one {# page} other {# pages}}`; pass `count` as a number. A
   language without the message falls back to English with English plural rules.
+  Wording that refers to the items as one or several ("it" / "them") selects on
+  `{amount, select, exactlyOne {…} exactlyTwo {…} other {…}}` instead; pass
+  `amount: exactAmount(count)` (see docs/architecture/i18n.md).
 - **Placeholders:** pass dates, durations and sizes already formatted, as strings
   (`formatLocale()` / `appLanguage()` from `@/lib/appLocale`).
 - **Digits:** in Arabic, numbers print in the format locale's digits, as dates do
@@ -120,23 +123,30 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   reason; a `dir="ltr"` box keeps flex order and text there left to right. `pre` is
   always left to right; inline `code`, `kbd` and `samp` take their text's direction
   unless they carry a `dir`.
-- An input or read-only field that holds a URL or server path sets `dir="ltr"`
-  (`SettingField` takes a `dir` prop); otherwise trailing `/` or `…` moves to the
-  start. When the field can show a translated placeholder or message instead, set
-  it only while it shows the URL or path (`dir={value ? "ltr" : undefined}`).
-  `dir="auto"` leaves an empty field's example in the page's direction, and
-  `type="url"` rejects addresses without a scheme.
+- An input or read-only field that holds a URL, server path, or network address
+  (hostname, IP address, CIDR list) sets `dir="ltr"` (`SettingField` takes a `dir`
+  prop); otherwise trailing `/`, `.` or `…` moves to the start, and a comma-separated
+  list draws in reverse order. When the field can show a translated placeholder or
+  message instead, set it only while it shows the value
+  (`dir={value ? "ltr" : undefined}`).
+  `dir="auto"` doesn't do this: an empty field resolves to left to right, so a
+  translated placeholder lands on the wrong side. `type="url"` rejects addresses
+  without a scheme.
 - A path or URL shown as text (a `code` block, a list of folders) also sets `dir="ltr"`,
   and the block that holds it takes `align-with-page` (in `app.css`). The class gives the
   block its parent's `text-align`, with `start` and `end` resolved in the parent's
   direction, so under a start-aligned parent that runs in the page's direction every line,
   wrapped or not, sits on the page's start side. Without it, an inherited `start` resolves
   against the block's own direction and puts every line at its left edge. Chromium shows
-  that wherever it happens; Firefox and Safari give `li` `text-align: match-parent`, so
-  inside a right-to-left list item they right-align the lines anyway. Where the block
-  would stretch, also give it `w-fit`, without `max-w-full`: a folder name that can't
-  wrap, such as one long emoji sequence, then widens the block toward the page's end side,
-  as it would in English, instead of running past its start edge.
+  that wherever it happens; Firefox and Safari give `li` `text-align: match-parent`, so a
+  list item in a start-aligned right-to-left list, even `<li dir="ltr">`, and everything
+  inside it are right-aligned there anyway. A folder name that can't wrap, such as one
+  long emoji sequence, still runs past the block's right edge, the page's start side in a
+  right-to-left page: clip it sideways while it overflows, with `useOverflowsInline` and
+  `OVERFLOW_CLIP` (`src/hooks/useOverflowsInline.ts`), so it keeps its start and stays in
+  the block. `PathList` (`src/components/PathList.tsx`) and `CardPath` handle the
+  alignment and the clip. Don't give a list of paths `w-fit` instead: one such name would
+  make the list that wide, and its other paths would wrap at that width.
 - A name that can be in either script and is cut with `truncate` (a username, say) takes
   `dir="auto"`: it reads in the direction of its first strong character (a letter, or
   right-to-left punctuation such as `؟`), and left to right when it has none, as a name
@@ -164,16 +174,17 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   words must stay and the name is cut, make the line a
   `flex overflow-hidden whitespace-pre` box: the words become flex items that keep the
   page's direction and don't shrink, and `whitespace-pre` keeps the spaces at their
-  edges. That suits translated words only: user text there would keep its line
-  breaks. A rich-text tag that wraps the name (`<strong>{name}</strong>`) is the flex
+  edges. User text on the line (a note, a device name) is its own `dir="auto"`
+  `truncate` element too, whose `nowrap` folds any line breaks `pre` would keep. A
+  rich-text tag that wraps the name (`<strong>{name}</strong>`) is the flex
   item, so it needs `overflow-hidden` too, or the name can't shrink inside it. Where
   the row can squeeze the line narrower than its words (the impersonation banner),
   the words shrink too, but only once the name is down to a letter and "…"
   (`wordsYieldLast` in `ImpersonationBanner.tsx`); where the row has other text that
   doesn't shrink, cap it (`max-w-1/2 truncate`) so the line keeps room. When the text
-  after the name is cut first, which includes user text such as a note, keep the
-  line's `truncate` and make the name an
-  `inline-block max-w-full truncate align-bottom` span.
+  after the name is cut first (a suggestion's note, a requester's device), give the
+  name `max-w-full shrink-0`: the name is then cut only when it alone fills the line
+  (`SuggestionList.tsx`).
 - Titles, names, taglines and overviews from metadata use `.bidi-text` (`app.css`).
   Where such text is cut with an ellipsis (`truncate`, `line-clamp`, or a clamp in a
   stylesheet), it also takes `dir="auto"`. Without it, text that runs the other way

@@ -266,7 +266,9 @@ export default function PreparationTab() {
                     )}
                   >
                     <span className="text-muted-foreground me-1">{worker.label}</span>
-                    {worker.name}
+                    {/* Isolated, so a count after a left-to-right name doesn't join its
+                        run in a right-to-left language ("gpu-01" and "3" as "gpu-013"). */}
+                    <bdi>{worker.name}</bdi>
                     <span className="text-muted-foreground ms-1.5 tabular-nums">
                       {worker.count}
                     </span>
@@ -609,7 +611,7 @@ function PreparationRow({
           <span className="truncate">{formatPreparationOutput(prep)}</span>
         </div>
         <div className="text-muted-foreground flex items-center justify-between gap-2 text-[10px]">
-          <span className="truncate">{requesterSummary(t, prep)}</span>
+          <span className="flex overflow-hidden whitespace-pre">{requesterSummary(t, prep)}</span>
           <div className="flex shrink-0 items-center gap-1">
             {rowActions}
             {detailsButton}
@@ -725,10 +727,12 @@ function WorkerBadge({ prep }: { prep: AdminDownloadPreparation }) {
   return (
     <span className="border-primary/20 bg-primary/10 text-primary inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[9px] font-semibold">
       {/* Same label treatment as the playback route badges (PlaybackRouteBadges). */}
-      <span className="text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-(--font-weight-ui)">
+      <span className="text-foreground/75 [html[data-high-contrast=true]_&]:text-muted-foreground font-normal">
         {worker.label}
       </span>
-      <span className="truncate">{worker.name}</span>
+      <span dir="auto" className="truncate">
+        {worker.name}
+      </span>
     </span>
   );
 }
@@ -861,23 +865,29 @@ function requesterDevices(
   t: Translate,
   first: AdminDownloadPreparation["requesters"][number],
   others: number,
-): string {
-  const device = requesterDevice(first);
+): ReactNode {
+  // Its own element, so a device name reads in its own direction and is cut at its own end.
+  const device = (
+    <span dir="auto" className="truncate">
+      {requesterDevice(first)}
+    </span>
+  );
   return others > 0
     ? t(`${K}.requesters.deviceMore`, { count: others, count_text: others, device })
     : device;
 }
 
 /**
- * The phone row's requester line. The name reads in its own direction and is
- * cut only when it alone fills the line; the devices after it are cut first.
+ * The phone row's requester line, in a `flex whitespace-pre` box. The name and
+ * the device read in their own directions; the device is cut first, and the
+ * name only when it alone fills the line.
  */
 function requesterSummary(t: Translate, prep: AdminDownloadPreparation): ReactNode {
   const [first, ...rest] = prep.requesters;
   if (!first) return t(`${K}.requesters.none`);
   return (
     <>
-      <span dir="auto" className="inline-block max-w-full truncate align-bottom">
+      <span dir="auto" className="max-w-full shrink-0 truncate">
         {requesterName(first)}
       </span>
       {SEPARATOR}
@@ -911,7 +921,7 @@ function Requesters({ prep }: { prep: AdminDownloadPreparation }) {
           </span>
         )}
       </div>
-      <div className="text-muted-foreground truncate text-[10px]">
+      <div className="text-muted-foreground flex overflow-hidden text-[10px] whitespace-pre">
         {requesterDevices(t, first, rest.length)}
       </div>
     </div>

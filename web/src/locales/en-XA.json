@@ -16051,14 +16051,26 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Ĥîđé îţ~~~⟧"
+              "value": "Ĥîđé îţ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ĥîđé ţĥéɱ"
             }
           ]
         },
@@ -16066,13 +16078,15 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Ĥîđé ţĥéɱ~~~~⟧"
+              "value": "Ĥîđé ţĥéɱ"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -16245,14 +16259,26 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Šĥöŵ îţ~~~⟧"
+              "value": "Šĥöŵ îţ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Šĥöŵ ţĥéɱ"
             }
           ]
         },
@@ -16260,13 +16286,15 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Šĥöŵ ţĥéɱ~~~~⟧"
+              "value": "Šĥöŵ ţĥéɱ"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -17131,14 +17159,18 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Åļšö çĥöšé "
+              "value": "Åļšö çĥöšé "
             },
             {
               "type": 1,
@@ -17146,7 +17178,23 @@
             },
             {
               "type": 0,
-              "value": ", ŵĥîçĥ îš ñééđéđ ƀý ŵĥåţ ýöû çĥöšé.~~~~~~~~~~~~~~~~~~~⟧"
+              "value": ", ŵĥîçĥ îš ñééđéđ ƀý ŵĥåţ ýöû çĥöšé."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Åļšö çĥöšé "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", ŵĥîçĥ åŕé ñééđéđ ƀý ŵĥåţ ýöû çĥöšé."
             }
           ]
         },
@@ -17154,7 +17202,7 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Åļšö çĥöšé "
+              "value": "Åļšö çĥöšé "
             },
             {
               "type": 1,
@@ -17162,25 +17210,31 @@
             },
             {
               "type": 0,
-              "value": ", ŵĥîçĥ åŕé ñééđéđ ƀý ŵĥåţ ýöû çĥöšé.~~~~~~~~~~~~~~~~~~~~⟧"
+              "value": ", ŵĥîçĥ åŕé ñééđéđ ƀý ŵĥåţ ýöû çĥöšé."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦Åļšö ûñçĥöšé "
+              "value": "Åļšö ûñçĥöšé "
             },
             {
               "type": 1,
@@ -17188,7 +17242,23 @@
             },
             {
               "type": 0,
-              "value": ", ŵĥîçĥ ñééđš ŵĥåţ ýöû ûñçĥöšé.~~~~~~~~~~~~~~~~~~⟧"
+              "value": ", ŵĥîçĥ ñééđš ŵĥåţ ýöû ûñçĥöšé."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Åļšö ûñçĥöšé "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", ŵĥîçĥ ñééđ ŵĥåţ ýöû ûñçĥöšé."
             }
           ]
         },
@@ -17196,7 +17266,7 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦Åļšö ûñçĥöšé "
+              "value": "Åļšö ûñçĥöšé "
             },
             {
               "type": 1,
@@ -17204,13 +17274,15 @@
             },
             {
               "type": 0,
-              "value": ", ŵĥîçĥ ñééđ ŵĥåţ ýöû ûñçĥöšé.~~~~~~~~~~~~~~~~~~⟧"
+              "value": ", ŵĥîçĥ ñééđ ŵĥåţ ýöû ûñçĥöšé."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -22277,14 +22349,26 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦îţš đåţå çöûļđñ'ţ ƀé ŕéåđ~~~~~~~~~~⟧"
+              "value": "îţš đåţå çöûļđñ'ţ ƀé ŕéåđ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ţĥéîŕ đåţå çöûļđñ'ţ ƀé ŕéåđ"
             }
           ]
         },
@@ -22292,13 +22376,15 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦ţĥéîŕ đåţå çöûļđñ'ţ ƀé ŕéåđ~~~~~~~~~~~⟧"
+              "value": "ţĥéîŕ đåţå çöûļđñ'ţ ƀé ŕéåđ"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -22547,6 +22633,426 @@
     {
       "type": 0,
       "value": "⟦Ţĥéý'ŕé ŕéƒéŕéñçéđ îñ ţĥé đåţåƀåšé ƀûţ ŵéŕéñ'ţ ƒöûñđ îñ šţöŕåĝé; ŕéšţöŕéš ļéåṽé ţĥéɱ öûţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ƀŕåñđîñĝ åššéţ~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ƀŕåñđîñĝ åššéţš~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çöļļéçţîöñ ƀåçķđŕöþ~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çöļļéçţîöñ ƀåçķđŕöþš~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çöļļéçţîöñ þöšţéŕ~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " çöļļéçţîöñ þöšţéŕš~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " đöŵñļöåđéđ šûƀţîţļé~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " đöŵñļöåđéđ šûƀţîţļéš~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ļîƀŕåŕý þöšţéŕ~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ļîƀŕåŕý þöšţéŕš~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " öṽéŕļåý îɱåĝé~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " öṽéŕļåý îɱåĝéš~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " þéŕšöñåļ çöļļéçţîöñ þöšţéŕ~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " þéŕšöñåļ çöļļéçţîöñ þöšţéŕš~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " þŕöƒîļé åṽåţåŕ~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " þŕöƒîļé åṽåţåŕš~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ûþļöåđéđ åŕţŵöŕķ ƒîļé~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ûþļöåđéđ åŕţŵöŕķ ƒîļéš~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ûþļöåđéđ šûƀţîţļé~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ûþļöåđéđ šûƀţîţļéš~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -22857,14 +23363,18 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦îţš "
+              "value": "îţš "
             },
             {
               "type": 1,
@@ -22872,7 +23382,23 @@
             },
             {
               "type": 0,
-              "value": " çöûļđñ'ţ ƀé ŕéåđ~~~~~~~~~⟧"
+              "value": " çöûļđñ'ţ ƀé ŕéåđ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ţĥéîŕ "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " çöûļđñ'ţ ƀé ŕéåđ"
             }
           ]
         },
@@ -22880,7 +23406,7 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦ţĥéîŕ "
+              "value": "ţĥéîŕ "
             },
             {
               "type": 1,
@@ -22888,13 +23414,15 @@
             },
             {
               "type": 0,
-              "value": " çöûļđñ'ţ ƀé ŕéåđ~~~~~~~~~~⟧"
+              "value": " çöûļđñ'ţ ƀé ŕéåđ"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~⟧"
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -23075,14 +23603,26 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "⟦îţš đåţå îš ţöö ļåŕĝé ƒöŕ ţĥé ŕéšţöŕé šéţ~~~~~~~~~~~~~~~~~⟧"
+              "value": "îţš đåţå îš ţöö ļåŕĝé ƒöŕ ţĥé ŕéšţöŕé šéţ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ţĥéîŕ đåţå îš ţöö ļåŕĝé ƒöŕ ţĥé ŕéšţöŕé šéţ"
             }
           ]
         },
@@ -23090,13 +23630,15 @@
           "value": [
             {
               "type": 0,
-              "value": "⟦ţĥéîŕ đåţå îš ţöö ļåŕĝé ƒöŕ ţĥé ŕéšţöŕé šéţ~~~~~~~~~~~~~~~~~~⟧"
+              "value": "ţĥéîŕ đåţå îš ţöö ļåŕĝé ƒöŕ ţĥé ŕéšţöŕé šéţ"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -50074,6 +50616,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "⟦Šçåñš åñđ ɱéţåđåţå ŕéƒŕéšĥéš åþþéåŕ ĥéŕé ŵĥîļé ţĥéý ŕûñ.~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ñö åçţîṽé šçåñš öŕ ŕéƒŕéšĥéš~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "⟦Åļļ ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîđé ǫûéûé~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " öţĥéŕ ļîƀŕåŕý~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " öţĥéŕ ļîƀŕåŕîéš~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéţåđåţå Ŕéƒŕéšĥéš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéƒŕéšĥîñĝ ɱéţåđåţå~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîéŵ ǫûéûé~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "⟦Ĥîĝĥ~~⟧"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "⟦Ļöŵ~~⟧"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "⟦Ṁéđîûɱ~~~⟧"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -50544,6 +51194,30 @@
       "value": "⟦Çöñƒîŕɱ éɱþţý ŕööţ çļéåñûþ~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "⟦Îñšþéçţ~~~⟧"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö îţéɱš åŕé ŵåîţîñĝ îñ ţĥé ɱéţåđåţå ɱåţçĥéŕ ǫûéûé.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šķîþþéđ ŕööţš ŕéçöŕđéđ.~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šţåļé éẋţéŕñåļ ÎĐš ŕéçöŕđéđ.~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -50588,6 +51262,18 @@
     {
       "type": 0,
       "value": "~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "⟦Éđîţ~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ļîƀŕåŕîéš çöñƒîĝûŕéđ ýéţ.~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -50648,6 +51334,12 @@
       "value": "⟦Ĥîđé þåţĥš~~~~⟧"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "⟦Îđļé~~⟧"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -50686,6 +51378,12 @@
       "value": "⟦Þåŕţîåļ šçåñ~~~~~⟧"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļļ ɱîššîñĝ öŕ ŕéþļåçé åļļ ɱéţåđåţå~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -50698,6 +51396,12 @@
       "value": "⟦Ŕööţ ûñŕéåçĥåƀļé~~~~~~~⟧"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "⟦Šçåñ~~⟧"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -50708,6 +51412,12 @@
     {
       "type": 0,
       "value": "⟦Šĥöŵ þåţĥš~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "⟦Šţöþ~~⟧"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -50726,6 +51436,26 @@
     {
       "type": 0,
       "value": "⟦Ṽéŕîƒý Ṁöûñţš~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķ ţĥåţ åļļ ļîƀŕåŕý ƒöļđéŕš åŕé ŕéåçĥåƀļé~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîéŵ åçţîṽé šçåñš ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~⟧"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -50845,7 +51575,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "⟦Ṁåñåĝé ļîƀŕåŕý ŕööţš åñđ šçåñš. Çåţåļöĝ îɱþöŕţ/éẋþöŕţ ñöŵ ļîṽéš ûñđéŕ Ṁåîñţéñåñçé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ṁåñåĝé ɱéđîå ƒöļđéŕš, ɱöñîţöŕ šçåñš, åñđ ŕéšöļṽé ɱåţçĥîñĝ îššûéš.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.libraries.page.title": [
@@ -51368,6 +52098,64 @@
       "value": "⟦Šţåļé Éẋţéŕñåļ ÎĐš~~~~~~~~⟧"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åçţîṽé~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " åçţîṽé~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "⟦Šçåñ Åçţîṽîţý~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "⟦Çåţåļöĝ Ĥéåļţĥ~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "⟦Ļîƀŕåŕîéš~~~~⟧"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -51846,6 +52634,24 @@
     {
       "type": 0,
       "value": "⟦Šéåŕçĥ îĝñöŕéđ îţéɱš ƀý ţîţļé, ļîƀŕåŕý, öŕ ţýþé...~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "⟦Åɱƀîĝûöûš~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "⟦Þéñđîñĝ~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "⟦Ûñɱåţçĥéđ~~~~⟧"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -139109,6 +139915,20 @@
       "value": "⟦Ɓåçķ ţö þåĝé 1~~~~~~⟧"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "⟦Ĝö ţö þåĝé "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -139207,6 +140027,20 @@
     {
       "type": 0,
       "value": "⟦Ŕéǫûéšţ ţö åđđ þåĝéš~~~~~~~~⟧"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "⟦Þåĝé "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " îš þåšţ ţĥé éñđ öƒ ţĥéšé ŕéšûļţš.~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.requests.toAdd.series": [
@@ -140891,6 +141725,12 @@
     {
       "type": 0,
       "value": "⟦Ŕéåđ ţĥé þŕöƒîļé'š ñöţîƒîçåţîöñš åš ţĥéý åŕŕîṽé åñđ ɱåŕķ ţĥéɱ ŕéåđ.~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "⟦Šéé ŵĥåţ îš þļåýîñĝ ŕîĝĥţ ñöŵ öñ ţĥé þŕöƒîļé, öŕ öñ éṽéŕý þŕöƒîļé öƒ ţĥé åççöûñţ ŵĥéñ ţĥé ķéý ñåɱéš ñöñé: ţîţļé, þöšîţîöñ, þåûšéđ šţåţé, đéṽîçé åñđ þļåý ɱéţĥöđ. Ñö þļåýƀåçķ çöñţŕöļ öŕ ñéţŵöŕķ đéţåîļš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.settings.apiKeys.scope.requests": [

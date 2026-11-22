@@ -925,7 +925,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var calendarHandler *handlers.CalendarHandler
 	var catalogSearchService *catalog.CatalogSearchService
 	var webhookSyncHandler *handlers.WebhookSyncHandler
-	var requestHandler *handlers.RequestsHandler
+	var requestSvc *mediarequests.Service
 	// watchlistTitles is the one watchlist.Titles every surface shares: the
 	// v2 title operations, promotion on library watchlist reads, the title
 	// detail's repair observer and the profile purge.
@@ -1100,7 +1100,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		catalogHandler.SetBoxSetRepository(catalog.NewBoxSetRepository(deps.DB))
 
 		requestsRepo := mediarequests.NewRepository(deps.DB, deps.SecretCipher)
-		requestSvc := mediarequests.NewService(
+		requestSvc = mediarequests.NewService(
 			requestsRepo,
 			deps.TMDB,
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
@@ -1131,7 +1131,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if lifecycle := notifications.NewRequestLifecycleNotifier(deps.Notifications); lifecycle != nil {
 			requestSvc.SetLifecycleNotifier(lifecycle)
 		}
-		requestHandler = handlers.NewRequestsHandler(requestSvc)
 
 		// Onboarding tour manifest: gates consult live state at request time
 		// so admin toggles apply without a restart. The watch-together gate
@@ -3261,11 +3260,12 @@ func newChiRouter(deps Dependencies) chi.Router {
 				return plugins.ListProvisionStatus(ctx, deps.DB)
 			}
 		}
-		v2deps.AdminPluginCatalogSettings = plugins.NewRepositoryStore(deps.DB)
-		v2deps.AdminPluginRepositories = plugins.NewRepositoryStore(deps.DB)
-		v2deps.AdminPluginRepositoryCreation = plugins.NewRepositoryStore(deps.DB)
-		v2deps.AdminPluginRepositoryUpdates = plugins.NewRepositoryStore(deps.DB)
-		v2deps.AdminPluginRepositoryDeletes = plugins.NewRepositoryStore(deps.DB)
+		pluginRepoStore := plugins.NewRepositoryStore(deps.DB)
+		v2deps.AdminPluginCatalogSettings = pluginRepoStore
+		v2deps.AdminPluginRepositories = pluginRepoStore
+		v2deps.AdminPluginRepositoryCreation = pluginRepoStore
+		v2deps.AdminPluginRepositoryUpdates = pluginRepoStore
+		v2deps.AdminPluginRepositoryDeletes = pluginRepoStore
 	}
 	var externalSignInPlugins *handlers.PluginHandler
 	if deps.DB != nil && deps.PluginService != nil && deps.PluginUserConfig != nil {
@@ -3402,26 +3402,21 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminHistoryImports = historyImportHandler.Service()
 	}
 	v2deps.WatchProviders = deps.WatchProviderService
-	if requestHandler != nil {
-		v2deps.Requests = requestHandler.Service()
-		v2deps.RequestLifecycle = requestHandler.Service()
-		v2deps.AdminRequests = requestHandler.Service()
-		if watchlistRequests, ok := requestHandler.Service().(apiv2.WatchlistRequestService); ok && personalDataHandler != nil && watchlistTitles != nil {
+	if requestSvc != nil {
+		v2deps.Requests = requestSvc
+		v2deps.RequestLifecycle = requestSvc
+		v2deps.AdminRequests = requestSvc
+		v2deps.AdminRequestUsage = requestSvc
+		if personalDataHandler != nil && watchlistTitles != nil {
 			v2deps.WatchlistTitles = personalDataHandler
-			v2deps.WatchlistRequests = watchlistRequests
+			v2deps.WatchlistRequests = requestSvc
 			// Titles watch provider sync adds are requested like ones added
 			// by hand.
-			syncRequests, requestsOK := watchlistRequests.(syncRequestService)
 			if watchSync, ok := deps.WatchProviderService.(interface {
 				SetWatchlistTitles(watchsync.WatchlistTitles)
-			}); ok && requestsOK {
-				watchSync.SetWatchlistTitles(watchlistTitles.WatchSync(watchlistSyncRequests{requests: syncRequests}))
+			}); ok {
+				watchSync.SetWatchlistTitles(watchlistTitles.WatchSync(watchlistSyncRequests{requests: requestSvc}))
 			}
-		}
-		// *requests.Service implements the usage read (pinned at the top of
-		// this file), so the assertion only fails for a test double.
-		if usage, ok := requestHandler.Service().(apiv2.AdminRequestUsageService); ok {
-			v2deps.AdminRequestUsage = usage
 		}
 	}
 	if collectionHandler != nil {

@@ -15437,7 +15437,8 @@ export interface components {
         | "kept_stricter"
         | "unverified_backup"
         | "over_restore_budget"
-        | "needs_primary_profile";
+        | "needs_primary_profile"
+        | "managed_by_environment";
       /** @description Items (section:id) that must be chosen with this one: a collection whose library is restored by the same request */
       requires: string[];
       restart_required: boolean;
@@ -15659,7 +15660,8 @@ export interface components {
         | "kept_stricter"
         | "unverified_backup"
         | "over_restore_budget"
-        | "needs_primary_profile";
+        | "needs_primary_profile"
+        | "managed_by_environment";
       restart_keys: string[];
       restart_required: boolean;
       /** @enum {string} */
@@ -15771,7 +15773,7 @@ export interface components {
       /** @description The setting applies after a restart */
       restart_required: boolean;
       /**
-       * @description on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores
+       * @description on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores; managed_by_environment: this server's environment sets it, or sets another setting of the outside-service connection it belongs to (mail's SMTP settings, for example), so a restore never writes it and this server keeps its value
        * @enum {string}
        */
       status:
@@ -15780,7 +15782,8 @@ export interface components {
         | "needs_another_key"
         | "kept_stricter"
         | "cleared"
-        | "unverified_backup";
+        | "unverified_backup"
+        | "managed_by_environment";
     };
     AdminBackupRestoreSource: {
       /** @description The backup restored from; absent for an upload */

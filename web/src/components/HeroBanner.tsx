@@ -18,6 +18,7 @@ import { usePageActivity } from "@/hooks/usePageActivity";
 import { usePrefersReducedMotion } from "@/hooks/usePrefersReducedMotion";
 import { HeroOverviewText } from "./HeroOverviewText";
 import { LocalErrorBoundary } from "./LocalErrorBoundary";
+import { hasArabicScript } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 import type { SectionItem } from "@/api/types";
 import { buildItemHref, buildMediaPlayHref } from "@/lib/mediaNavigation";
@@ -366,6 +367,7 @@ export default function HeroBanner({
             <h1
               key={current.content_id}
               className="bidi-text font-display mb-4 max-w-4xl text-4xl font-extrabold tracking-[-0.04em] text-balance sm:text-5xl lg:text-6xl xl:text-7xl"
+              data-cursive={hasArabicScript(current.title) || undefined}
               style={{ textShadow: "var(--hero-text-shadow, none)" }}
             >
               {current.title}
