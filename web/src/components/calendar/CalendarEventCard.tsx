@@ -1,5 +1,6 @@
 import { useState } from "react";
 import DefaultArtwork from "@/components/DefaultArtwork";
+import { TitleLineParts } from "@/components/TitleLine";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import {
@@ -26,7 +27,7 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
       ? `/item/${event.content_id}`
       : `/item/${event.series_id ?? event.content_id}`;
 
-  const subtitle = formatUpcomingSubtitle(event);
+  const subtitle = formatUpcomingSubtitle(event, t);
   const airTime = formatUpcomingTime(event.air_time, event.air_at);
 
   return (
@@ -103,8 +104,8 @@ export default function CalendarEventCard({ event }: { event: CalendarEvent }) {
           {event.title}
         </div>
         {subtitle ? (
-          <div className="text-muted-foreground mt-1 truncate text-[0.6875rem] font-medium tracking-[0.14em] uppercase">
-            {subtitle}
+          <div className="text-muted-foreground mt-1 flex flex-wrap overflow-hidden text-[0.6875rem] font-medium tracking-[0.14em] uppercase">
+            <TitleLineParts>{subtitle}</TitleLineParts>
           </div>
         ) : null}
         {airTime ? (

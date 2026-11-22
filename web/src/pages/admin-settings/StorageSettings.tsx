@@ -478,7 +478,7 @@ function S3Group({
                   label={t("web.admin.settings.storage.s3.tokenParam")}
                   dirty={keptForEdit("s3.public_token_param")}
                   description={t("web.admin.settings.storage.s3.tokenParamDescription")}
-                  value={form.getValue("s3.public_token_param") || "verify"}
+                  value={form.getValue("s3.public_token_param")}
                   onChange={(v) => form.setValue("s3.public_token_param", v)}
                   restartRequired={restartKeys.has("s3.public_token_param")}
                   managedByEnv={form.envVar("s3.public_token_param")}
@@ -490,7 +490,7 @@ function S3Group({
                   dirty={keptForEdit("s3.public_token_ttl")}
                   type="number"
                   unit={t("web.admin.settings.storage.unitSeconds")}
-                  value={form.getValue("s3.public_token_ttl") || "10800"}
+                  value={form.getValue("s3.public_token_ttl")}
                   onChange={(v) => form.setValue("s3.public_token_ttl", v)}
                   restartRequired={restartKeys.has("s3.public_token_ttl")}
                   managedByEnv={form.envVar("s3.public_token_ttl")}

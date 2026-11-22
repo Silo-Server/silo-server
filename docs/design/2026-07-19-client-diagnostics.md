@@ -33,7 +33,7 @@ Everything ships **disabled by default**:
 
 ## Motivation
 
-Today we are blind to client-side failures:
+Before this design, client-side failures were invisible to us:
 
 - **No crash reporting anywhere.** Neither the Android repo nor the Apple
   repo installs an uncaught-exception handler, uses MetricKit, or bundles a
@@ -141,10 +141,10 @@ MetricKit natively (iOS; not tvOS — see Apple design).
 ```text
  Android / Apple client                          silo-server
 ┌────────────────────────────────┐   ┌──────────────────────────────────────┐
-│ Safe-logging facade → ring     │   │ GET  /api/v1/diagnostics/status      │
+│ Safe-logging facade → ring     │   │ GET /api/v2/diagnostics/capabilities │
 │  └ debug mode: rotating        │   │   └ available|disabled|              │
-│    segment files               │   │     storage_unavailable + limits     │
-│ Crash/abnormal-exit capture    │   │ POST /api/v1/diagnostics/reports     │
+│    segment files               │   │     not_configured + limits          │
+│ Crash/abnormal-exit capture    │   │ POST /api/v2/diagnostics/reports     │
 │  ├ UEH marker (Android)        │──▶│   ├ gate + storage check             │
 │  ├ ApplicationExitInfo (30+)   │   │   ├ streaming, bounded multipart     │
 │  ├ MetricKit (iOS)             │   │   ├ account quotas + concurrency     │
@@ -283,8 +283,8 @@ additive fields.
 
 ### Safe logging contract (redaction happens at collection time)
 
-Best-effort scrubbing at package time is not enough: today's client logs
-already emit full URLs with query strings, token suffixes, and raw exception
+Best-effort scrubbing at package time is not enough: the client logs of the
+time already emitted full URLs with query strings, token suffixes, and raw exception
 strings (e.g. the Apple `HTTPClient` response logging and player URL prints;
 Android exception messages containing backend URLs). Therefore:
 
@@ -381,43 +381,31 @@ refuses to enable it otherwise. `S3Private` is a nullable dependency in the
 router and is only populated when configured, so the feature must degrade
 predictably, not 500.
 
-### Status endpoint
+### Capability endpoint
 
-`GET /api/v1/diagnostics/status` — authenticated (`RequireAuth`), **no
-profile required**: crashes during login/profile selection must still be
-reportable, so capability discovery and upload are account-scoped with
-optional profile attribution.
-
-```json
-{
-  "status": "available",            // available | disabled | storage_unavailable
-  "server_instance_id": "srv_…",    // stable; binds consent + pending reports
-  "accepted_schema_versions": [1],
-  "max_bundle_bytes": 10485760,
-  "max_manifest_bytes": 65536,
-  "retention_days": 30,
-  "consent_notice_version": 1,
-  "accepted_crash_sources": ["ueh", "exit_info", "metrickit", "exit_sentinel", "watchdog"]
-}
-```
-
-`accepted_crash_sources` is absent on servers that predate it; those accept
-only `ueh`, `exit_info`, `metrickit` and `exit_sentinel`. Clients do not send
-a report whose `crash.source` the server has not listed.
-
-Clients cache this alongside existing server-driven config refresh.
+The shipped route is `GET /api/v2/diagnostics/capabilities`; the
+[diagnostics upload API](../diagnostics-upload-api.md) documents its fields,
+states and caching. It needs a signed-in account but **no profile**: crashes
+during login or profile selection must still be reportable, so capability
+discovery and upload are account-scoped with optional profile attribution.
+The document carries the server instance identity that binds consent and
+pending reports, the accepted schema versions, size limits, retention, the
+consent notice version and `accepted_crash_sources`. Clients do not send a
+report whose `crash.source` the server has not listed.
 
 ### Ingest endpoint
 
-`POST /api/v1/diagnostics/reports` — `RequireAuth`; access-token
-`Authorization` header only (no query credentials; `sa_` API keys rejected
-for diagnostics). Optional validated profile attribution. Hardened parsing —
-the avatar handler is the *precedent* (multipart + `PutObject`), but its
-buffer-everything approach (`ParseMultipartForm` + `io.ReadAll`) is not
-reused:
+The shipped routes are `POST /api/v2/diagnostics/reports` (one multipart
+request) and the chunked upload transport under
+`/api/v2/diagnostics/reports/uploads`; the
+[diagnostics upload API](../diagnostics-upload-api.md) is their contract,
+including authentication, profile attribution, limits and Problem Details
+errors. The hardened ingest pipeline below is the design behind them. The
+avatar handler was the *precedent* (multipart + `PutObject`), but its
+buffer-everything approach (`ParseMultipartForm` + `io.ReadAll`) is not reused:
 
-1. Guard: `diagnostics.uploads_enabled` + storage present, else stable error
-   codes (`disabled`, `storage_unavailable`).
+1. Guard: `diagnostics.uploads_enabled` + storage present, else a stable
+   disabled or not-configured error.
 2. `http.MaxBytesReader` with `max_bundle_bytes` + manifest overhead before
    any parsing; request deadline; per-account concurrency cap (1 in-flight)
    and a server-global concurrency ceiling, on top of the existing rate-limit
@@ -428,17 +416,16 @@ reused:
    lock (`pg_advisory_xact_lock(user_id)` — serializing concurrent uploads
    from multiple devices on one account), check the per-day count and
    per-user byte quota and insert the report row in state `receiving`
-   (server-generated UUID + `short_id`). Failures return `quota_exceeded`
-   (429, with `retry_after`) or `too_large` (413) — machine-readable so
+   (server-generated UUID + `short_id`). Quota failures (429 with
+   `Retry-After`) and oversize bundles (413) are machine-readable so
    clients back off and keep the report pending locally.
 5. Stream the `bundle` part directly to its final key
    (`diagnostics/{user_id}/{report_id}.tar.gz`) while hashing and counting
    bytes; enforce the compressed cap during streaming. Validate the
    gzip/tar structure and per-entry limits (entry count, name allowlist,
    uncompressed total ≤ `max_uncompressed_bytes`, compression ratio bound)
-   in the same bounded streaming pass. Reject on violation
-   (`invalid_bundle`, `unsupported_schema`). There is no staging/rename
-   step — S3-style stores have no cheap rename, and the row's `state` is
+   in the same bounded streaming pass, and reject the upload on any
+   violation. There is no staging/rename step — S3-style stores have no cheap rename, and the row's `state` is
    the source of truth: a blob is not a report until its row is `ready`.
 6. On success, update the row to `ready` with sizes + sha256. On any
    failure: delete the object, mark the row `failed` (compensation); the
@@ -457,7 +444,7 @@ New code: `internal/diagnostics/` (service + store interface), handler in
 avatar handler's is package-private and presign-only) and covers everything
 the design uses: a **streaming** put (`io.Reader` — the existing s3client
 `PutObject` takes `[]byte`, so this is a small s3client addition),
-`GetObject` (streamed admin download fallback), `DeleteObject`,
+`GetObject` (streamed admin download), `DeleteObject`,
 `ListObjects(prefix)` (reconciler), and `PresignGetURL`.
 
 ### Storage
@@ -494,17 +481,11 @@ stacks/traces live only in the archive; the row holds a truncated summary.
 
 ### Admin API
 
-Under the acting-admin subtree (same placement as the `admin_logs.go`
-routes):
-
-- `GET /api/v1/admin/diagnostics/reports` — list; filters: user, platform,
-  type, date range, `short_id` (exact, case-insensitive); paginated.
-- `GET /api/v1/admin/diagnostics/reports/{id}` — row incl. manifest.
-- `GET /api/v1/admin/diagnostics/reports/{id}/download` — presigned GET URL
-  (primary, matching avatar behavior) with a streamed `GetObject` proxy
-  fallback for deployments where presigned URLs aren't reachable — the
-  fallback is new behavior, not something the avatar path provides.
-- `DELETE /api/v1/admin/diagnostics/reports/{id}` — row + blob.
+The shipped acting-admin routes list, read, download and delete reports; the
+[admin diagnostics API](../admin-diagnostics-api.md) documents them. The list
+filters by user, platform, type, date range and `short_id` (exact,
+case-insensitive). Download streams the archive through the API host rather
+than returning a presigned storage URL. Delete removes the row and the blob.
 
 Admin download and delete emit audit/operational events. Web admin gets a
 list/detail/download page next to the logs viewer, with a
@@ -537,7 +518,7 @@ New package
 
 - `SiloLog.kt` — safe-logging facade per the contract above:
   `SiloLog.d(cat, tag, msg, attrs)` (+`i/w/e`, sanitized `Throwable`).
-  Always forwards to `android.util.Log` (today's behavior unchanged) and
+  Always forwards to `android.util.Log` (existing behavior unchanged) and
   offers the entry to the ring buffer.
 - `LogRing.kt` — always-on in-memory ring: fixed-size array of pre-rendered
   compact entries, **non-blocking** writes (atomic index; a torn final entry
@@ -636,9 +617,9 @@ state can differ from crash-time state.
 - `DiagnosticsUploader.kt` — builds the tar.gz (marker + ring/segment files
   overlapping the incident window + breadcrumbs + snapshot), streams it to
   the endpoint, deletes the pending report only on 201, records `short_id`.
-  On `quota_exceeded`/`too_large`/`disabled`/`storage_unavailable` it keeps
-  the pending report and backs off per `retry_after`; on
-  `unsupported_schema` it surfaces "server needs an update" rather than
+  On a quota, size, disabled or not-configured rejection it keeps
+  the pending report and backs off per `Retry-After`; on an
+  unsupported schema it surfaces "server needs an update" rather than
   silently retrying until expiry.
 
 ## Apple design (`silo-apple`)
@@ -689,7 +670,7 @@ daily, while the app runs), not "next launch".
   `TVSettingsView` (tvOS) with the same state-aware presentation, manual
   capture flow, and consent rules.
 - **Upload**: a small multipart body writer added to `HTTPClient` (verified:
-  JSON-only today, no multipart/uploadTask), same status/error handling as
+  JSON-only at the time, no multipart/uploadTask), same status/error handling as
   Android.
 - Housekeeping note: product bundle IDs are already `org.siloserver.silo`;
   only legacy keychain/logging identifiers (`com.continuum.*`) remain, so
@@ -712,7 +693,7 @@ daily, while the app runs), not "next launch".
   has server-side access to this information; that is the trust model this
   feature is scoped to — and why third-party destinations are out.
 - **Persistent identifiers**: the existing device IDs (already sent to the
-  server today) plus hashed audio-route UIDs; each is enumerated in the
+  server) plus hashed audio-route UIDs; each is enumerated in the
   schema docs with its purpose and retention.
 - **User control**: state-aware Diagnostics screen with pending list,
   review, delete, sent history; admin-side deletion; account deletion
@@ -762,7 +743,7 @@ releases never prompt for reports they can't send.
 5. Exact quota defaults (20/day, 200 MiB/user, 10 MiB/bundle) — tune before
    enabling anywhere real.
 6. Whether the status payload should also fold into an existing server-driven
-   config refresh response later (clients poll both today); the dedicated
+   config refresh response later (clients polled both when this was written); the dedicated
    endpoint ships first either way.
 
 ## Review notes
@@ -777,5 +758,5 @@ is optional in real deployments); streaming bounded ingest with a report
 state machine and orphan reconciliation; the archive container replacing a
 bare log gzip; collection-time typed redaction replacing scrub-at-package;
 fingerprint-based ExitInfo dedupe; non-blocking ring + bounded crash marker;
-recent-session trackers (only the active playback session ID exists today);
+recent-session trackers (only the active playback session ID existed then);
 and honest Apple snapshot capabilities (passthrough currently unknown).

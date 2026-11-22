@@ -1398,7 +1398,9 @@ export function WatchPlaybackBar() {
                 <Play className="ml-0.5 h-4 w-4 fill-current" />
               </div>
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-white">{title}</div>
+                <div dir="auto" className="bidi-text truncate text-sm font-semibold text-white">
+                  {title}
+                </div>
                 <div className="text-xs text-white/60">
                   {subtitle ??
                     (snapshot

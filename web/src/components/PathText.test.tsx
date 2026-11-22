@@ -16,4 +16,29 @@ describe("PathText", () => {
     expect(html.match(/<bdi>/g)?.length).toBeLessThanOrEqual(32);
     expect(html.replace(/<[^>]+>/g, "")).toBe(path);
   });
+
+  it("isolates a URL's query values but not a file name's", () => {
+    const bdis = (path: string) =>
+      [...renderToStaticMarkup(<PathText path={path} />).matchAll(/<bdi>(.*?)<\/bdi>/g)].map(
+        (match) => match[1],
+      );
+    // An Arabic query value must not run together with the `&limit=10` after it.
+    expect(bdis("https://example.com/seed.json.gz?prefix=/تجربة&limit=10#نسخة")).toEqual([
+      "https:",
+      "example.com",
+      "seed.json.gz",
+      "prefix",
+      "تجربة",
+      "limit",
+      "10",
+      "نسخة",
+    ]);
+    // "?" and "&" are folder-name characters in a file path.
+    expect(bdis("/media/What If...?/توم & جيري/كتب #1.mkv")).toEqual([
+      "media",
+      "What If...?",
+      "توم &amp; جيري",
+      "كتب #1.mkv",
+    ]);
+  });
 });

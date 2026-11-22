@@ -1773,6 +1773,7 @@ func fixtureCases() []fixtureCase {
 	cases = append(cases, deviceLoginBindingFixtureCases()...)
 	cases = append(cases, adminDashboardLayoutFixtureCases()...)
 	cases = append(cases, catalogItemCollectionsFixtureCases()...)
+	cases = append(cases, directConnectionsFixtureCases()...)
 	return append(cases,
 		fixtureCase{name: "get_admin_plugin_capabilities_ok", operationID: "getAdminPluginCapabilities",
 			scenario: "An administrator discovers deployment-managed plugin settings.",
@@ -2122,6 +2123,7 @@ func profileOwner() map[string]string { return with(bearer(memberToken), "X-Prof
 func fixtureDeps() Dependencies {
 	deps := pilotDeps(&fakeProgress{entries: progressRows()}, nil)
 	deps.NetworkAccess = newFakeNetworkAccess()
+	deps.DirectConnections = fakeDirectConnections{}
 	deps.ServerIdentity = fakeServerIdentity{id: fixtureServerID}
 	deps.AdminPluginProvisionStatus = func(context.Context) ([]plugins.ProvisionStatus, error) {
 		return []plugins.ProvisionStatus{{PluginID: "silo.auth.oidc", Version: "0.1.2", State: "pending"}}, nil

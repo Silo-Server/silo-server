@@ -1380,5 +1380,24 @@ describe("StorageSettings", () => {
       expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
       expect(publicGroup.getByLabelText("Token Secret")).toHaveValue("secret");
     });
+
+    it("lets go of a token secret that was typed and erased again", async () => {
+      render(<StorageSettings />);
+
+      const publicGroup = within(screen.getByRole("group", { name: "Public storage" }));
+      const linkMode = publicGroup.getByRole("combobox", {
+        name: "How asset links are authorized",
+      });
+      await userEvent.click(linkMode);
+      await userEvent.click(screen.getByRole("option", { name: "Cloudflare signed token" }));
+      await userEvent.click(publicGroup.getByRole("button", { name: /Advanced/ }));
+      await userEvent.type(publicGroup.getByLabelText("Token Secret"), "secret");
+      await userEvent.clear(publicGroup.getByLabelText("Token Secret"));
+      await userEvent.click(linkMode);
+      await userEvent.click(screen.getByRole("option", { name: "Signed links (recommended)" }));
+
+      expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
+      expect(publicGroup.queryByLabelText("Token Secret")).not.toBeInTheDocument();
+    });
   });
 });

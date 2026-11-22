@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2, Upload } from "lucide-react";
 
 import type { SubtitleLanguageDetection } from "@/api/types";
+import { readableErrorText } from "@/api/v2/request";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -126,7 +127,7 @@ export function SubtitleUploadForm({
           return;
         }
         setDetectionSource(null);
-        reportError(err instanceof Error ? err.message : t("web.subtitles.upload.detectFailed"));
+        reportError(readableErrorText(err, t("web.subtitles.upload.detectFailed")));
       } finally {
         if (requestId === detectRequestRef.current) {
           setDetectingLanguage(false);
@@ -226,7 +227,7 @@ export function SubtitleUploadForm({
       onSuccess();
     } catch (err) {
       if (requestId !== uploadRequestRef.current || isCanceledSubtitleRequest(err)) return;
-      reportError(err instanceof Error ? err.message : t("web.subtitles.upload.uploadFailed"));
+      reportError(readableErrorText(err, t("web.subtitles.upload.uploadFailed")));
     } finally {
       if (requestId === uploadRequestRef.current) setUploading(false);
     }

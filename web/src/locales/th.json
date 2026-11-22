@@ -281,6 +281,18 @@
       "value": "รหัสลงชื่อเข้าใช้นี้หมดอายุแล้ว โปรดเริ่มใหม่"
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "บัญชีนี้มีอุปกรณ์สำหรับการเชื่อมต่อโดยตรงครบจำนวนที่กำหนดแล้ว"
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "มีอุปกรณ์อื่นใช้คีย์การเชื่อมต่อนี้อยู่แล้ว โปรดลองอีกครั้ง"
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -339,6 +351,12 @@
     {
       "type": 0,
       "value": "ค่านี้กำหนดโดยสภาพแวดล้อม โปรดเปลี่ยนค่าในสภาพแวดล้อมนั้นแล้วรีสตาร์ทบริการที่เกี่ยวข้อง"
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "ไม่มีค่านี้"
     }
   ],
   "error.field.out_of_range": [
@@ -22246,6 +22264,12 @@
       "value": "ผู้ให้บริการแปลงเสียงพูดเป็นข้อความไม่พร้อมใช้งานชั่วคราว โปรดลองอีกครั้งในภายหลัง"
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความไม่มีเครดิตเหลือ หรือถึงขีดจำกัดการใช้งานหรือวงเงินการใช้จ่ายแล้ว ตรวจสอบยอดคงเหลือและขีดจำกัดกับผู้ให้บริการ หรือการตั้งค่าการใช้งาน ChatGPT"
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -22256,6 +22280,80 @@
     {
       "type": 0,
       "value": "เชื่อมต่อ AI ข้อความไม่ได้ ตรวจสอบโมเดล ระดับการให้เหตุผล ระดับบริการ การเชื่อมต่อบัญชี และขีดจำกัดการใช้งานของผู้ให้บริการ"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการปฏิเสธการเข้าถึง AI ข้อความ ตรวจสอบว่าคีย์ API หรือบัญชี ChatGPT ใช้โมเดลนี้ได้"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "ปลายทางหรือโมเดล AI ข้อความไม่พร้อมใช้งาน ตรวจสอบ URL หลักของผู้ให้บริการและโมเดล"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "บัญชี ChatGPT ที่เชื่อมต่อแชร์การใช้งานตามแพ็กเกจไม่ได้ ตรวจสอบการตั้งค่าการใช้งาน ChatGPT หรือเชื่อมต่อบัญชีอื่น"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความกำลังจำกัดอัตราคำขอ โปรดลองอีกครั้งในภายหลัง"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความปฏิเสธคำขอตรวจสอบ ตรวจสอบโมเดล ระดับการให้เหตุผล และการตั้งค่าการใช้งานของบัญชี ดูข้อผิดพลาดจากผู้ให้บริการได้ในล็อกของเซิร์ฟเวอร์"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความปฏิเสธคำขอตรวจสอบ (สถานะ "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ") ตรวจสอบโมเดล ระดับการให้เหตุผล และระดับบริการ ดูข้อผิดพลาดจากผู้ให้บริการได้ในล็อกของเซิร์ฟเวอร์"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "การตรวจสอบการเชื่อมต่อ AI ข้อความหมดเวลา ตรวจสอบความพร้อมใช้งานของผู้ให้บริการแล้วลองอีกครั้ง"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความปฏิเสธข้อมูลรับรอง เปลี่ยนคีย์ API ของผู้ให้บริการ หรือลงชื่อเข้าใช้ด้วย ChatGPT อีกครั้ง"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความไม่พร้อมใช้งานชั่วคราว โปรดลองอีกครั้งในภายหลัง"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo เข้าถึงผู้ให้บริการ AI ข้อความไม่ได้ ตรวจสอบ URL หลักของผู้ให้บริการ และตรวจสอบว่าเซิร์ฟเวอร์นี้เชื่อมต่อกับผู้ให้บริการได้"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "โมเดลข้อความส่งคืนการตอบกลับที่ Silo ใช้ไม่ได้ เลือกโมเดลอื่น"
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -22336,6 +22434,12 @@
     {
       "type": 0,
       "value": "ล้างขีดจำกัด"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "โดยตรง"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -58304,6 +58408,612 @@
       "value": "ซิงค์มาร์กเกอร์ออนไลน์"
     }
   ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "อัลกอริทึม: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "ที่ขอ "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": " ที่ใช้อยู่ "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "ค่าที่อนุญาต: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "การควบคุมความแออัด: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "บัญชี"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "ใช้เส้นทางนี้ตั้งแต่"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "ไม่มีอุปกรณ์ที่เชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "ปลายทางของเพียร์"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์ที่เชื่อมต่อ"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "ไปยังพอร์ต "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "ค่าเริ่มต้น: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบความพร้อมของเซิร์ฟเวอร์นี้สำหรับการเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "ค่าที่มีผล: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "เปิดใช้การเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "ความสามารถ NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "เอนจินการเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT hairpin"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "การแมป NAT"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "การใช้ PMTU สำรอง"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "การเข้าถึงได้"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "บัฟเฟอร์รับของซ็อกเก็ต"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "บัฟเฟอร์ส่งของซ็อกเก็ต"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "การปรับแต่งโฮสต์"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "การลดจำนวน ACK"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "นโยบายจัดการแพ็กเก็ตสูญหายของ BBR"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "การออฟโหลดการแบ่งเซกเมนต์ UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "หน้าต่างการรับของไคลเอ็นต์"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "พอร์ต UDP ของการเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "การควบคุมความแออัด TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "บัฟเฟอร์ส่ง TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบล่าสุด "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "พร็อกซี"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "ลิสเทนเนอร์"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "ที่อยู่สาธารณะที่ตรวจพบ: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบการรองรับ UPnP NAT-PMP หรือ PCP ของเราเตอร์"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "การแมปพอร์ต"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "การตรวจสอบความพร้อมจะไม่เริ่มการเล่นโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "ผู้ดูแลระบบปิดใช้งานแล้ว"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "ปิดใช้งาน"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "เริ่มเอนจินการเชื่อมต่อโดยตรงไม่ได้"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "เพิ่มขนาดบัฟเฟอร์ไม่ได้"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "เราเตอร์ไม่รองรับการแมปพอร์ต"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "บัฟเฟอร์เล็กกว่าที่ขอ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "ตัวช่วยปรับแต่งเครือข่ายไม่พร้อมใช้งาน"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "ค่าไม่ถูกต้อง จึงใช้ “ปิด”"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "ระบบใช้หรืออ่านการตั้งค่านี้ไม่ได้"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "เคอร์เนลนี้ไม่รองรับ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "บัฟเฟอร์ถึงขีดจำกัดของโฮสต์แล้ว"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "อ่านขีดจำกัดบัฟเฟอร์ของโฮสต์ไม่ได้"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "ที่อยู่สาธารณะเปลี่ยนไปตามปลายทาง"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR ไม่พร้อมใช้งาน"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR ไม่ได้โหลดหรือไม่ได้รับอนุญาต"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "มีเซิร์ฟเวอร์ API ทำงานอยู่มากกว่าหนึ่งเครื่อง"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "สละความสามารถ NET_ADMIN แล้ว"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "ไม่มีความสามารถ NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "ไม่พบเราเตอร์"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "ไม่มีความสามารถ NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "ไม่ได้รับอนุญาต"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "ไม่พร้อมใช้งาน"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "ยังไม่ได้วัด"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "ไม่ต้องเพิ่มขนาด"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "นโยบายของโฮสต์เลือกอัลกอริทึมอื่น"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "การตรวจสอบล้มเหลว"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบเซิร์ฟเวอร์ API อื่นไม่ได้"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "เซิร์ฟเวอร์ API อื่นเป็นโฮสต์การเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "กำลังรอเป็นโฮสต์การเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "สถานะการเชื่อมต่อโดยตรงไม่พร้อมใช้งาน"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "เปิดพอร์ต UDP ไม่ได้"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "พอร์ต UDP ไม่ถูกต้อง"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "แพลตฟอร์มนี้ไม่รองรับ"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "ค่าที่ขอ: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "ขนาดที่ขอ: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": " ขนาดที่ได้รับ: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "เรียกใช้การตรวจสอบ"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "บัฟเฟอร์ส่ง: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "จำกัดอยู่"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "ประสิทธิภาพลดลง"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "ใช้วิธีสำรอง"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "ไม่จำเป็น"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "ปิด"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "เปิด"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "ไม่ทราบ"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "รายการ host:port สูงสุดแปดรายการที่คั่นด้วยจุลภาค เว้นว่างไว้เพื่อใช้ค่าเริ่มต้น"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "เซิร์ฟเวอร์ STUN"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "การเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "ให้อุปกรณ์เข้าถึงเซิร์ฟเวอร์นี้ผ่านเส้นทาง UDP โดยตรง พอร์ต UDP มาจาก "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " และอ่านได้อย่างเดียวที่นี่"
+    }
+  ],
   "web.admin.settings.network.host.apiServer": [
     {
       "type": 0,
@@ -93891,6 +94601,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

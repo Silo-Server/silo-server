@@ -114,7 +114,4 @@ including after `401`. After an uncertain result, inspect status before
 deciding whether to trigger again. The status query continues to poll every
 five seconds. The web asks for confirmation before a reset and disables it
 while the embeddings, taste profile or recommendation job runs on the
-responding process.
-
-These existing administration flows have no Apple or Android callers and no
-Jellyfin compatibility equivalent. Viewer recommendation endpoints are separate.
+responding process. Viewer recommendation endpoints are separate.

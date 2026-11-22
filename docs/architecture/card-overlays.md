@@ -14,7 +14,7 @@ renderer follows, and the uploaded images badges can use.
 - The server-wide default is the `defaults.card_overlays` server setting, returned as `defaults`
   by the overlay-config endpoint. It has the same shape.
 - `ui.card_overlays_enabled` turns badges on or off. It does not affect the watch-status corner.
-- The web client is the only editor today. A client that parses the document must keep ids,
+- The web client is the only editor. A client that parses the document must keep ids,
   fields and values it does not render, or a later save from it erases another client's choices.
 
 ## The document

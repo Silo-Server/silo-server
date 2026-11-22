@@ -48,6 +48,7 @@ import {
   getSessionClientLabelFull,
   getSessionRouteNodes,
   getVideoConversion,
+  isEpisodeSession,
   normalizeContainerDecision,
   normalizeStreamDecision,
   sessionRoutesVary,
@@ -82,7 +83,7 @@ import {
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
 import { formatLocale, joinList } from "@/lib/appLocale";
-import { codeNumber, englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
+import { englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 
 type SortField = "username" | "media" | "method" | "bitrate" | "node" | "started";
@@ -915,8 +916,8 @@ function StreamRow({
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               <TitleLink session={session} />
-              {session.series_title ? (
-                // An episode's own title doesn't say which show it is.
+              {isEpisodeSession(session) ? (
+                // The episode code and title, under the show's title.
                 <div className="text-muted-foreground truncate text-[0.75rem]">
                   {getPlaybackSessionSubtitle(session)}
                 </div>
@@ -1891,14 +1892,8 @@ function getDisplayTitle(
   session: AdminSession,
   t: (id: MessageKey, values?: TextValues) => string,
 ): string {
-  if (session.series_title && session.season_number != null && session.episode_number != null) {
-    return (
-      session.media_title ||
-      t("web.detail.episodeCode", {
-        season: codeNumber(session.season_number),
-        episode: codeNumber(session.episode_number),
-      })
-    );
+  if (isEpisodeSession(session)) {
+    return session.series_title;
   }
   return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
 }

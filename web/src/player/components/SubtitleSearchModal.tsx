@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { PlayerConfig } from "../context/PlayerConfigContext";
 import { playerV2 } from "../player-v2";
 import type { SubtitleLanguageDetection, SubtitleResult } from "@/api/types";
+import { readableErrorText } from "@/api/v2/request";
 import { SubtitleUploadForm } from "@/components/subtitles/SubtitleUploadForm";
 import { languageOptions } from "../utils/languageNames";
 import { canonicalLanguageWireValue } from "@/lib/languageNames";
@@ -105,7 +106,7 @@ export function SubtitleSearchModal({
       setResults(response.results ?? []);
       setWarnings(response.warnings ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("web.subtitles.search.searchFailed"));
+      setError(readableErrorText(err, t("web.subtitles.search.searchFailed")));
     } finally {
       setSearching(false);
     }
@@ -203,8 +204,7 @@ export function SubtitleSearchModal({
         onSubtitleDownloaded(response?.subtitle, "download");
         onClose();
       } catch (err) {
-        if (current())
-          setError(err instanceof Error ? err.message : t("web.subtitles.search.downloadFailed"));
+        if (current()) setError(readableErrorText(err, t("web.subtitles.search.downloadFailed")));
       } finally {
         if (current()) setDownloading(null);
       }
