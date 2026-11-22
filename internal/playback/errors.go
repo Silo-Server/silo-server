@@ -77,4 +77,9 @@ var (
 	// current generation's same-numbered bytes would silently mix generations;
 	// the caller rejects the read and the client reloads the manifest.
 	ErrStaleSegmentGeneration = errors.New("segment generation is stale")
+	// ErrSegmentRecoverySuperseded reports that a segment wait or restart was
+	// issued for a target a newer seek has replaced. The viewer moved on, so
+	// the old target must not restart FFmpeg; the request answers the
+	// stale-generation verdict and the client follows the newest playlist.
+	ErrSegmentRecoverySuperseded = errors.New("segment recovery request superseded")
 )

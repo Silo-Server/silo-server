@@ -3761,7 +3761,17 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 			// budget instead of composing two full timeouts.
 			recoveryStarted := time.Now()
 			now := time.Now()
-			decision := transcodeSession.SegmentRecoveryDecision(segNum, now)
+			// The request's arrival number orders overlapping waits and the
+			// restarts after them: a wait that outlives a newer seek must not
+			// move the generation to its older target.
+			recoverySeq := transcodeSession.BeginSegmentRecovery()
+			decision := transcodeSession.SegmentRecoveryDecisionForRequest(segNum, recoverySeq, now)
+			if decision.BeyondWaitReach {
+				// The request names a position the produced window cannot
+				// reach: it is the viewer's newest seek target, and every
+				// older wait or restart becomes superseded.
+				transcodeSession.MarkSegmentSeek(recoverySeq)
+			}
 			segmentStalled := false
 			lastProducedAgeMS := int64(-1)
 			if !decision.Progress.LastProducedAt.IsZero() {
@@ -3794,10 +3804,16 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 					"session", sessionID,
 					"playback_session_id", sessionID,
 				)
+				stall := time.Duration(0)
 				if decision.Reason == "near_produced_head" {
-					segmentLease, err = transcodeSession.WaitForOpenSegmentWithStallGeneration(segmentName, requestedGeneration, decision.WaitTimeout, playback.SegmentStallTimeoutFor(transcodeSession.Opts()))
-				} else {
-					segmentLease, err = transcodeSession.WaitForOpenSegmentGenerationContext(r.Context(), segmentName, requestedGeneration, decision.WaitTimeout)
+					stall = playback.SegmentStallTimeoutFor(transcodeSession.Opts())
+				}
+				segmentLease, err = transcodeSession.WaitForOpenSegmentRecoveryContext(r.Context(), segmentName, requestedGeneration, recoverySeq, decision.WaitTimeout, stall)
+				if errors.Is(err, playback.ErrSegmentRecoverySuperseded) {
+					// A newer seek replaced this target: the viewer is no longer
+					// waiting for these bytes. Answer the fence so this request
+					// refetches the playlist the newest seek produces.
+					err = playback.ErrStaleSegmentGeneration
 				}
 				if errors.Is(err, playback.ErrSegmentStalled) {
 					stalledHead := transcodeSession.SegmentProgress(time.Now()).ProducedHead
@@ -3827,10 +3843,22 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 			// active encode range), either restart at the exact manifest-derived
 			// timeline position or return 404 for copy-mode segments outside the
 			// current manifest window.
+			//
+			// A newer seek that arrived while this request waited owns the
+			// generation. Restarting here would move FFmpeg to the older target
+			// and leave the viewer's target unproduced, so the request answers
+			// the fence and follows the newest playlist instead.
+			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout &&
+				transcodeSession.SegmentRecoverySuperseded(recoverySeq) {
+				err = playback.ErrStaleSegmentGeneration
+			}
 			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
 				if (decision.Reason == playback.SegmentRecoveryFarSeekReason || segmentStalled) && !transcodeSession.IsCopyVideo() {
-					h.tm.RestartSegmentAsync(sessionID, transcodeSession, segNum)
-					segmentLease, err = transcodeSession.WaitForRestartContinuationWithin(segmentName, playback.RestartContinuationRemaining(recoveryStarted))
+					h.tm.RestartSegmentAsyncForRequest(sessionID, transcodeSession, segNum, recoverySeq)
+					segmentLease, err = transcodeSession.WaitForRestartContinuationForRecovery(segmentName, playback.RestartContinuationRemaining(recoveryStarted), recoverySeq)
+					if errors.Is(err, playback.ErrSegmentRecoverySuperseded) {
+						err = playback.ErrStaleSegmentGeneration
+					}
 					if err == nil && requestedGeneration != "" {
 						if _, token, ok := transcodeSession.RestartContinuationSegment(requestedGeneration, segmentName); ok {
 							continuationSuccessorToken = token
@@ -3846,12 +3874,18 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 						continuationServe = true
 					}
 				} else {
-					_, ok, restartErr := h.tm.RestartSegmentLocked(
+					_, ok, restartErr := h.tm.RestartSegmentLockedForRecovery(
 						r.Context(),
 						sessionID,
 						transcodeSession,
 						segNum,
+						recoverySeq,
 					)
+					if errors.Is(restartErr, playback.ErrSegmentRecoverySuperseded) {
+						// A newer seek owns the generation; this target is stale.
+						err = playback.ErrStaleSegmentGeneration
+						restartErr = nil
+					}
 					// A restart skipped because the request ended is not a failure.
 					if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
 						slog.ErrorContext(r.Context(), "restart transcode at missing segment", "component", "api", "error", restartErr, "segment", segmentName, "session", sessionID, "playback_session_id", sessionID)
@@ -3863,7 +3897,7 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 					// client retries while the session keeps producing manifest.
 					// Mirrors the transcode-node guard in
 					// internal/transcodenode/server.go.
-					if !ok && restartErr == nil && transcodeSession.IsCopyVideo() {
+					if err == nil && !ok && restartErr == nil && transcodeSession.IsCopyVideo() {
 						err = playback.ErrSegmentNotFound
 					}
 
@@ -3881,8 +3915,13 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 							"playback_session_id", sessionID,
 						)
 						// Throttler + exit monitor re-arm via the session's
-						// restart hook.
-						segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 30*time.Second)
+						// restart hook. A newer seek ends the hold instead of
+						// making this request wait for a position the viewer
+						// left.
+						segmentLease, err = transcodeSession.WaitForOpenSegmentRecoveryContext(r.Context(), segmentName, "", recoverySeq, 30*time.Second, 0)
+						if errors.Is(err, playback.ErrSegmentRecoverySuperseded) {
+							err = playback.ErrStaleSegmentGeneration
+						}
 						if err == nil && strings.EqualFold(transcodeSession.Opts().TargetCodecVideo, "copy") {
 							// Copy-mode seeks can resume as soon as the target segment
 							// exists, but that sometimes leaves the player one segment

@@ -4608,6 +4608,93 @@ describe("VideoPlayer source timeline", () => {
       expect(controls.current?.playing).toBe(true);
     });
 
+    // hls.js re-creates the MediaSource asynchronously: the resume request can
+    // run while the element is still unpaused, and the load algorithm pauses it
+    // in a later task. A resume that only acted when the element was already
+    // paused did nothing on that path, so a seek sequence's third re-create
+    // was left stopped. Every re-create in the sequence must end playing.
+    it("starts every reload of a seek sequence, including one that pauses after the request", async () => {
+      hlsJS.supported = true;
+      vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+      const onReanchorSeek = vi.fn(() => true);
+      const { container, rerenderPlayer } = renderPlayer({
+        plan: anchoredPlan,
+        onReanchorSeek,
+        transportRevision: 1,
+      });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+      fireEvent.play(video);
+
+      let paused = false;
+      Object.defineProperty(video, "paused", {
+        configurable: true,
+        get: () => paused,
+      });
+      // A real element reports `play` once the paused state clears.
+      vi.mocked(HTMLMediaElement.prototype.play).mockImplementation(async () => {
+        paused = false;
+        fireEvent.play(video);
+      });
+      const instance = hlsJS.latest!;
+      Object.defineProperty(instance, "url", {
+        configurable: true,
+        value: "/api/v1/stream/session-1?token=token",
+      });
+      Object.defineProperty(instance, "config", {
+        configurable: true,
+        value: { startPosition: 0 },
+      });
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 0, start: () => 0, end: () => 0 },
+      });
+      // Each loadSource re-creates the MediaSource in a later task: it reports
+      // `emptied` and pauses the element only then, never with `pause`.
+      const pauseAfterReload: Array<() => void> = [];
+      const loadSource = vi.fn(() => {
+        pauseAfterReload.push(() => {
+          paused = true;
+          fireEvent.emptied(video);
+        });
+      });
+      Object.defineProperty(instance, "loadSource", { configurable: true, value: loadSource });
+
+      vi.mocked(HTMLMediaElement.prototype.play).mockClear();
+
+      const fence = (fragment: number) =>
+        act(() =>
+          instance.emit("error", {
+            fatal: true,
+            type: "networkError",
+            details: "fragLoadError",
+            response: { code: 412 },
+            frag: { sn: fragment, url: `/playback/transcode/session-1/seg_00${fragment}.ts` },
+          }),
+        );
+      const finishReload = () => {
+        const pause = pauseAfterReload.shift();
+        if (!pause) throw new Error("expected a MediaSource re-create");
+        act(pause);
+      };
+
+      for (let reload = 1; reload <= 3; reload++) {
+        // Each reload belongs to the seek the viewer is still waiting for.
+        act(() => controls.current!.onSeek(690 + reload * 10));
+        fence(160 + reload);
+        rerenderPlayer({ plan: anchoredPlan, planRevision: reload + 1, transportRevision: 1 });
+        await waitFor(() => expect(loadSource).toHaveBeenCalledTimes(reload));
+        // The resume ran before the pause; the emptied task is what starts it.
+        finishReload();
+        await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalledTimes(reload));
+      }
+      expect(controls.current?.playing).toBe(true);
+    });
+
     // The element is the single source of truth for the controls. A MediaSource
     // re-attach clears `paused` and reports `emptied`, never `pause`, so the
     // state has to follow the element rather than the last `play` event.

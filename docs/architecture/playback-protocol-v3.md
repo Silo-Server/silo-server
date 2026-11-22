@@ -1242,6 +1242,20 @@ Segmented HLS does not carry the same offset. Its player starts at the target
 segment rather than at the transport's first frame, because the segment layer
 waits for, or restarts FFmpeg at, that segment.
 
+**A segment restart belongs to the newest seek.** A seek can put several segment
+requests in flight at once: the new target ahead of the produced head, plus
+older waits that have not expired. Each recovery request is numbered when it
+arrives, not when its wait ends, and the newest position the produced window
+cannot reach becomes the viewer's target. A wait or restart issued before it is
+superseded: the wait ends at the fence and never restarts FFmpeg at the older
+position. A request that arrives while an in-place restart is running is
+coalesced onto that restart when it lies beyond the reach of the restart's own
+production (a seek); otherwise it waits for the segment as before. The worker
+re-reads the coalesced target after each restart, so the final position is the
+last one the viewer asked for. A request farther past the produced head than the
+throttle's forward window is a seek rather than sequential prefetch, because a
+healthy encoder is allowed to run ahead of the client by at least that window.
+
 Re-encoding the leading GOP to remove the pre-roll was considered and rejected:
 it changes the delivery and play method — a CPU-cost and route decision, not a
 seek fix. Starting at the next keyframe instead would skip past the requested

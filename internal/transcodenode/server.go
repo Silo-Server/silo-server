@@ -596,19 +596,32 @@ func (s *Server) restartSegmentLocked(
 	session *playback.TranscodeSession,
 	segNum int,
 ) (playback.SegmentRecoveryTarget, bool, error) {
-	return s.restartSegmentLockedWithTarget(ctx, sessionID, session, func() int { return segNum })
+	return s.restartSegmentLockedForRecovery(ctx, sessionID, session, segNum, 0)
 }
 
-// restartSegmentLockedWithTarget is restartSegmentLocked with the segment read
-// inside the lifecycle critical section. The coalescing worker uses it so two
-// queued far-seeks collapse onto the target that is current when the lock is
-// actually held, instead of the one that was current when the goroutine
-// started.
+// restartSegmentLockedForRecovery is restartSegmentLocked for a request
+// numbered by BeginSegmentRecovery. A newer seek makes it refuse instead of
+// moving FFmpeg to the position the viewer left.
+func (s *Server) restartSegmentLockedForRecovery(
+	ctx context.Context,
+	sessionID string,
+	session *playback.TranscodeSession,
+	segNum int,
+	seq uint64,
+) (playback.SegmentRecoveryTarget, bool, error) {
+	return s.restartSegmentLockedWithTarget(ctx, sessionID, session, func() (int, uint64) { return segNum, seq })
+}
+
+// restartSegmentLockedWithTarget is restartSegmentLocked with the segment and
+// its recovery sequence read inside the lifecycle critical section. The
+// coalescing worker uses it so two queued far-seeks collapse onto the target
+// that is current when the lock is actually held, and a target a newer seek
+// replaced during that wait is refused instead of applied.
 func (s *Server) restartSegmentLockedWithTarget(
 	ctx context.Context,
 	sessionID string,
 	session *playback.TranscodeSession,
-	segNum func() int,
+	nextTarget func() (segNum int, seq uint64),
 ) (playback.SegmentRecoveryTarget, bool, error) {
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
@@ -618,7 +631,8 @@ func (s *Server) restartSegmentLockedWithTarget(
 	if !ok || live != session {
 		return playback.SegmentRecoveryTarget{}, false, playback.ErrSessionSuperseded
 	}
-	return session.RestartSegment(ctx, segNum())
+	segNum, seq := nextTarget()
+	return session.RestartSegmentForRecovery(ctx, segNum, seq)
 }
 
 // pendingNodeAsyncRestart coalesces the detached far-seek restarts for one
@@ -627,9 +641,12 @@ func (s *Server) restartSegmentLockedWithTarget(
 // re-reads the target after each restart and converges on the latest request.
 type pendingNodeAsyncRestart struct {
 	session *playback.TranscodeSession
-	// mu guards segNum, the latest requested segment.
+	// mu guards segNum and seq: the latest requested segment and the arrival
+	// number of the request that named it. An older request that reaches the
+	// coalescer later must not overwrite a newer target.
 	mu     sync.Mutex
 	segNum int
+	seq    uint64
 }
 
 // restartSegmentAsync runs restartSegmentLocked on its own goroutine so a
@@ -649,20 +666,37 @@ func (s *Server) restartSegmentAsync(sessionID string, session *playback.Transco
 	if session == nil {
 		return
 	}
+	s.restartSegmentAsyncForRequest(sessionID, session, segNum, session.BeginSegmentRecovery())
+}
+
+// restartSegmentAsyncForRequest is restartSegmentAsync for a request numbered
+// by BeginSegmentRecovery: the coalesced target is ordered by when the viewer
+// asked, not by when a wait expired.
+func (s *Server) restartSegmentAsyncForRequest(sessionID string, session *playback.TranscodeSession, segNum int, seq uint64) {
+	if session == nil {
+		return
+	}
+	if seq == 0 {
+		seq = session.BeginSegmentRecovery()
+	}
 	s.asyncRestartMu.Lock()
 	if s.asyncRestarts == nil {
 		s.asyncRestarts = make(map[string]*pendingNodeAsyncRestart)
 	}
 	if pending := s.asyncRestarts[sessionID]; pending != nil && pending.session == session {
 		// A restart for this session is already running: record the newest
-		// target and let the worker converge on it.
+		// target and let the worker converge on it. An older request leaves a
+		// newer target in place.
 		pending.mu.Lock()
-		pending.segNum = segNum
+		if seq >= pending.seq {
+			pending.segNum = segNum
+			pending.seq = seq
+		}
 		pending.mu.Unlock()
 		s.asyncRestartMu.Unlock()
 		return
 	}
-	pending := &pendingNodeAsyncRestart{session: session, segNum: segNum}
+	pending := &pendingNodeAsyncRestart{session: session, segNum: segNum, seq: seq}
 	s.asyncRestarts[sessionID] = pending
 	s.asyncRestartMu.Unlock()
 
@@ -685,11 +719,11 @@ func (s *Server) runRestartSegmentAsync(sessionID string, pending *pendingNodeAs
 	}()
 	for {
 		applied := 0
-		nextTarget := func() int {
+		nextTarget := func() (int, uint64) {
 			pending.mu.Lock()
 			defer pending.mu.Unlock()
 			applied = pending.segNum
-			return applied
+			return applied, pending.seq
 		}
 
 		ctx, cancel := context.WithTimeout(context.Background(), restartSegmentAsyncTimeout)
@@ -697,10 +731,12 @@ func (s *Server) runRestartSegmentAsync(sessionID string, pending *pendingNodeAs
 		cancel()
 		s.recordRestartSegmentOutcome(sessionID, pending.session, applied, target, ok, err)
 
-		// A terminal failure cannot be fixed by a different target on the same
-		// dead generation, so stop rather than loop; the latched verdict is what
-		// the next request answers.
-		if err != nil {
+		// A superseded target is not a failure: a newer seek owns the session,
+		// and the finish check either loops onto the target that request
+		// recorded or lets it start its own worker. Every other error is
+		// terminal for this generation, so stop rather than loop; the latched
+		// verdict is what the next request answers.
+		if err != nil && !errors.Is(err, playback.ErrSegmentRecoverySuperseded) {
 			return
 		}
 		if s.finishNodeAsyncRestart(sessionID, pending, applied) {
@@ -744,6 +780,11 @@ func (s *Server) recordRestartSegmentOutcome(
 		// Routine teardown: the session was stopped or replaced while the
 		// seek restart waited, so nothing was re-spawned.
 		slog.Debug("restart transcode node at missing segment skipped, session superseded (async)",
+			"component", "transcodenode", "segment", segNum, "session", sessionID)
+	case errors.Is(err, playback.ErrSegmentRecoverySuperseded):
+		// A newer seek replaced this target while the worker waited; nothing
+		// was re-spawned for the older position.
+		slog.Debug("restart transcode node at missing segment skipped, request superseded (async)",
 			"component", "transcodenode", "segment", segNum, "session", sessionID)
 	case err != nil && !errors.Is(err, playback.ErrManifestNotReady):
 		slog.Warn("restart transcode node at missing segment (async)", "component", "transcodenode", "error", err, "segment", segNum, "session", sessionID)
@@ -3279,7 +3320,13 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 			// wait and the restart continuation share one bounded budget.
 			recoveryStarted := time.Now()
 			now := time.Now()
-			decision := session.SegmentRecoveryDecision(segNum, now)
+			// Arrival order, not wait expiry, decides which overlapping request
+			// owns the generation's next restart.
+			recoverySeq := session.BeginSegmentRecovery()
+			decision := session.SegmentRecoveryDecisionForRequest(segNum, recoverySeq, now)
+			if decision.BeyondWaitReach {
+				session.MarkSegmentSeek(recoverySeq)
+			}
 			segmentStalled := false
 			lastProducedAgeMS := int64(-1)
 			if !decision.Progress.LastProducedAt.IsZero() {
@@ -3310,7 +3357,12 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 					"session", sessionID,
 					"playback_session_id", sessionID,
 				)
-				segmentLease, err = session.WaitForOpenSegmentContext(r.Context(), name, decision.WaitTimeout)
+				segmentLease, err = session.WaitForOpenSegmentRecoveryContext(r.Context(), name, "", recoverySeq, decision.WaitTimeout, 0)
+				if errors.Is(err, playback.ErrSegmentRecoverySuperseded) {
+					// A newer seek replaced this target; answer the fence so
+					// this request follows the newest playlist.
+					err = playback.ErrStaleSegmentGeneration
+				}
 				if errors.Is(err, playback.ErrSegmentNotFound) {
 					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "transcodenode",
 						"segment", name,
@@ -3328,13 +3380,25 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 
+			// A newer seek that arrived while this request waited owns the
+			// generation: restarting here would apply the older target and
+			// leave the viewer's position unproduced.
+			if errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout &&
+				session.SegmentRecoverySuperseded(recoverySeq) {
+				err = playback.ErrStaleSegmentGeneration
+			}
 			if errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
-				_, ok, restartErr := s.restartSegmentLocked(
+				_, ok, restartErr := s.restartSegmentLockedForRecovery(
 					r.Context(),
 					sessionID,
 					session,
 					segNum,
+					recoverySeq,
 				)
+				if errors.Is(restartErr, playback.ErrSegmentRecoverySuperseded) {
+					err = playback.ErrStaleSegmentGeneration
+					restartErr = nil
+				}
 				// A restart skipped because the request ended is not a failure.
 				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
 					slog.ErrorContext(r.Context(), "restart transcode node at missing segment", "component", "transcodenode", "error", restartErr, "segment", name, "session", sessionID, "playback_session_id", sessionID)
@@ -3360,10 +3424,14 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 					// stale-generation verdict while a single-node server
 					// serves it. The wait spends only the request's remaining
 					// hold budget and still surfaces a failed restart's verdict.
-					segmentLease, err = session.WaitForRestartContinuationWithin(
+					segmentLease, err = session.WaitForRestartContinuationForRecovery(
 						name,
 						playback.RestartContinuationRemaining(recoveryStarted),
+						recoverySeq,
 					)
+					if errors.Is(err, playback.ErrSegmentRecoverySuperseded) {
+						err = playback.ErrStaleSegmentGeneration
+					}
 					if err == nil {
 						if requestedGeneration != "" {
 							if _, successorToken, ok := session.RestartContinuationSegment(requestedGeneration, name); ok {
@@ -3380,20 +3448,28 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 					if err == nil {
 						continuationServe = true
 					}
-				} else {
-					_, _, restartErr := s.restartSegmentLocked(
+				} else if errors.Is(err, playback.ErrSegmentNotFound) {
+					_, _, restartErr := s.restartSegmentLockedForRecovery(
 						r.Context(),
 						sessionID,
 						session,
 						segNum,
+						recoverySeq,
 					)
-					if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) {
-						slog.ErrorContext(r.Context(), "restart transcode node at missing segment", "component", "transcodenode", "error", restartErr, "segment", name, "session", sessionID, "playback_session_id", sessionID)
+					if errors.Is(restartErr, playback.ErrSegmentRecoverySuperseded) {
+						// A newer seek owns the generation; do not wait here.
+						err = playback.ErrStaleSegmentGeneration
+					} else {
+						if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) {
+							slog.ErrorContext(r.Context(), "restart transcode node at missing segment", "component", "transcodenode", "error", restartErr, "segment", name, "session", sessionID, "playback_session_id", sessionID)
+						}
+						segmentLease, err = session.WaitForOpenSegmentRecoveryContext(r.Context(), name, "", recoverySeq, 30*time.Second, 0)
+						if errors.Is(err, playback.ErrSegmentRecoverySuperseded) {
+							err = playback.ErrStaleSegmentGeneration
+						}
 					}
-
-					segmentLease, err = session.WaitForOpenSegmentContext(r.Context(), name, 30*time.Second)
 				}
-				if !ok && restartErr == nil && session.IsCopyVideo() {
+				if err == nil && !ok && restartErr == nil && session.IsCopyVideo() {
 					err = playback.ErrSegmentNotFound
 				}
 			}

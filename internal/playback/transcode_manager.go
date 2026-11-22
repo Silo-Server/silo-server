@@ -488,24 +488,41 @@ func (m *TranscodeManager) RestartSegmentLocked(
 	ts *TranscodeSession,
 	segNum int,
 ) (SegmentRecoveryTarget, bool, error) {
-	return m.restartSegmentLockedWithTarget(ctx, sessionID, ts, func() int { return segNum })
+	return m.RestartSegmentLockedForRecovery(ctx, sessionID, ts, segNum, 0)
 }
 
-// restartSegmentLockedWithTarget is RestartSegmentLocked with the segment read
-// inside the lifecycle critical section. The coalescing worker uses it so two
-// queued far-seeks collapse onto the target that is current when the lock is
-// actually held, instead of the one that was current when the goroutine started.
+// RestartSegmentLockedForRecovery is RestartSegmentLocked for a request
+// numbered by BeginSegmentRecovery. The sequence travels into the lifecycle
+// critical section, where a newer seek makes the restart refuse instead of
+// moving FFmpeg to the position the viewer left (see
+// TranscodeSession.RestartSegmentForRecovery).
+func (m *TranscodeManager) RestartSegmentLockedForRecovery(
+	ctx context.Context,
+	sessionID string,
+	ts *TranscodeSession,
+	segNum int,
+	seq uint64,
+) (SegmentRecoveryTarget, bool, error) {
+	return m.restartSegmentLockedWithTarget(ctx, sessionID, ts, func() (int, uint64) { return segNum, seq })
+}
+
+// restartSegmentLockedWithTarget is RestartSegmentLocked with the segment and
+// its recovery sequence read inside the lifecycle critical section. The
+// coalescing worker uses it so two queued far-seeks collapse onto the target
+// that is current when the lock is actually held, and a target a newer seek
+// replaced during that wait is refused instead of applied.
 func (m *TranscodeManager) restartSegmentLockedWithTarget(
 	ctx context.Context,
 	sessionID string,
 	ts *TranscodeSession,
-	segNum func() int,
+	nextTarget func() (segNum int, seq uint64),
 ) (SegmentRecoveryTarget, bool, error) {
 	var target SegmentRecoveryTarget
 	var ok bool
 	err := m.restartSessionLocked(sessionID, ts, func() error {
+		segNum, seq := nextTarget()
 		var restartErr error
-		target, ok, restartErr = ts.RestartSegment(ctx, segNum())
+		target, ok, restartErr = ts.RestartSegmentForRecovery(ctx, segNum, seq)
 		return restartErr
 	})
 	if err != nil {
@@ -531,8 +548,12 @@ type pendingAsyncRestart struct {
 	// request named and is adopted forward to a live successor when a replan
 	// replaces that generation while the restart waits for the lifecycle lock.
 	ts *TranscodeSession
-	// segNum is the latest requested segment.
+	// segNum is the latest requested segment, and seq is the arrival number of
+	// the request that named it. A request that reaches the coalescer after a
+	// newer one (a wait that expired later) must not overwrite the newer
+	// target with its older position.
 	segNum int
+	seq    uint64
 	// adoptions counts the successors this worker has followed, so a replan
 	// storm cannot keep one detached seek restart alive indefinitely.
 	adoptions int
@@ -566,6 +587,21 @@ func (m *TranscodeManager) RestartSegmentAsync(sessionID string, ts *TranscodeSe
 	if m == nil || ts == nil {
 		return
 	}
+	m.RestartSegmentAsyncForRequest(sessionID, ts, segNum, ts.BeginSegmentRecovery())
+}
+
+// RestartSegmentAsyncForRequest is RestartSegmentAsync for a request numbered
+// by BeginSegmentRecovery. The number orders the coalesced target by when the
+// viewer asked, not by when a wait happened to expire, so a stale wait cannot
+// overwrite the newer target a seek already recorded.
+func (m *TranscodeManager) RestartSegmentAsyncForRequest(sessionID string, ts *TranscodeSession, segNum int, seq uint64) {
+	if m == nil || ts == nil {
+		return
+	}
+	if seq == 0 {
+		// An unnumbered caller is the newest request right now.
+		seq = ts.BeginSegmentRecovery()
+	}
 	m.asyncRestartMu.Lock()
 	if m.asyncRestarts == nil {
 		m.asyncRestarts = make(map[string]*pendingAsyncRestart)
@@ -573,10 +609,13 @@ func (m *TranscodeManager) RestartSegmentAsync(sessionID string, ts *TranscodeSe
 	if pending := m.asyncRestarts[sessionID]; pending != nil {
 		pending.mu.Lock()
 		sameGeneration := pending.ts == ts
-		if sameGeneration {
+		newer := seq >= pending.seq
+		if sameGeneration && newer {
 			// A restart for this generation is already running: record the
-			// newest target and let the worker converge on it.
+			// newest target and let the worker converge on it. An older
+			// request leaves the newer target in place.
 			pending.segNum = segNum
+			pending.seq = seq
 		}
 		pending.mu.Unlock()
 		if sameGeneration {
@@ -584,7 +623,7 @@ func (m *TranscodeManager) RestartSegmentAsync(sessionID string, ts *TranscodeSe
 			return
 		}
 	}
-	pending := &pendingAsyncRestart{ts: ts, segNum: segNum}
+	pending := &pendingAsyncRestart{ts: ts, segNum: segNum, seq: seq}
 	m.asyncRestarts[sessionID] = pending
 	m.asyncRestartMu.Unlock()
 
@@ -615,11 +654,11 @@ func (m *TranscodeManager) runAsyncRestart(sessionID string, pending *pendingAsy
 		// queued behind another worker's restart is collapsed onto whatever the
 		// latest requested segment is when the lock is actually held.
 		applied := 0
-		nextTarget := func() int {
+		nextTarget := func() (int, uint64) {
 			pending.mu.Lock()
 			defer pending.mu.Unlock()
 			applied = pending.segNum
-			return applied
+			return applied, pending.seq
 		}
 
 		generation := pending.session()
@@ -638,10 +677,12 @@ func (m *TranscodeManager) runAsyncRestart(sessionID string, pending *pendingAsy
 		}
 		m.recordAsyncRestartOutcome(sessionID, generation, applied, target, ok, err)
 
-		// A terminal failure cannot be fixed by a different target on the same
-		// dead generation, so stop rather than loop; the latched verdict is what
-		// the next request answers.
-		if err != nil {
+		// A superseded target is not a failure: a newer seek owns the session,
+		// and the finish check below either loops onto the target that request
+		// recorded or lets it start its own worker. Every other error is
+		// terminal for this generation, so stop rather than loop; the latched
+		// verdict is what the next request answers.
+		if err != nil && !errors.Is(err, ErrSegmentRecoverySuperseded) {
 			return
 		}
 		if m.tryFinishAsyncRestart(sessionID, pending, applied) {
@@ -681,6 +722,11 @@ func (m *TranscodeManager) recordAsyncRestartOutcome(sessionID string, ts *Trans
 		// waited for the lifecycle lock, so nothing was re-spawned. A replaced
 		// generation is followed instead (see followAsyncRestartSuccessor).
 		slog.Debug("restart transcode at missing segment skipped, session superseded (async)",
+			"component", "playback", "segment", segNum, "session", sessionID)
+	case errors.Is(err, ErrSegmentRecoverySuperseded):
+		// A newer seek replaced this target while the worker waited for the
+		// lifecycle lock. Nothing was re-spawned for the old position.
+		slog.Debug("restart transcode at missing segment skipped, request superseded (async)",
 			"component", "playback", "segment", segNum, "session", sessionID)
 	case err != nil && !errors.Is(err, ErrManifestNotReady):
 		slog.Warn("restart transcode at missing segment (async)", "component", "playback", "error", err, "segment", segNum, "session", sessionID)

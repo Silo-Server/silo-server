@@ -3354,6 +3354,13 @@ export function VideoPlayer({
   // screen under controls that still say "playing". The transport effect owns
   // the current closure; a stale transport leaves the no-op in place.
   const resumeReloadedTransportRef = useRef<() => void>(() => {});
+  // Set when a reload was asked to resume but hls.js had not yet paused the
+  // element. The MediaSource re-create is asynchronous: the load algorithm
+  // clears `paused` and reports `emptied` later, in its own task. Latching the
+  // request lets the `emptied` listener start the transport at the moment it
+  // actually became paused, instead of racing that task and finding it still
+  // unpaused.
+  const resumeAfterReloadRef = useRef(false);
 
   // A delivered segment that presents no frames leaves the element on its last
   // frame while hls.js keeps buffering: every later load succeeds, so the load
@@ -3427,12 +3434,20 @@ export function VideoPlayer({
     // here. It runs only for an intent to play: a viewer, room or connection
     // pause stays paused.
     const resumeReloadedTransport = () => {
-      if (destroyed || !video.paused) return;
+      if (destroyed) return;
       if (connectionReplacedRef.current || connectionStatusRef.current !== "connected") return;
       if (roomPlaybackActiveRef.current) return;
       // The viewer's live intent, not the intent the plan was adopted with: a
       // pause made while the reload was in flight must keep it paused.
       if (!viewerPlayIntentRef.current) return;
+      if (!video.paused) {
+        // hls.js has not re-created the MediaSource yet. Latch the request and
+        // let the `emptied` handler start the transport once the load
+        // algorithm has paused the element.
+        resumeAfterReloadRef.current = true;
+        return;
+      }
+      resumeAfterReloadRef.current = false;
       playbackStarted = true;
       void video.play().catch((error: unknown) => {
         if (destroyed) return;
@@ -3440,6 +3455,8 @@ export function VideoPlayer({
       });
     };
     resumeReloadedTransportRef.current = resumeReloadedTransport;
+    // A replacement transport starts with no reload resume latched.
+    resumeAfterReloadRef.current = false;
     // A replacement transport gets its own no-frame budget and starts from the
     // viewer's live intent to play. The element is paused while a replacement
     // loads, so reading only the element would disarm the deadline for exactly
@@ -4480,6 +4497,7 @@ export function VideoPlayer({
       if (resumeReloadedTransportRef.current === resumeReloadedTransport) {
         resumeReloadedTransportRef.current = () => {};
       }
+      resumeAfterReloadRef.current = false;
       clearInterval(deliveredNoFramesTimer);
       video.removeEventListener("seeking", onDeliveredNoFramesSeek);
       if (frameProbe !== null && typeof video.cancelVideoFrameCallback === "function") {
@@ -4654,6 +4672,13 @@ export function VideoPlayer({
       if (!video.paused) return;
       setPlaying(false);
       deliveredNoFramesRef.current?.setPlaying(false, { deliberate: false });
+      // The MediaSource re-create the player asked to resume has now paused
+      // the element. Start it again; without this the load was reported before
+      // the pause and the transport stays paused under a Pause control.
+      if (resumeAfterReloadRef.current) {
+        resumeAfterReloadRef.current = false;
+        resumeReloadedTransportRef.current();
+      }
     };
     const clearBuffering = () => {
       if (bufferingTimerRef.current) {
