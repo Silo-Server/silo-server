@@ -521,6 +521,12 @@
       "value": "⟦Ţĥîš þļåýƀåçķ šéššîöñ éñđéđ. Šţåŕţ þļåýîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš šţŕéåɱ ŵåš ŕéþļåçéđ. Þļåýƀåçķ çöñţîñûéš öñ ţĥé çûŕŕéñţ öñé.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -73739,6 +73745,12 @@
     {
       "type": 0,
       "value": "⟦Ṁåŕķ ŵåţçĥéđ åţ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ţîţļéš ŵîţĥ å çŕéđîţš ɱåŕķéŕ åļšö çöûñţ åš ŵåţçĥéđ öñçé þļåýƀåçķ ŕéåçĥéš ţĥé çŕéđîţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

@@ -521,6 +521,12 @@
       "value": "Ta sesja odtwarzania się zakończyła. Rozpocznij odtwarzanie ponownie."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Ten strumień został zastąpiony. Odtwarzanie trwa w bieżącym strumieniu."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -82333,6 +82339,12 @@
     {
       "type": 0,
       "value": "Oznacz jako obejrzane przy"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Tytuły ze znacznikiem napisów końcowych są też oznaczane jako obejrzane, gdy odtwarzanie dotrze do napisów końcowych."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
