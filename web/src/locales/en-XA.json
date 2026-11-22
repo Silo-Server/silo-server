@@ -281,6 +281,18 @@
       "value": "⟦Ţĥîš šîĝñ-îñ çöđé éẋþîŕéđ. Šţåŕţ åĝåîñ.~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš åççöûñţ ĥåš ŕéåçĥéđ îţš ļîɱîţ öƒ đéṽîçéš ƒöŕ đîŕéçţ çöññéçţîöñš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "⟦Åñöţĥéŕ đéṽîçé åļŕéåđý ûšéš ţĥîš çöññéçţîöñ ķéý. Ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -339,6 +351,12 @@
     {
       "type": 0,
       "value": "⟦Šéţ ƀý ţĥé éñṽîŕöñɱéñţ. Çĥåñĝé îţ ţĥéŕé åñđ ŕéšţåŕţ ţĥé åƒƒéçţéđ šéŕṽîçé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ṽåļûé îš ɱîššîñĝ.~~~~~~~~~⟧"
     }
   ],
   "error.field.out_of_range": [
@@ -26371,6 +26389,12 @@
       "value": "⟦Šþééçĥ-ţö-ţéẋţ þŕöṽîđéŕ îš ţéɱþöŕåŕîļý ûñåṽåîļåƀļé. Ţŕý åĝåîñ ļåţéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ þŕöṽîđéŕ ĥåš ñö åṽåîļåƀļé çŕéđîţ, öŕ å ûšåĝé öŕ šþéñđîñĝ ļîɱîţ ŵåš ŕéåçĥéđ. Çĥéçķ ţĥé þŕöṽîđéŕ ƀåļåñçé åñđ ļîɱîţš, öŕ ÇĥåţĜÞŢ ûšåĝé šéţţîñĝš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -26381,6 +26405,80 @@
     {
       "type": 0,
       "value": "⟦Ţéẋţ ÅÎ çöññéçţîöñ ƒåîļéđ. Çĥéçķ ţĥé ɱöđéļ, ŕéåšöñîñĝ ļéṽéļ, šéŕṽîçé ţîéŕ, åççöûñţ çöññéçţîöñ, åñđ þŕöṽîđéŕ ûšåĝé ļîɱîţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ åççéšš ŵåš đéñîéđ. Çĥéçķ ţĥåţ ţĥé ÅÞÎ ķéý öŕ ÇĥåţĜÞŢ åççöûñţ ɱåý ûšé ţĥîš ɱöđéļ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ éñđþöîñţ öŕ ɱöđéļ îš ûñåṽåîļåƀļé. Çĥéçķ ţĥé þŕöṽîđéŕ'š ƀåšé ÛŔĻ åñđ ţĥé ɱöđéļ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé çöññéçţéđ ÇĥåţĜÞŢ åççöûñţ çåñ'ţ šĥåŕé îţš þļåñ ûšåĝé. Çĥéçķ ÇĥåţĜÞŢ ûšåĝé šéţţîñĝš, öŕ çöññéçţ åñöţĥéŕ åççöûñţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ þŕöṽîđéŕ îš ŕåţé ļîɱîţîñĝ ŕéǫûéšţš. Ţŕý åĝåîñ ļåţéŕ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ þŕöṽîđéŕ ŕéƒûšéđ ţĥé çĥéçķ ŕéǫûéšţ. Çĥéçķ ţĥé ɱöđéļ, ţĥé ŕéåšöñîñĝ ļéṽéļ, åñđ ţĥé åççöûñţ'š ûšåĝé šéţţîñĝš. Ţĥé šéŕṽéŕ ļöĝ ĥåš ţĥé þŕöṽîđéŕ'š éŕŕöŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ þŕöṽîđéŕ ŕéĵéçţéđ ţĥé çĥéçķ ŕéǫûéšţ (šţåţûš "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Çĥéçķ ţĥé ɱöđéļ, ŕéåšöñîñĝ ļéṽéļ, åñđ šéŕṽîçé ţîéŕ. Ţĥé šéŕṽéŕ ļöĝ ĥåš ţĥé þŕöṽîđéŕ'š éŕŕöŕ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ çöññéçţîöñ çĥéçķ ţîɱéđ öûţ. Çĥéçķ þŕöṽîđéŕ åṽåîļåƀîļîţý åñđ ţŕý åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ þŕöṽîđéŕ ŕéĵéçţéđ ţĥé çŕéđéñţîåļš. Ŕéþļåçé ţĥé þŕöṽîđéŕ'š ÅÞÎ ķéý, öŕ šîĝñ îñ ŵîţĥ ÇĥåţĜÞŢ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ÅÎ þŕöṽîđéŕ îš ţéɱþöŕåŕîļý ûñåṽåîļåƀļé. Ţŕý åĝåîñ ļåţéŕ.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "⟦Šîļö çöûļđ ñöţ ŕéåçĥ ţĥé ţéẋţ ÅÎ þŕöṽîđéŕ. Çĥéçķ ţĥé þŕöṽîđéŕ'š ƀåšé ÛŔĻ åñđ ţĥåţ ţĥîš šéŕṽéŕ çåñ çöññéçţ ţö îţ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "⟦Ţéẋţ ɱöđéļ ŕéţûŕñéđ å ŕéšþöñšé Šîļö çåññöţ ûšé. Çĥööšé åñöţĥéŕ ɱöđéļ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -26477,6 +26575,12 @@
     {
       "type": 0,
       "value": "⟦Çļéåŕ ļîɱîţ~~~~~⟧"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţ~~~⟧"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -69825,6 +69929,664 @@
     {
       "type": 0,
       "value": "⟦Šýñç öñļîñé ɱåŕķéŕš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "⟦Åļĝöŕîţĥɱ: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "⟦ŕéǫûéšţéđ "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; åçţîṽé "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "⟦Åļļöŵéđ: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "⟦Çöñĝéšţîöñ çöñţŕöļ: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "⟦Åççöûñţ~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "⟦Öñ ţĥîš þåţĥ šîñçé~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "⟦Đéṽîçé~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö đéṽîçé îš çöññéçţéđ đîŕéçţļý.~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "⟦Þééŕ éñđþöîñţ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "⟦Çöññéçţéđ đéṽîçéš~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "⟦ţö þöŕţ "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "⟦Đéƒåûļţ: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķ ţĥîš šéŕṽéŕ’š ŕéåđîñéšš ƒöŕ đîŕéçţ çöññéçţîöñš.~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "⟦Éƒƒéçţîṽé: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "⟦Éñåƀļé đîŕéçţ çöññéçţîöñš~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "⟦ÑÉŢ_ÅĐṀÎÑ çåþåƀîļîţý~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţ çöññéçţîöñ éñĝîñé~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "⟦ÑÅŢ ĥåîŕþîñ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "⟦ÑÅŢ ɱåþþîñĝ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "⟦ÞṀŢÛ ƒåļļƀåçķ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéåçĥåƀîļîţý~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "⟦Šöçķéţ ŕéçéîṽé ƀûƒƒéŕ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "⟦Šöçķéţ šéñđ ƀûƒƒéŕ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöšţ ţûñîñĝ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "⟦ÅÇĶ đéçîɱåţîöñ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "⟦ƁƁŔ ļöšš þöļîçý~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "⟦ÛĐÞ šéĝɱéñţåţîöñ öƒƒļöåđ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "⟦Çļîéñţ ŕéçéîṽé ŵîñđöŵ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţ çöññéçţîöñ ÛĐÞ þöŕţ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "⟦ŢÇÞ çöñĝéšţîöñ çöñţŕöļ~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "⟦ŢÇÞ šéñđ ƀûƒƒéŕ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "⟦Ļåšţ çĥéçķéđ "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöẋý~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "⟦Ļîšţéñéŕš~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "⟦Öƀšéŕṽéđ þûƀļîç åđđŕéšš: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķ ţĥé ŕöûţéŕ ƒöŕ ÛÞñÞ, ÑÅŢ-ÞṀÞ, öŕ ÞÇÞ šûþþöŕţ.~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "⟦Þöŕţ ɱåþþîñĝ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéåđîñéšš çĥéçķš đö ñöţ šţåŕţ đîŕéçţ þļåýƀåçķ.~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "⟦Đîšåƀļéđ ƀý åđɱîñîšţŕåţöŕ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "⟦Đîšåƀļéđ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé đîŕéçţ çöññéçţîöñ éñĝîñé çöûļđ ñöţ šţåŕţ~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ îñçŕéåšé ƀûƒƒéŕ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "⟦Ŕöûţéŕ đöéš ñöţ šûþþöŕţ þöŕţ ɱåþþîñĝ~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "⟦Ɓûƒƒéŕ îš šɱåļļéŕ ţĥåñ ŕéǫûéšţéđ~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "⟦Ñéţŵöŕķ ţûñîñĝ ĥéļþéŕ ûñåṽåîļåƀļé~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "⟦Îñṽåļîđ ṽåļûé; ûšîñĝ öƒƒ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "⟦Šýšţéɱ çöûļđ ñöţ åþþļý öŕ ŕéåđ ţĥîš šéţţîñĝ~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ šûþþöŕţéđ ƀý ţĥîš ķéŕñéļ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöšţ ƀûƒƒéŕ ļîɱîţ ŕéåçĥéđ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ ŕéåđ ĥöšţ ƀûƒƒéŕ ļîɱîţš~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "⟦Þûƀļîç åđđŕéšš ṽåŕîéš ƀý đéšţîñåţîöñ~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "⟦ƁƁŔ îš ñöţ åṽåîļåƀļé~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "⟦ƁƁŔ îš ñöţ ļöåđéđ öŕ åļļöŵéđ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöŕé ţĥåñ öñé ÅÞÎ šéŕṽéŕ îš ŕûññîñĝ~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "⟦ÑÉŢ_ÅĐṀÎÑ çåþåƀîļîţý đŕöþþéđ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "⟦ÑÉŢ_ÅĐṀÎÑ çåþåƀîļîţý ɱîššîñĝ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ŕöûţéŕ ƒöûñđ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "⟦ÑÉŢ_ÅĐṀÎÑ çåþåƀîļîţý ɱîššîñĝ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "⟦Þéŕɱîššîöñ đéñîéđ~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ åṽåîļåƀļé~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ ɱéåšûŕéđ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "⟦Ñö îñçŕéåšé ñééđéđ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "⟦Ĥöšţ þöļîçý šéļéçţéđ åñöţĥéŕ åļĝöŕîţĥɱ~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "⟦Çĥéçķ ƒåîļéđ~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ çĥéçķ ƒöŕ öţĥéŕ ÅÞÎ šéŕṽéŕš~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "⟦Åñöţĥéŕ ÅÞÎ šéŕṽéŕ ĥöšţš đîŕéçţ çöññéçţîöñš~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåîţîñĝ ţö ƀéçöɱé ţĥé đîŕéçţ çöññéçţîöñ ĥöšţ~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţ çöññéçţîöñ šţåţé îš ûñåṽåîļåƀļé~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "⟦Çöûļđ ñöţ öþéñ ţĥé ÛĐÞ þöŕţ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "⟦ÛĐÞ þöŕţ îš îñṽåļîđ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ šûþþöŕţéđ öñ ţĥîš þļåţƒöŕɱ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţéđ: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéǫûéšţéđ: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; ĝŕåñţéđ: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "⟦Ŕûñ çĥéçķ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "⟦Šéñđ ƀûƒƒéŕ: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "⟦Çåþþéđ~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "⟦Đéĝŕåđéđ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåļļƀåçķ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "⟦Ñöţ ñééđéđ~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "⟦Öƒƒ~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "⟦Öñ~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "⟦Ûñķñöŵñ~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "⟦Å çöɱɱå-šéþåŕåţéđ ļîšţ öƒ ûþ ţö éîĝĥţ ĥöšţ:þöŕţ éñţŕîéš. Ļéåṽé îţ éɱþţý ţö ûšé ţĥé đéƒåûļţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "⟦ŠŢÛÑ šéŕṽéŕš~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "⟦Đîŕéçţ çöññéçţîöñš~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ļéţ đéṽîçéš ŕéåçĥ ţĥîš šéŕṽéŕ öṽéŕ å đîŕéçţ ÛĐÞ þåţĥ. Ţĥé ÛĐÞ þöŕţ çöɱéš ƒŕöɱ "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " åñđ îš ŕéåđ-öñļý ĥéŕé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.network.host.apiServer": [

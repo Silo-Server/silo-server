@@ -8,6 +8,7 @@
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
 ./internal/catalog TestCatalogSearchSortsByProfilePlaysDB
 ./internal/catalog TestCatalogQuerySortsDateViewedUnwatchedLastDB
+./internal/catalog TestCatalogQuerySortsSeriesByEpisodeDateViewedDB
 ./internal/catalog TestLibraryCollectionDrawsFromItsRulesLibrariesDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
 ./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
@@ -658,6 +659,7 @@
 ./internal/downloads TestLateCompletionStopsItsPreparationDB
 ./internal/downloads TestStaleAbandonedPreparationsAreRetiredNotClaimedDB
 ./internal/userstore/pgstore TestPostgresClearResumePosition
+./internal/userstore/pgstore TestPostgresSeriesLatestViewedAtDB
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
 ./internal/userstore/pgstore TestPostgresCollectionsHolding
 ./internal/userstore/pgstore TestPostgresFailedSyncKeepsANewerResult

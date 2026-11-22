@@ -2,7 +2,7 @@
 
 Status: The server and web parts of phases 1 and 2 shipped in #2699. The server
 contract is now in [playback protocol v3](../architecture/playback-protocol-v3.md#buffering-quality-native-v2)
-and the [Playback API](../playback-api.md#buffering-quality-native-v2); this
+and the [Playback API](../playback-api.md#buffering-quality); this
 document remains the client controller spec.
 Date: 2026-10-17, revised 2026-10-22 after device testing (see *Decisions*)
 Repos affected: `silo-server` (contract, planner, store, web), `silo-android`, `silo-apple`
@@ -10,8 +10,8 @@ Repos affected: `silo-server` (contract, planner, store, web), `silo-android`, `
 ## Summary
 
 When playback keeps rebuffering, every Silo client should notice, lower the
-quality, and remember the result for that device and network. Today only the
-web player does this.
+quality, and remember the result for that device and network. When this was written,
+only the web player did this.
 
 This design defines:
 
@@ -65,7 +65,7 @@ answers where they differ:
 | When is playback in an outage? | When a media request fails or cannot connect, the device is offline, or the player waits while no media request has received data for `OUTAGE_NO_DATA_MS = 4000` on progressive delivery, or `OUTAGE_NO_DATA_SEGMENTED_MS = 15000` on segmented (HLS) delivery, where the server holds a segment request silent while it produces the segment. A request that keeps receiving data never fails, however slow. A client's player or engine timeouts no longer decide it. |
 | When is a wait with media buffered a stall? | A renderer wait whose buffer stays under the player's own resume amount becomes a stall after `RENDERER_WAIT_MAX_MS = 3000`. On a player that resumes at an explicit buffered amount (Media3, tunneled or not, and Apple's software route) or as soon as data reaches the playhead (browsers), a wait with more buffered than its ample threshold is a renderer wait from that moment: the device, not the network, is behind. The threshold is 5000 ms in browsers and on Apple's software route, which resumes at a fixed 2000 ms lead, and twice the resume amount on Media3 (10000 ms). AVPlayer has none. |
 | What does a lowering send? | The step-down estimate, as before, plus `observed_throughput_kbps`, the throughput the plan that kept buffering measured. The server plans with, and learns, the lower figure. |
-| How low can Auto go? | Until a stream fits a 500 kbps link. The `/api/v2` menu gains 480p Low (800 kbps) and 360p (300 kbps); the frozen `/api/v1` menu does not. An Auto encode fits video and audio together within its budget, in stereo once the audio share drops below 192 kbps. |
+| How low can Auto go? | Until a stream fits a 500 kbps link. The menu gains 480p Low (800 kbps) and 360p (300 kbps). An Auto encode fits video and audio together within its budget, in stereo once the audio share drops below 192 kbps. |
 | What if a start or replan sends no estimate? | On Auto, the server uses the connection's current reading in its place. It replaces "the server plans only from the estimate a request carries". |
 | When does Auto try a lower version? | Under any Auto budget, not only after buffering. Of the versions that fit, one that keeps the source's dynamic range comes first, then the highest bitrate. |
 | What does an Auto encode target? | Its budget, up to the bitrate of its class's highest menu rung, and never more than that rung even without an estimate, except on the local network with neither an estimate nor a cap. |
@@ -527,7 +527,7 @@ A limit is recorded when a start or replan carries
   with the limit alone when the request has no estimate. A request without an
   estimate first takes the connection's current reading in its place (see
   *When to test*), so the limit then applies to that. Fixed rungs ignore it,
-  as they ignore estimates today. The admin bitrate cap and
+  as they ignore estimates. The admin bitrate cap and
   `bandwidth_cap_kbps` still apply on top.
 - **Request control**: start and replan gain an optional `learned_limit` field.
   Absent, the limit applies. `ignore` plans without it and leaves it stored;
@@ -585,8 +585,8 @@ would otherwise take the source's bitrate. The exception is the local network
 with neither an estimate nor a client or server cap: nothing says that link is
 short, so a conversion or a subtitle burn-in keeps the source's bitrate.
 
-The `/api/v2` menu reaches below 1.5 Mbps with 480p Low (800 kbps) and 360p
-(300 kbps). The frozen `/api/v1` menu does not list them. A client lowers Auto only while the menu has an entry below what plays,
+The menu reaches below 1.5 Mbps with 480p Low (800 kbps) and 360p
+(300 kbps). A client lowers Auto only while the menu has an entry below what plays,
 and each lowering fits video and audio together within about 53% of the
 delivered bitrate that stalled. A link that keeps stalling therefore keeps
 lowering until the whole stream is at most about 400 kbps, which a 500 kbps
@@ -1024,7 +1024,7 @@ in parallel:
 | `learned_limit` | Start and replan, optional: `ignore` or `clear`. |
 | `playback_plan.bandwidth_limit` | Optional object: `kbps` (integer), `source` (`"observed_rebuffer"`), `expires_at` (RFC 3339). Present only when the learned limit lowered the plan. |
 | Connection endpoints | `GET /api/v2/playback/connection`, and `DELETE /api/v2/playback/connection/learned-limit` returning 204. Both exist when the feature is advertised. They use normal authenticated profile-scoped headers and `X-Silo-Device-Id`; no installation ID or body is required. The reset without `X-Silo-Device-Id` is a `422`. |
-| Menu | On `/api/v2`, `available_qualities` can list `480p-low` ("480p Low", 800 kbps) and `360p` ("360p", 300 kbps) below the earlier 1.5 Mbps floor. Clients treat them like any other rung. `/api/v1` menus omit them. |
+| Menu | `available_qualities` can list `480p-low` ("480p Low", 800 kbps) and `360p` ("360p", 300 kbps) below the earlier 1.5 Mbps floor. Clients treat them like any other rung. |
 | Setting | `playback.buffering_quality_mode`, introduced in manifest revision 23. The revision is informational: native clients detect the setting by the key's presence in the server's settings manifest or resolved settings, not by comparing revision numbers. |
 | Telemetry | Feature `playback_plan_summary_v1`, route event `plan_summary`, and the allowlist keys under *Telemetry*. |
 | Phase 2 | The server advertises `connection_speed_v1` and adds `bandwidth_probe_url` to the capability response: the probe on the path this client's media takes. With it, clients probe that URL, report to `POST /api/v2/playback/bandwidth-probe/results`, and read `probe` and `auto_budget_kbps` from the connection endpoint. |

@@ -118,18 +118,19 @@ landed within about 120 ms. Subtitles of another title got at most two
 agreeing windows. Cues are spotted slightly ahead of speech and stay up after
 it, which bounds the precision and sets the `already_synced` margin.
 
-The joint search's thresholds were measured on 2,708 production sidecar
-jobs with their cached speech (`eval_test.go`, build tag `subsynceval`):
-it matched 161 of the 502 the window search had rejected, changed no result
-the window search had matched, and matched no subtitle of another episode or
-title among 1,235 pairings, most of them other episodes of the same series.
+The joint search's thresholds were measured on real sidecar jobs with their
+cached speech (`internal/subtitles/subsync/eval_test.go`, build tag
+`subsynceval`): it matched about a third of the sidecars the window search had
+rejected, changed no result the window search had matched, and matched no
+subtitle of another episode or title across the cross-title and cross-episode
+pairings, most of them other episodes of the same series.
 Where another sidecar of the same file was matched, the timings it found
 agreed with that sidecar's. What it still rejects is mostly forced
 subtitles, with too few lines to place, and subtitles of other releases.
 
 Alignment runs against the original bytes, so syncing again never compounds a
 correction. Tuning constants, and the measurements behind them, live in
-`subsync/align.go`.
+`internal/subtitles/subsync/align.go`.
 
 ## Cost
 

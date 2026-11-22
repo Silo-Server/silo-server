@@ -348,6 +348,23 @@ export function v2ErrorText(error: unknown, fallback: string): string {
 }
 
 /**
+ * Like `v2ErrorText`, for actions whose own code also throws translated
+ * `Error`s (a value that doesn't parse, a batch that stopped part-way): any
+ * `Error`'s message, except the ones written in developer English: a failed
+ * fetch (`TypeError`), a `V2TimeoutError`, a `V2TransportError`, or a
+ * `StaleApiRequestContextError`. Those, and anything that isn't an `Error`,
+ * get `fallback`.
+ */
+export function readableErrorText(error: unknown, fallback: string): string {
+  const developerText =
+    error instanceof TypeError ||
+    error instanceof V2TimeoutError ||
+    error instanceof V2TransportError ||
+    error instanceof StaleApiRequestContextError;
+  return error instanceof Error && !developerText ? error.message : fallback;
+}
+
+/**
  * Whether a failed v2 request may succeed if sent again later: the server was
  * busy (429, 5xx), never answered (a network error, the deadline), or a
  * session refresh got no verdict. Any other 4xx is the server's answer.
