@@ -521,6 +521,12 @@
       "value": "This playback session ended. Start playing again."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "This stream was replaced. Playback continues on the current one."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -48272,6 +48278,184 @@
       "value": ")"
     }
   ],
+  "web.admin.libraries.unsupportedFiles.column.files": [
+    {
+      "type": 0,
+      "value": "Files"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.column.firstFound": [
+    {
+      "type": 0,
+      "value": "First found"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.column.folder": [
+    {
+      "type": 0,
+      "value": "Folder"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.column.library": [
+    {
+      "type": 0,
+      "value": "Library"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.column.type": [
+    {
+      "type": 0,
+      "value": "Type"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.description": [
+    {
+      "type": 0,
+      "value": "Folders holding video files that scans find but skip because of their type."
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.detail.lastFound": [
+    {
+      "type": 0,
+      "value": "Last found"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.detail.why": [
+    {
+      "type": 0,
+      "value": "Why"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.empty": [
+    {
+      "type": 0,
+      "value": "No skipped files found."
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.filterLabel": [
+    {
+      "type": 0,
+      "value": "Filter files not cataloged"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.filterPlaceholder": [
+    {
+      "type": 0,
+      "value": "Filter by folder, file, library, or reason..."
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.loadFailed": [
+    {
+      "type": 0,
+      "value": "The list could not be loaded."
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.loading": [
+    {
+      "type": 0,
+      "value": "Loading..."
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.moreFiles": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "and "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " more"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "and "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " more"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reason.disc_image": [
+    {
+      "type": 0,
+      "value": "Disc image"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reason.disc_stream": [
+    {
+      "type": 0,
+      "value": "Blu-ray or AVCHD folder"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reason.dvd_vob": [
+    {
+      "type": 0,
+      "value": "DVD VOB"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reason.realmedia": [
+    {
+      "type": 0,
+      "value": "RealMedia"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reasonMessage.disc_image": [
+    {
+      "type": 0,
+      "value": "Disc images are not cataloged; remux the disc title to a single file"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reasonMessage.disc_stream": [
+    {
+      "type": 0,
+      "value": "Blu-ray and AVCHD disc folders (BDMV/STREAM) are not cataloged; remux the disc title to a single file"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reasonMessage.dvd_vob": [
+    {
+      "type": 0,
+      "value": "DVD VOB files are not cataloged; remux the DVD title to a single file"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reasonMessage.realmedia": [
+    {
+      "type": 0,
+      "value": "RealMedia files are not cataloged"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.refreshFailed": [
+    {
+      "type": 0,
+      "value": "The list could not be refreshed. It shows what loaded before."
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.title": [
+    {
+      "type": 0,
+      "value": "Files Not Cataloged"
+    }
+  ],
   "web.admin.libraries.warning.checkMount": [
     {
       "type": 0,
@@ -67723,6 +67907,12 @@
     {
       "type": 0,
       "value": "Mark watched at"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titles with a credits marker also count as watched once playback reaches the credits."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

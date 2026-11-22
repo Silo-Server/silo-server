@@ -521,6 +521,12 @@
       "value": "Aquesta sessió de reproducció ha finalitzat. Torna a començar la reproducció."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Aquesta transmissió s’ha substituït. La reproducció continua a la transmissió actual."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -74653,6 +74659,12 @@
     {
       "type": 0,
       "value": "Marca com a vist al"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Els títols amb un marcador de crèdits també compten com a vistos quan la reproducció arriba als crèdits."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

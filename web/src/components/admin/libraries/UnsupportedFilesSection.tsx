@@ -18,12 +18,22 @@ import { useUnsupportedLibraryFiles } from "@/hooks/queries/admin/libraries";
 import { useDebounce } from "@/hooks/useDebounce";
 import { formatDateTime } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
+import { numberText, useT, type MessageKey } from "@/i18n";
 
-const REASON_LABELS: Record<LibraryUnsupportedFileGroup["reason"], string> = {
-  dvd_vob: "DVD VOB",
-  disc_image: "Disc image",
-  realmedia: "RealMedia",
-  disc_stream: "Blu-ray or AVCHD folder",
+const REASON_LABELS: Record<LibraryUnsupportedFileGroup["reason"], MessageKey> = {
+  dvd_vob: "web.admin.libraries.unsupportedFiles.reason.dvd_vob",
+  disc_image: "web.admin.libraries.unsupportedFiles.reason.disc_image",
+  realmedia: "web.admin.libraries.unsupportedFiles.reason.realmedia",
+  disc_stream: "web.admin.libraries.unsupportedFiles.reason.disc_stream",
+};
+
+// The server's English explanation stays as sent for a reason this build
+// does not know.
+const REASON_MESSAGES: Record<LibraryUnsupportedFileGroup["reason"], MessageKey> = {
+  dvd_vob: "web.admin.libraries.unsupportedFiles.reasonMessage.dvd_vob",
+  disc_image: "web.admin.libraries.unsupportedFiles.reasonMessage.disc_image",
+  realmedia: "web.admin.libraries.unsupportedFiles.reasonMessage.realmedia",
+  disc_stream: "web.admin.libraries.unsupportedFiles.reasonMessage.disc_stream",
 };
 
 /**
@@ -51,6 +61,7 @@ function unsupportedFolderLabel(group: LibraryUnsupportedFileGroup, libraries: L
  * their type, so an admin can see why a title never appeared.
  */
 export function UnsupportedFilesSection({ libraries }: { libraries: Library[] }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
@@ -66,8 +77,8 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
 
   return (
     <CollapsibleDiagnosticsSection
-      title="Files Not Cataloged"
-      description="Folders holding video files that scans find but skip because of their type."
+      title={t("web.admin.libraries.unsupportedFiles.title")}
+      description={t("web.admin.libraries.unsupportedFiles.description")}
       count={data?.pages[0]?.total}
       isError={loadFailed}
       icon={<FileX className="h-4 w-4 text-amber-500" />}
@@ -77,8 +88,8 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
       <div className="relative mb-2">
         <Search className="text-muted-foreground pointer-events-none absolute start-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2" />
         <Input
-          placeholder="Filter by folder, file, library, or reason..."
-          aria-label="Filter files not cataloged"
+          placeholder={t("web.admin.libraries.unsupportedFiles.filterPlaceholder")}
+          aria-label={t("web.admin.libraries.unsupportedFiles.filterLabel")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="h-8 ps-8 text-xs"
@@ -88,8 +99,8 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
         <div role="alert" className="text-destructive mb-2 flex items-center gap-2 px-2 text-sm">
           <span>
             {loadFailed
-              ? "The list could not be loaded."
-              : "The list could not be refreshed. It shows what loaded before."}
+              ? t("web.admin.libraries.unsupportedFiles.loadFailed")
+              : t("web.admin.libraries.unsupportedFiles.refreshFailed")}
           </span>
           <Button
             variant="outline"
@@ -97,14 +108,16 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
             disabled={isRefetching}
             onClick={() => void refetch()}
           >
-            Retry
+            {t("common.retry")}
           </Button>
         </div>
       ) : null}
       {groups.length === 0 ? (
         loadFailed ? null : (
           <p className="text-muted-foreground px-2 py-3 text-sm">
-            {data ? "No skipped files found." : "Loading..."}
+            {data
+              ? t("web.admin.libraries.unsupportedFiles.empty")
+              : t("web.admin.libraries.unsupportedFiles.loading")}
           </p>
         )
       ) : (
@@ -112,11 +125,13 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
           <Table>
             <TableHeader>
               <TableRow className="hover:bg-transparent">
-                <TableHead>Folder</TableHead>
-                <TableHead>Library</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead className="text-end">Files</TableHead>
-                <TableHead>First found</TableHead>
+                <TableHead>{t("web.admin.libraries.unsupportedFiles.column.folder")}</TableHead>
+                <TableHead>{t("web.admin.libraries.unsupportedFiles.column.library")}</TableHead>
+                <TableHead>{t("web.admin.libraries.unsupportedFiles.column.type")}</TableHead>
+                <TableHead className="text-end">
+                  {t("web.admin.libraries.unsupportedFiles.column.files")}
+                </TableHead>
+                <TableHead>{t("web.admin.libraries.unsupportedFiles.column.firstFound")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -154,11 +169,13 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
                           variant="outline"
                           className="border-warning/30 bg-warning/5 text-warning"
                         >
-                          {REASON_LABELS[group.reason] ?? group.reason}
+                          {Object.hasOwn(REASON_LABELS, group.reason)
+                            ? t(REASON_LABELS[group.reason])
+                            : group.reason}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
-                        {group.file_count}
+                        {numberText(group.file_count)}
                       </TableCell>
                       <TableCell className="text-muted-foreground text-xs tabular-nums">
                         {formatDateTime(group.first_seen_at)}
@@ -171,13 +188,23 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
                           className="bg-muted/30 border-b px-4 py-3 whitespace-normal"
                         >
                           <div className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-xs">
-                            <span className="text-muted-foreground font-medium">Folder</span>
+                            <span className="text-muted-foreground font-medium">
+                              {t("web.admin.libraries.unsupportedFiles.column.folder")}
+                            </span>
                             <code className="font-mono break-all select-all">
                               {group.directory_path}
                             </code>
-                            <span className="text-muted-foreground font-medium">Why</span>
-                            <span>{group.message}</span>
-                            <span className="text-muted-foreground font-medium">Files</span>
+                            <span className="text-muted-foreground font-medium">
+                              {t("web.admin.libraries.unsupportedFiles.detail.why")}
+                            </span>
+                            <span>
+                              {Object.hasOwn(REASON_MESSAGES, group.reason)
+                                ? t(REASON_MESSAGES[group.reason])
+                                : group.message}
+                            </span>
+                            <span className="text-muted-foreground font-medium">
+                              {t("web.admin.libraries.unsupportedFiles.column.files")}
+                            </span>
                             <div>
                               <ul className="max-h-48 space-y-0.5 overflow-y-auto">
                                 {group.file_names.map((name) => (
@@ -187,10 +214,16 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
                                 ))}
                               </ul>
                               {hiddenNames > 0 ? (
-                                <p className="text-muted-foreground mt-1">and {hiddenNames} more</p>
+                                <p className="text-muted-foreground mt-1">
+                                  {t("web.admin.libraries.unsupportedFiles.moreFiles", {
+                                    count: hiddenNames,
+                                  })}
+                                </p>
                               ) : null}
                             </div>
-                            <span className="text-muted-foreground font-medium">Last found</span>
+                            <span className="text-muted-foreground font-medium">
+                              {t("web.admin.libraries.unsupportedFiles.detail.lastFound")}
+                            </span>
                             <span>{formatDateTime(group.last_seen_at)}</span>
                           </div>
                         </TableCell>
@@ -211,7 +244,9 @@ export function UnsupportedFilesSection({ libraries }: { libraries: Library[] })
           disabled={isFetchingNextPage}
           onClick={() => void fetchNextPage()}
         >
-          {isFetchingNextPage ? "Loading..." : "Load more"}
+          {isFetchingNextPage
+            ? t("web.admin.libraries.unsupportedFiles.loading")
+            : t("web.admin.libraries.loadMore")}
         </Button>
       ) : null}
     </CollapsibleDiagnosticsSection>

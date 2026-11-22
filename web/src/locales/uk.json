@@ -521,6 +521,12 @@
       "value": "Цей сеанс відтворення завершено. Почніть відтворення знову."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Цей потік замінено. Відтворення триває в поточному потоці."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -81478,6 +81484,12 @@
     {
       "type": 0,
       "value": "Позначати переглянутим на"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Тайтли з міткою титрів також вважаються переглянутими, щойно відтворення доходить до титрів."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
