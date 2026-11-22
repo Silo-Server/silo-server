@@ -637,6 +637,7 @@ export function usePlaybackSession(
   const requestedEstimateRef = useRef<number | null | undefined>(undefined);
   const requestedCapRef = useRef<number | null>(maxBitrateKbps ?? null);
   const requestedTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
+  const requestedQualityRef = useRef(normalizeQualityPreferenceV3(qualityPreference));
   const requestedAppliesQualityPolicyRef = useRef(true);
   const activeBandwidthCapRef = useRef<number | null>(maxBitrateKbps ?? null);
   const activePlanTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
@@ -646,6 +647,7 @@ export function usePlaybackSession(
   const tierChangeSeqRef = useRef(0);
   const qualitySelectionSeqRef = useRef(0);
   const userPickedQualityRef = useRef(false);
+  const pendingManualQualityRef = useRef(false);
   const latestQualitySettingsRef = useRef({
     qualityPreference: normalizeQualityPreferenceV3(qualityPreference),
     maxBitrateKbps: maxBitrateKbps ?? null,
@@ -966,6 +968,7 @@ export function usePlaybackSession(
       if (requestedAppliesQualityPolicyRef.current) {
         activeBandwidthCapRef.current = requestedCapRef.current;
         activePlanTierRef.current = requestedTierRef.current;
+        adoptedQualityRef.current = requestedQualityRef.current;
       }
       if (
         Number.isFinite(plan.timeline.source_start_seconds) &&
@@ -1014,11 +1017,13 @@ export function usePlaybackSession(
       playbackAttemptId: string,
       subtitleTrackIndex: number | undefined,
       audioTrackIndex: number | null | undefined = explicitAudioTrackIndex,
+      startQuality: string = qualityRef.current,
     ): Promise<DecisionResponseV3> => {
       const bandwidthEstimateKbps = detectBandwidthEstimateKbpsV3();
       requestedEstimateRef.current = bandwidthEstimateKbps;
       requestedCapRef.current = maxBitrateKbps ?? null;
       requestedTierRef.current = latestNetworkTierRef.current;
+      requestedQualityRef.current = startQuality;
       requestedAppliesQualityPolicyRef.current = true;
       // An owed Restore's `clear` goes out once, on this start.
       const clearOwed = clearOwedRef.current;
@@ -1028,7 +1033,7 @@ export function usePlaybackSession(
         fileId: targetFileId,
         profileId: config.getProfileId() ?? "",
         playbackAttemptId,
-        qualityPreference: qualityRef.current,
+        qualityPreference: startQuality,
         allowAlternateVersions: allowAlternateVersions && !versionPinnedRef.current,
         position,
         forceStartPosition,
@@ -1164,6 +1169,13 @@ export function usePlaybackSession(
       const previousSessionId = sessionIdRef.current;
       const hasExistingSession = !!previousState.sessionId && !!previousState.streamUrl;
       const loadSequence = ++loadSequenceRef.current;
+      // A start takes ownership of the quality it sends and supersedes any
+      // in-flight quality replan from the previous session so its refusal
+      // cannot roll back the replacement session's displayed preference.
+      const qualitySelectionSeq = ++qualitySelectionSeqRef.current;
+      const startQuality = qualityRef.current;
+      const adoptedManualPick = pendingManualQualityRef.current;
+      pendingManualQualityRef.current = false;
       const previousAttempt = {
         playbackAttemptId: playbackAttemptIdRef.current,
         planAttemptId: planAttemptIdRef.current,
@@ -1244,6 +1256,7 @@ export function usePlaybackSession(
           playbackAttemptId,
           tracks ? tracks.subtitleIndex : initialSubtitleTrackIndexByFileId?.[selectedFileId],
           startAudioTrackIndex,
+          startQuality,
         );
 
         if (loadSequence !== loadSequenceRef.current) {
@@ -1284,6 +1297,7 @@ export function usePlaybackSession(
             fallbackPlaybackAttemptId,
             undefined,
             startAudioTrackIndex,
+            startQuality,
           );
           if (!decisionToAdopt.playback_plan) {
             initialSubtitleFailure = null;
@@ -1304,8 +1318,13 @@ export function usePlaybackSession(
           return { kind: "superseded" };
         }
 
+        requestedQualityRef.current = startQuality;
+        requestedAppliesQualityPolicyRef.current = true;
         const adopted = adoptDecision(decisionToAdopt, initialSubtitleFailure, onAdopt);
         if (adopted) {
+          if (adoptedManualPick) {
+            userPickedQualityRef.current = true;
+          }
           // The kept estimate belonged to the attempt this start replaced.
           keptEstimateRef.current = undefined;
           // A start opens a new attempt. Its first frame is still to come:
@@ -1315,10 +1334,18 @@ export function usePlaybackSession(
         }
         if (!adopted && hasExistingSession && allowPreserveExistingSessionOnError) {
           restorePreviousAttempt();
+          const rollbackQuality =
+            qualitySelectionSeq === qualitySelectionSeqRef.current
+              ? adoptedQualityRef.current
+              : undefined;
+          if (rollbackQuality !== undefined) {
+            qualityRef.current = rollbackQuality;
+          }
           setState((current) => ({
             ...current,
             loading: false,
             replacing: false,
+            ...(rollbackQuality !== undefined ? { qualityPreference: rollbackQuality } : {}),
             errorTitle: previousState.errorTitle,
             errorReason: previousState.errorReason,
             error: previousState.error,
@@ -1343,10 +1370,18 @@ export function usePlaybackSession(
         if (hasExistingSession && allowPreserveExistingSessionOnError) {
           console.error(replacementErrorMessage, err);
           restorePreviousAttempt();
+          const rollbackQuality =
+            qualitySelectionSeq === qualitySelectionSeqRef.current
+              ? adoptedQualityRef.current
+              : undefined;
+          if (rollbackQuality !== undefined) {
+            qualityRef.current = rollbackQuality;
+          }
           setState((current) => ({
             ...current,
             loading: false,
             replacing: false,
+            ...(rollbackQuality !== undefined ? { qualityPreference: rollbackQuality } : {}),
           }));
           return { kind: "failed", error: err };
         }
@@ -1387,6 +1422,7 @@ export function usePlaybackSession(
     tierChangeSeqRef.current += 1;
     qualitySelectionSeqRef.current += 1;
     userPickedQualityRef.current = false;
+    pendingManualQualityRef.current = false;
     versionPinnedRef.current = versionPicked;
     const initialQuality = normalizeQualityPreferenceV3(qualityPreference);
     qualityRef.current = initialQuality;
@@ -1596,6 +1632,7 @@ export function usePlaybackSession(
       requestedEstimateRef.current = bandwidthEstimateKbps;
       requestedCapRef.current = maxBitrateKbps ?? null;
       requestedTierRef.current = latestNetworkTierRef.current;
+      requestedQualityRef.current = qualityRef.current;
       requestedAppliesQualityPolicyRef.current = options.operation === "quality_change";
       // A Restore that could not go at once rides its `clear` on the request
       // that replaced it.
@@ -2041,6 +2078,9 @@ export function usePlaybackSession(
       }
       const normalized = normalizeQualityPreferenceV3(label);
       const qualitySelectionSeq = ++qualitySelectionSeqRef.current;
+      if (!buffering) {
+        pendingManualQualityRef.current = true;
+      }
       qualityRef.current = normalized;
       setState((current) => ({ ...current, qualityPreference: normalized }));
       // The replan tells onAdopt as it adopts, before the new plan renders; a
@@ -2065,6 +2105,7 @@ export function usePlaybackSession(
             adoptedQualityRef.current = normalized;
             if (!buffering) {
               userPickedQualityRef.current = true;
+              pendingManualQualityRef.current = false;
             }
             onAdopt?.(planRevision);
           },
@@ -2072,6 +2113,9 @@ export function usePlaybackSession(
           if (adopted) return;
           onAdopt?.(undefined);
           if (qualitySelectionSeq !== qualitySelectionSeqRef.current) return;
+          if (!buffering) {
+            pendingManualQualityRef.current = false;
+          }
           const rollbackPreference = adoptedQualityRef.current;
           qualityRef.current = rollbackPreference;
           setState((current) =>

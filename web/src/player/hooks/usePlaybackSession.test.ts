@@ -1320,6 +1320,148 @@ describe("usePlaybackSession quality changes", () => {
 
     unmount();
   });
+
+  it("keeps the replacement start quality when switching versions during an in-flight manual pick", async () => {
+    let resolveOldReplan: ((response: Response) => void) | undefined;
+    const oldReplanResponse = new Promise<Response>((resolve) => {
+      resolveOldReplan = resolve;
+    });
+    let resolveSwitchStart: ((response: Response) => void) | undefined;
+    const switchStartResponse = new Promise<Response>((resolve) => {
+      resolveSwitchStart = resolve;
+    });
+    const startBodies: Array<Record<string, unknown>> = [];
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        startBodies.push(body);
+        if (startBodies.length === 1) {
+          return jsonResponse(playable("session-1", fixturePlanV3()), { status: 201 });
+        }
+        return switchStartResponse;
+      }
+      if (url.endsWith("/replan")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        replanBodies.push(body);
+        if (replanBodies.length === 1) return oldReplanResponse;
+        return jsonResponse(
+          playable(
+            "session-2",
+            fixturePlanV3({
+              session_id: "session-2",
+              plan_id: "plan:tier-after-version-switch",
+              plan_attempt_key: "v3:tier-after-version-switch",
+              requested_media_file_id: 99,
+              effective_media_file_id: 99,
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({
+        quality,
+        cap,
+        tier,
+      }: {
+        quality: string;
+        cap: number | null;
+        tier: "unmetered" | "metered" | "low_data";
+      }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          quality,
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          quality: "auto",
+          cap: null as number | null,
+          tier: "unmetered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.sessionId).toBe("session-1"));
+
+    // Start a manual pick, then switch versions before it returns.
+    act(() => result.current.changeQuality("1080p", 30));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+
+    act(() => result.current.switchVersion(99, 30));
+    await waitFor(() => expect(startBodies).toHaveLength(2));
+    expect(startBodies[1]?.quality_preference).toBe("1080p");
+
+    // The superseded replan returns; it must not roll back the replacement start's quality.
+    await act(async () => {
+      resolveOldReplan?.(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:superseded-pick",
+              plan_attempt_key: "v3:superseded-pick",
+            }),
+          ),
+        ),
+      );
+      await oldReplanResponse;
+    });
+
+    await act(async () => {
+      resolveSwitchStart?.(
+        jsonResponse(
+          playable(
+            "session-2",
+            fixturePlanV3({
+              session_id: "session-2",
+              plan_id: "plan:version-switch-1080p",
+              plan_attempt_key: "v3:version-switch-1080p",
+              requested_media_file_id: 99,
+              effective_media_file_id: 99,
+            }),
+          ),
+          { status: 201 },
+        ),
+      );
+      await switchStartResponse;
+    });
+
+    await waitFor(() => expect(result.current.sessionId).toBe("session-2"));
+    expect(result.current.qualityPreference).toBe("1080p");
+
+    // A later network-tier change preserves the adopted manual 1080p preference.
+    rerender({ quality: "720p", cap: 10_000, tier: "metered" });
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    expect(replanBodies[1]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "1080p",
+      bandwidth_cap_kbps: 10_000,
+    });
+    expect(result.current.qualityPreference).toBe("1080p");
+
+    unmount();
+  });
 });
 
 describe("usePlaybackSession initial bitmap subtitles", () => {
