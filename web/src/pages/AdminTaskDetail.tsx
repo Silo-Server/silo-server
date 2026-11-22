@@ -518,11 +518,9 @@ function HistoryRow({
         <td className="px-4 py-2">
           <TaskStatusBadge result={result} />
         </td>
-        {/* Wraps where the table fits its panel; translated step names run long. */}
-        <td
-          className="text-muted-foreground max-w-xs truncate px-4 py-2 sm:text-pretty sm:whitespace-normal"
-          title={errorText}
-        >
+        {/* Wraps at every width, since translated step names run long; the table
+            scrolls sideways when it is wider than its panel. */}
+        <td className="text-muted-foreground max-w-xs min-w-48 px-4 py-2 text-pretty">
           {errorText}
         </td>
       </tr>
@@ -724,7 +722,7 @@ export default function AdminTaskDetail() {
           </div>
         )}
         <div className="surface-panel overflow-hidden rounded-2xl border-0">
-          <table className="w-full text-sm">
+          <Table>
             <thead>
               <tr className="border-border bg-muted/50 border-b">
                 <th className="px-4 py-2 text-start font-medium">
@@ -758,7 +756,7 @@ export default function AdminTaskDetail() {
                 />
               ))}
             </tbody>
-          </table>
+          </Table>
         </div>
         {historyQuery.hasNextPage && (
           <Button
