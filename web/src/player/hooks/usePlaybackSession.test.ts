@@ -1802,6 +1802,80 @@ describe("usePlaybackSession output capability changes", () => {
     unmount();
   });
 
+  it("retires the over-cap session when a queued output refresh inherits a tightening policy and fails with HTTP 503", async () => {
+    const setHDR = outputProbe(true);
+    let resolveTightening: ((response: Response) => void) | undefined;
+    const tighteningResponse = new Promise<Response>((resolve) => {
+      resolveTightening = resolve;
+    });
+    const replanOperations: string[] = [];
+    const stoppedSessions: string[] = [];
+    const fetchMock = hdrFetch((init) => {
+      replanOperations.push((JSON.parse(String(init?.body)) as { operation: string }).operation);
+      if (replanOperations.length === 1) return tighteningResponse;
+      return new Response(JSON.stringify({ error: "temporary failure" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }, stoppedSessions);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
+
+    rerender({ cap: 2_000, tier: "low_data" });
+    await waitFor(() => expect(replanOperations).toEqual(["quality_change"]));
+
+    // Queue an output refresh behind the in-flight tightening replan.
+    act(() => setHDR(false));
+
+    await act(async () => {
+      resolveTightening?.(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "output_change_v1"],
+          outcome: "terminal",
+          terminal: { reason: "transcoding_disabled", message: "Transcoding disabled" },
+        }),
+      );
+      await tighteningResponse;
+    });
+
+    await waitFor(() => expect(replanOperations).toEqual(["quality_change", "output_change"]));
+    await waitFor(() => expect(result.current.plan).toBeNull());
+    expect(result.current.streamUrl).toBeNull();
+    expect(result.current.error).not.toBeNull();
+    await waitFor(() => expect(stoppedSessions).toEqual(["/api/v2/playback/session-hdr"]));
+    unmount();
+  });
+
   it("retires after a queued user intent also refuses refreshed output", async () => {
     const setHDR = outputProbe(true);
     let resolveOutputReplan: ((response: Response) => void) | undefined;

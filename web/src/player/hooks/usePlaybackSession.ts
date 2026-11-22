@@ -506,17 +506,31 @@ function describePlaybackSessionError(
  *    answers with a whole new plan, never a patch.
  * 3. On unmount: DELETE `/playback/{session_id}` with a keepalive fallback.
  */
-type RetireOnRefusalPolicy = boolean | (() => boolean);
+interface ReplanFailurePolicy {
+  /** Retire the active session on a server refusal (e.g. output_change). */
+  retireOnRefusal?: boolean;
+  /**
+   * Predicate for a cap-tightening replan: while true on a refusal or request
+   * failure, retire the over-cap session; when false, ignore the stale
+   * tightening failure unless `retireOnRefusal` independently applies.
+   */
+  retireWhileTightened?: () => boolean;
+}
 
-function mergeRetireOnRefusal(
-  existing: RetireOnRefusalPolicy,
-  incoming: RetireOnRefusalPolicy,
-): RetireOnRefusalPolicy {
-  if (existing === true || incoming === true) return true;
-  if (typeof existing === "function" && typeof incoming === "function") {
-    return () => existing() || incoming();
-  }
-  return existing || incoming;
+const NO_RETIRE_POLICY: ReplanFailurePolicy = {};
+
+function mergeReplanFailurePolicy(
+  existing: ReplanFailurePolicy,
+  incoming: ReplanFailurePolicy,
+): ReplanFailurePolicy {
+  const retireOnRefusal = existing.retireOnRefusal || incoming.retireOnRefusal || undefined;
+  const retireWhileTightened =
+    existing.retireWhileTightened && incoming.retireWhileTightened
+      ? () => existing.retireWhileTightened!() || incoming.retireWhileTightened!()
+      : (existing.retireWhileTightened ?? incoming.retireWhileTightened);
+  return retireOnRefusal || retireWhileTightened
+    ? { retireOnRefusal, retireWhileTightened }
+    : NO_RETIRE_POLICY;
 }
 
 export function usePlaybackSession(
@@ -630,6 +644,7 @@ export function usePlaybackSession(
   const latestNetworkTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
   latestNetworkTierRef.current = networkTier;
   const tierChangeSeqRef = useRef(0);
+  const manualPickSeqRef = useRef(0);
   const userPickedQualityRef = useRef(false);
   const latestQualitySettingsRef = useRef({
     qualityPreference: normalizeQualityPreferenceV3(qualityPreference),
@@ -720,7 +735,7 @@ export function usePlaybackSession(
   const pendingReplanRef = useRef<{
     options: ReplanOptions;
     loadSequence: number;
-    retireSessionOnRefusal: boolean | (() => boolean);
+    failurePolicy: ReplanFailurePolicy;
     resolve: (adopted: boolean) => void;
     planId: string;
     /** The file the queued request's track ordinals index into. */
@@ -732,7 +747,7 @@ export function usePlaybackSession(
   const issueReplanRef = useRef<
     (
       options: ReplanOptions,
-      retireSessionOnRefusal?: boolean | (() => boolean),
+      failurePolicy?: ReplanFailurePolicy,
       reconnect?: boolean,
       onAdopt?: (planRevision: number) => void,
     ) => Promise<boolean>
@@ -1369,6 +1384,7 @@ export function usePlaybackSession(
     activePlanTierRef.current = networkTier;
     activeBandwidthCapRef.current = maxBitrateKbps ?? null;
     tierChangeSeqRef.current += 1;
+    manualPickSeqRef.current += 1;
     userPickedQualityRef.current = false;
     versionPinnedRef.current = versionPicked;
     qualityRef.current = normalizeQualityPreferenceV3(qualityPreference);
@@ -1455,7 +1471,7 @@ export function usePlaybackSession(
   const replan = useCallback(
     async function issueReplan(
       options: ReplanOptions,
-      retireSessionOnRefusal: boolean | (() => boolean) = false,
+      failurePolicy: ReplanFailurePolicy = NO_RETIRE_POLICY,
       reconnect = false,
       onAdopt?: (planRevision: number) => void,
     ): Promise<boolean> {
@@ -1511,7 +1527,7 @@ export function usePlaybackSession(
             pendingReplanRef.current = {
               options,
               loadSequence: loadSequenceRef.current,
-              retireSessionOnRefusal,
+              failurePolicy,
               resolve,
               planId: plan.plan_id,
               mediaFileId: plan.effective_media_file_id,
@@ -1636,10 +1652,12 @@ export function usePlaybackSession(
         }
 
         if (reconnect && !decision.playback_plan) return false;
+        const tightenedStillActive = failurePolicy.retireWhileTightened?.() ?? false;
         if (
           !decision.playback_plan &&
-          typeof retireSessionOnRefusal === "function" &&
-          !retireSessionOnRefusal()
+          !failurePolicy.retireOnRefusal &&
+          failurePolicy.retireWhileTightened &&
+          !tightenedStillActive
         ) {
           // A tightening replan was refused after the viewer already relaxed
           // the cap back to a value the active stream satisfies; ignore the
@@ -1655,28 +1673,21 @@ export function usePlaybackSession(
           options.operation === "track_change" && options.subtitle !== undefined ? null : undefined,
           onAdopt,
         );
-        const shouldRetire =
-          typeof retireSessionOnRefusal === "function"
-            ? retireSessionOnRefusal()
-            : retireSessionOnRefusal;
-        if (!adopted && shouldRetire) {
+        if (!adopted && (failurePolicy.retireOnRefusal || tightenedStillActive)) {
           const pending = pendingReplanRef.current;
           const pendingCanValidateOutput =
             pending?.loadSequence === loadSequence &&
             pending.options.operation !== "seek_reanchor" &&
             pending.options.operation !== "seek_failure_recovery";
           if (pending && pendingCanValidateOutput) {
-            // The output refusal proves the predecessor route is incompatible.
-            // Let a queued planner-backed intent try the latest output evidence,
-            // but require it to retire the session too if it is refused. Frozen
-            // seek replans cannot validate new output evidence, so they must not
+            // The output or cap refusal proves the predecessor route is
+            // incompatible. Let a queued planner-backed intent try the latest
+            // evidence, preserving both refusal and tightening policies. Frozen
+            // seek replans cannot validate new evidence, so they must not
             // postpone retirement.
             pendingReplanRef.current = {
               ...pending,
-              retireSessionOnRefusal: mergeRetireOnRefusal(
-                pending.retireSessionOnRefusal,
-                retireSessionOnRefusal,
-              ),
+              failurePolicy: mergeReplanFailurePolicy(pending.failurePolicy, failurePolicy),
             };
           } else {
             retireActiveSession(sessionId);
@@ -1699,11 +1710,12 @@ export function usePlaybackSession(
           }));
           return false;
         }
-        if (retireSessionOnRefusal === true) {
+        const tightenedStillActive = failurePolicy.retireWhileTightened?.() ?? false;
+        if (failurePolicy.retireOnRefusal && !tightenedStillActive) {
           console.error("Failed to refresh playback output", err);
           return false;
         }
-        if (typeof retireSessionOnRefusal === "function" && !retireSessionOnRefusal()) {
+        if (failurePolicy.retireWhileTightened && !tightenedStillActive) {
           // A tightening request failed after the viewer already relaxed the
           // cap; leave the permitted stream running without surfacing a stale
           // error.
@@ -1732,7 +1744,7 @@ export function usePlaybackSession(
           errorReason: null,
           error: nextError.message,
         }));
-        if (typeof retireSessionOnRefusal === "function") {
+        if (tightenedStillActive) {
           retireActiveSession(sessionId);
         }
         return false;
@@ -1790,7 +1802,7 @@ export function usePlaybackSession(
             // render. Dispatch through the latest callback so its request carries
             // the current output evidence rather than the closed-over snapshot.
             void issueReplanRef
-              .current(options, pendingReplan.retireSessionOnRefusal, false, pendingReplan.onAdopt)
+              .current(options, pendingReplan.failurePolicy, false, pendingReplan.onAdopt)
               .then(pendingReplan.resolve);
           }
         } else {
@@ -1854,7 +1866,7 @@ export function usePlaybackSession(
         operation: "output_change",
         positionSeconds: playbackPositionRef.current,
       },
-      true,
+      { retireOnRefusal: true },
     );
   }, [
     capabilityRequestKey,
@@ -1939,7 +1951,7 @@ export function usePlaybackSession(
             operation: "quality_change",
             positionSeconds: playbackPositionRef.current,
           },
-          capTightened ? stillTightened : false,
+          capTightened ? { retireWhileTightened: stillTightened } : NO_RETIRE_POLICY,
         )
         .then((adopted) => {
           if (
@@ -2019,6 +2031,7 @@ export function usePlaybackSession(
       const normalized = normalizeQualityPreferenceV3(label);
       const previousPreference = qualityRef.current;
       const previousUserPicked = userPickedQualityRef.current;
+      const manualPickSeq = !buffering ? ++manualPickSeqRef.current : manualPickSeqRef.current;
       if (!buffering) {
         userPickedQualityRef.current = true;
       }
@@ -2040,7 +2053,7 @@ export function usePlaybackSession(
                 }
               : {}),
           },
-          false,
+          NO_RETIRE_POLICY,
           false,
           onAdopt,
         ).then((adopted) => {
@@ -2048,7 +2061,9 @@ export function usePlaybackSession(
           onAdopt?.(undefined);
           if (qualityRef.current !== normalized) return;
           qualityRef.current = previousPreference;
-          userPickedQualityRef.current = previousUserPicked;
+          if (!buffering && manualPickSeq === manualPickSeqRef.current) {
+            userPickedQualityRef.current = previousUserPicked;
+          }
           setState((current) =>
             current.qualityPreference === normalized
               ? { ...current, qualityPreference: previousPreference }
@@ -2179,7 +2194,11 @@ export function usePlaybackSession(
           planRef.current.delivery === "server_remux_progressive"
             ? "seek_reanchor"
             : "track_change";
-        const adopted = await issueReplanRef.current({ operation, positionSeconds }, false, true);
+        const adopted = await issueReplanRef.current(
+          { operation, positionSeconds },
+          NO_RETIRE_POLICY,
+          true,
+        );
         // An adopted plan has already ended the cycle.
         if (adopted || !isCurrent()) return;
       } catch (error) {
