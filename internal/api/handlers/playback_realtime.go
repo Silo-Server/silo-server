@@ -233,7 +233,7 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 		result.MediaItemID = playbackProgressTarget(file)
 		result.DurationSeconds = float64(file.Duration)
 		result.Completed = result.HistoryID != "" && !session.DisableProgressPersistence &&
-			h.playbackThresholdsForFile(ctx, file, result.DurationSeconds).Watched(session.Position, result.DurationSeconds)
+			h.playbackThresholdsForFile(ctx, session, file, result.DurationSeconds).Watched(session.Position, result.DurationSeconds)
 	}
 	return realtimeStopOutcome{result: result, reason: endReasonForStop(session.ID, receipt.StopID), notify: notify}
 }

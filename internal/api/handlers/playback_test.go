@@ -843,11 +843,15 @@ func TestPersistStopAndHistory_CreditsFinishTheItem(t *testing.T) {
 		name          string
 		segments      []models.MarkerSegment
 		position      float64
+		playingFileID int
 		wantCompleted bool
 	}{
 		{name: "stop inside end credits", segments: credits(1200, 1410), position: 1220, wantCompleted: true},
 		{name: "stop before end credits", segments: credits(1200, 1410), position: 1150},
 		{name: "credits outside the end window", segments: credits(300, 400), position: 1220},
+		// The session streams another version than the requested file whose
+		// credits these are, so they don't apply to its position.
+		{name: "another version streams", segments: credits(1200, 1410), position: 1220, playingFileID: 43},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			store := newPlaybackTestStore(t)
@@ -862,13 +866,17 @@ func TestPersistStopAndHistory_CreditsFinishTheItem(t *testing.T) {
 			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
 			handler.StoreProvider = testUserStoreProvider{store: store}
 
-			result := handler.persistStopAndHistory(context.Background(), &playback.Session{
+			session := &playback.Session{
 				ID:          "session-1",
 				UserID:      1,
 				ProfileID:   "profile-1",
 				MediaFileID: 42,
 				Position:    tc.position,
-			})
+			}
+			if tc.playingFileID > 0 {
+				session.RequestedMediaFileID, session.MediaFileID = 42, tc.playingFileID
+			}
+			result := handler.persistStopAndHistory(context.Background(), session)
 
 			progress, err := store.GetProgress(context.Background(), "profile-1", "episode-1")
 			if err != nil {

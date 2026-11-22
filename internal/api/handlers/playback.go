@@ -494,12 +494,15 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 }
 
 // playbackThresholdsForFile is playbackThresholds with file's end credits,
-// for a position measured on a timeline of duration seconds. The credits
-// count only when that timeline is the file's own; a longer one, such as a
-// whole audiobook, keeps the percentage rule.
-func (h *PlaybackHandler) playbackThresholdsForFile(ctx context.Context, file *models.MediaFile, duration float64) userstore.ProgressThresholds {
+// for session's position measured on a timeline of duration seconds. The
+// credits count only when file is the one session streams and the timeline is
+// that file's own. A session that streams another file than the one it loaded,
+// such as a lower-bitrate version or the next part of a multipart title, or a
+// longer timeline such as a whole audiobook, keeps the percentage rule.
+func (h *PlaybackHandler) playbackThresholdsForFile(ctx context.Context, session *playback.Session, file *models.MediaFile, duration float64) userstore.ProgressThresholds {
 	t := h.playbackThresholds(ctx)
-	if file != nil && duration == float64(file.Duration) {
+	streams := session == nil || session.MediaFileID <= 0 || (file != nil && file.ID == session.MediaFileID)
+	if file != nil && streams && duration == float64(file.Duration) {
 		t.CreditsStartSeconds = markers.CreditsLimitsForFile(file).EndCreditsStart(models.EffectiveMarkerSegments(file), duration)
 	}
 	return t
@@ -1065,7 +1068,7 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 	}
 
 	duration := float64(file.Duration)
-	thresholds := h.playbackThresholdsForFile(ctx, file, duration)
+	thresholds := h.playbackThresholdsForFile(ctx, session, file, duration)
 	hints := userstore.VersionHints{
 		FileID:     file.ID,
 		Resolution: file.Resolution,
@@ -1121,7 +1124,7 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	}
 
 	duration := float64(file.Duration)
-	thresholds := h.playbackThresholdsForFile(ctx, file, duration)
+	thresholds := h.playbackThresholdsForFile(ctx, session, file, duration)
 	watchSvc := watchstate.NewService(h.StoreProvider).
 		WithStableIdentityResolver(h.StableIdentityResolver).
 		WithCompletionObserver(h.CompletionObserver)
@@ -1289,7 +1292,7 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 			duration = session.TimelineDuration
 		}
 		durationPtr = &duration
-		completed = h.playbackThresholdsForFile(ctx, file, duration).Watched(session.Position, duration)
+		completed = h.playbackThresholdsForFile(ctx, session, file, duration).Watched(session.Position, duration)
 	}
 
 	entry := &AdminPlaybackHistoryEntry{
