@@ -397,8 +397,11 @@ history. That item's values may come from a match the admin has since removed,
 so a `complete` refresh of a movie or series ends like `reset` does: every
 unlocked field other than the title and artwork, the credits and the rating
 sources get the providers' values, empty when no provider has one. Unlike
-`reset`, it keeps `locked_fields` and the values they hold. When a provider in
-the chain fails to answer (the failures that fail a reset, and also an
+`reset`, it keeps `locked_fields` and the values they hold. It clears only the
+base row: the localization rows keep their text in other languages, including
+text the removed match wrote, and a library whose metadata language isn't the
+item's own keeps the base row's overview and tagline, as `reset` does. When a
+provider in the chain fails to answer (the failures that fail a reset, and also an
 enrichment provider whose key is rejected), it ends with a quick refresh instead
 and keeps the values the providers leave empty. A season
 or episode target ends with a quick refresh of that season or episode.
