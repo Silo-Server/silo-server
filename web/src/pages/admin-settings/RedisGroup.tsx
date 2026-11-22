@@ -98,7 +98,10 @@ export function RedisGroup({
           // while a save is in flight, like the URL field below.
           if (secrets.disabled) return;
           if (value === "true") {
-            setEnabledOverride(true);
+            // With a URL saved, taking back the switch-off leaves nothing
+            // staged, so the switch follows what is saved again. With none
+            // saved, it stays on so a URL can be typed.
+            setEnabledOverride(configured ? null : true);
             // Takes back a staged switch-off, which cleared the number too.
             form.resetValue("redis.url");
             form.resetValue("redis.db");
