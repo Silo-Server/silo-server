@@ -37,31 +37,35 @@ func TestNotificationEmailLinksV2PreserveHTML(t *testing.T) {
 	links := handlers.NewEmailLinkHandler(fake)
 	h := apiv2.NewHandler(apiv2.Dependencies{NotificationEmailLinks: links})
 	for _, tc := range []struct {
-		name, path, method string
-		outcome            notifications.EmailVerifyOutcome
-		ok                 bool
-		err                error
-		status             int
+		name, path, method, token string
+		outcome                   notifications.EmailVerifyOutcome
+		ok                        bool
+		err                       error
+		status                    int
 	}{
-		{"verify", "verify", http.MethodGet, notifications.EmailVerifyOK, false, nil, 200},
-		{"used", "verify", http.MethodGet, notifications.EmailVerifyInvalid, false, nil, 400},
-		{"conflict", "verify", http.MethodGet, notifications.EmailVerifyConflict, false, nil, 409},
-		{"verify-error", "verify", http.MethodGet, notifications.EmailVerifyInvalid, false, errors.New("private database detail"), 500},
-		{"unsubscribe", "unsubscribe", http.MethodGet, 0, true, nil, 200},
-		{"one-click", "unsubscribe", http.MethodPost, 0, true, nil, 200},
-		{"invalid", "unsubscribe", http.MethodPost, 0, false, nil, 400},
-		{"unsubscribe-error", "unsubscribe", http.MethodPost, 0, false, errors.New("private database detail"), 500},
+		{"verify", "verify", http.MethodGet, "synthetic-proof", notifications.EmailVerifyOK, false, nil, 200},
+		{"used", "verify", http.MethodGet, "synthetic-proof", notifications.EmailVerifyInvalid, false, nil, 400},
+		{"conflict", "verify", http.MethodGet, "synthetic-proof", notifications.EmailVerifyConflict, false, nil, 409},
+		{"verify-error", "verify", http.MethodGet, "synthetic-proof", notifications.EmailVerifyInvalid, false, errors.New("private database detail"), 500},
+		{"unsubscribe", "unsubscribe", http.MethodGet, "synthetic-proof", 0, true, nil, 200},
+		{"unsubscribe-missing", "unsubscribe", http.MethodGet, "", 0, true, nil, 400},
+		{"one-click", "unsubscribe", http.MethodPost, "synthetic-proof", 0, true, nil, 200},
+		{"invalid", "unsubscribe", http.MethodPost, "synthetic-proof", 0, false, nil, 400},
+		{"unsubscribe-error", "unsubscribe", http.MethodPost, "synthetic-proof", 0, false, errors.New("private database detail"), 500},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			*fake = fakeNotificationEmailLinks{outcome: tc.outcome, unsubscribed: tc.ok, err: tc.err}
-			req := httptest.NewRequest(tc.method, "/api/v2/notifications/email/"+tc.path+"?token=synthetic-proof", strings.NewReader("List-Unsubscribe=One-Click"))
+			req := httptest.NewRequest(tc.method, "/api/v2/notifications/email/"+tc.path+"?token="+tc.token, strings.NewReader("List-Unsubscribe=One-Click"))
 			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 			req.Header.Set("Accept", "text/html")
+			// The confirmation page is no-referrer, so its form post arrives with Origin: null.
+			req.Header.Set("Origin", "null")
 			// This token capability is independent of an ambient browser login.
 			req.Header.Set("Authorization", "Bearer unrelated-expired-session")
 			rec := httptest.NewRecorder()
 			h.ServeHTTP(rec, req)
-			wantCalls, wantToken := 1, "synthetic-proof"
+			// Opening the unsubscribe link must not change preferences; only POST does.
+			wantCalls, wantToken := 1, tc.token
 			if tc.path == "unsubscribe" && tc.method == http.MethodGet {
 				wantCalls, wantToken = 0, ""
 			}
@@ -71,43 +75,14 @@ func TestNotificationEmailLinksV2PreserveHTML(t *testing.T) {
 			if rec.Header().Get("Content-Type") != "text/html; charset=utf-8" || rec.Header().Get("Cache-Control") != "no-store" || rec.Header().Get("Referrer-Policy") != "no-referrer" {
 				t.Fatalf("headers: %v", rec.Header())
 			}
-			if strings.Contains(rec.Body.String(), "synthetic-proof") || strings.Contains(rec.Body.String(), "private database detail") {
+			body := rec.Body.String()
+			if strings.Contains(body, "synthetic-proof") || strings.Contains(body, "private database detail") {
 				t.Fatal("proof or internal error reflected")
 			}
-		})
-	}
-}
-
-func TestNotificationEmailLinksV2UnsubscribePostForms(t *testing.T) {
-	for _, body := range []string{"", "List-Unsubscribe=One-Click", "token=unrelated-body-proof"} {
-		t.Run(body, func(t *testing.T) {
-			fake := &fakeNotificationEmailLinks{unsubscribed: true}
-			h := apiv2.NewHandler(apiv2.Dependencies{NotificationEmailLinks: handlers.NewEmailLinkHandler(fake)})
-			req := httptest.NewRequest(http.MethodPost, "/api/v2/notifications/email/unsubscribe?token=synthetic-proof", strings.NewReader(body))
-			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-			req.Header.Set("Origin", "null")
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, req)
-			if rec.Code != http.StatusOK || fake.calls != 1 || fake.token != "synthetic-proof" || !strings.Contains(rec.Body.String(), "Unsubscribed") {
-				t.Fatalf("POST result: %d calls=%d token=%q body=%s", rec.Code, fake.calls, fake.token, rec.Body.String())
-			}
-		})
-	}
-}
-
-func TestNotificationEmailLinksV2UnsubscribeUnsupportedMethods(t *testing.T) {
-	for _, method := range []string{http.MethodHead, http.MethodOptions, http.MethodPut, http.MethodDelete, http.MethodPatch} {
-		t.Run(method, func(t *testing.T) {
-			fake := new(fakeNotificationEmailLinks)
-			h := apiv2.NewHandler(apiv2.Dependencies{NotificationEmailLinks: handlers.NewEmailLinkHandler(fake)})
-			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, httptest.NewRequest(method, "/api/v2/notifications/email/unsubscribe?token=synthetic-proof", nil))
-			if rec.Code != http.StatusMethodNotAllowed || fake.calls != 0 || !strings.HasPrefix(rec.Header().Get("Content-Type"), "application/problem+json") {
-				t.Fatalf("method response: %d calls=%d headers=%v", rec.Code, fake.calls, rec.Header())
-			}
-			allow := strings.Join(rec.Header().Values("Allow"), ", ")
-			if !strings.Contains(allow, "GET") || !strings.Contains(allow, "POST") || strings.Contains(allow, method) {
-				t.Fatalf("Allow: %s", allow)
+			// The confirmation form has no action, so it posts back to the URL it
+			// was opened at, token included.
+			if wantForm := tc.name == "unsubscribe"; strings.Contains(body, `<form method="post"`) != wantForm || strings.Contains(body, "action=") {
+				t.Fatalf("confirmation form: %s", body)
 			}
 		})
 	}

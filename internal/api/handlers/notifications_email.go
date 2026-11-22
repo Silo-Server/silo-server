@@ -47,16 +47,14 @@ func (h *EmailLinkHandler) HandleVerify(w http.ResponseWriter, r *http.Request) 
 }
 
 // HandleUnsubscribe handles GET and POST /notifications/email/unsubscribe?token=...
-// GET only confirms intent. POST is also the RFC 8058 one-click target, so it
-// accepts requests without a login, including no-referrer form posts with Origin: null.
+// Only POST changes preferences. It is both the confirmation page's button and
+// the RFC 8058 one-click target, so it needs no login and accepts no-referrer
+// form posts with Origin: null. Any other request only renders the
+// confirmation, so a link scanner or prefetch can't unsubscribe anyone.
 func (h *EmailLinkHandler) HandleUnsubscribe(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet && r.Method != http.MethodPost {
-		w.Header().Set("Allow", "GET, POST")
-		writeEmailLinkPage(w, http.StatusMethodNotAllowed, "Method not allowed", "Open this link to confirm, or submit the confirmation to unsubscribe.")
-		return
-	}
-	if r.Method == http.MethodGet {
-		if r.URL.Query().Get("token") == "" {
+	token := r.URL.Query().Get("token")
+	if r.Method != http.MethodPost {
+		if token == "" {
 			writeEmailLinkPage(w, http.StatusBadRequest, "Link invalid",
 				"This unsubscribe link is no longer valid. Manage notifications in Silo's settings.")
 			return
@@ -65,7 +63,7 @@ func (h *EmailLinkHandler) HandleUnsubscribe(w http.ResponseWriter, r *http.Requ
 			"Choose Unsubscribe to stop notification emails for this profile. Opening this page has not changed your preferences.", true)
 		return
 	}
-	ok, err := h.system.UnsubscribeEmail(r.Context(), r.URL.Query().Get("token"))
+	ok, err := h.system.UnsubscribeEmail(r.Context(), token)
 	switch {
 	case err != nil:
 		writeEmailLinkPage(w, http.StatusInternalServerError, "Something went wrong",
@@ -87,8 +85,6 @@ func writeEmailLinkPage(w http.ResponseWriter, status int, title, detail string)
 
 func writeEmailLinkPageWithConfirmation(w http.ResponseWriter, status int, title, detail string, confirm bool) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Referrer-Policy", "no-referrer")
 	w.WriteHeader(status)
 	_, _ = fmt.Fprintf(w, `<!doctype html><html lang="en"><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>%s — Silo</title>
 <style>button{font:inherit;font-weight:600;background:#e8e8ec;color:#101014;border:0;border-radius:6px;padding:12px 20px;cursor:pointer}button:focus-visible{outline:3px solid #e8e8ec;outline-offset:4px}</style></head>
