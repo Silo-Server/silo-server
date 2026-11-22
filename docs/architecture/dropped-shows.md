@@ -42,8 +42,9 @@ dated at the run; see
 
 ## Sync with providers
 
-Each connection has one setting, `sync_dropped_enabled`. It is on for new connections,
-and for existing connections that sync anything, so the first sync after the feature
+Each connection has one setting, `sync_dropped_enabled`. It is off for new connections
+until the profile turns it on. It is on for existing connections that sync anything, so
+the first sync after the feature
 ships imports drops already on the provider; a connection with every sync setting off
 stays paused. A provider takes part when it advertises the `sync_dropped` capability.
 The v2 watch-provider connection responses expose the setting and capability.

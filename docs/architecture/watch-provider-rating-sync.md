@@ -3,7 +3,8 @@
 A profile's movie and series ratings sync with a connected watch provider in either
 direction or both. Each connection has two settings: `import_ratings_enabled` brings
 provider ratings into Silo, and `export_ratings_enabled` sends Silo ratings to the
-provider and clears ones the profile removes. New connections start with both on;
+provider and clears ones the profile removes. New connections start with both off
+until the profile turns them on;
 connections that existed before rating sync start with both off. A provider takes part
 only when it advertises the matching `import_ratings` or `export_ratings` capability.
 Season and episode ratings are not synced, because Silo rates only movies and series.
