@@ -173,6 +173,16 @@ func TestRebuildItemForLibrary_ProviderOutageKeepsStoredValues(t *testing.T) {
 	const contentID = "146000000000000100"
 	h := newTestHarness()
 	seedEditedMovie(t, h, contentID)
+	// The overview lock also holds the tagline, so the content rating is the
+	// stored value here that no lock holds and no provider sends.
+	seeded, err := h.itemRepo.GetByID(context.Background(), contentID)
+	if err != nil {
+		t.Fatalf("load seeded item: %v", err)
+	}
+	seeded.ContentRating = "PG-13"
+	if err := h.itemRepo.Upsert(context.Background(), seeded); err != nil {
+		t.Fatalf("seed content rating: %v", err)
+	}
 	providers := []Provider{
 		&capturingMetadataProvider{response: &MetadataResult{
 			HasMetadata: true, Title: "Provider Title", Year: 2006,
@@ -192,8 +202,8 @@ func TestRebuildItemForLibrary_ProviderOutageKeepsStoredValues(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load item: %v", err)
 	}
-	if item.Tagline != "Typed tagline" || item.Year != 2006 {
-		t.Errorf("tagline=%q year=%d, want the unlocked tagline kept and the answering provider's year", item.Tagline, item.Year)
+	if item.ContentRating != "PG-13" || item.Year != 2006 {
+		t.Errorf("content rating=%q year=%d, want the unlocked content rating kept and the answering provider's year", item.ContentRating, item.Year)
 	}
 	if len(item.LockedFields) != 2 {
 		t.Errorf("locked_fields = %v, want the stored locks kept", item.LockedFields)
