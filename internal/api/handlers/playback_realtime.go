@@ -337,19 +337,15 @@ func (c *CopySafetyPlaybackControl) StopSession(ctx context.Context, sessionID s
 type adminStopMarker interface {
 	// MarkAdminStop records that commandID was issued to the player.
 	MarkAdminStop(ctx context.Context, sessionID, commandID string) error
-	// ClearAdminStop withdraws commandID's mark, and no later command's.
-	// When heir, another stop of the session the player hasn't answered, is
-	// set, the mark passes to it instead.
-	ClearAdminStop(ctx context.Context, sessionID, commandID, heir string) error
+	// ClearAdminStop withdraws commandID's mark, and no other command's.
+	ClearAdminStop(ctx context.Context, sessionID, commandID string) error
 }
 
 // markAdminStop sets the attempt's administrator stop mark for commandID, or
-// withdraws it when requested is false and commandID still holds it. A later
-// stop takes the mark over from an earlier one, so withdrawing it hands it
-// back to any other stop still pending on this replica. The write is bounded
-// like the other store calls on the command and socket paths; a failure only
-// leaves the player's own stop recorded as its own, as before the mark
-// existed.
+// withdraws commandID's mark when requested is false; overlapping stops keep
+// one mark each. The write is bounded like the other store calls on the
+// command and socket paths; a failure only leaves the player's own stop
+// recorded as its own, as before the mark existed.
 func (h *PlaybackHandler) markAdminStop(sessionID, commandID string, requested bool) {
 	marker, ok := h.PlanStoreV3.(adminStopMarker)
 	if !ok {
@@ -361,7 +357,7 @@ func (h *PlaybackHandler) markAdminStop(sessionID, commandID string, requested b
 	if requested {
 		err = marker.MarkAdminStop(ctx, sessionID, commandID)
 	} else {
-		err = marker.ClearAdminStop(ctx, sessionID, commandID, h.pendingRealtimeStop(sessionID, commandID))
+		err = marker.ClearAdminStop(ctx, sessionID, commandID)
 	}
 	if err != nil {
 		slog.WarnContext(ctx, "failed to record an administrator's pending stop", "session", sessionID, "playback_session_id", sessionID, "command", commandID, "requested", requested, "error", err)
@@ -389,19 +385,6 @@ func (h *PlaybackHandler) forgetRealtimeCommand(commandID string) {
 	h.realtimeCommandMu.Lock()
 	delete(h.realtimeCommands, commandID)
 	h.realtimeCommandMu.Unlock()
-}
-
-// pendingRealtimeStop is a stop command other than except that this replica
-// sent to sessionID and the player hasn't answered, or "" when there is none.
-func (h *PlaybackHandler) pendingRealtimeStop(sessionID, except string) string {
-	h.realtimeCommandMu.Lock()
-	defer h.realtimeCommandMu.Unlock()
-	for commandID, record := range h.realtimeCommands {
-		if commandID != except && record.SessionID == sessionID && record.Name == playback.CommandStop {
-			return commandID
-		}
-	}
-	return ""
 }
 
 func (h *PlaybackHandler) getRealtimeCommand(commandID string) (playbackCommandRecord, bool) {

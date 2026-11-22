@@ -525,8 +525,9 @@ func (s *Postgres) StopAttempt(ctx context.Context, sessionID, stopID string, fi
 		    stop_receipt = jsonb_strip_nulls(jsonb_build_object(
 		        'stop_id', $2::uuid::text,
 		        'accepted', CASE WHEN $3::bigint > last_sequence THEN $4::jsonb ELSE last_sample END,
-		        'admin_stop_requested', CASE WHEN admin_stop_command_id IS NOT NULL
-		            AND admin_stop_requested_at > NOW() - make_interval(secs => $6) THEN TRUE END)),
+		        'admin_stop_requested', CASE WHEN EXISTS (
+		            SELECT 1 FROM jsonb_each_text(admin_stop_commands) AS pending(command_id, requested_at)
+		            WHERE pending.requested_at::timestamptz > NOW() - make_interval(secs => $6)) THEN TRUE END)),
 		    updated_at = NOW()
 		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL
 		RETURNING stop_receipt`, sessionID, stopID, finalSequence, finalJSON, time.Now(), playback.AdminStopPendingFor.Seconds()).Scan(&receiptJSON)
@@ -558,22 +559,23 @@ func (s *Postgres) StopAttempt(ctx context.Context, sessionID, stopID string, fi
 
 // MarkAdminStop records that commandID, an administrator's stop, was sent to
 // the player of a live attempt; a stop that wins the attempt within
-// playback.AdminStopPendingFor copies the mark into its receipt. It leaves
-// updated_at alone: the idle expiry reads it as activity.
+// playback.AdminStopPendingFor copies the mark into its receipt. Each command
+// keeps its own entry, so overlapping stops, on any replica, withdraw only
+// their own. It leaves updated_at alone: the idle expiry reads it as
+// activity.
 func (s *Postgres) MarkAdminStop(ctx context.Context, sessionID, commandID string) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE playback_v3_attempts SET admin_stop_command_id = $2, admin_stop_requested_at = NOW()
+		UPDATE playback_v3_attempts
+		SET admin_stop_commands = COALESCE(admin_stop_commands, '{}'::jsonb) || jsonb_build_object($2::text, NOW())
 		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL`, sessionID, commandID)
 	return err
 }
 
-// ClearAdminStop withdraws commandID's mark, and no later command's. A
-// non-empty heir, another stop still pending, takes the mark over instead.
-func (s *Postgres) ClearAdminStop(ctx context.Context, sessionID, commandID, heir string) error {
+// ClearAdminStop withdraws commandID's mark, and no other command's.
+func (s *Postgres) ClearAdminStop(ctx context.Context, sessionID, commandID string) error {
 	_, err := s.db.Exec(ctx, `
-		UPDATE playback_v3_attempts SET admin_stop_command_id = NULLIF($3::text, ''),
-		    admin_stop_requested_at = CASE WHEN $3::text = '' THEN NULL ELSE admin_stop_requested_at END
-		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND admin_stop_command_id = $2`, sessionID, commandID, heir)
+		UPDATE playback_v3_attempts SET admin_stop_commands = NULLIF(admin_stop_commands - $2::text, '{}'::jsonb)
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND admin_stop_commands ? $2::text`, sessionID, commandID)
 	return err
 }
 

@@ -478,7 +478,9 @@ func TestAdministratorStopIsTerminatedWhicheverStopWins(t *testing.T) {
 			if _, err := h.StopPlaybackV2(newAuthorizedPlaybackContext(), caller, session.ID, PlaybackStopCommand{StopID: uuid.NewString(), Sequence: 2, Position: &position}); err != nil {
 				t.Fatal(err)
 			}
-			if n := len(tc.stops); n > 0 && !slices.Contains(tc.refused, tc.stops[n-1]) {
+			// A stop with no lane was never sent, so nothing answers it; its
+			// fallback timer outlives the subtest and finds the session gone.
+			if n := len(tc.stops); n > 0 && !tc.noLane && !slices.Contains(tc.refused, tc.stops[n-1]) {
 				answer(tc.stops[n-1], playback.RealtimeResultStatusCompleted)
 			}
 			if len(admin.history) != 1 || admin.history[0].EndReason != tc.want || admin.history[0].EndPositionSeconds != 610 {

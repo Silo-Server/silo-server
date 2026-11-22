@@ -286,9 +286,11 @@ func (h *AdminPlaybackControlHandler) dispatchSequenced(_ context.Context, in Ad
 			h.dropCommandLedger(in.SessionID)
 		}
 	}
-	if in.Name == playback.CommandStop {
-		// Before the player can act on the stop: it may send its own stop as
-		// it leaves, and that stop must record the administrator's end.
+	// Before the player can act on the stop: it may send its own stop as it
+	// leaves, and that stop must record the administrator's end. Without a
+	// lane here nothing reaches a player, so there is nothing to mark.
+	marked := in.Name == playback.CommandStop && h.playback.RealtimeHub.HasLane(in.SessionID)
+	if marked {
 		h.playback.markAdminStop(in.SessionID, in.CommandID, true)
 	}
 	h.playback.rememberRealtimeCommand(in.CommandID, in.SessionID, in.Name)
@@ -297,9 +299,9 @@ func (h *AdminPlaybackControlHandler) dispatchSequenced(_ context.Context, in Ad
 		return AdminPlaybackDeliveryDispatched, nil
 	}
 	h.playback.forgetRealtimeCommand(in.CommandID)
-	if in.Name == playback.CommandStop {
+	if marked {
 		// Never sent, so no player is carrying it out: a stop the viewer makes
-		// now is their own, and the fallback below records its own end.
+		// now is their own, and a fallback below records its own end.
 		h.playback.markAdminStop(in.SessionID, in.CommandID, false)
 	}
 	if errors.Is(result.DispatchErr, playback.ErrRealtimeConnectionNotFound) {

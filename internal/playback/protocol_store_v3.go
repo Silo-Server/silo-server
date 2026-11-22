@@ -277,14 +277,10 @@ type MemoryPlanStoreV3 struct {
 	attempts     map[string]AttemptRecordV3
 	replans      map[string]memoryReplanV3
 	stopReceipts map[string]StopReceiptV3
-	// adminStops is each live session's pending administrator stop.
-	adminStops map[string]memoryAdminStopV3
+	// adminStops is each live session's pending administrator stops, by
+	// command id, with when each was sent.
+	adminStops map[string]map[string]time.Time
 	events     []RouteEventRecordV3
-}
-
-type memoryAdminStopV3 struct {
-	commandID string
-	at        time.Time
 }
 
 // AdminStopPendingFor is how long an administrator's stop counts as pending
@@ -587,8 +583,12 @@ func (s *MemoryPlanStoreV3) StopAttempt(_ context.Context, sessionID, stopID str
 	record.StopID = stopID
 	record.LastSampleAt = now
 	s.attempts[attemptID] = *record
-	pending, ok := s.adminStops[sessionID]
-	receipt := StopReceiptV3{StopID: stopID, AdminStopRequested: ok && now.Sub(pending.at) < AdminStopPendingFor}
+	receipt := StopReceiptV3{StopID: stopID}
+	for _, at := range s.adminStops[sessionID] {
+		if now.Sub(at) < AdminStopPendingFor {
+			receipt.AdminStopRequested = true
+		}
+	}
 	delete(s.adminStops, sessionID)
 	if record.LastSample != nil {
 		accepted := *record.LastSample
@@ -610,30 +610,24 @@ func (s *MemoryPlanStoreV3) MarkAdminStop(_ context.Context, sessionID, commandI
 		return nil
 	}
 	if s.adminStops == nil {
-		s.adminStops = make(map[string]memoryAdminStopV3)
+		s.adminStops = make(map[string]map[string]time.Time)
 	}
-	s.adminStops[sessionID] = memoryAdminStopV3{commandID: commandID, at: time.Now()}
+	if s.adminStops[sessionID] == nil {
+		s.adminStops[sessionID] = make(map[string]time.Time)
+	}
+	s.adminStops[sessionID][commandID] = time.Now()
 	return nil
 }
 
-// ClearAdminStop withdraws commandID's mark, and no later command's. A
-// non-empty heir, another stop still pending, takes the mark over instead.
-func (s *MemoryPlanStoreV3) ClearAdminStop(_ context.Context, sessionID, commandID, heir string) error {
+// ClearAdminStop withdraws commandID's mark, and no other command's.
+func (s *MemoryPlanStoreV3) ClearAdminStop(_ context.Context, sessionID, commandID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, record := s.findAttemptLocked(sessionID); record == nil || record.StoppedAt != nil {
-		return nil
-	}
-	pending, ok := s.adminStops[sessionID]
-	if !ok || pending.commandID != commandID {
-		return nil
-	}
-	if heir == "" {
+	pending := s.adminStops[sessionID]
+	delete(pending, commandID)
+	if len(pending) == 0 {
 		delete(s.adminStops, sessionID)
-		return nil
 	}
-	pending.commandID = heir
-	s.adminStops[sessionID] = pending
 	return nil
 }
 

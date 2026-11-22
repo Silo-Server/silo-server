@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/notifications"
@@ -372,14 +374,14 @@ func TestAdminStopMarkDB(t *testing.T) {
 		if err := store.CompleteReplan(ctx, session, "replan-1", lease.LeaseToken, base, json.RawMessage(`{}`), *record); err != nil {
 			t.Fatal(err)
 		}
-		if got := pendingAdminStop(t, ctx, pool, session); got != commandA {
-			t.Fatalf("after the replan the mark names %q, want %q", got, commandA)
+		if got := pendingAdminStops(t, ctx, pool, session); !slices.Equal(got, []string{commandA}) {
+			t.Fatalf("after the replan the marks are %q, want %q", got, commandA)
 		}
-		// A second stop takes the mark over; the first one's refusal leaves it.
+		// The first stop's refusal leaves a second stop's mark.
 		if err := store.MarkAdminStop(ctx, session, commandB); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.ClearAdminStop(ctx, session, commandA, ""); err != nil {
+		if err := store.ClearAdminStop(ctx, session, commandA); err != nil {
 			t.Fatal(err)
 		}
 		receipt, first, err := store.StopAttempt(ctx, session, uuid.NewString(), nil)
@@ -399,8 +401,8 @@ func TestAdminStopMarkDB(t *testing.T) {
 		if err := store.MarkAdminStop(ctx, session, commandA); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := pool.Exec(ctx, `UPDATE playback_v3_attempts SET admin_stop_requested_at = NOW() - $2::interval WHERE session_id = $1`,
-			session, (playback.AdminStopPendingFor + time.Second).String()); err != nil {
+		if _, err := pool.Exec(ctx, `UPDATE playback_v3_attempts SET admin_stop_commands = jsonb_build_object($3::text, NOW() - $2::interval) WHERE session_id = $1`,
+			session, (playback.AdminStopPendingFor + time.Second).String(), commandA); err != nil {
 			t.Fatal(err)
 		}
 		if receipt, _, err := store.StopAttempt(ctx, session, uuid.NewString(), nil); err != nil || receipt.AdminStopRequested {
@@ -412,7 +414,7 @@ func TestAdminStopMarkDB(t *testing.T) {
 		if err := store.MarkAdminStop(ctx, session, commandA); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.ClearAdminStop(ctx, session, commandA, ""); err != nil {
+		if err := store.ClearAdminStop(ctx, session, commandA); err != nil {
 			t.Fatal(err)
 		}
 		if receipt, _, err := store.StopAttempt(ctx, session, uuid.NewString(), nil); err != nil || receipt.AdminStopRequested {
@@ -421,10 +423,11 @@ func TestAdminStopMarkDB(t *testing.T) {
 	})
 }
 
-// TestAdminStopMarkHandedBackDB: a later stop takes the mark over from an
-// earlier one still pending, and withdrawing the later one hands the mark
-// back, so the earlier stop's player still records the administrator's end.
-func TestAdminStopMarkHandedBackDB(t *testing.T) {
+// TestAdminStopMarksPerCommandDB: each administrator stop keeps its own
+// mark, so withdrawing a later stop (refused, or never sent) leaves an
+// earlier one still pending, and that stop's player records the
+// administrator's end.
+func TestAdminStopMarksPerCommandDB(t *testing.T) {
 	const commandA, commandB = "11111111-1111-4111-8111-111111111111", "22222222-2222-4222-8222-222222222222"
 	ctx, pool, store, session := newLifecycleAttemptDB(t)
 	if err := store.MarkAdminStop(ctx, session, commandA); err != nil {
@@ -433,27 +436,28 @@ func TestAdminStopMarkHandedBackDB(t *testing.T) {
 	if err := store.MarkAdminStop(ctx, session, commandB); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.ClearAdminStop(ctx, session, commandB, commandA); err != nil {
+	if err := store.ClearAdminStop(ctx, session, commandB); err != nil {
 		t.Fatal(err)
 	}
-	if got := pendingAdminStop(t, ctx, pool, session); got != commandA {
-		t.Fatalf("after B's refusal the mark names %q, want %q", got, commandA)
+	if got := pendingAdminStops(t, ctx, pool, session); !slices.Equal(got, []string{commandA}) {
+		t.Fatalf("after B's refusal the marks are %q, want %q", got, commandA)
 	}
 	if receipt, _, err := store.StopAttempt(ctx, session, uuid.NewString(), nil); err != nil || !receipt.AdminStopRequested {
 		t.Fatalf("client stop = %+v, %v; want the earlier administrator stop pending", receipt, err)
 	}
 }
 
-// pendingAdminStop is the command that holds the attempt's administrator stop
-// mark, or "".
-func pendingAdminStop(t *testing.T, ctx context.Context, pool *pgxpool.Pool, session string) string {
+// pendingAdminStops lists the commands that hold an administrator stop mark
+// on the attempt, sorted.
+func pendingAdminStops(t *testing.T, ctx context.Context, pool *pgxpool.Pool, session string) []string {
 	t.Helper()
-	var commandID *string
-	if err := pool.QueryRow(ctx, `SELECT admin_stop_command_id FROM playback_v3_attempts WHERE session_id = $1`, session).Scan(&commandID); err != nil {
+	rows, err := pool.Query(ctx, `SELECT jsonb_object_keys(admin_stop_commands) FROM playback_v3_attempts WHERE session_id = $1 ORDER BY 1`, session)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if commandID == nil {
-		return ""
+	commands, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
 	}
-	return *commandID
+	return commands
 }
