@@ -491,17 +491,6 @@ jobs:
   # after it: golangci-lint (changed lines, then router recovery) and go vet
   # each took about half of the old combined job, and over 15 minutes when a
   # pull request changed go.mod and every cache missed.
-  runner-probe:
-    name: TEMP runner disk probe
-    runs-on: ubuntu-24.04
-    steps:
-      - name: Report disk and memory
-        run: |
-          df -h / /mnt /tmp "$HOME" || true
-          free -m
-          nproc
-          lsblk || true
-
   go-vet:
     name: Go vet and contracts
     needs: select
@@ -537,12 +526,6 @@ jobs:
         id: setup-go
         with:
           cache-name: vet
-          # This cache holds three builds of the tree (Linux vet, darwin vet,
-          # the trimmed darwin node build), about 6 GB for one commit. After a
-          # go.sum change it also holds the restored stale entries and passes
-          # the 8 GB tmpfs, and route-inventory's go list then fails reading
-          # back a cgo file list it could not write.
-          build-cache-in-memory: 'false'
 
       - *libvips-save
 
