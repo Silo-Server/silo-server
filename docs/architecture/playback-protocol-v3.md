@@ -998,7 +998,11 @@ request can start it again on the node. Without Redis the session exists only in
 the memory of the API process that started it, so it needs a single API replica
 or session affinity. A transcode the API executes itself (no transcode node) is
 only safe with one API replica or session affinity in any case: each replica
-that rebuilds it starts its own FFmpeg. Proxy-origin URLs
+that rebuilds it starts its own FFmpeg. A replica whose copy of the session
+predates a replan onto a transcode node made on another replica never starts
+FFmpeg for it: it relays the media request to the node the shared node recipe
+store names for the request's transport, or else the node the request's recipe
+card names, and answers 404 when that node can't be reached. Proxy-origin URLs
 (`authorized_media_origins_v1`) are unaffected: the proxy serves from the shared
 grant store rather than from an API process's memory.
 

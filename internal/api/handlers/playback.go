@@ -632,12 +632,21 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 					return nil, playback.SessionMissing, nil, nil, nil
 				}
 				if card.TranscodeNodeURL != "" {
-					// The card runs on a node this copy does not know about:
-					// another replica replanned the session there. The serve
-					// handler relays to the card's node; nothing is rebuilt
-					// here (#4601). The copy-safety verdict above still
-					// applies, as it does to a node card with no live copy.
-					return session, playback.SessionLoaded, card, claims, nil
+					if !movedHereFromCardNode(session, *card) {
+						// The card runs on a node this copy does not know
+						// about: another replica replanned the session there.
+						// The serve handler relays to the card's node; nothing
+						// is rebuilt here (#4601). The copy-safety verdict
+						// above still applies, as it does to a node card with
+						// no live copy.
+						return session, playback.SessionLoaded, card, claims, nil
+					}
+					// This copy moved the card's transport off its node to
+					// this server, and the client still presents the token
+					// minted for that node. The local runtime was lost since:
+					// rebuild it here, as the move did.
+					local := localTranscodeCard(*card)
+					card = &local
 				}
 				session, _, status, reconstructErr := h.tm.LoadOrReconstructTranscodeWithError(r.Context(), h.sessionMgr.GetSession, sessionID, requestUserID, requestedSegment, card)
 				return session, status, card, claims, reconstructErr

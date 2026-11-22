@@ -1013,6 +1013,12 @@ func (m *TranscodeManager) ReconstructTranscodeWithError(ctx context.Context, se
 	if card.SessionID == "" || card.SessionID != sessionID {
 		return nil, nil
 	}
+
+	// A concurrent reconstruct may already have registered the session; serve it
+	// directly so we never enter single-flight only to discard a duplicate.
+	if existing := m.GetTranscodeSession(sessionID); existing != nil {
+		return existing, nil
+	}
 	// A card whose committed route runs on a node is served by relaying to that
 	// node, never by an FFmpeg on this server. Without session affinity a
 	// replica can hold a stale copy of a session that another replica replanned
@@ -1022,12 +1028,6 @@ func (m *TranscodeManager) ReconstructTranscodeWithError(ctx context.Context, se
 		slog.WarnContext(ctx, "refusing to rebuild a node transcode on this server", "component", "playback",
 			"session", sessionID, "playback_session_id", sessionID, "requested_segment", requestedSegment)
 		return nil, nil
-	}
-
-	// A concurrent reconstruct may already have registered the session; serve it
-	// directly so we never enter single-flight only to discard a duplicate.
-	if existing := m.GetTranscodeSession(sessionID); existing != nil {
-		return existing, nil
 	}
 
 	v, err, _ := m.reconstructGroup.Do(sessionID, func() (interface{}, error) {
