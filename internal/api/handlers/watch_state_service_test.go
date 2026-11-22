@@ -4,10 +4,31 @@ import (
 	"context"
 	"testing"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
+
+func TestRestoredVersionChoiceProjectsEditionWithoutOverwritingLocalFile(t *testing.T) {
+	choice := &userstore.SeriesPlaybackPreference{EditionKey: "extended_edition"}
+	aliases := catalog.EditionAliases{"extended_edition": "extended"}
+	data := applyVersionChoice(nil, choice)
+	var effective *string
+	applyEffectiveEditionPreference(data, &effective)
+	projectEditionPreference(aliases, data, &effective)
+	if data.LastFileID != nil || data.LastEditionKey == nil || *data.LastEditionKey != "extended" ||
+		effective == nil || *effective != "extended" || choice.EditionKey != "extended_edition" {
+		t.Fatalf("restored choice did not project to the current alias: data=%+v, effective=%v", data, effective)
+	}
+
+	local := &catalog.SeasonUserData{LastFileID: new(42), LastEditionKey: new("unrated")}
+	data = applyVersionChoice(local, choice)
+	if data.LastFileID == nil || *data.LastFileID != 42 || data.LastEditionKey == nil || *data.LastEditionKey != "unrated" {
+		t.Fatalf("remote choice displaced a local file: %+v", data)
+	}
+}
 
 type recordingWatchDispatcher struct {
 	events []watchsync.LocalWatchEvent

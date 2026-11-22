@@ -8,6 +8,8 @@ import (
 	"testing"
 	"testing/synctest"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
 
 func TestNodeDrainTimeout(t *testing.T) {
@@ -15,15 +17,15 @@ func TestNodeDrainTimeout(t *testing.T) {
 		value string
 		want  time.Duration
 	}{
-		{"", defaultNodeDrainTimeout},
+		{"", transcodenode.DefaultDrainTimeout},
 		{"0", 0},
 		{"0s", 0},
 		{"900", 15 * time.Minute},
 		{"45m", 45 * time.Minute},
 		{" 2h ", 2 * time.Hour},
-		{"-5m", defaultNodeDrainTimeout},
-		{"99999999999", defaultNodeDrainTimeout}, // more seconds than a Duration holds
-		{"soon", defaultNodeDrainTimeout},
+		{"-5m", transcodenode.DefaultDrainTimeout},
+		{"99999999999", transcodenode.DefaultDrainTimeout}, // more seconds than a Duration holds
+		{"soon", transcodenode.DefaultDrainTimeout},
 	} {
 		if got := nodeDrainTimeout(test.value); got != test.want {
 			t.Errorf("nodeDrainTimeout(%q) = %v, want %v", test.value, got, test.want)

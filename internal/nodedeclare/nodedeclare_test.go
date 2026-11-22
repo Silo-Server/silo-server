@@ -20,7 +20,7 @@ func TestFromEnv(t *testing.T) {
 	})
 	t.Run("values follow the update body", func(t *testing.T) {
 		in, err := FromEnv(nodepool.NodeTypeTranscode, env(map[string]string{
-			"SILO_NODE_MAX_TRANSCODES": "0", "SILO_NODE_HW_ACCEL": "QSV", "SILO_NODE_SOURCE_ACCESS": "core",
+			"SILO_NODE_MAX_TRANSCODES": "0", "SILO_NODE_HW_ACCEL": "VideoToolbox", "SILO_NODE_SOURCE_ACCESS": "core",
 			"SILO_NODE_URL": "http://gpu1:8082", "SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES": "0",
 			// A proxy variable means nothing to a transcode node.
 			"SILO_NODE_MAX_STREAMS": "5",
@@ -32,7 +32,7 @@ func TestFromEnv(t *testing.T) {
 		if got := in.SetFields(); !slices.Equal(got, want) {
 			t.Fatalf("declared %v, want %v", got, want)
 		}
-		if *in.MaxJobs != 0 || *in.HWAccelOverride != "qsv" || *in.DownloadArtifactMaxBytesOverride != 0 {
+		if *in.MaxJobs != 0 || *in.HWAccelOverride != "videotoolbox" || *in.DownloadArtifactMaxBytesOverride != 0 {
 			t.Fatalf("max_jobs %d, hw_accel %q, max_bytes %d", *in.MaxJobs, *in.HWAccelOverride, *in.DownloadArtifactMaxBytesOverride)
 		}
 	})

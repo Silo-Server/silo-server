@@ -56,7 +56,10 @@ interface MediaCarouselProps {
    * to it again whenever it changes, as when the page moves to another item.
    */
   startSlide?: number;
-  /** Optional actions rendered next to the title (e.g. pin button) */
+  /**
+   * Optional actions rendered after the title (e.g. pin button). They follow
+   * the title's last word, or start the next line when they don't fit there.
+   */
   headerActions?: ReactNode;
   /**
    * When true (default) the carousel applies its own page-edge horizontal
@@ -224,8 +227,11 @@ export default function MediaCarousel({
   onNearEnd,
 }: MediaCarouselProps) {
   const t = useT();
+  // "Explore all" keeps its one-line width beside a wrapping heading, up to half
+  // the header. A longer label (a long translation at a large Text Size) wraps
+  // there instead of crushing the heading, but never below its longest word.
   const viewAllClass =
-    "text-muted-foreground hover:text-primary text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
+    "text-muted-foreground hover:text-primary max-w-1/2 min-w-min shrink-0 text-[0.75rem] font-semibold tracking-[0.16em] uppercase transition-all active:scale-[0.98]";
   const { emblaApi, emblaRef, canScrollPrev, canScrollNext, scrollPrev, scrollNext } =
     useCarouselEmbla();
   useEffect(() => {
@@ -242,9 +248,13 @@ export default function MediaCarousel({
   const headerPadX = edgePadding ? " px-4 sm:px-6 lg:px-10 xl:px-12" : "";
   const viewportPadX = edgePadding ? " pe-4 sm:pe-6 lg:pe-10 xl:pe-12" : "";
   const containerPadX = edgePadding ? " ps-4 sm:ps-6 lg:ps-10 xl:ps-12" : "";
-  const titleClass = compact
-    ? "text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase"
-    : "text-foreground text-xl font-semibold tracking-tight";
+  const titleSize = compact ? "text-[0.6875rem]" : "text-xl";
+  // With actions, the heading stacks above them so the pin's enlarged tap area
+  // can't take taps on heading text when the pin starts the next line.
+  const titleClass = `inline font-semibold ${headerActions ? "relative z-10 me-2" : ""} ${
+    compact ? "text-muted-foreground tracking-[0.18em] uppercase" : "text-foreground tracking-tight"
+  }`;
+  const hasExploreAll = Boolean(viewAllHref || onViewAll);
   const headerGap = compact ? "mb-2" : "mb-5";
   const slideGap = compact ? "gap-3" : "gap-4 lg:gap-5";
   const listClassName = `embla__container flex cursor-grab list-none ${slideGap}${containerPadX}`;
@@ -268,22 +278,42 @@ export default function MediaCarousel({
   );
 
   return (
+    // `.media-carousel`'s content-visibility clips paint and hit testing at
+    // the section's edge, and the header sits on its top edge. The padding,
+    // cancelled by the negative margin, keeps the top of header focus rings
+    // and hit areas inside the clip.
     <section
-      className="section-row media-carousel group/carousel relative isolate"
+      className="section-row media-carousel group/carousel relative isolate -mt-2 pt-2"
       style={
         {
           "--carousel-intrinsic-h": carouselIntrinsicHeight(cardPresentation.poster_size),
         } as CSSProperties
       }
     >
-      <div className={`${headerGap} flex items-end justify-between gap-4${headerPadX}`}>
-        <div className="flex min-w-0 items-center gap-2">
+      <div
+        className={`${headerGap} flex flex-wrap items-end justify-end gap-x-4 gap-y-2${headerPadX}`}
+      >
+        {/* Inline flow puts the actions right after the heading's last word, or
+            at the start of the next line when they don't fit; in a flex row, a
+            wrapped heading keeps its full width and leaves them at the far edge.
+            The heading inherits the size here, so min-h-lh is one heading line.
+            The column fills the row but never gets narrower than an action, so
+            "Explore all" moves to its own line before it would crowd the pin. */}
+        <div className={`min-w-10 grow basis-0 ${titleSize}`}>
           {titleHref ? (
-            <Link to={titleHref} className="group/title hover:text-primary transition-colors">
-              <h2 className={titleClass}>
+            <Link to={titleHref} className="group/title">
+              {/* The heading and "View" set their own colors, so without "View"
+                  an underline is the only hover cue. */}
+              <h2
+                className={
+                  hasExploreAll
+                    ? `${titleClass} decoration-1 underline-offset-3 group-hover/title:underline`
+                    : titleClass
+                }
+              >
                 {title}
                 {/* "Explore all" already names the destination. */}
-                {viewAllHref || onViewAll ? null : (
+                {hasExploreAll ? null : (
                   <span className="text-muted-foreground group-hover/title:text-primary ms-2 text-sm transition-colors">
                     {t("web.catalog.carousel.view")}
                   </span>
@@ -293,13 +323,17 @@ export default function MediaCarousel({
           ) : (
             <h2 className={titleClass}>{title}</h2>
           )}
-          {headerActions}
+          {headerActions ? (
+            <span className="inline-flex min-h-lh items-center gap-2 align-top empty:hidden">
+              {headerActions}
+            </span>
+          ) : null}
         </div>
         {viewAllHref ? (
           <Link
             to={viewAllHref}
             aria-label={t("web.catalog.carousel.exploreAllLabel", { title })}
-            className={`${viewAllClass} shrink-0`}
+            className={viewAllClass}
           >
             {t("web.catalog.carousel.exploreAll")}
           </Link>

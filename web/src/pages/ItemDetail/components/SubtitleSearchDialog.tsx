@@ -34,6 +34,7 @@ import { SubtitleUploadForm } from "@/components/subtitles/SubtitleUploadForm";
 import { buildQualitySummary } from "./VersionFlyout";
 import { formatLocale } from "@/lib/appLocale";
 import { useT } from "@/i18n";
+import { leadingGraphemes } from "@/lib/text";
 
 interface SubtitleSearchDialogProps {
   open: boolean;
@@ -315,7 +316,7 @@ export default function SubtitleSearchDialog({
               <div className="min-w-0 space-y-2">
                 {parsedResults.map(({ result, key, names }) => {
                   const provider = providerInfo[result.provider] ?? {
-                    abbr: result.provider.slice(0, 2).toUpperCase(),
+                    abbr: leadingGraphemes(result.provider, 2).toUpperCase(),
                     className: "bg-muted text-muted-foreground",
                   };
                   const tone = scoreTone(result.score);

@@ -1,11 +1,10 @@
 import { useCallback, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { leafUserData, type FileVersion, type ItemDetail } from "@/api/types";
-import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
+import type { PlayerSubtitleTrackSignature } from "@/player/types";
 import { useSeasonDetail, useSeasonEpisodes } from "@/hooks/queries/episodes";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
-import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
-import { usePrePlayAudioSelection } from "./usePrePlayAudioSelection";
+import { usePrePlayAudioSelection, usePrePlaySubtitleSelection } from "./usePrePlayTrackSelection";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useAuth } from "@/hooks/useAuth";
@@ -103,8 +102,6 @@ export default function EpisodeContent({
   const canManageTrickplay =
     capabilities?.trickplay === true && capabilities.trickplay_supported === true;
   const canRedetectMarkers = markerCapabilities.data?.redetect_markers === true;
-  const deleteSubtitlePreference = useDeleteSubtitlePreference();
-  const setSubtitlePreference = useSetSubtitlePreference();
 
   // Version selection state — drives the Play button and inline stream popovers.
   const userData = leafUserData(item.user_data);
@@ -163,28 +160,21 @@ export default function EpisodeContent({
   );
   const audioSelection = usePrePlayAudioSelection(item.content_id, item.series_id, selectedVersion);
   const clearAudioSelection = audioSelection.clear;
-  const [subtitleSelectionMode, setSubtitleSelectionMode] = useState<"auto" | "off" | "explicit">(
-    "auto",
+  const subtitleSelection = usePrePlaySubtitleSelection(
+    item.content_id,
+    item.series_id,
+    selectedVersion?.file_id,
   );
-  const [explicitSubtitleSelection, setExplicitSubtitleSelection] =
-    useState<PrePlaySubtitleSelection | null>(null);
+  const clearSubtitleSelection = subtitleSelection.clear;
 
   // Reset selection when navigating to a different episode (adjust state during render).
   const [prevContentId, setPrevContentId] = useState(item.content_id);
-  const [prevSelectedFileId, setPrevSelectedFileId] = useState(selectedVersion?.file_id);
   if (prevContentId !== item.content_id) {
     setPrevContentId(item.content_id);
     setManualSelectedFileId(null);
     setSelectedEditionKey(undefined);
-    setSubtitleSelectionMode("auto");
-    setExplicitSubtitleSelection(null);
   } else if (selectedEditionKey === undefined && qualitySettled && defaultSelectedVersion) {
     setSelectedEditionKey(defaultSelectedVersion.edition_key ?? "");
-  }
-  if (prevSelectedFileId !== selectedVersion?.file_id) {
-    setPrevSelectedFileId(selectedVersion?.file_id);
-    setSubtitleSelectionMode("auto");
-    setExplicitSubtitleSelection(null);
   }
 
   const handleSelectVersion = useCallback(
@@ -193,10 +183,9 @@ export default function EpisodeContent({
       if (version) setSelectedEditionKey(version.edition_key ?? "");
       // Track indexes belong to a file, so another version starts from Auto.
       clearAudioSelection();
-      setSubtitleSelectionMode("auto");
-      setExplicitSubtitleSelection(null);
+      clearSubtitleSelection();
     },
-    [clearAudioSelection],
+    [clearAudioSelection, clearSubtitleSelection],
   );
 
   const handleSelectEdition = useCallback(
@@ -215,41 +204,6 @@ export default function EpisodeContent({
     [selectedVersion, item.playback_variants, qualityPreference],
   );
 
-  const handleSelectSubtitle = (selection: PrePlaySubtitleSelection) => {
-    setSubtitleSelectionMode("explicit");
-    setExplicitSubtitleSelection(selection);
-    // Persist as the series' override so the choice sticks across visits,
-    // exactly like a manual in-player selection (preferences are
-    // series-scoped).
-    if (item.series_id) {
-      setSubtitlePreference.mutate({
-        prefId: item.series_id,
-        selection,
-      });
-    }
-  };
-
-  const handleResetSubtitleSelection = () => {
-    setSubtitleSelectionMode("auto");
-    setExplicitSubtitleSelection(null);
-    // "Auto" also clears the persisted override saved by a manual in-player
-    // selection. Subtitle preferences are series-scoped, so this restores
-    // profile-level auto selection for the whole series.
-    if (item.series_id) {
-      deleteSubtitlePreference.mutate(item.series_id);
-    }
-  };
-
-  const handleSelectSubtitleOff = () => {
-    setSubtitleSelectionMode("off");
-    setExplicitSubtitleSelection(null);
-    if (item.series_id) {
-      setSubtitlePreference.mutate({
-        prefId: item.series_id,
-        selection: null,
-      });
-    }
-  };
   const preferredSubtitleTrackSignature: PlayerSubtitleTrackSignature | null =
     item.effective_subtitle_track_signature
       ? {
@@ -467,11 +421,11 @@ export default function EpisodeContent({
               explicitAudioTrackIndex={audioSelection.explicitIndex}
               onSelectAudioTrack={audioSelection.select}
               onResetAudioSelection={audioSelection.reset}
-              prePlaySubtitleMode={subtitleSelectionMode}
-              explicitSubtitleSelection={explicitSubtitleSelection}
-              onSelectSubtitle={handleSelectSubtitle}
-              onSelectSubtitleOff={handleSelectSubtitleOff}
-              onResetSubtitleSelection={handleResetSubtitleSelection}
+              prePlaySubtitleMode={subtitleSelection.mode}
+              explicitSubtitleSelection={subtitleSelection.explicitSelection}
+              onSelectSubtitle={subtitleSelection.select}
+              onSelectSubtitleOff={subtitleSelection.selectOff}
+              onResetSubtitleSelection={subtitleSelection.reset}
               preferredSubtitleLanguage={item.effective_subtitle_language}
               preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
               subtitleMode={item.effective_subtitle_mode as "off" | "auto" | "always" | undefined}

@@ -81,7 +81,7 @@ export function playerRequestHeaders(
     headers["X-Profile-Token"] = profileToken;
   }
 
-  headers["X-Silo-Device-Id"] = config.getDeviceId();
+  Object.assign(headers, config.getDeviceHeaders());
   return headers;
 }
 

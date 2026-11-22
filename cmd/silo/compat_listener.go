@@ -11,14 +11,14 @@ import (
 
 // startCompatServer binds synchronously so the caller can release the helper
 // after all listeners are configured, then serves in the background.
-func startCompatServer(ctx context.Context, srv *http.Server, label string, opts tcpcongestion.Options, errCh chan<- error) {
+func startCompatServer(ctx context.Context, srv *http.Server, label string, opts tcpcongestion.Options, errCh chan<- error) *tcpcongestion.Result {
 	if srv == nil {
-		return
+		return nil
 	}
-	listener, _, err := tcpcongestion.Listen(ctx, "tcp", srv.Addr, label, opts)
+	listener, result, err := tcpcongestion.Listen(ctx, "tcp", srv.Addr, label, opts)
 	if err != nil {
 		errCh <- fmt.Errorf("%s compat server error: %w", label, err)
-		return
+		return nil
 	}
 	go func() {
 		switch label {
@@ -31,4 +31,5 @@ func startCompatServer(ctx context.Context, srv *http.Server, label string, opts
 			errCh <- fmt.Errorf("%s compat server error: %w", label, serveErr)
 		}
 	}()
+	return &result
 }

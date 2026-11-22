@@ -1,5 +1,5 @@
 {
-  "revision": "a1579201fa7920b06c303899b3e4b300acb99bc9cee3ea5dbd7669c2712c794c",
+  "revision": "25b10c53e78e06f77ffd8a81ac79d4bb1d84119b8fc23f01ebbd3147fb499f22",
   "state": "available",
   "allowed": false,
   "schema_version": 1,
@@ -18,6 +18,7 @@
     "user_settings",
     "settings",
     "notifications",
-    "download_preparations"
+    "download_preparations",
+    "downloads"
   ]
 }

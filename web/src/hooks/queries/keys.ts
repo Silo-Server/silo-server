@@ -138,6 +138,11 @@ export const collectionKeys = {
   items: (collectionId: string) => ["collections", "items", collectionId] as const,
   /** The list, each own manual collection marked with whether it holds the title. */
   containing: (contentId: string) => ["collections", "containing", contentId] as const,
+  /** Every title page's collections row. */
+  onTitles: () => ["collections", "on-title"] as const,
+  /** The collections row on one title's page. */
+  onTitle: (contentId: string, libraryId: number | undefined) =>
+    ["collections", "on-title", contentId, libraryId ?? ""] as const,
   preview: (scope: "user" | "admin", fingerprint: string) =>
     ["collections", "preview", scope, fingerprint] as const,
   templates: () => ["collections", "templates"] as const,
@@ -567,6 +572,7 @@ export const adminKeys = {
   pluginRepositories: () => ["admin", "plugins", "repositories"] as const,
   pluginCatalog: () => ["admin", "plugins", "catalog"] as const,
   pluginCatalogSettings: () => ["admin", "plugins", "catalogSettings"] as const,
+  pluginProvisioningStatus: () => ["admin", "plugins", "provisioning-status"] as const,
   pluginInstallations: () => ["admin", "plugins", "installations"] as const,
   unmatchedItems: (search?: string, ignored = false) =>
     search === undefined

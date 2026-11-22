@@ -65,6 +65,17 @@ const (
 	// origin, so every byte egresses from the API server; with it the plan may
 	// hand out credential-free proxy origins and distributed egress is restored.
 	FeatureAuthorizedMediaOriginsV3 = "authorized_media_origins_v1"
+	// FeatureParallelRangeOriginV1 is the client's promise about the plan's
+	// stream.parallel_range_url: when the plan has one, the client may read the
+	// file's byte ranges from it, uses it exactly as given, and adds no account
+	// token to it. The URL authorizes itself. The server names the admin's
+	// media origin, the stream URL itself, or a proxy node's own URL there. A
+	// plan without the field is read from stream.url, and stream.url stays
+	// valid either way: a client may read the warm head, overflow ranges, or a
+	// natively played file from it. The server leaves the field out when the
+	// attempt negotiated header_authenticated_media_v1. Without the feature the
+	// plan carries no such field.
+	FeatureParallelRangeOriginV1 = "parallel_range_origin_v1"
 	// FeaturePlanInvalidatedV3 is the client's promise to handle the realtime
 	// plan_invalidated command: ack it, replan off the named plan with operation
 	// failure_recovery and the invalidated plan's attempt key in
@@ -85,6 +96,10 @@ const (
 	// NativeServerFeaturesV3).
 	FeatureMarkerThumbnailsV3 = "marker_thumbnails_v1"
 	FeatureSubripSidecarV3    = "subrip_sidecar_v1"
+	// FeatureSurroundBitstreamConversionV3 tells a client the server may
+	// convert a multichannel track it would decode to PCM into E-AC-3 or AC-3
+	// 5.1 that its sink validates (decision_reason surround_bitstream_conversion).
+	FeatureSurroundBitstreamConversionV3 = "surround_bitstream_conversion_v1"
 	// FeatureHLSSubtitleRenditionsV3 is the client's statement that it plays
 	// a subtitle carried as a WebVTT SUBTITLES rendition of the plan's HLS
 	// stream (subtitle.hls_rendition) instead of a sidecar artifact. A
@@ -327,7 +342,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3, FeatureProgressiveRangeRefusalV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3, FeatureProgressiveRangeRefusalV3, FeatureSurroundBitstreamConversionV3, FeatureParallelRangeOriginV1)
 }
 
 // HLSVariableSubstitutionV3 reports whether the request's hls delivery
@@ -420,6 +435,8 @@ const (
 // executor must run; the registry keys availability by the same names.
 const (
 	TransformationAudioToAACV3      = "audio_to_aac"
+	TransformationAudioToEAC3V3     = "audio_to_eac3"
+	TransformationAudioToAC3V3      = "audio_to_ac3"
 	TransformationVideoToH264V3     = "video_to_h264"
 	TransformationVideoToHEVCV3     = "video_to_hevc"
 	TransformationServerDV7HDR10V3  = "server_dv7_to_hdr10"
@@ -429,6 +446,8 @@ const (
 	TransformationVideoToH264RecipeVersionV3     = "2"
 	TransformationVideoToHEVCRecipeVersionV3     = "1"
 	TransformationAudioToAACRecipeVersionV3      = "4"
+	TransformationAudioToEAC3RecipeVersionV3     = "1"
+	TransformationAudioToAC3RecipeVersionV3      = "1"
 	TransformationHDRToSDRToneMapRecipeVersionV3 = "1"
 	// TransformationServerDV7HDR10RecipeVersionV3 2 also removes the Profile 7
 	// enhancement-layer NAL units (see DV7ToHDR10BitstreamFilter), so an
@@ -991,6 +1010,13 @@ type StreamV3 struct {
 	Headers          map[string]string   `json:"headers"`
 	HeaderRefresh    HeaderRefreshModeV3 `json:"header_refresh"`
 	HeaderRefreshURL string              `json:"header_refresh_url,omitempty" format:"uri-reference"`
+	// ParallelRangeURL is where a client that negotiated
+	// parallel_range_origin_v1 may read the file's byte ranges over several
+	// connections: the same stream on the admin's media origin, the stream URL
+	// itself (relative to the API root, as URL is), or the proxy node's own
+	// URL. It authorizes itself; the client uses it as given and adds no
+	// account token. Absent, the client reads URL as before.
+	ParallelRangeURL string `json:"parallel_range_url,omitempty" format:"uri-reference"`
 }
 
 type TimelineV3 struct {

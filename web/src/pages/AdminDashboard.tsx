@@ -1,5 +1,5 @@
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
 import { AdminSectionCommandDialog } from "@/components/AdminSectionCommandDialog";
 import { DashboardGrid } from "@/components/admin/dashboard/DashboardGrid";
 import { useDashboardLayout } from "@/components/admin/dashboard/useDashboardLayout";
@@ -161,14 +161,11 @@ export default function AdminDashboard() {
     [queryClient, refetchLibraries, refetchSessions, refetchUsers],
   );
 
-  useEffect(() => {
-    if (!pageActivity.canPollDashboard) {
-      wasDashboardPollingPausedRef.current = true;
-      return;
-    }
-    if (isManualRefreshPending) {
-      return;
-    }
+  // Reads data freshness without making it a dependency of the polling effect.
+  // During playback the realtime sessions channel refetches after every
+  // reconciler sync that moves a position, and restarting the interval on each
+  // arrival kept it from ever firing.
+  const catchUpDashboard = useEffectEvent(() => {
     const resumedPolling = wasDashboardPollingPausedRef.current;
     wasDashboardPollingPausedRef.current = false;
     if (
@@ -188,6 +185,24 @@ export default function AdminDashboard() {
     ) {
       void refreshDashboard({ manual: false });
     }
+  });
+
+  // Changes once, when the first data timestamp lands, so the catch-up also
+  // runs then: returning to the page with cached data older than the cadence
+  // refreshes right away.
+  const hasLastDashboardUpdate = lastDashboardUpdatedAt !== null;
+
+  useEffect(() => {
+    if (!pageActivity.canPollDashboard) {
+      wasDashboardPollingPausedRef.current = true;
+      return;
+    }
+    if (isManualRefreshPending) {
+      return;
+    }
+    // A manual refresh started here sets isManualRefreshPending, so this
+    // interval is cleared at once and restarts when that refresh settles.
+    catchUpDashboard();
 
     const interval = window.setInterval(() => {
       void refreshDashboard({ manual: false });
@@ -197,10 +212,8 @@ export default function AdminDashboard() {
       window.clearInterval(interval);
     };
   }, [
-    hasDashboardData,
-    hasStaleDashboardData,
+    hasLastDashboardUpdate,
     isManualRefreshPending,
-    lastDashboardUpdatedAt,
     pageActivity.canPollDashboard,
     refreshDashboard,
   ]);

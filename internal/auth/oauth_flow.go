@@ -97,7 +97,7 @@ func oauthBinderCookie(state, value, callbackURL string, maxAge int) *http.Cooki
 	secure := false
 	if u, err := url.Parse(callbackURL); err == nil {
 		if u.Path != "" {
-			path = u.Path
+			path = u.EscapedPath()
 		}
 		secure = strings.EqualFold(u.Scheme, schemeHTTPS)
 	}

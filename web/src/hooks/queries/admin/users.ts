@@ -33,6 +33,7 @@ import {
 export { adminUserFromV2 } from "@/api/v2/adminUsers";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { adminKeys } from "../keys";
+import { settingWriteOptions } from "../settingWriteOffline";
 import { useAdminUserProfiles } from "./history";
 import { toast } from "sonner";
 import { t } from "@/i18n";
@@ -317,6 +318,7 @@ export function useUpdateAdminUserSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: async ({
       userId,
@@ -346,6 +348,7 @@ export function useDeleteAdminUserSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: async ({
       userId,
@@ -444,6 +447,7 @@ export function useUpdateAdminUserDeviceSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: async ({
       userId,
@@ -482,6 +486,7 @@ export function useDeleteAdminUserDeviceSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: ({
       userId,
@@ -523,6 +528,7 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: async ({
       userId,

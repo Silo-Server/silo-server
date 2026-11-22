@@ -235,6 +235,7 @@ export default function LibraryMetadataSettings() {
               value={form.getValue(REALTIME_MONITORING_KEY) || "true"}
               onChange={(value) => form.setValue(REALTIME_MONITORING_KEY, value)}
               restartRequired={restartKeys.has(REALTIME_MONITORING_KEY)}
+              managedByEnv={form.envVar(REALTIME_MONITORING_KEY)}
             />
           )}
           <SettingField

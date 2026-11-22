@@ -63,3 +63,9 @@ it.each(["/api/v1", "/api/v2", "https://silo.example.test/base/api/v1"])(
     ).toBe("https://proxy.example.test/stream/opaque?st=a%2Bb");
   },
 );
+
+it("appends the token to a path that already carries st", () => {
+  expect(buildPlayerStreamUrl("/api/v1", "/api/v2/stream/session?st=opaque", "access")).toBe(
+    "/api/v2/stream/session?st=opaque&token=access",
+  );
+});

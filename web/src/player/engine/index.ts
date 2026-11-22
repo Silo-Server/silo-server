@@ -24,7 +24,13 @@ export function attachBrowserEngine(options: {
   source: EngineSourceSpec;
   onFailure: (failure: FailureV3) => void;
   /** Data a read from the file received; see EnginePlayerOptions. */
-  onMediaData?: (request: number, bytes: number, first: number, last: number) => void;
+  onMediaData?: (
+    request: number,
+    bytes: number,
+    first: number,
+    last: number,
+    spans: [number, number][],
+  ) => void;
 }): BrowserEngineSession {
   const { video, surface, source, onFailure, onMediaData } = options;
   const player = new EnginePlayer({

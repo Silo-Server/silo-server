@@ -134,7 +134,7 @@ export function AdminUserDeleteDialog({
           <label htmlFor={confirmId} className="text-sm font-medium">
             {t("web.admin.users.deleteDialog.confirmLabel", {
               username,
-              code: (chunks) => <span className="font-mono">{chunks}</span>,
+              code: (chunks) => <code className="font-mono">{chunks}</code>,
             })}
           </label>
           <Input

@@ -171,6 +171,11 @@ export function parseConfigValues(
 export const FILL_FROM_MOVIE_LIBRARY_PATHS = "library_paths_movie";
 export const FILL_FROM_TV_LIBRARY_PATHS = "library_paths_tv";
 
+/** Whether a field fills from library paths, so it holds server paths. */
+export function fillsFromLibraryPaths(fillFrom: string | undefined): boolean {
+  return fillFrom === FILL_FROM_MOVIE_LIBRARY_PATHS || fillFrom === FILL_FROM_TV_LIBRARY_PATHS;
+}
+
 function libraryKind(type: string): "movie" | "tv" | "mixed" | null {
   switch (type.trim().toLowerCase()) {
     case "movie":
@@ -200,9 +205,7 @@ export function fillValueFromLibraries(
   fillFrom: string | undefined,
   libraries: readonly Library[],
 ): string | null {
-  if (fillFrom !== FILL_FROM_MOVIE_LIBRARY_PATHS && fillFrom !== FILL_FROM_TV_LIBRARY_PATHS) {
-    return null;
-  }
+  if (!fillsFromLibraryPaths(fillFrom)) return null;
   const want = fillFrom === FILL_FROM_MOVIE_LIBRARY_PATHS ? "movie" : "tv";
 
   const paths = new Set<string>();

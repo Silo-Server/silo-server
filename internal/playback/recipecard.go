@@ -71,6 +71,9 @@ type RecipeCard struct {
 	// AdaptationReasons is the admin views' account of why the route adapts,
 	// kept like the client metadata above and never projected into claims.
 	AdaptationReasons []string `json:"adaptation_reasons,omitempty"`
+	// Subtitle is the subtitle the committed plan delivers, kept for the
+	// admin views like AdaptationReasons.
+	Subtitle *SessionSubtitle `json:"subtitle,omitempty"`
 
 	// Header-authenticated recovery. A session that negotiated
 	// header_authenticated_media_v1 publishes no stream token, so the API keeps
