@@ -1619,11 +1619,18 @@ func main() {
 			}
 			return nil
 		},
-		OnServerSettingUpdated: func(_ context.Context, key, value string) {
+		OnServerSettingUpdated: func(ctx context.Context, key, value string) {
 			if directConn != nil && strings.HasPrefix(key, "direct_connections.") {
-				if err := directConn.SettingsChanged(context.Background()); err != nil {
-					slog.WarnContext(context.Background(), "direct connections: settings reload failed", "component", "directconn", "error", err)
-				}
+				// The save has committed; reread in the background so a slow settings
+				// read never holds up the administrator's response. The read outlives
+				// the request; the service bounds it and ends it at shutdown. Reads
+				// serialize in the service, and unchanged values start no check.
+				reloadCtx := context.WithoutCancel(ctx)
+				go func() {
+					if err := directConn.SettingsChanged(reloadCtx); err != nil {
+						slog.WarnContext(reloadCtx, "direct connections: settings reload failed", "component", "directconn", "error", err)
+					}
+				}()
 			}
 			// Key-scoped reload for the client-IP trust boundary: unlike the
 			// whole-config watcher reload below, this cannot be blocked by an
