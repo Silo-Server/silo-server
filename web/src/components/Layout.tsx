@@ -12,7 +12,14 @@ import { Link, useLocation } from "react-router";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Menu, Search, X } from "lucide-react";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetClose,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { useAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
@@ -44,6 +51,7 @@ import { markCriticalContentLoaded, useCriticalContentLoaded } from "@/lib/start
 import { useSettingsReturnPath } from "@/hooks/useSettingsReturnPath";
 import { useT } from "@/i18n";
 import { useSidebarSwap } from "@/hooks/useSidebarSwap";
+import { getInitial } from "@/lib/text";
 
 // Only admins see the activity indicator, so everyone else skips downloading it.
 const ServerActivity = lazy(() => import("@/components/ServerActivity"));
@@ -429,69 +437,79 @@ export default function Layout({ children }: LayoutProps) {
           )}
         </div>
 
-        {/* Mobile header — visible below lg, pinned below any impersonation
+        {/* The Sheet root wraps the mobile header too, so its Open menu button
+            is the drawer's trigger and gets focus back when the drawer closes. */}
+        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+          {/* Mobile header — visible below lg, pinned below any impersonation
           banner. Slides up on scroll-down within the Calendar route to free
           vertical space; pulling up reveals it. */}
-        <div
-          ref={mobileHeaderRef}
-          data-sticky-header
-          className={`mobile-header glass-dark border-border/70 sticky top-(--impersonation-banner-height) z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out motion-reduce:transition-none lg:hidden ${
-            mobileHeaderHidden ? "-translate-y-[140%]" : "translate-y-0"
-          }`}
-        >
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setMobileOpen(true)}
-              className="text-muted-foreground hover:text-foreground hover:bg-accent/60 flex h-10 w-10 items-center justify-center rounded-xl transition-all active:scale-[0.98]"
-              aria-label={t("web.shell.layout.openMenu")}
-            >
-              <Menu className="h-5 w-5" />
-            </button>
-            <ViewTransitionLink to="/" className="flex items-center gap-2.5">
-              <SiloBrand className="h-10 w-[94px]" />
-            </ViewTransitionLink>
+          <div
+            ref={mobileHeaderRef}
+            data-sticky-header
+            className={`mobile-header glass-dark border-border/70 sticky top-(--impersonation-banner-height) z-30 mx-3 mt-3 flex items-center justify-between rounded-2xl border px-4 py-3 transition-transform duration-200 ease-out motion-reduce:transition-none lg:hidden ${
+              mobileHeaderHidden ? "-translate-y-[140%]" : "translate-y-0"
+            }`}
+          >
+            <div className="flex items-center gap-3">
+              <SheetTrigger asChild>
+                <button
+                  className="text-muted-foreground hover:text-foreground hover:bg-accent/60 flex h-10 w-10 items-center justify-center rounded-xl transition-all active:scale-[0.98]"
+                  aria-label={t("web.shell.layout.openMenu")}
+                >
+                  <Menu className="h-5 w-5" />
+                </button>
+              </SheetTrigger>
+              <ViewTransitionLink to="/" className="flex items-center gap-2.5">
+                <SiloBrand className="h-10 w-[94px]" />
+              </ViewTransitionLink>
+            </div>
+            <div className="flex items-center gap-2">
+              <ViewTransitionLink
+                to={buildQueryCatalogHref()}
+                onPointerDown={prefetchCatalog}
+                onFocus={prefetchCatalog}
+                aria-label={t("web.shell.sidebar.search")}
+                className="text-muted-foreground hover:text-foreground hover:bg-accent/60 flex h-10 w-10 items-center justify-center rounded-xl transition-all active:scale-[0.98]"
+              >
+                <Search className="h-5 w-5" />
+              </ViewTransitionLink>
+              {showAdminActivity && <AdminActivityIndicator />}
+              <Link
+                to="/settings"
+                aria-label={t("web.shell.layout.profileSettings", {
+                  name: profile?.name ?? user?.username ?? t("web.shell.profile.fallbackName"),
+                })}
+                className="flex h-9 w-9 items-center justify-center rounded-full transition-transform active:scale-[0.98]"
+              >
+                <Avatar className="h-9 w-9 shadow-[0_16px_32px_-22px_rgba(0,0,0,0.7)]">
+                  {profile?.avatar_url ? (
+                    <AvatarImage src={profile.avatar_url} alt={profile.name} />
+                  ) : null}
+                  <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold">
+                    {getInitial(profile?.name ?? user?.username ?? "?")}
+                  </AvatarFallback>
+                </Avatar>
+              </Link>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <ViewTransitionLink
-              to={buildQueryCatalogHref()}
-              onPointerDown={prefetchCatalog}
-              onFocus={prefetchCatalog}
-              aria-label={t("web.shell.sidebar.search")}
-              className="text-muted-foreground hover:text-foreground hover:bg-accent/60 flex h-10 w-10 items-center justify-center rounded-xl transition-all active:scale-[0.98]"
-            >
-              <Search className="h-5 w-5" />
-            </ViewTransitionLink>
-            {showAdminActivity && <AdminActivityIndicator />}
-            <Link
-              to="/settings"
-              aria-label={t("web.shell.layout.profileSettings", {
-                name: profile?.name ?? user?.username ?? t("web.shell.profile.fallbackName"),
-              })}
-              className="flex h-9 w-9 items-center justify-center rounded-full transition-transform active:scale-[0.98]"
-            >
-              <Avatar className="h-9 w-9 shadow-[0_16px_32px_-22px_rgba(0,0,0,0.7)]">
-                {profile?.avatar_url ? (
-                  <AvatarImage src={profile.avatar_url} alt={profile.name} />
-                ) : null}
-                <AvatarFallback className="bg-primary text-primary-foreground text-xs font-bold">
-                  {profile?.name?.charAt(0).toUpperCase() ??
-                    user?.username?.charAt(0).toUpperCase() ??
-                    // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- placeholder initial, not a word
-                    "?"}
-                </AvatarFallback>
-              </Avatar>
-            </Link>
-          </div>
-        </div>
 
-        {/* Mobile sidebar drawer */}
-        <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+          {/* Mobile sidebar drawer */}
           {/* Matches AppSidebar's 260px surface. That surface is fixed at z-40, so
               it would cover the sheet's built-in close button; this one sits
               above it, centred in the sidebar's logo row. */}
           <SheetContent
             side="left"
             showCloseButton={false}
+            onCloseAutoFocus={(event) => {
+              // Radix runs this after the drawer has gone, so focus that was
+              // inside it is back on the body. Anything else was focused by
+              // the page just chosen (the catalog's search field), so keep it
+              // there rather than pulling it back to Open menu.
+              const active = document.activeElement;
+              if (active && active !== document.body && active !== document.documentElement) {
+                event.preventDefault();
+              }
+            }}
             className="w-[260px] border-e-0 p-0 sm:max-w-[260px]"
           >
             <SheetHeader className="sr-only">

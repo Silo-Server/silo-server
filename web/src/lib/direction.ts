@@ -65,3 +65,16 @@ export function readingArrowKey(event: { key: string; currentTarget: Element }):
   if (!isRightToLeft(event.currentTarget)) return event.key;
   return event.key === "ArrowLeft" ? "ArrowRight" : "ArrowLeft";
 }
+
+// A letter, not a digit: Arabic-Indic digits are in the Arabic script too.
+const ARABIC_SCRIPT_LETTER = /(?=\p{L})\p{Script=Arabic}/u;
+
+/**
+ * Whether text has any Arabic-script letter (Arabic, Persian, Urdu and others),
+ * whose letters join. Safari spaces them apart under letter-spacing, so a
+ * letter-spaced element that shows a name or title sets `data-cursive` from
+ * this to clear it (app.css). Mixed text loses the spacing on all of it.
+ */
+export function hasArabicScript(text: string): boolean {
+  return ARABIC_SCRIPT_LETTER.test(text);
+}

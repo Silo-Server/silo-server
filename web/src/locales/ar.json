@@ -19805,18 +19805,10 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاؤها"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -19824,27 +19816,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "إخفاؤهما"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاؤها"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "إخفاؤها"
             }
           ]
         },
@@ -19856,9 +19832,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -20135,18 +20109,10 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرضها"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -20154,27 +20120,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "عرضهما"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرضها"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "عرضها"
             }
           ]
         },
@@ -20186,9 +20136,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -21337,26 +21285,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تم أيضًا اختيار "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": "، لأن ما اخترته يحتاج إليها."
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -21372,7 +21304,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -21388,38 +21320,6 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تم أيضًا اختيار "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": "، لأن ما اخترته يحتاج إليها."
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تم أيضًا اختيار "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": "، لأن ما اخترته يحتاج إليها."
-            }
-          ]
-        },
         "other": {
           "value": [
             {
@@ -21436,33 +21336,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تم أيضًا إلغاء اختيار "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": "، لأنها تحتاج إلى ما ألغيت اختياره."
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -21478,7 +21360,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -21491,38 +21373,6 @@
             {
               "type": 0,
               "value": "، لأنهما يحتاجان إلى ما ألغيت اختياره."
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تم أيضًا إلغاء اختيار "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": "، لأنها تحتاج إلى ما ألغيت اختياره."
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تم أيضًا إلغاء اختيار "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": "، لأنها تحتاج إلى ما ألغيت اختياره."
             }
           ]
         },
@@ -21542,9 +21392,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -28271,18 +28119,10 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تعذّرت قراءة بياناتها"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -28290,27 +28130,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "تعذّرت قراءة بياناتهما"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تعذّرت قراءة بياناتها"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تعذّرت قراءة بياناتها"
             }
           ]
         },
@@ -28322,9 +28146,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -28629,6 +28451,746 @@
     {
       "type": 0,
       "value": "يُشار إليها في قاعدة البيانات لكن لم يُعثر عليها في مساحة التخزين؛ وتستبعدها عمليات الاستعادة."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنصر علامة تجارية"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عنصر علامة تجارية واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عنصرا علامة تجارية"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عناصر علامة تجارية"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنصرًا للعلامة التجارية"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنصر علامة تجارية"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " خلفية مجموعة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "خلفية مجموعة واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "خلفيتا مجموعة"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " خلفيات مجموعات"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " خلفيةً للمجموعات"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " خلفية مجموعة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصق مجموعة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملصق مجموعة واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملصقا مجموعة"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصقات مجموعات"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصقًا للمجموعات"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصق مجموعة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمة منزّلة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ترجمة منزّلة واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ترجمتان منزّلتان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمات منزّلة"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمةً منزّلة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمة منزّلة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصق مكتبة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملصق مكتبة واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملصقا مكتبة"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصقات مكتبات"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصقًا للمكتبات"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصق مكتبة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صورة تراكب"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "صورة تراكب واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "صورتا تراكب"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صور تراكب"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صورةً للتراكب"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صورة تراكب"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصق مجموعة شخصية"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملصق مجموعة شخصية واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملصقا مجموعة شخصية"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصقات مجموعات شخصية"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصقًا لمجموعات شخصية"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصق مجموعة شخصية"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صورة رمزية لملفات شخصية"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "صورة رمزية واحدة لملف شخصي"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "صورتان رمزيتان لملفات شخصية"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صور رمزية لملفات شخصية"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صورةً رمزية لملفات شخصية"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صورة رمزية لملفات شخصية"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملف صور فنية مرفوع"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملف صور فنية مرفوع واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملفا صور فنية مرفوعان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملفات صور فنية مرفوعة"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملفًا من الصور الفنية المرفوعة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملف صور فنية مرفوع"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمة مرفوعة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ترجمة مرفوعة واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ترجمتان مرفوعتان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمات مرفوعة"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمةً مرفوعة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمة مرفوعة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -29199,26 +29761,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تعذّرت قراءة "
-            },
-            {
-              "type": 1,
-              "value": "part"
-            },
-            {
-              "type": 0,
-              "value": " لديها"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -29234,7 +29780,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -29247,38 +29793,6 @@
             {
               "type": 0,
               "value": " لديهما"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تعذّرت قراءة "
-            },
-            {
-              "type": 1,
-              "value": "part"
-            },
-            {
-              "type": 0,
-              "value": " لديها"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تعذّرت قراءة "
-            },
-            {
-              "type": 1,
-              "value": "part"
-            },
-            {
-              "type": 0,
-              "value": " لديها"
             }
           ]
         },
@@ -29298,9 +29812,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -29517,18 +30029,10 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "بياناتها كبيرة جدًا على مجموعة الاستعادة"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -29536,27 +30040,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "بياناتهما كبيرة جدًا على مجموعة الاستعادة"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "بياناتها كبيرة جدًا على مجموعة الاستعادة"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "بياناتها كبيرة جدًا على مجموعة الاستعادة"
             }
           ]
         },
@@ -29568,9 +30056,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -66752,6 +67238,160 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "تظهر هنا الفحوصات وعمليات تحديث البيانات الوصفية أثناء تشغيلها."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "لا توجد فحوصات أو عمليات تحديث نشطة"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "الكل ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "إخفاء قائمة الانتظار"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مكتبة أخرى"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ مكتبة أخرى"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ مكتبتان أخريان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مكتبات أخرى"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مكتبة أخرى"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مكتبة أخرى"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "تحديثات البيانات الوصفية"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "جارٍ تحديث البيانات الوصفية"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "عرض قائمة الانتظار"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "عالية"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "منخفضة"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "متوسطة"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -67454,6 +68094,30 @@
       "value": "تأكيد تنظيف الجذور الفارغة"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "فحص"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "لا توجد عناصر في انتظار قائمة مطابقة البيانات الوصفية."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "لم تُسجَّل أي جذور متخطاة."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "لم تُسجَّل أي معرّفات خارجية قديمة."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -67490,6 +68154,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "تعديل"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "لم تُضبط أي مكتبات بعد."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -67577,6 +68253,12 @@
       "value": "إخفاء المسارات"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "خاملة"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -67611,6 +68293,12 @@
       "value": "فحص جزئي"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "إكمال البيانات الوصفية الناقصة أو استبدالها كلها"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -67623,6 +68311,12 @@
       "value": "يتعذّر الوصول إلى الجذر"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "فحص"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -67633,6 +68327,12 @@
     {
       "type": 0,
       "value": "عرض المسارات"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "إيقاف"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -67651,6 +68351,22 @@
     {
       "type": 0,
       "value": "التحقق من نقاط التحميل"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "التحقق من إمكانية الوصول إلى كل مجلدات المكتبة"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "عرض الفحوصات النشطة لـ "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -67754,7 +68470,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "أدر جذور المكتبات وفحوصاتها. أصبح استيراد الكتالوج وتصديره الآن ضمن «الصيانة»."
+      "value": "أدر مجلدات الوسائط، وراقب الفحوصات، وحلّ مشكلات المطابقة."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -68541,6 +69257,91 @@
       "value": "المعرّفات الخارجية القديمة"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا مهام نشطة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مهمة نشطة واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مهمتان نشطتان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مهام نشطة"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مهمة نشطة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مهمة نشطة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "نشاط الفحص"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "سلامة الكتالوج"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "المكتبات"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -69055,6 +69856,24 @@
     {
       "type": 0,
       "value": "ابحث في العناصر المتجاهلة حسب العنوان أو المكتبة أو النوع..."
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "ملتبس"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "قيد الانتظار"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "غير مطابق"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -169135,6 +169954,16 @@
       "value": "العودة إلى الصفحة 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "الانتقال إلى الصفحة "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -169225,6 +170054,20 @@
     {
       "type": 0,
       "value": "صفحات طلب للإضافة"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "الصفحة "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " تتجاوز نهاية هذه النتائج."
     }
   ],
   "web.requests.toAdd.series": [
@@ -171381,6 +172224,12 @@
     {
       "type": 0,
       "value": "قراءة إشعارات الملف الشخصي فور وصولها وتعليمها كمقروءة."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "معرفة ما يُشغَّل الآن على الملف الشخصي، أو على كل ملف شخصي في الحساب إذا لم يحدد المفتاح ملفًا شخصيًا: العنوان والموضع وحالة الإيقاف المؤقت والجهاز وطريقة التشغيل. دون التحكم في التشغيل أو تفاصيل الشبكة."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

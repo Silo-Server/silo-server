@@ -96,6 +96,12 @@ func (p *planner) planSettings(ctx context.Context) ([]settingPlan, error) {
 				have = false
 			}
 		}
+		// What the environment sets is the value in effect here, stored or
+		// not, and the write path refuses to change it.
+		envValue, envSet := p.s.environmentValue(e.Key)
+		if envSet {
+			current, have = envValue, true
+		}
 		live := current
 		if !have {
 			live = ""
@@ -103,6 +109,8 @@ func (p *planner) planSettings(ctx context.Context) ([]settingPlan, error) {
 		switch _, wider := AccessSettingWider(e.Key, value, live); {
 		case have && current == value:
 			plan.preview.Status = ItemOnThisServer
+		case envSet:
+			plan.preview.Status = SettingManagedByEnvironment
 		case wider:
 			// A restore never widens access: the live value stays.
 			plan.preview.Status = SettingKeptStricter
@@ -114,7 +122,43 @@ func (p *planner) planSettings(ctx context.Context) ([]settingPlan, error) {
 		}
 		out = append(out, plan)
 	}
+	keepEnvironmentBundles(out, func(key string) bool { _, ok := p.s.environmentValue(key); return ok })
 	return guardRoutes(out, func(key string) string { return liveValue(stored, cipher, key) }), nil
+}
+
+// keepEnvironmentBundles keeps every outbound bundle (outboundBundles) that
+// this server's environment sets any setting of as it is here, as the full
+// restore carries a bundle whole: restoring the rest of it from the backup
+// would mix the environment's settings with the backup's, such as an
+// environment's plain-text transport with the backup's host and password.
+// The rule holds even when the environment sets only part of the bundle
+// that is neither an address nor a credential (a sender name, the switch).
+// Each of its settings that differs, or that would widen access (mail's
+// switch and transport are access settings too), is marked
+// managed_by_environment, so the page names the environment as the reason.
+func keepEnvironmentBundles(plans []settingPlan, setByEnvironment func(key string) bool) {
+	for _, b := range outboundBundles {
+		if !slices.ContainsFunc(b.keys, setByEnvironment) {
+			continue
+		}
+		for i := range plans {
+			switch plans[i].preview.Status {
+			case ItemDiffers, SettingKeptStricter:
+				if slices.Contains(b.keys, plans[i].preview.Key) {
+					plans[i].preview.Status = SettingManagedByEnvironment
+				}
+			}
+		}
+	}
+}
+
+// environmentValue is the value this server's environment sets for key
+// (RestoreTargets.EnvironmentValue).
+func (s *Service) environmentValue(key string) (string, bool) {
+	if s.targets.EnvironmentValue == nil {
+		return "", false
+	}
+	return s.targets.EnvironmentValue(key)
 }
 
 // liveValue is key's stored value, decrypted; "" when there is none, or
@@ -178,6 +222,9 @@ func settingsPageItems(plans []settingPlan) []PreviewItem {
 		case counts.unverified > 0:
 			item.Status, item.Reason = ItemDiffers, ReasonUnverifiedBackup
 			notes = []string{msgUnverifiedServices}
+		case counts.environment > 0:
+			item.Status, item.Reason = ItemDiffers, ReasonManagedByEnvironment
+			notes = []string{"This server's environment sets the settings that differ, or part of their connection, so this server keeps its current values."}
 		}
 		item.Message = strings.Join(notes, " ")
 		out = append(out, item)
@@ -221,6 +268,8 @@ func (a *applier) applySettingsPage(ctx context.Context, tx pgx.Tx, id string) (
 			return leftOut(item, ReasonKeptStricter, "Every setting that differs would widen access, so this server kept its stricter current values."), nil
 		case counts.unverified > 0:
 			return leftOut(item, ReasonUnverifiedBackup, msgUnverifiedServices), nil
+		case counts.environment > 0:
+			return leftOut(item, ReasonManagedByEnvironment, "This server's environment sets the settings that differ, or part of their connection, so this server kept its current values."), nil
 		}
 		return unchanged(item), nil
 	}

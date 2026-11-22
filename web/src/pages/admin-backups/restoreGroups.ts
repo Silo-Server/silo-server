@@ -114,6 +114,7 @@ const BLOCKED_TITLES: Record<RestoreReason, MessageKey> = {
   unverified_backup: "web.admin.backups.restore.blocked.unverifiedBackup",
   over_restore_budget: "web.admin.backups.restore.blocked.overRestoreBudget",
   needs_primary_profile: "web.admin.backups.restore.blocked.needsPrimaryProfile",
+  managed_by_environment: "web.admin.backups.restore.blocked.managedByEnvironment",
 };
 
 /** For an item the server gave a status but no reason. */
@@ -290,19 +291,16 @@ export function sectionProgress(section: RestoreSection, selection: SelectionKey
 }
 
 /**
- * The short muted text after a row's label: what the item is here. With
- * `withLibrary`, collections and sections name their library too, for lists
- * that aren't already under a library heading.
+ * The library a collection or section belongs to, which its row names in lists
+ * that aren't already under a library heading. The row shows it as a part of its
+ * own beside rowSecondary's text, since the name can run in either direction.
  */
-export function rowSecondary(
-  item: RestoreItem,
-  names: LibraryNames,
-  withLibrary = false,
-): string | null {
-  const library =
-    withLibrary && (item.collection || item.home_section) ? itemLibrary(item, names).name : null;
-  const join = (...parts: (string | null | undefined)[]) =>
-    parts.filter(Boolean).join(" · ") || null;
+export function rowLibrary(item: RestoreItem, names: LibraryNames): string | null {
+  return item.collection || item.home_section ? itemLibrary(item, names).name : null;
+}
+
+/** The short muted text after a row's label: what the item is here. */
+export function rowSecondary(item: RestoreItem, names: LibraryNames): string | null {
   switch (item.kind) {
     case "library": {
       const local = item.library?.local_id ? names.local.get(item.library.local_id) : undefined;
@@ -327,31 +325,26 @@ export function rowSecondary(
         : null;
     }
     case "template_collection":
-      return join(
-        library,
-        item.collection?.local_id
-          ? t("web.admin.backups.restore.row.templateChanges")
-          : t("web.admin.backups.restore.row.templateCreated"),
-      );
+      return item.collection?.local_id
+        ? t("web.admin.backups.restore.row.templateChanges")
+        : t("web.admin.backups.restore.row.templateCreated");
     case "collection": {
       const collection = item.collection;
-      if (!collection) return library;
-      return join(
-        library,
-        item.status === "differs" && collection.missing_items > 0
-          ? countText("web.admin.backups.restore.row.collectionAdds", collection.missing_items)
-          : countText("web.admin.backups.restore.row.collectionItems", collection.items),
-      );
+      if (!collection) return null;
+      return item.status === "differs" && collection.missing_items > 0
+        ? countText("web.admin.backups.restore.row.collectionAdds", collection.missing_items)
+        : countText("web.admin.backups.restore.row.collectionItems", collection.items);
     }
     case "home_section":
-      return join(
-        library,
+      return [
         item.home_section ? rowKindLabel(item.home_section.section_type) : null,
         item.home_section?.local_id
           ? t("web.admin.backups.restore.row.sectionReplaces")
           : t("web.admin.backups.restore.row.sectionAdded"),
-      );
+      ]
+        .filter(Boolean)
+        .join(" · ");
     default:
-      return library;
+      return null;
   }
 }
