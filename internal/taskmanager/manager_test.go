@@ -737,3 +737,43 @@ func TestTrackedRunRenewsAndFinishesItsLease(t *testing.T) {
 		}
 	})
 }
+
+// main cancels Start's context before it calls Stop; a scheduled run that
+// cancellation ends is interrupted too, not a failure of the task.
+func TestCanceledStartContextRecordsTheScheduledRunAsInterrupted(t *testing.T) {
+	hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)}
+	history := insertSignalingRepository{inserted: make(chan taskmanager.ExecutionResult, 1)}
+	fired := make(chan *fakeTrigger, 1)
+	factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
+		tr := &fakeTrigger{cfg: cfg, ch: make(chan struct{}, 1), stopCh: make(chan struct{})}
+		select {
+		case fired <- tr:
+		default:
+		}
+		return tr
+	}
+	manager := taskmanager.New(&fakeTriggerRepository{}, history, factory, slog.New(slog.DiscardHandler))
+	task := gatedTask{
+		stubTask: stubTask{key: "scan", triggers: []taskmanager.TriggerConfig{hourly}},
+		entered:  make(chan struct{}, 1),
+		release:  make(chan struct{}),
+		runs:     make(chan struct{}, 1),
+	}
+	manager.Register(task)
+	ctx, cancel := context.WithCancel(context.Background())
+	manager.Start(ctx)
+	defer manager.Stop()
+	(<-fired).ch <- struct{}{}
+	<-task.entered
+
+	cancel()
+
+	select {
+	case got := <-history.inserted:
+		if got.Status != "failed" || got.ErrorMessage != interruptedMessage {
+			t.Fatalf("recorded run = %s %q, want failed %q", got.Status, got.ErrorMessage, interruptedMessage)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled scheduled run was not recorded")
+	}
+}

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -255,7 +256,8 @@ func (m *TaskManager) scheduleBase(ctx context.Context, key string, latest *Exec
 	}
 	recent, err := m.historyRepo.List(ctx, key, 20)
 	if err != nil {
-		return nil
+		m.logger.WarnContext(ctx, "failed to read task history for its schedule", "task", key, "error", err)
+		return latest
 	}
 	for i := range recent {
 		if !recent[i].IsInterrupted() {
@@ -629,11 +631,23 @@ func (m *TaskManager) executeAndRecord(w *taskWorker, execCtx context.Context, c
 	result := *w.executeReserved(execCtx, cancel)
 	stopRenewing()
 
-	if m.stopped.Load() && result.Status == ExecutionStatusFailed {
-		// Stop canceled the run; the task didn't fail on its own.
+	if result.Status == ExecutionStatusFailed && m.shuttingDown() {
+		// Shutdown canceled the run; the task didn't fail on its own.
 		result.ErrorMessage = InterruptedExecutionMessage
 	}
 	m.recordRun(writeCtx, leaseID, result)
+}
+
+// shuttingDown reports whether the server is stopping: Stop has begun, or
+// the context Start was given, which scheduled runs inherit, is done. main
+// cancels that context well before it calls Stop.
+func (m *TaskManager) shuttingDown() bool {
+	if m.stopped.Load() {
+		return true
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.startCtx != nil && m.startCtx.Err() != nil
 }
 
 // renewRunLease renews leaseID until the returned function is called, which
@@ -721,8 +735,13 @@ func (m *TaskManager) reconcileStaleRuns(ctx context.Context) {
 	}
 	for _, key := range keys {
 		m.logger.WarnContext(ctx, "recorded an interrupted task run", "task", key)
+	}
+	slices.Sort(keys)
+	for _, key := range slices.Compact(keys) {
 		if w, err := m.getWorker(key); err == nil {
-			m.reloadLastResult(ctx, w)
+			readCtx, readCancel := context.WithTimeout(ctx, historyWriteTimeout)
+			m.reloadLastResult(readCtx, w)
+			readCancel()
 			w.notify()
 		}
 	}

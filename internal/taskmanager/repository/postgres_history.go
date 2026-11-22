@@ -69,11 +69,17 @@ func (r *PgExecutionRepository) RenewRun(ctx context.Context, leaseID int64) (bo
 // FinishRun inserts the finished run and deletes its lease in one statement.
 // A lease another server already recorded as interrupted is gone; the run is
 // still inserted, so its real outcome is kept next to the interrupted entry.
+// Without its lease, an identical entry means an earlier attempt committed
+// unacknowledged, so a retry inserts nothing.
 func (r *PgExecutionRepository) FinishRun(ctx context.Context, leaseID int64, result taskmanager.ExecutionResult) error {
 	_, err := r.pool.Exec(ctx, `
-		WITH released AS (DELETE FROM task_execution_leases WHERE id = $8)
+		WITH released AS (DELETE FROM task_execution_leases WHERE id = $8 RETURNING id)
 		INSERT INTO task_executions (task_key, started_at, completed_at, status, error_message, result_data, duration_ms)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		SELECT $1, $2, $3, $4, $5, $6, $7
+		WHERE EXISTS (SELECT 1 FROM released)
+		   OR NOT EXISTS (
+			SELECT 1 FROM task_executions
+			WHERE task_key = $1 AND started_at = $2 AND completed_at = $3 AND status = $4)`,
 		result.TaskKey, result.StartedAt, result.CompletedAt,
 		result.Status, result.ErrorMessage, result.ResultData, result.DurationMs, leaseID,
 	)

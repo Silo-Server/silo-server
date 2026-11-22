@@ -159,8 +159,9 @@ func TestPgExecutionRepositoryRecordsStaleRunLeasesAsInterrupted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReconcileStaleRuns: %v", err)
 	}
-	if !slices.Equal(keys, []string{key}) {
-		t.Fatalf("ReconcileStaleRuns keys = %v, want [%s]", keys, key)
+	// Other tests' stale leases may be reconciled too; this task's is once.
+	if n := countOf(keys, key); n != 1 {
+		t.Fatalf("ReconcileStaleRuns keys = %v, want %s once", keys, key)
 	}
 	latest, err := repo.GetLatest(ctx, key)
 	if err != nil || latest == nil {
@@ -172,8 +173,26 @@ func TestPgExecutionRepositoryRecordsStaleRunLeasesAsInterrupted(t *testing.T) {
 	if held, err := repo.RenewRun(ctx, staleID); err != nil || held {
 		t.Fatalf("RenewRun reconciled = (%v, %v), want (false, nil)", held, err)
 	}
-	if keys, err := repo.ReconcileStaleRuns(ctx, 3*time.Minute); err != nil || len(keys) != 0 {
-		t.Fatalf("second ReconcileStaleRuns = (%v, %v), want nothing", keys, err)
+	if keys, err := repo.ReconcileStaleRuns(ctx, 3*time.Minute); err != nil || slices.Contains(keys, key) {
+		t.Fatalf("second ReconcileStaleRuns = (%v, %v), want %s left alone", keys, err, key)
+	}
+	// A retried FinishRun whose first attempt committed adds no second entry.
+	retried := taskmanager.ExecutionResult{
+		TaskKey: key, StartedAt: time.Now().Add(-time.Second).UTC().Truncate(time.Microsecond),
+		CompletedAt: time.Now().UTC().Truncate(time.Microsecond), Status: "completed", DurationMs: 1000,
+	}
+	retryID, err := repo.StartRun(ctx, key)
+	if err != nil {
+		t.Fatalf("StartRun retried: %v", err)
+	}
+	for range 2 {
+		if err := repo.FinishRun(ctx, retryID, retried); err != nil {
+			t.Fatalf("FinishRun retried: %v", err)
+		}
+	}
+	var copies int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM task_executions WHERE task_key = $1 AND started_at = $2`, key, retried.StartedAt).Scan(&copies); err != nil || copies != 1 {
+		t.Fatalf("retried entries = (%d, %v), want 1", copies, err)
 	}
 
 	finished := taskmanager.ExecutionResult{
@@ -189,4 +208,14 @@ func TestPgExecutionRepositoryRecordsStaleRunLeasesAsInterrupted(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM task_execution_leases WHERE task_key = $1`, key).Scan(&leases); err != nil || leases != 0 {
 		t.Fatalf("leases left = (%d, %v), want 0", leases, err)
 	}
+}
+
+func countOf(keys []string, key string) int {
+	n := 0
+	for _, k := range keys {
+		if k == key {
+			n++
+		}
+	}
+	return n
 }
