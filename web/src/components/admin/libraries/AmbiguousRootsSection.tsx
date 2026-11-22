@@ -144,8 +144,11 @@ export function AmbiguousRootsSection({
   useEffect(() => {
     if (!onStatusChange) return;
     if (debouncedSearch.trim() !== "") return;
-    onStatusChange({ count: countUnknown ? undefined : totalRoots, isError: loadFailed });
-  }, [countUnknown, debouncedSearch, loadFailed, onStatusChange, totalRoots]);
+    // `useLibraryRoots` queries one library at a time, so only publish a count
+    // to the catalog-wide summary tile when there is a single library.
+    const catalogWideCount = libraries.length === 1 && !countUnknown ? totalRoots : undefined;
+    onStatusChange({ count: catalogWideCount, isError: loadFailed });
+  }, [countUnknown, debouncedSearch, libraries.length, loadFailed, onStatusChange, totalRoots]);
 
   const pag = usePagination(roots);
 

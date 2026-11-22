@@ -284,6 +284,9 @@ describe("AdminLibraries layout", () => {
     fireEvent.click(screen.getByRole("tab", { name: /Ambiguous Roots/i }));
     expect(mocks.rootsCalls.some((call) => call.enabled === true)).toBe(true);
     expect(mocks.skippedCalls).toHaveLength(0);
+    // With multiple libraries, the tile stays on "Inspect" rather than showing
+    // one library's count as a catalog-wide total.
+    expect(screen.getByRole("tab", { name: /Ambiguous Roots/i })).toHaveTextContent("Inspect");
 
     fireEvent.click(screen.getByRole("tab", { name: /Stale External IDs/i }));
     expect(mocks.staleCalls.some((call) => call.enabled === true)).toBe(true);
