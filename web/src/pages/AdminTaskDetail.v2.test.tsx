@@ -147,7 +147,9 @@ it("lets a refetch's 404 replace a task that was already cached", async () => {
   expect(screen.queryByText("Retired task")).not.toBeInTheDocument();
 });
 
-function renderScheduleEditor(triggers: Array<{ type: "interval"; interval_ms: number }>) {
+function renderScheduleEditor(
+  triggers: Array<{ type: "interval"; interval_ms: number; max_runtime_ms?: number }>,
+) {
   const writes: unknown[] = [];
   vi.stubGlobal(
     "fetch",
@@ -224,4 +226,34 @@ it("keeps each row's unit when a row above it is removed", async () => {
 
   expect((screen.getAllByRole("spinbutton")[0] as HTMLInputElement).value).toBe("2");
   expect(screen.getAllByRole("combobox")[1]).toHaveTextContent("Hours");
+});
+
+it("keeps a typed Max runtime as typed, and shows a stored one rounded", async () => {
+  const writes = renderScheduleEditor([
+    { type: "interval", interval_ms: 120_000, max_runtime_ms: 74_075 },
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: "Edit Schedule" }));
+  const box = (await screen.findByPlaceholderText("None")) as HTMLInputElement;
+  expect(box.value).toBe("1.23458");
+
+  // A negative limit is saved as 0 (no limit), so the box shows 0.
+  fireEvent.change(box, { target: { value: "-5" } });
+  expect(box.value).toBe("0");
+
+  // So is a positive one under half a millisecond, once the admin leaves the box.
+  fireEvent.change(box, { target: { value: "0.000008" } });
+  expect(box.value).toBe("0.000008");
+  fireEvent.blur(box);
+  expect(box.value).toBe("0");
+
+  const typed = "1.23456";
+  for (let i = 1; i <= typed.length; i++) {
+    fireEvent.change(box, { target: { value: typed.slice(0, i) } });
+  }
+  expect(box.value).toBe("1.23456");
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(writes).toHaveLength(1));
+  expect(writes[0]).toEqual({
+    triggers: [{ type: "interval", interval_ms: 120_000, max_runtime_ms: 74_074 }],
+  });
 });

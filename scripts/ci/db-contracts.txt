@@ -1329,6 +1329,7 @@
 ./internal/backup TestSelectivePluginRestorePreviewsOwnedConfigDB
 ./internal/backup TestRestoreRechecksAccessSettingsUnderTheLockDB
 ./internal/backup TestRestoreNeverSendsLiveSecretsToARestoredAddressDB
+./internal/backup TestRestoreLeavesOutSettingsTheEnvironmentSetsDB
 ./internal/backup TestTemplateCollectionsAndHomeSectionsDB
 ./internal/backup TestRestoredLibrarySectionsWaitForTheRestoreDB
 ./internal/backup TestManagedSectionPointedElsewhereIsRestoredDB

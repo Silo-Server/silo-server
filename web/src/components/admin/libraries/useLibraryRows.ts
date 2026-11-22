@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import type { AdminJob, Library, LibraryMountCheckResponse, ScanRun } from "@/api/types";
+import type { LibraryEditorSection } from "@/components/admin/libraries/LibraryEditorDialog";
 import {
   useCancelAdminJob,
   useCancelLibraryScans,
@@ -52,13 +53,14 @@ export interface LibraryRow {
   cancelJob: (jobID: string) => void;
   cancelScans: () => void;
   edit: () => void;
+  editFolders: () => void;
   remove: () => void;
 }
 
 interface Options {
   activeScans: ScanRun[];
   refreshJobs: AdminJob[];
-  onEdit: (library: Library) => void;
+  onEdit: (library: Library, section?: LibraryEditorSection) => void;
   onDelete: (library: Library) => void;
   onRefresh: (library: Library) => void;
   onConfirmCleanup: (library: Library) => void;
@@ -221,6 +223,7 @@ export function useLibraryRows({
       cancelJob: (jobID) => cancelAdminJobMutation.mutate(jobID),
       cancelScans,
       edit: () => onEdit(library),
+      editFolders: () => onEdit(library, "folders"),
       remove: () => onDelete(library),
     };
   }

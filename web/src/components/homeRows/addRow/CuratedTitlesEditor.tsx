@@ -10,6 +10,7 @@ import { catalogKeys, itemKeys } from "@/hooks/queries/keys";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useT, type Translate } from "@/i18n";
 import { titleCount } from "@/lib/homeRows/describe";
+import { itemTypeLabel } from "@/lib/itemTypeLabels";
 
 const SEARCH_LIMIT = 10;
 const SEARCH_DEBOUNCE_MS = 250;
@@ -131,6 +132,7 @@ export function CuratedTitlesEditor({
           >
             {found.map((item) => {
               const already = picked.has(item.content_id);
+              const type = itemTypeLabel(t, item.type);
               return (
                 <li key={item.content_id} className="flex items-center gap-2 px-3 py-2 text-sm">
                   {/* The year and type sit under the title so the title has the
@@ -143,9 +145,9 @@ export function CuratedTitlesEditor({
                       {item.year
                         ? t("web.home.addRow.curated.resultMeta", {
                             year: item.year,
-                            type: item.type,
+                            type,
                           })
-                        : item.type}
+                        : type}
                     </span>
                   </span>
                   <Button

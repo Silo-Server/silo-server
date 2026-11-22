@@ -1,4 +1,4 @@
-package playback
+package mediatrack
 
 import (
 	"strings"
@@ -48,7 +48,7 @@ func audioTrackMatchesSignature(track models.AudioTrack, sig *userstore.AudioTra
 	if sig == nil || sig.IsZero() {
 		return false
 	}
-	return langMatch(track.Language, sig.Language) &&
+	return LangMatch(track.Language, sig.Language) &&
 		trackStringEqual(track.Title, sig.Title) &&
 		trackStringEqual(track.EmbeddedTitle, sig.EmbeddedTitle) &&
 		trackStringEqual(track.Codec, sig.Codec) &&
