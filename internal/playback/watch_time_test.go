@@ -57,6 +57,14 @@ func TestWatchTimeObserve(t *testing.T) {
 			wantPaused: 32,
 		},
 		{
+			// A detached stop replays the attempt's latest report at the
+			// time it arrived, which can be before a pause confirmed since.
+			name:       "a report from before a confirmed pause keeps the pause",
+			samples:    []sample{{0, 0, false, false}, {10, 0, true, true}, {5, 5, false, false}, {100, 10, true, false}},
+			wantPlayed: 10,
+			wantPaused: 90,
+		},
+		{
 			name:       "a seek while paused after a confirmed pause is not watched",
 			samples:    []sample{{0, 0, false, false}, {10, 0, true, true}, {100, 100, true, false}},
 			wantPaused: 90,
