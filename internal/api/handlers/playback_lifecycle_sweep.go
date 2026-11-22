@@ -54,6 +54,9 @@ type lifecycleCandidate struct {
 	attemptLive  bool
 	finalized    bool
 	stopID       string
+	// adminStopRequested: an administrator's stop was pending when the
+	// attempt stopped, from its stop receipt (see endReasonForStop).
+	adminStopRequested bool
 	// reported is an Audiobookshelf play a client only reports; the rest is
 	// its row, which the end records.
 	reported          bool
@@ -131,6 +134,7 @@ func loadLifecycleCandidates(ctx context.Context, pool *pgxpool.Pool, now time.T
 					COALESCE(r.last_sync_at, lc.updated_at)) AS activity,
 				a.session_id IS NOT NULL AS attempt_found, a.session_id IS NOT NULL AND a.stopped_at IS NULL AS attempt_live,
 				COALESCE((a.stop_receipt->>'finalized')::boolean, FALSE) AS finalized, COALESCE(a.stop_receipt->>'stop_id', '') AS stop_id,
+				COALESCE((a.stop_receipt->>'admin_stop_requested')::boolean, FALSE) AS admin_stop_requested,
 				r.id IS NOT NULL AS reported, r.id IS NOT NULL AND r.closed_at IS NULL AS reported_open,
 				COALESCE(r.current_position_seconds, 0) AS reported_position, COALESCE(r.time_listening_seconds, 0)::double precision AS reported_listening,
 				COALESCE(r.started_at, lc.started_at) AS reported_started_at, COALESCE(r.last_sync_at, lc.updated_at) AS reported_last_sync
@@ -143,7 +147,7 @@ func loadLifecycleCandidates(ctx context.Context, pool *pgxpool.Pool, now time.T
 		)
 		-- Only rows the sweep can act on now: an attempt someone stopped, or a
 		-- session idle past its grace. Rows still active never fill the batch.
-		SELECT session_id::text, frontend, user_id, profile_id, paused, activity, attempt_found, attempt_live, finalized, stop_id,
+		SELECT session_id::text, frontend, user_id, profile_id, paused, activity, attempt_found, attempt_live, finalized, stop_id, admin_stop_requested,
 			reported, reported_open, reported_position, reported_listening, reported_started_at, reported_last_sync
 		FROM live
 		WHERE (attempt_found AND NOT attempt_live)
@@ -161,7 +165,7 @@ func loadLifecycleCandidates(ctx context.Context, pool *pgxpool.Pool, now time.T
 	return pgx.CollectRows(rows, func(row pgx.CollectableRow) (lifecycleCandidate, error) {
 		var c lifecycleCandidate
 		err := row.Scan(&c.sessionID, &c.frontend, &c.userID, &c.profileID, &c.paused, &c.activity,
-			&c.attemptFound, &c.attemptLive, &c.finalized, &c.stopID,
+			&c.attemptFound, &c.attemptLive, &c.finalized, &c.stopID, &c.adminStopRequested,
 			&c.reported, &c.reportedOpen, &c.reportedPosition, &c.reportedListening, &c.reportedStartedAt, &c.reportedLastSync)
 		return c, err
 	})
@@ -181,7 +185,7 @@ func (h *PlaybackHandler) sweepLifecycleCandidate(ctx context.Context, pool *pgx
 	case c.attemptFound:
 		// The attempt's end was finalized without stopping the lifecycle
 		// (its writer failed, or ended before the upgrade): record it now.
-		h.endLifecycleFromFacts(ctx, pool, c.sessionID, endReasonForStop(c.sessionID, c.stopID), now)
+		h.endLifecycleFromFacts(ctx, pool, c.sessionID, endReasonForStop(c.sessionID, c.stopID, c.adminStopRequested), now)
 	case c.frontend == LifecycleFrontendJellyfin:
 		h.expireIdleJellyfinSession(ctx, pool, c, idleBefore, now)
 	case c.reported:

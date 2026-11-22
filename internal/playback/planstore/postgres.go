@@ -524,10 +524,13 @@ func (s *Postgres) StopAttempt(ctx context.Context, sessionID, stopID string, fi
 		    sample_accepted_at = CASE WHEN $3::bigint > last_sequence THEN $5::timestamptz ELSE sample_accepted_at END,
 		    stop_receipt = jsonb_strip_nulls(jsonb_build_object(
 		        'stop_id', $2::uuid::text,
-		        'accepted', CASE WHEN $3::bigint > last_sequence THEN $4::jsonb ELSE last_sample END)),
+		        'accepted', CASE WHEN $3::bigint > last_sequence THEN $4::jsonb ELSE last_sample END,
+		        'admin_stop_requested', CASE WHEN EXISTS (
+		            SELECT 1 FROM jsonb_each_text(admin_stop_commands) AS pending(command_id, requested_at)
+		            WHERE pending.requested_at::timestamptz > NOW() - make_interval(secs => $6)) THEN TRUE END)),
 		    updated_at = NOW()
 		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL
-		RETURNING stop_receipt`, sessionID, stopID, finalSequence, finalJSON, time.Now()).Scan(&receiptJSON)
+		RETURNING stop_receipt`, sessionID, stopID, finalSequence, finalJSON, time.Now(), playback.AdminStopPendingFor.Seconds()).Scan(&receiptJSON)
 	if err == nil {
 		var receipt playback.StopReceiptV3
 		if err := json.Unmarshal(receiptJSON, &receipt); err != nil {
@@ -552,6 +555,28 @@ func (s *Postgres) StopAttempt(ctx context.Context, sessionID, stopID string, fi
 		return playback.StopReceiptV3{}, false, err
 	}
 	return receipt, false, nil
+}
+
+// MarkAdminStop records that commandID, an administrator's stop, was sent to
+// the player of a live attempt; a stop that wins the attempt within
+// playback.AdminStopPendingFor copies the mark into its receipt. Each command
+// keeps its own entry, so overlapping stops, on any replica, withdraw only
+// their own. It leaves updated_at alone: the idle expiry reads it as
+// activity.
+func (s *Postgres) MarkAdminStop(ctx context.Context, sessionID, commandID string) error {
+	_, err := s.db.Exec(ctx, `
+		UPDATE playback_v3_attempts
+		SET admin_stop_commands = COALESCE(admin_stop_commands, '{}'::jsonb) || jsonb_build_object($2::text, NOW())
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL`, sessionID, commandID)
+	return err
+}
+
+// ClearAdminStop withdraws commandID's mark, and no other command's.
+func (s *Postgres) ClearAdminStop(ctx context.Context, sessionID, commandID string) error {
+	_, err := s.db.Exec(ctx, `
+		UPDATE playback_v3_attempts SET admin_stop_commands = NULLIF(admin_stop_commands - $2::text, '{}'::jsonb)
+		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND admin_stop_commands ? $2::text`, sessionID, commandID)
+	return err
 }
 
 // ExpireIdleAttempt stops a live attempt under stopID only while it has

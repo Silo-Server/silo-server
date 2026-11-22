@@ -1101,6 +1101,8 @@
 ./internal/playback/planstore TestSampleAcceptedAtDB
 ./internal/playback/planstore TestLatePlaybackProgressCannotOverwriteFinalStopDB
 ./internal/playback/planstore TestPlaybackStopCommitsResumeAndEpisodeSpanOnceDB
+./internal/playback/planstore TestAdminStopMarkDB
+./internal/playback/planstore TestAdminStopMarksPerCommandDB
 ./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB
 ./internal/api/handlers TestForgetDeviceKeepsConnectionsUntilLastRegistrationDB
 ./internal/api/handlers TestConcurrentLastRegistrationDeletesDropConnectionsDB

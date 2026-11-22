@@ -3,11 +3,22 @@ package handlers
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/playback/planstore"
+)
+
+// Both plan stores keep the administrator stop mark.
+var (
+	_ adminStopMarker = (*playback.MemoryPlanStoreV3)(nil)
+	_ adminStopMarker = (*planstore.Postgres)(nil)
 )
 
 const (
@@ -396,5 +407,85 @@ func TestUnconfirmedPauseEndsTheAttemptAsAdministratorStop(t *testing.T) {
 			t.Fatalf("attempt not ended by administrator: %+v, %v", record, err)
 		}
 		time.Sleep(10 * time.Millisecond)
+	}
+}
+
+// An administrator's stop is recorded as terminated whichever stop reaches
+// the attempt first: the player carrying it out may send its own stop before
+// it confirms. A stop the player refused leaves the viewer's later stop its
+// own, a refusal of either of two stops leaves the other pending, and a
+// viewer stop with no administrator command, or during the fallback of a stop
+// the player has no socket to receive, stays a viewer stop.
+func TestAdministratorStopIsTerminatedWhicheverStopWins(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		// stops are the administrator's stop commands sent, in order; refused
+		// are the ones the player refuses before it stops, and the last one
+		// it confirms after its own stop unless refused.
+		stops   []string
+		refused []string
+		// noLane: the player has no control socket, so each stop waits for
+		// its fallback instead of reaching the player.
+		noLane bool
+		want   PlaybackEndReason
+	}{
+		{"player stops before confirming", []string{sequencedCommandA}, nil, false, PlaybackEndTerminated},
+		{"player refuses, viewer stops later", []string{sequencedCommandA}, []string{sequencedCommandA}, false, PlaybackEndStopped},
+		{"an earlier stop's refusal leaves the later one", []string{sequencedCommandA, sequencedCommandB}, []string{sequencedCommandA}, false, PlaybackEndTerminated},
+		{"a later stop's refusal leaves the earlier one", []string{sequencedCommandA, sequencedCommandB}, []string{sequencedCommandB}, false, PlaybackEndTerminated},
+		{"viewer stop without a command", nil, nil, false, PlaybackEndStopped},
+		{"viewer stop before a stop's fallback", []string{sequencedCommandA}, nil, true, PlaybackEndStopped},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			control, _, hub, session := newAdminPlaybackControlTestHandler(t)
+			h := control.playback
+			h.InstallationID = serviceInstallation
+			admin := &recordingPlaybackAdminStore{}
+			h.AdminStore = admin
+			h.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+			if err := h.PlanStoreV3.SaveAttempt(t.Context(), playback.AttemptRecordV3{
+				PlaybackAttemptID: "attempt-" + session.ID, SessionID: session.ID, UserID: session.UserID, ProfileID: session.ProfileID,
+				RequestedMediaFileID: 100, EffectiveMediaFileID: 100, ExpiresAt: time.Now().Add(time.Hour),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			delivery := AdminPlaybackDeliveryFallbackScheduled
+			if !tc.noLane {
+				sequencedLane(t, control, hub, session)
+				delivery = AdminPlaybackDeliveryDispatched
+			}
+			caller := PlaybackCaller{UserID: 1, ProfileID: "profile-1", InstallationID: serviceInstallation}
+			if _, err := h.ApplyProgressV2(newAuthorizedPlaybackContext(), caller, session.ID, PlaybackProgressCommand{Sequence: 1, Position: 600}); err != nil {
+				t.Fatal(err)
+			}
+			answer := func(commandID string, status playback.RealtimeResultStatus) {
+				t.Helper()
+				if err := h.handleRealtimeClientMessage(session.ID, realtimeResultMessage(t, session.ID, commandID, status)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i, commandID := range tc.stops {
+				in := sequencedInput(session.ID, commandID, int64(i+1), playback.CommandStop)
+				in.DeadlineMS = 10_000
+				if view, err := control.Command(t.Context(), in); err != nil || view.Delivery != delivery {
+					t.Fatalf("stop = %+v, %v", view, err)
+				}
+			}
+			for _, commandID := range tc.refused {
+				answer(commandID, playback.RealtimeResultStatusRejected)
+			}
+			position := 610.0
+			if _, err := h.StopPlaybackV2(newAuthorizedPlaybackContext(), caller, session.ID, PlaybackStopCommand{StopID: uuid.NewString(), Sequence: 2, Position: &position}); err != nil {
+				t.Fatal(err)
+			}
+			// A stop with no lane was never sent, so nothing answers it; its
+			// fallback timer outlives the subtest and finds the session gone.
+			if n := len(tc.stops); n > 0 && !tc.noLane && !slices.Contains(tc.refused, tc.stops[n-1]) {
+				answer(tc.stops[n-1], playback.RealtimeResultStatusCompleted)
+			}
+			if len(admin.history) != 1 || admin.history[0].EndReason != tc.want || admin.history[0].EndPositionSeconds != 610 {
+				t.Fatalf("admin history = %+v, want one %s row at 610", admin.history, tc.want)
+			}
+		})
 	}
 }

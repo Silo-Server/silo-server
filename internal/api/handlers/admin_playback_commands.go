@@ -202,8 +202,9 @@ func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in Admin
 
 	// Session lookup, admission, dispatch and recording all happen under the
 	// ledger lock. The lane is already serialized per session and the
-	// dispatcher only performs one bounded lane write, so holding the lock
-	// through dispatch costs nothing and means a concurrent duplicate or stale
+	// dispatcher only performs one bounded lane write (a stop also writes its
+	// pending mark first, within realtimeReceiptReadBudget), so holding the
+	// lock through dispatch costs little and means a concurrent duplicate or stale
 	// command can never be dispatched alongside the winner, nor observe a
 	// receipt whose delivery is still unknown: it either waits and replays the
 	// completed receipt, or the dispatch failed, the slot was released, and
@@ -285,12 +286,24 @@ func (h *AdminPlaybackControlHandler) dispatchSequenced(_ context.Context, in Ad
 			h.dropCommandLedger(in.SessionID)
 		}
 	}
+	// Before the player can act on the stop: it may send its own stop as it
+	// leaves, and that stop must record the administrator's end. Without a
+	// lane here nothing reaches a player, so there is nothing to mark.
+	marked := in.Name == playback.CommandStop && h.playback.RealtimeHub.HasLane(in.SessionID)
+	if marked {
+		h.playback.markAdminStop(in.SessionID, in.CommandID, true)
+	}
 	h.playback.rememberRealtimeCommand(in.CommandID, in.SessionID, in.Name)
 	result := h.playback.CommandDispatcher.DispatchToSession(command, deadline, fallback)
 	if result.DispatchErr == nil {
 		return AdminPlaybackDeliveryDispatched, nil
 	}
 	h.playback.forgetRealtimeCommand(in.CommandID)
+	if marked {
+		// Never sent, so no player is carrying it out: a stop the viewer makes
+		// now is their own, and a fallback below records its own end.
+		h.playback.markAdminStop(in.SessionID, in.CommandID, false)
+	}
 	if errors.Is(result.DispatchErr, playback.ErrRealtimeConnectionNotFound) {
 		time.AfterFunc(deadline, fallback)
 		return AdminPlaybackDeliveryFallbackScheduled, nil
