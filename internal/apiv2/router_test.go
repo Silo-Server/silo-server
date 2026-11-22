@@ -489,6 +489,7 @@ func TestBodyCapIsEnforcedBeforeDecoding(t *testing.T) {
 // TestBodyReadTimeout exercises the 408 boundary over a real connection with
 // an injected deadline, so the test does not wait for BodyReadTimeout.
 func TestBodyReadTimeout(t *testing.T) {
+	t.Parallel()
 	h := newTestHandler(t, Dependencies{bodyReadTimeout: 150 * time.Millisecond})
 	srv := httptest.NewServer(h)
 	defer srv.Close()

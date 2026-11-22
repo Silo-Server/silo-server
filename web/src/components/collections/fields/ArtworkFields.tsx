@@ -273,6 +273,7 @@ function PasteLinkBox({
         {t("web.collections.fields.imageLink", { slot })}
       </label>
       <Input
+        dir="ltr"
         ref={fieldRef}
         id={`${id}-link`}
         type="url"

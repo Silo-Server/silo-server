@@ -187,16 +187,22 @@ func TestCatalogSearchIndexerFreezesRuntimeSettings(t *testing.T) {
 	}
 }
 
+type staticSearchSettings map[string]string
+
+func (s staticSearchSettings) GetAll(context.Context) (map[string]string, error) {
+	return s, nil
+}
+
 func TestCatalogSearchIndexerWaitsForRestartBeforeUsingSavedSchemaSettings(t *testing.T) {
 	startup := DefaultCatalogSearchSettings()
 	startup.Provider = SearchProviderMeilisearch
 	startup.MeilisearchURL = "http://meilisearch:7700"
-	store := &memSettings{m: map[string]string{
+	store := staticSearchSettings{
 		SearchSettingProvider:                    SearchProviderMeilisearch,
 		SearchSettingMeilisearchURL:              startup.MeilisearchURL,
 		SearchSettingMeilisearchSemanticEnabled:  "true",
 		SearchSettingMeilisearchRebuildBatchSize: "17",
-	}}
+	}
 	indexer := NewCatalogSearchIndexerFromSettings(nil, store, startup)
 
 	runtime, configured, err := indexer.loadMeilisearchRuntime(t.Context())

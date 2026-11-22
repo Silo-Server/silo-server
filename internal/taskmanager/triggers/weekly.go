@@ -41,13 +41,14 @@ func (w *WeeklyTrigger) SetStartSpread(spread time.Duration) {
 	w.spread = spread
 }
 
+// calcNextRun returns the first slot after now on the configured weekday,
+// stepping a week at a time from calendar dates as DailyTrigger does.
 func (w *WeeklyTrigger) calcNextRun(now time.Time) time.Time {
-	daysAhead := (int(w.dayOfWeek) - int(now.Weekday()) + 7) % 7
-	target := time.Date(now.Year(), now.Month(), now.Day()+daysAhead, w.hour, w.minute, 0, 0, now.Location())
-	if daysAhead == 0 && !target.After(now) {
-		target = target.Add(7 * 24 * time.Hour)
+	for days := (int(w.dayOfWeek) - int(now.Weekday()) + 7) % 7; ; days += 7 {
+		if slot := wallClock(now, days, w.hour, w.minute); slot.After(now) {
+			return spreadStart(slot, w.spread)
+		}
 	}
-	return spreadStart(target, w.spread)
 }
 
 func (w *WeeklyTrigger) Start(_ *taskmanager.ExecutionResult) {

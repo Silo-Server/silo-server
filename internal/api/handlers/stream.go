@@ -828,7 +828,7 @@ func (h *StreamHandler) abortPlaybackSession(ctx context.Context, session *playb
 	// An earlier stop that won the row and never finished is finished as
 	// that stop by the playback handler, which has its writers.
 	if claim.owned && !claim.ownEnd(abortStopID(session.ID)) && h.FinishOtherEnd != nil {
-		h.FinishOtherEnd(ctx, claim, session.ID)
+		h.FinishOtherEnd(withEndWatch(ctx, session), claim, session.ID)
 		deleteSessionRecipeV3(ctx, h.SessionRecipeStore, session.ID)
 		return
 	}

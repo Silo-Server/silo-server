@@ -39,6 +39,8 @@ export interface SecretFieldProps {
   hint?: string;
   /** Extra line under the description, e.g. a save error for this field. */
   status?: ReactNode;
+  /** Marks the row as holding an unsaved change, as `SettingField` does. */
+  dirty?: boolean;
   disabled?: boolean;
   restartRequired?: boolean;
   /** The environment variable that sets this secret; disables the control. */
@@ -67,6 +69,7 @@ export function SecretField({
   cleared = false,
   hint,
   status,
+  dirty,
   disabled: disabledProp = false,
   restartRequired = false,
   managedByEnv,
@@ -81,10 +84,14 @@ export function SecretField({
   const clearStaged = cleared && value === "";
   const showAction = onClear != null && configured && !disabled && value === "";
 
-  // While a clear is staged its description replaces `hint`.
+  // While a clear is staged its description replaces `hint`. A secret the
+  // environment sets can't be replaced here, so it gets no editing hint.
   const description = clearStaged
     ? t("web.settings.secretField.clearedDescription")
-    : (hint ?? (configured ? t("web.settings.secretField.configuredDescription") : undefined));
+    : (hint ??
+      (configured && managedByEnv == null
+        ? t("web.settings.secretField.configuredDescription")
+        : undefined));
 
   function keepSaved() {
     if (onKeep) onKeep();
@@ -104,6 +111,7 @@ export function SecretField({
     <SettingFieldRow
       label={label}
       htmlFor={controlId}
+      dirty={dirty}
       description={description}
       descriptionId={hintId}
       status={status}

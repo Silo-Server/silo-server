@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,16 +22,16 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 )
 
-type v2WiringTokens struct{}
-
-func (v2WiringTokens) ValidateToken(string) (*auth.Claims, error) {
-	return &auth.Claims{UserID: 1, Role: "user", SessionID: "s1", TokenType: auth.TokenTypeAccess}, nil
+type v2WiringIdentity struct {
+	role string
 }
 
-type v2WiringSessions struct{}
+func (f v2WiringIdentity) ValidateToken(string) (*auth.Claims, error) {
+	return &auth.Claims{UserID: 1, Role: f.role, SessionID: "s1", TokenType: auth.TokenTypeAccess}, nil
+}
 
-func (v2WiringSessions) ActiveSession(context.Context, string, int) (auth.SessionAuthority, bool, error) {
-	return auth.SessionAuthority{Role: "user", Purpose: models.SessionPurposeAccount}, true, nil
+func (f v2WiringIdentity) ActiveSession(context.Context, string, int) (auth.SessionAuthority, bool, error) {
+	return auth.SessionAuthority{Role: f.role, Purpose: models.SessionPurposeAccount}, true, nil
 }
 
 type v2WiringViewer struct{}
@@ -92,7 +93,8 @@ func TestV2PluginSettingsWiredWhenPluginsConfigured(t *testing.T) {
 	// plugin handler (here a failed query on the dead pool), never from the
 	// dependency_unavailable fallback.
 	v2 := *sealed
-	v2.Auth = apimw.NewAuthMiddleware(v2WiringTokens{}, v2WiringSessions{}, nil, nil)
+	member := v2WiringIdentity{role: models.RoleUser}
+	v2.Auth = apimw.NewAuthMiddleware(member, member, nil, nil)
 	v2.ViewerAccess = apimw.NewViewerAccessMiddleware(v2WiringViewer{})
 	req := httptest.NewRequest(http.MethodGet, "/api/v2/settings/plugins", nil)
 	req.Header.Set("Authorization", "Bearer member")
@@ -104,5 +106,55 @@ func TestV2PluginSettingsWiredWhenPluginsConfigured(t *testing.T) {
 	}
 	if rec.Code == http.StatusUnauthorized {
 		t.Fatalf("faked auth gate did not admit the request: %s", rec.Body.String())
+	}
+}
+
+func TestV2PluginProvisionStatusUsesDeclaringReplicaLookup(t *testing.T) {
+	cfg, err := config.LoadFromDB(map[string]string{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := pgxpool.New(t.Context(), "postgres://nobody:nobody@127.0.0.1:1/none?sslmode=disable&connect_timeout=1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	cipher, err := secret.New(bytes.Repeat([]byte{0}, secret.MinMasterKeyLen))
+	if err != nil {
+		t.Fatal(err)
+	}
+	conflict := plugins.ProvisionStatus{
+		PluginID: "silo.auth.oidc",
+		Version:  "0.1.2",
+		State:    "refused",
+		Detail:   "Another API process is applying a plugin provisioning declaration.",
+	}
+	var v2 apiv2.Dependencies
+	deps := Dependencies{
+		Config:           cfg,
+		AppContext:       t.Context(),
+		DB:               pool,
+		SecretCipher:     cipher,
+		ClientIPResolver: clientip.NewResolver(nil),
+		NodeID:           "v2-plugin-provision-status",
+		PluginProvisionStatus: func(context.Context) ([]plugins.ProvisionStatus, error) {
+			return []plugins.ProvisionStatus{conflict}, nil
+		},
+		v2Wiring: func(d apiv2.Dependencies) { v2 = d },
+	}
+	newChiRouter(deps)
+	admin := v2WiringIdentity{role: models.RoleAdmin}
+	v2.Auth = apimw.NewAuthMiddleware(admin, admin, nil, nil)
+	v2.ViewerAccess = apimw.NewViewerAccessMiddleware(v2WiringViewer{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v2/admin/plugins/provisioning-status", nil)
+	req.Header.Set("Authorization", "Bearer admin")
+	rec := httptest.NewRecorder()
+	apiv2.NewHandler(v2).ServeHTTP(rec, req)
+	var body apiv2.Collection[apiv2.AdminPluginProvisionStatus]
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); rec.Code != http.StatusOK || err != nil {
+		t.Fatalf("status = %d, body = %s, error = %v", rec.Code, rec.Body, err)
+	}
+	if len(body.Items) != 1 || body.Items[0] != apiv2.AdminPluginProvisionStatus(conflict) {
+		t.Fatalf("status response = %+v, want the local refusal", body)
 	}
 }

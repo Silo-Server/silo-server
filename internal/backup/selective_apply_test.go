@@ -473,7 +473,7 @@ func TestUnverifiedTemplateWithholdsSourceAndSchedule(t *testing.T) {
 		SyncSchedule: &daily}
 	def := catalog.CreateLibraryCollectionInput{Title: "Popular"}
 	trusted := customizeTemplate(entry, def, nil, nil, true)
-	if !slices.Equal(trusted.changes, []string{"title", "source", "sync schedule"}) || len(trusted.withheld) != 0 || trusted.update.SyncSchedule == nil {
+	if !slices.Equal(trusted.changes, []string{"title", "source", "sync_schedule"}) || len(trusted.withheld) != 0 || trusted.update.SyncSchedule == nil {
 		t.Fatalf("verified = %+v", trusted)
 	}
 	untrusted := customizeTemplate(entry, def, nil, nil, false)

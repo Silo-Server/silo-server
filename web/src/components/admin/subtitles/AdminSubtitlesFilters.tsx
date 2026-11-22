@@ -48,7 +48,7 @@ export default function AdminSubtitlesFilters({
             value={search}
             onChange={(event) => onSearchChange(event.target.value)}
             placeholder={t("web.admin.common.subtitles.filters.searchPlaceholder")}
-            className="font-mono text-xs sm:max-w-sm"
+            className="placeholder:font-ui font-mono text-xs sm:max-w-sm"
             aria-label={t("web.admin.common.subtitles.filters.searchLabel")}
           />
         </div>
