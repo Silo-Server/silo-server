@@ -707,7 +707,7 @@ export function usePlaybackSession(
   const pendingReplanRef = useRef<{
     options: ReplanOptions;
     loadSequence: number;
-    retireSessionOnRefusal: boolean;
+    retireSessionOnRefusal: boolean | (() => boolean);
     resolve: (adopted: boolean) => void;
     planId: string;
     /** The file the queued request's track ordinals index into. */
@@ -719,7 +719,7 @@ export function usePlaybackSession(
   const issueReplanRef = useRef<
     (
       options: ReplanOptions,
-      retireSessionOnRefusal?: boolean,
+      retireSessionOnRefusal?: boolean | (() => boolean),
       reconnect?: boolean,
       onAdopt?: (planRevision: number) => void,
     ) => Promise<boolean>
@@ -1442,7 +1442,7 @@ export function usePlaybackSession(
   const replan = useCallback(
     async function issueReplan(
       options: ReplanOptions,
-      retireSessionOnRefusal = false,
+      retireSessionOnRefusal: boolean | (() => boolean) = false,
       reconnect = false,
       onAdopt?: (planRevision: number) => void,
     ): Promise<boolean> {
@@ -1623,6 +1623,16 @@ export function usePlaybackSession(
         }
 
         if (reconnect && !decision.playback_plan) return false;
+        if (
+          !decision.playback_plan &&
+          typeof retireSessionOnRefusal === "function" &&
+          !retireSessionOnRefusal()
+        ) {
+          // A tightening replan was refused after the viewer already relaxed
+          // the cap back to a value the active stream satisfies; ignore the
+          // stale refusal rather than retiring or surfacing an error.
+          return false;
+        }
 
         // Keep a refused-start subtitle pinned off across unrelated replans.
         // A successful explicit subtitle choice is the one action that clears
@@ -1632,7 +1642,11 @@ export function usePlaybackSession(
           options.operation === "track_change" && options.subtitle !== undefined ? null : undefined,
           onAdopt,
         );
-        if (!adopted && retireSessionOnRefusal) {
+        const shouldRetire =
+          typeof retireSessionOnRefusal === "function"
+            ? retireSessionOnRefusal()
+            : retireSessionOnRefusal;
+        if (!adopted && shouldRetire) {
           const pending = pendingReplanRef.current;
           const pendingCanValidateOutput =
             pending?.loadSequence === loadSequence &&
@@ -1646,7 +1660,7 @@ export function usePlaybackSession(
             // postpone retirement.
             pendingReplanRef.current = {
               ...pending,
-              retireSessionOnRefusal: true,
+              retireSessionOnRefusal,
             };
           } else {
             retireActiveSession(sessionId);
@@ -1881,9 +1895,14 @@ export function usePlaybackSession(
         return;
       }
 
-      const capTightened =
-        tierCap !== null &&
-        (activeBandwidthCapRef.current === null || tierCap < activeBandwidthCapRef.current);
+      const stillTightened = () => {
+        const currentCap = latestQualitySettingsRef.current.maxBitrateKbps;
+        return (
+          currentCap !== null &&
+          (activeBandwidthCapRef.current === null || currentCap < activeBandwidthCapRef.current)
+        );
+      };
+      const capTightened = stillTightened();
       const previousPreference = qualityRef.current;
       if (qualityChanged) {
         qualityRef.current = nextQuality;
@@ -1895,7 +1914,7 @@ export function usePlaybackSession(
             operation: "quality_change",
             positionSeconds: playbackPositionRef.current,
           },
-          capTightened,
+          capTightened ? stillTightened : false,
         )
         .then((adopted) => {
           if (

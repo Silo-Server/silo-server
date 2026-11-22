@@ -1092,6 +1092,83 @@ describe("usePlaybackSession quality changes", () => {
 
     unmount();
   });
+
+  it("keeps playback running when Data Saver is turned off before a refused tightening returns", async () => {
+    let resolveRefusal!: (response: Response) => void;
+    const fetchMock = sessionFetch(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveRefusal = resolve;
+        }),
+      fixturePlanV3(),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Turn Data Saver on -> 2 Mbps tightening replan starts in flight.
+    rerender({ cap: 2_000, tier: "low_data" });
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+
+    // Turn Data Saver back off before the 2 Mbps replan returns its refusal.
+    rerender({ cap: 10_000, tier: "metered" });
+
+    // Resolving the stale refusal must neither retire the permitted 10 Mbps
+    // session nor surface a stale transcoding_disabled error.
+    act(() =>
+      resolveRefusal(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "output_change_v1"],
+          outcome: "transcoding_disabled",
+          playback_plan: null,
+          terminal: {
+            reason: "transcoding_disabled",
+            message: "Transcoding is disabled on this server.",
+            retryable: false,
+          },
+        }),
+      ),
+    );
+    await waitFor(() => expect(result.current.replanning).toBe(false));
+    expect(result.current.plan).not.toBeNull();
+    expect(result.current.streamUrl).not.toBeNull();
+    expect(result.current.errorReason).toBeNull();
+
+    unmount();
+  });
 });
 
 describe("usePlaybackSession initial bitmap subtitles", () => {
