@@ -493,6 +493,18 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 	return t
 }
 
+// playbackThresholdsForFile is playbackThresholds with file's end credits,
+// for a position measured on a timeline of duration seconds. The credits
+// count only when that timeline is the file's own; a longer one, such as a
+// whole audiobook, keeps the percentage rule.
+func (h *PlaybackHandler) playbackThresholdsForFile(ctx context.Context, file *models.MediaFile, duration float64) userstore.ProgressThresholds {
+	t := h.playbackThresholds(ctx)
+	if file != nil && duration == float64(file.Duration) {
+		t.CreditsStartSeconds = markers.EndCreditsStart(models.EffectiveMarkerSegments(file), duration)
+	}
+	return t
+}
+
 // --- Request/Response types ---
 
 func semanticPlayMethod(s *playback.Session) playback.PlayMethod {
@@ -1053,7 +1065,7 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 	}
 
 	duration := float64(file.Duration)
-	thresholds := h.playbackThresholds(ctx)
+	thresholds := h.playbackThresholdsForFile(ctx, file, duration)
 	hints := userstore.VersionHints{
 		FileID:     file.ID,
 		Resolution: file.Resolution,
@@ -1109,7 +1121,7 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	}
 
 	duration := float64(file.Duration)
-	thresholds := h.playbackThresholds(ctx)
+	thresholds := h.playbackThresholdsForFile(ctx, file, duration)
 	watchSvc := watchstate.NewService(h.StoreProvider).
 		WithStableIdentityResolver(h.StableIdentityResolver).
 		WithCompletionObserver(h.CompletionObserver)
@@ -1150,8 +1162,8 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	// an earlier stop failed to mark is not lost; the mark skips episodes
 	// already completed.
 	var spanWritten bool
-	if (historyID == "" || session.IsJellyfinCompat) && (result.Completed || (result.AlreadyRecorded && duration > 0 &&
-		session.Position/duration > userstore.WatchedFraction(thresholds.WatchedPct))) {
+	if (historyID == "" || session.IsJellyfinCompat) && (result.Completed || (result.AlreadyRecorded &&
+		thresholds.Watched(session.Position, duration))) {
 		targets, spanErr := h.spannedEpisodeTargets(ctx, file)
 		if spanErr == nil {
 			spanWritten, spanErr = watchSvc.RecordSpannedEpisodesWatched(ctx, session.UserID, session.ProfileID, targets, stoppedAt)
@@ -1277,9 +1289,7 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 			duration = session.TimelineDuration
 		}
 		durationPtr = &duration
-		if duration > 0 && session.Position/duration > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct) {
-			completed = true
-		}
+		completed = h.playbackThresholdsForFile(ctx, file, duration).Watched(session.Position, duration)
 	}
 
 	entry := &AdminPlaybackHistoryEntry{

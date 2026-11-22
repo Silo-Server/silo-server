@@ -101,8 +101,45 @@ func TestPlayedSourceDurationFallbacks(t *testing.T) {
 		{"nothing identifies the version", PlaybackSession{MediaSources: sources(theatrical, extended)}, "", 3600},
 		{"played version without a runtime", PlaybackSession{MediaSources: sources(theatrical, unknownRuntime), UpstreamMediaFileID: 43}, "", 0},
 	} {
-		if got := playedSourceDuration(&tc.play, tc.mediaSourceID); got != tc.want {
+		if got := float64(playedSourceVersion(&tc.play, tc.mediaSourceID).Duration); got != tc.want {
 			t.Errorf("%s: duration = %v, want %v", tc.name, got, tc.want)
 		}
+	}
+}
+
+// A progress report inside the played version's end credits finishes the
+// title below the % threshold; another cut's credits don't count. The report
+// is at 4600 s: past the extended cut's credits at 4550 s but only 85% of it.
+func TestProgressReportFinishesAtPlayedVersionCredits(t *testing.T) {
+	for _, tc := range []struct {
+		name                 string
+		theatrical, extended *catalog.Marker
+		wantCompleted        bool
+	}{
+		{name: "played cut's credits", extended: &catalog.Marker{Start: 4550, End: 5390}, wantCompleted: true},
+		{name: "other cut's credits", theatrical: &catalog.Marker{Start: 3000, End: 3590}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			theatrical, extended := versionedReportVersions()
+			theatrical.Credits, extended.Credits = tc.theatrical, tc.extended
+			handler, _, store := newVersionedReportHandler(t, true, []catalog.FileVersion{theatrical, extended}, extended.FileID)
+
+			body := fmt.Sprintf(`{"PlaySessionId":"play-1","PositionTicks":%d}`, int64(4600)*10_000_000)
+			req := httptest.NewRequest(http.MethodPost, "/Sessions/Playing/Progress", strings.NewReader(body))
+			req = req.WithContext(context.WithValue(req.Context(), compatSessionKey,
+				&Session{Token: "token-1", StreamAppUserID: 1, ProfileID: "profile-1"}))
+			rec := httptest.NewRecorder()
+			handler.HandleSessionPlayingProgress(rec, req)
+			if rec.Code != http.StatusNoContent {
+				t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+			}
+			progress, err := store.GetProgress(context.Background(), "profile-1", "movie-1")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if progress == nil || progress.Completed != tc.wantCompleted {
+				t.Fatalf("progress = %+v, want completed %v", progress, tc.wantCompleted)
+			}
+		})
 	}
 }

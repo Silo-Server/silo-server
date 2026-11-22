@@ -24,6 +24,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/fspath"
 
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/logredact"
@@ -2654,8 +2655,8 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	// point, matching the native playback persistence rule.
 	if positionSeconds > 0 && h.storeProvider != nil && playSession.ItemID != "" {
 		if store, storeErr := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID); storeErr == nil {
-			duration := playedSourceDuration(playSession, req.MediaSourceID)
-			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context()))
+			version := playedSourceVersion(playSession, req.MediaSourceID)
+			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, float64(version.Duration), h.versionThresholds(r.Context(), version))
 			if err == nil && completed {
 				refreshTasteProfile = true
 			}
@@ -4199,20 +4200,20 @@ func mediaSourceByFileID(session *PlaybackSession, fileID int) *PlaybackMediaSou
 	return nil
 }
 
-// playedSourceDuration returns the runtime in seconds that a progress report
-// is judged against: the played version's (see playedMediaSource), which is 0
-// when that version has none, or the first listed runtime when no version can
-// be identified.
-func playedSourceDuration(session *PlaybackSession, mediaSourceID string) float64 {
+// playedSourceVersion returns the version whose runtime and end credits a
+// progress report is judged against: the played version (see
+// playedMediaSource), whose runtime is 0 when it has none, or the first listed
+// version with a runtime when no version can be identified.
+func playedSourceVersion(session *PlaybackSession, mediaSourceID string) catalog.FileVersion {
 	if source := playedMediaSource(session, mediaSourceID); source != nil {
-		return float64(source.Version.Duration)
+		return source.Version
 	}
 	for _, source := range session.MediaSources {
 		if source.Version.Duration > 0 {
-			return float64(source.Version.Duration)
+			return source.Version
 		}
 	}
-	return 0
+	return catalog.FileVersion{}
 }
 
 func findMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMediaSource {

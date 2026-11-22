@@ -38,6 +38,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -467,6 +468,14 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 			t.MinResumePct = pct
 		}
 	}
+	return t
+}
+
+// versionThresholds is playbackThresholds with the end credits of version,
+// whose runtime a report's position is measured against.
+func (h *PlaybackHandler) versionThresholds(ctx context.Context, version catalog.FileVersion) userstore.ProgressThresholds {
+	t := h.playbackThresholds(ctx)
+	t.CreditsStartSeconds = markers.EndCreditsStart(version.EffectiveMarkerSegments(), float64(version.Duration))
 	return t
 }
 

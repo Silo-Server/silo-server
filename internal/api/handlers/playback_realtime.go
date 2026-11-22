@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
@@ -233,8 +232,8 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	if err == nil && file != nil {
 		result.MediaItemID = playbackProgressTarget(file)
 		result.DurationSeconds = float64(file.Duration)
-		result.Completed = result.HistoryID != "" && !session.DisableProgressPersistence && result.DurationSeconds > 0 &&
-			session.Position/result.DurationSeconds > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct)
+		result.Completed = result.HistoryID != "" && !session.DisableProgressPersistence &&
+			h.playbackThresholdsForFile(ctx, file, result.DurationSeconds).Watched(session.Position, result.DurationSeconds)
 	}
 	return realtimeStopOutcome{result: result, reason: endReasonForStop(session.ID, receipt.StopID), notify: notify}
 }
