@@ -1,10 +1,16 @@
-import { memo, useId, useLayoutEffect, useRef, useState } from "react";
+import { memo, useId, useState } from "react";
 import { ShieldCheck } from "lucide-react";
 
 import type { RestoreDataTypeId, RestoreItem, RestoreProfile } from "@/api/v2/adminBackupRestore";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
+import {
+  NARROW_OVERFLOW_CLIP,
+  OVERFLOW_CLIP,
+  useOverflowsInline,
+} from "@/hooks/useOverflowsInline";
 import { useT, type Translate } from "@/i18n";
+import { emailDir } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 import { DATA_TYPE_IDS, DATA_TYPE_LABELS, pendingSummary } from "@/lib/profileDataTypes";
 import { SettingFieldStatus } from "@/pages/admin-settings/SettingField";
@@ -14,18 +20,39 @@ import { itemState } from "./restoreGroups";
 import { BreakableKey, StateTag, type ToggleKeys } from "./RestoreRows";
 import {
   REASON_SENTENCES,
+  nameDir,
   policyDifferenceSentence,
   profileKey,
   requiredPrimary,
   toggleKeys,
 } from "./restoreModel";
-import { useOverflowsInline } from "./useOverflowsInline";
+
+const MIDDLE_DOT = "·";
 
 function droppedLibraries(t: Translate, count: number): string {
   return t("web.admin.backups.restore.users.droppedLibraries", {
     count,
     count_text: count,
   });
+}
+
+/**
+ * A policy difference, which quotes the access group's name as it is. The status stops at
+ * the row's width and the sentence shrinks to it, so its words wrap there; a group name that
+ * still overflows, such as one long run of joined emoji, is clipped sideways only while it
+ * does, as the other restore names are.
+ */
+function PolicyDifferenceStatus({ sentence }: { sentence: string }) {
+  const [ref, overflows] = useOverflowsInline<HTMLSpanElement>(sentence);
+  return (
+    <div className="*:max-w-full">
+      <SettingFieldStatus tone="warn">
+        <span ref={ref} className={cn("min-w-0", overflows && OVERFLOW_CLIP)}>
+          {sentence}
+        </span>
+      </SettingFieldStatus>
+    </div>
+  );
 }
 
 function profileDetail(t: Translate, profile: RestoreProfile): string {
@@ -80,19 +107,7 @@ function ProfileRow({
   // Only a name still wider than the row after wrapping is clipped: one with a run
   // no line break can split, such as many joined emoji. Clipping a name that fits
   // would trim letters whose ink reaches past their edge, such as a leading "j".
-  const nameRef = useRef<HTMLLabelElement>(null);
-  const [nameOverflows, setNameOverflows] = useState(false);
-  useLayoutEffect(() => {
-    const name = nameRef.current;
-    if (!name) return;
-    // A name that fits can measure a fraction of a pixel wider than its box.
-    const measure = () => setNameOverflows(name.scrollWidth > name.clientWidth + 1);
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(name);
-    return () => observer.disconnect();
-  }, [profile.name]);
+  const [nameRef, nameOverflows] = useOverflowsInline<HTMLLabelElement>(profile.name);
   return (
     <li className="flex items-start gap-3 py-1.5">
       <Checkbox
@@ -105,18 +120,20 @@ function ProfileRow({
       <div className="min-w-0 flex-1">
         {/* When the name and detail don't fit on one line, the detail moves under the
             name, and a name wider than the row wraps; as a block, its words wrap at the
-            row's width. A name that still overflows is clipped sideways at the row's end
-            edge, and its title shows it in full. The start padding, offset by a negative
-            margin, keeps a first letter whole whose ink reaches before its box, such as
-            a leading "j". */}
+            row's width. A name that still overflows is clipped sideways at its end edge,
+            and its title shows it in full. It reads in its own direction, so the clipped
+            end is the name's end in either script, and its lines line up with the
+            page's. The start padding, offset by a negative margin, keeps a first letter
+            whole whose ink reaches before its box, such as a leading "j". */}
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5">
           <Label
             ref={nameRef}
             htmlFor={controlId}
             title={profile.name}
+            dir="auto"
             className={cn(
-              "block min-w-0 text-sm wrap-anywhere",
-              nameOverflows && "-ms-[0.25em] overflow-x-clip ps-[0.25em]",
+              "align-with-page block min-w-0 text-sm wrap-anywhere",
+              nameOverflows && OVERFLOW_CLIP,
               !selectable && "text-muted-foreground",
             )}
           >
@@ -180,7 +197,7 @@ export const AccountRow = memo(function AccountRow({
   const controlId = useId();
   const detailsId = useId();
   const [open, setOpen] = useState(false);
-  const [nameRef, nameOverflows] = useOverflowsInline<HTMLLabelElement>(item.label);
+  const [nameRef, nameOverflows] = useOverflowsInline<HTMLSpanElement>(item.label);
   // The merge line exists only while the details are open, so opening them measures it.
   const [mergeRef, mergeOverflows] = useOverflowsInline<HTMLParagraphElement>(open && item);
   const account = item.account;
@@ -204,13 +221,8 @@ export const AccountRow = memo(function AccountRow({
       : null;
   // The label can already be the email: an invited account's username is its address,
   // and an account with no username is labeled by its email.
-  const contact = [
-    pending,
-    account.username !== item.label ? account.username : null,
-    account.email !== item.label ? account.email : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const email = account.email && account.email !== item.label ? account.email : null;
+  const hasContact = Boolean(pending || email);
   // With no username on either side, the name is the email the row is labelled with.
   const destination = account.local_username || account.username || item.label;
   const status = !item.selectable
@@ -227,7 +239,7 @@ export const AccountRow = memo(function AccountRow({
   // names another account; the details show the admin role and the status. The badge
   // can cut a long merge destination short, so the details show a merge in full at
   // every width. As in ItemRow, a name clips sideways only while part of it can't wrap
-  // to fit: in the label, and in the merge status, which names the account it merges
+  // to fit: in the name, and in the merge status, which names the account it merges
   // into.
   return (
     <li className="border-border/60 @container border-b last:border-b-0">
@@ -241,36 +253,59 @@ export const AccountRow = memo(function AccountRow({
           onCheckedChange={(value) => onToggle(toggleKeys("users", item), value === true)}
         />
         <div className="flex min-w-0 flex-1 flex-col gap-x-2 gap-y-0.5 @2xl:flex-row @2xl:items-baseline">
+          {/* As in ItemRow: the label spans a narrow row's column, and the name inside
+              reads in its own direction and is sized to its text. That also keeps an
+              address that starts with digits in order on a right-to-left page. */}
           <Label
-            ref={nameRef}
             htmlFor={controlId}
             title={item.label}
             className={cn(
               "block max-w-full shrink-0 text-sm font-medium wrap-anywhere",
-              contact && "@2xl:max-w-max @2xl:flex-9 @2xl:truncate @2xl:[&_wbr]:hidden",
-              nameOverflows && (contact ? "@max-2xl:overflow-x-clip" : "overflow-x-clip"),
+              hasContact && "@2xl:max-w-max @2xl:min-w-0 @2xl:flex-9",
               !item.selectable && "text-muted-foreground",
             )}
           >
-            {/* <bdi> reads the name in its own direction, so an address that starts
-                with digits stays in order on a right-to-left page. */}
-            <bdi>
-              <BreakableKey value={item.label} />
-            </bdi>
-          </Label>
-          {contact ? (
-            // Without the pending summary the line is the email (the label is the
-            // username), which reads left to right in any language and so keeps its
-            // start when cut short. With the summary first, the line follows the page.
-            // In a narrow row, w-fit keeps a short line under the name, on the page's
-            // start side; max-w-full stops a long one at the column's width so it is
-            // still cut short.
             <span
-              title={contact}
-              dir={pending ? undefined : "ltr"}
-              className="text-muted-foreground w-fit max-w-full min-w-0 truncate text-xs @2xl:max-w-max @2xl:flex-11"
+              ref={nameRef}
+              dir={nameDir(item)}
+              className={cn(
+                "align-with-page block w-fit max-w-full",
+                hasContact && "@2xl:truncate @2xl:[&_wbr]:hidden",
+                nameOverflows && (hasContact ? NARROW_OVERFLOW_CLIP : OVERFLOW_CLIP),
+              )}
             >
-              {contact}
+              <BreakableKey value={item.label} />
+            </span>
+          </Label>
+          {hasContact ? (
+            // The summary follows the page and the email takes its own direction, each cut
+            // at its own end, so both keep their start: one cut line would lose the start
+            // of whichever part sits at its end. Each part's tooltip is on the part, so it
+            // reads in that part's direction too. When both don't fit on one line, the
+            // email moves to its own, so neither is cut short unless it is wider than the
+            // line on its own. As in UserDetailHeader, the separator sits before the email,
+            // pulled back over the gap, so when the email opens a line the separator falls
+            // past the clipped start edge. In a narrow row, w-fit keeps a short line under
+            // the name, on the page's start side; max-w-full stops a long one at the
+            // column's width.
+            <span className="text-muted-foreground flex w-fit max-w-full min-w-0 flex-wrap gap-x-(--sep) overflow-x-clip text-xs [--sep:0.65em] @2xl:max-w-max @2xl:flex-11">
+              {pending ? (
+                <span title={pending} className="min-w-0 truncate">
+                  {pending}
+                </span>
+              ) : null}
+              {email ? (
+                <span className={cn("flex min-w-0", pending && "-ms-(--sep)")}>
+                  {pending ? (
+                    <span aria-hidden="true" className="w-(--sep) shrink-0 text-center">
+                      {MIDDLE_DOT}
+                    </span>
+                  ) : null}
+                  <span dir={emailDir(email)} title={email} className="min-w-0 truncate">
+                    {email}
+                  </span>
+                </span>
+              ) : null}
             </span>
           ) : null}
         </div>
@@ -324,7 +359,7 @@ export const AccountRow = memo(function AccountRow({
               className={cn(
                 "text-[13px] wrap-anywhere",
                 !merges && "@[52rem]:hidden",
-                mergeOverflows && "overflow-x-clip",
+                mergeOverflows && OVERFLOW_CLIP,
               )}
             >
               {status}
@@ -345,11 +380,10 @@ export const AccountRow = memo(function AccountRow({
           ) : null}
           {!item.selectable
             ? account.policy_differences.map((difference) => (
-                <div key={difference.field}>
-                  <SettingFieldStatus tone="warn">
-                    {policyDifferenceSentence(account.group, difference)}
-                  </SettingFieldStatus>
-                </div>
+                <PolicyDifferenceStatus
+                  key={difference.field}
+                  sentence={policyDifferenceSentence(account.group, difference)}
+                />
               ))
             : null}
           {account.libraries_left_out > 0 ? (

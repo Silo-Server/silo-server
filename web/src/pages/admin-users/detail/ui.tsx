@@ -228,18 +228,27 @@ export function ListRow({
   title,
   meta,
   trailing,
+  titleDir,
 }: {
   leading?: ReactNode;
   title: ReactNode;
   meta?: ReactNode;
   trailing?: ReactNode;
+  /** "auto" for a title that is a name in either script, such as a device name. */
+  titleDir?: "auto";
 }) {
   return (
     <div className="border-border/50 flex items-center gap-3 border-t px-4 py-3 first:border-t-0 sm:px-5">
       {leading ? <div className="shrink-0">{leading}</div> : null}
       <div className="min-w-0 flex-1">
         {/* On a phone a long title (a device name) wraps rather than being cut off. */}
-        <div className="truncate text-sm font-medium max-lg:wrap-anywhere max-lg:whitespace-normal">
+        <div
+          dir={titleDir}
+          className={cn(
+            "truncate text-sm font-medium max-lg:wrap-anywhere max-lg:whitespace-normal",
+            titleDir && "align-with-page w-fit max-w-full",
+          )}
+        >
           {title}
         </div>
         {meta ? <div className="text-muted-foreground text-xs wrap-anywhere">{meta}</div> : null}

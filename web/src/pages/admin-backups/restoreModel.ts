@@ -1,5 +1,6 @@
-import { t, type MessageKey, type TextValues } from "@/i18n";
+import { exactAmount, t, type MessageKey, type TextValues } from "@/i18n";
 import { appLanguage } from "@/lib/appLocale";
+import { emailDir } from "@/lib/direction";
 import { DATA_TYPE_IDS, DATA_TYPE_PHRASES, pendingCount } from "@/lib/profileDataTypes";
 import type {
   RestoreDataTypeId,
@@ -12,6 +13,7 @@ import type {
   RestoreSectionId,
   RestoreSelection,
   RestoreSet,
+  RestoreSetting,
 } from "@/api/v2/adminBackupRestore";
 
 /**
@@ -49,6 +51,7 @@ export const REASON_SENTENCES: Record<RestoreReason, MessageKey> = {
   kept_stricter: "web.admin.backups.restore.reason.keptStricter",
   unverified_backup: "web.admin.backups.restore.reason.unverifiedBackup",
   over_restore_budget: "web.admin.backups.restore.reason.overRestoreBudget",
+  managed_by_environment: "web.admin.backups.restore.reason.managedByEnvironment",
 };
 
 export const SECTION_TITLES: Record<RestoreSectionId, MessageKey> = {
@@ -209,6 +212,23 @@ export function displayLabel(item: { kind: RestoreItem["kind"]; label: string })
   return item.kind === "branding" ? capitalize(brandingName(item.label)) : item.label;
 }
 
+/**
+ * The `dir` for an item's name in a restore row. A name reads in its own direction,
+ * so one cut short keeps its start in either script. An account named by its email
+ * (an invited account, or one with no username) reads as emails do in the other admin
+ * lists (`emailDir`); an account the backup can't restore carries no `account`, so a
+ * label with an `@` after its first character counts as its email. A branding item's
+ * name is interface text, so it follows the page.
+ */
+export function nameDir(item: Pick<RestoreItem, "kind" | "label" | "account">) {
+  if (item.kind === "branding") return undefined;
+  if (item.kind !== "account") return "auto";
+  const namedByEmail = item.account
+    ? item.label === item.account.email
+    : item.label.indexOf("@") > 0;
+  return namedByEmail ? emailDir(item.label) : "auto";
+}
+
 function itemName(entry: IndexEntry): string {
   if (entry.type === "profile") {
     return t("web.admin.backups.restore.itemName.profile", { name: entry.profile.name });
@@ -272,7 +292,7 @@ export function chooseItems(
   if (added.length > 0) {
     notices.push(
       t("web.admin.backups.restore.notice.alsoChose", {
-        count: added.length,
+        amount: exactAmount(added.length),
         names: joinNames(added.map(itemName)),
       }),
     );
@@ -344,7 +364,10 @@ export function unchooseItems(
       : counted("web.admin.backups.restore.notice.itemCount", dependents.length);
   return {
     selection: next,
-    notice: t("web.admin.backups.restore.notice.alsoUnchose", { count: dependents.length, names }),
+    notice: t("web.admin.backups.restore.notice.alsoUnchose", {
+      amount: exactAmount(dependents.length),
+      names,
+    }),
   };
 }
 
@@ -674,27 +697,31 @@ export function restoreCaveats(set: RestoreSet, selection: SelectionKeys): Cavea
         counted("web.admin.backups.restore.caveat.filesMissing", item.missing_blobs.length),
       );
     }
-    const otherKey = (item.settings ?? []).filter(
-      (setting) => setting.status === "needs_another_key",
-    ).length;
+    const settings = item.settings ?? [];
+    const countStatus = (status: RestoreSetting["status"]) =>
+      settings.filter((setting) => setting.status === status).length;
+    const otherKey = countStatus("needs_another_key");
     if (otherKey > 0) {
       add("key", counted("web.admin.backups.restore.caveat.otherKeySettings", otherKey));
     }
-    const stricter = (item.settings ?? []).filter(
-      (setting) => setting.status === "kept_stricter",
-    ).length;
-    const cleared = (item.settings ?? []).filter((setting) => setting.status === "cleared").length;
+    const cleared = countStatus("cleared");
     if (cleared > 0) {
       add("cleared", t("web.admin.backups.restore.caveat.credentialsCleared"));
     }
-    const unverified = (item.settings ?? []).filter(
-      (setting) => setting.status === "unverified_backup",
-    ).length;
+    const unverified = countStatus("unverified_backup");
     if (unverified > 0) {
       add("unverified", counted("web.admin.backups.restore.caveat.unverifiedSettings", unverified));
     }
+    const stricter = countStatus("kept_stricter");
     if (stricter > 0) {
       add("stricter", counted("web.admin.backups.restore.caveat.stricterSettings", stricter));
+    }
+    const environment = countStatus("managed_by_environment");
+    if (environment > 0) {
+      add(
+        "environment",
+        counted("web.admin.backups.restore.caveat.environmentSettings", environment),
+      );
     }
     const unknown = item.collection?.unknown_items ?? 0;
     if (unknown > 0) {

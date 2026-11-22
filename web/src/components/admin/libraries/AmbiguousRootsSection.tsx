@@ -4,6 +4,7 @@ import { AlertTriangle, FolderOpen, XIcon } from "lucide-react";
 
 import type { Library, LibraryRoot } from "@/api/types";
 import { CollapsibleDiagnosticsSection } from "@/components/admin/CollapsibleDiagnosticsSection";
+import { PathCode, PathText } from "@/components/PathText";
 import {
   CARD_ACTION_CLASS,
   CardActions,
@@ -19,7 +20,7 @@ import {
 } from "@/components/admin/libraries/DiagnosticsListParts";
 import {
   pathLeaf,
-  useLibrariesTableLayout,
+  useWideDiagnosticsTableLayout,
   usePagination,
 } from "@/components/admin/libraries/diagnosticsListState";
 import { Badge } from "@/components/ui/badge";
@@ -56,7 +57,8 @@ import {
   useUpsertLibraryRootOverride,
 } from "@/hooks/queries/admin/libraries";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT, type Translate } from "@/i18n";
+import { numberText, useT, type Translate } from "@/i18n";
+import { itemTypeLabel } from "@/lib/itemTypeLabels";
 import { cn } from "@/lib/utils";
 
 // Not translated: a sample year.
@@ -68,8 +70,28 @@ function rootRowModel(t: Translate, root: LibraryRoot) {
     key: `${root.library_id}:${root.root_path}`,
     label: root.title || pathLeaf(root.root_path),
     evidence: root.evidence_json ? buildRootEvidenceSummary(t, root) : null,
-    typeLabel: root.inferred_type || t("web.admin.libraries.ambiguousRoots.unknownType"),
+    typeLabel: root.inferred_type
+      ? itemTypeLabel(t, root.inferred_type)
+      : t("web.admin.libraries.ambiguousRoots.unknownType"),
+    confidenceLabel: confidenceLabel(t, root.type_confidence),
   };
+}
+
+/**
+ * The label for a root's type confidence, which the API sends as English
+ * data. A level the scanner doesn't send shows as sent.
+ */
+function confidenceLabel(t: Translate, confidence: string): string {
+  switch (confidence) {
+    case "low":
+      return t("web.admin.libraries.ambiguousRoots.confidence.low");
+    case "medium":
+      return t("web.admin.libraries.ambiguousRoots.confidence.medium");
+    case "high":
+      return t("web.admin.libraries.ambiguousRoots.confidence.high");
+    default:
+      return confidence;
+  }
 }
 
 /**
@@ -78,7 +100,7 @@ function rootRowModel(t: Translate, root: LibraryRoot) {
  */
 export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
   const t = useT();
-  const showTable = useLibrariesTableLayout();
+  const showTable = useWideDiagnosticsTableLayout();
   const [open, setOpen] = useState(false);
   const [selectedLibraryId, setSelectedLibraryId] = useState<number | undefined>(libraries[0]?.id);
   const [search, setSearch] = useState("");
@@ -220,8 +242,11 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                       <TableCell className="max-w-[28rem]">
                         <div className="space-y-1">
                           <div className="truncate text-sm font-medium">{row.label}</div>
-                          <code className="text-muted-foreground block truncate text-[11px]">
-                            {root.root_path}
+                          <code
+                            className="text-muted-foreground block w-fit max-w-full truncate text-[11px]"
+                            dir="ltr"
+                          >
+                            <PathText path={root.root_path} />
                           </code>
                           {row.evidence !== null ? (
                             <div className="text-muted-foreground truncate text-[11px]">
@@ -234,10 +259,10 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                         <Badge variant="outline">{row.typeLabel}</Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{root.type_confidence}</Badge>
+                        <Badge variant="secondary">{row.confidenceLabel}</Badge>
                       </TableCell>
                       <TableCell className="text-muted-foreground text-end text-xs tabular-nums">
-                        {root.observed_file_count}
+                        {numberText(root.observed_file_count)}
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-1">
@@ -275,11 +300,11 @@ export function AmbiguousRootsSection({ libraries }: { libraries: Library[] }) {
                   </CardField>
                   <CardField label={t("web.admin.libraries.column.confidence")}>
                     <Badge variant="secondary" className="max-w-full whitespace-normal">
-                      {root.type_confidence}
+                      {row.confidenceLabel}
                     </Badge>
                   </CardField>
                   <CardField label={t("web.admin.libraries.column.files")}>
-                    <span className="tabular-nums">{root.observed_file_count}</span>
+                    <span className="tabular-nums">{numberText(root.observed_file_count)}</span>
                   </CardField>
                 </CardFields>
                 {row.evidence ? (
@@ -467,13 +492,16 @@ function RootOverrideDialog({
         <DialogHeader className="max-sm:border-border max-sm:shrink-0 max-sm:border-b max-sm:ps-4 max-sm:pe-2 max-sm:pt-[calc(0.75rem+env(safe-area-inset-top))] max-sm:pb-3">
           <div className="flex items-start gap-3">
             <div className="flex min-w-0 flex-1 flex-col gap-2 max-sm:text-start">
-              <DialogTitle>{t("web.admin.libraries.rootOverride.title")}</DialogTitle>
+              {/* From sm up the built-in close button shows beside this title. */}
+              <DialogTitle className="sm:pe-6">
+                {t("web.admin.libraries.rootOverride.title")}
+              </DialogTitle>
               {/* The fixed phone header holds the full root path; a long one
                   scrolls here instead of squeezing the form below. */}
               <DialogDescription className="break-words max-sm:max-h-[25dvh] max-sm:overflow-y-auto">
                 {t("web.admin.libraries.rootOverride.description", {
                   path: root.root_path,
-                  code: (chunks) => <code className="break-all">{chunks}</code>,
+                  code: (chunks) => <PathCode className="wrap-anywhere">{chunks}</PathCode>,
                 })}
               </DialogDescription>
             </div>

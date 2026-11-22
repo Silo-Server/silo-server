@@ -297,7 +297,7 @@ function ChosenItem({ id, line, children }: { id: string; line: ChosenLine; chil
             {line.title}
           </span>
         ) : (
-          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-4 w-32 max-w-full" />
         )}
         {line.meta ? (
           <span className="text-muted-foreground block truncate text-[13px]">{line.meta}</span>

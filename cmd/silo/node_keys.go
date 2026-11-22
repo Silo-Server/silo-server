@@ -12,6 +12,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/envutil"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/transcodenode"
 )
 
 // startProxyNodeKeyRegistry loads a proxy's copy of the stream node credential
@@ -38,16 +39,12 @@ func startProxyNodeKeyRegistry(ctx context.Context, pool *pgxpool.Pool, cipher *
 	return registry
 }
 
-// envNodeKey is the transcode node's own key, issued by an administrator. The
-// node verifies every request the core signs to it with this key.
-const envNodeKey = "SILO_NODE_KEY"
-
 // transcodeNodeKey reads and validates SILO_NODE_KEY, or the file
 // SILO_NODE_KEY_FILE names. A transcode node refuses to start without one, or
 // with one that is not a well-formed node key: it could verify nothing, so
 // every request to it would fail.
 func transcodeNodeKey(getenv func(string) string) (string, error) {
-	key, usedVar, err := envutil.LookupSecret(getenv, envNodeKey)
+	key, usedVar, err := envutil.LookupSecret(getenv, transcodenode.EnvNodeKey)
 	if err != nil {
 		return "", err
 	}
