@@ -53,6 +53,13 @@ describe("NodeName", () => {
       dir: "rtl",
       texts: ["خادم البث ", "ب\u0300\u200fفرانكفورت ال"],
     });
+    // Nor does a zero-width space, and a joiner before a mark joins what follows.
+    for (const between of ["\u200b", "\u200d\u200f"]) {
+      expect(pieces(`خادم البث ب${between}فرانكفورت ال`).texts).toEqual([
+        "خادم البث ",
+        `ب${between}فرانكفورت ال`,
+      ]);
+    }
   });
 
   it("doesn't start the end piece with a zero-width joiner", () => {

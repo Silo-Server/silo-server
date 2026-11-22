@@ -32,7 +32,7 @@ const CLOSES = new RegExp(`^${NOT_BRACKET}\\p{Pe}$`, "u");
 const CROSSED: Record<string, string> = { "\u298e": "\u298f", "\u2990": "\u298d" };
 // Marks and format characters, such as a directional mark, which letters join
 // across. Not the zero-width non-joiner and joiner, which set the joining.
-const ENDS_TRANSPARENT = /(?:(?![\u200c\u200d])[\p{M}\p{Cf}])+$/u;
+const TRANSPARENT = /^(?![\u200c\u200d])[\p{M}\p{Cf}]$/u;
 
 /** Whether `closing` pairs with `opening`: "()" and "（）" are one code point apart, "[]" two. */
 function closes(closing: string, opening: string) {
@@ -40,6 +40,18 @@ function closes(closing: string, opening: string) {
   if (crossed !== undefined) return opening === crossed;
   const gap = closing.codePointAt(0)! - opening.codePointAt(0)!;
   return gap === 1 || gap === 2;
+}
+
+/** `head` without the marks and format characters at its end. */
+function withoutTransparentEnd(head: string) {
+  let end = head.length;
+  while (end > 0) {
+    const low = head.charCodeAt(end - 1);
+    const size = end > 1 && low >= 0xdc00 && low <= 0xdfff ? 2 : 1;
+    if (!TRANSPARENT.test(head.slice(end - size, end))) break;
+    end -= size;
+  }
+  return head.slice(0, end);
 }
 
 /**
@@ -93,7 +105,7 @@ function nodeNameCut(name: string, rightToLeft: boolean) {
     const head = name.slice(0, -n);
     const tail = name.slice(-n);
     // The head without what letters join across, to check what it joins to.
-    const bare = head.replace(ENDS_TRANSPARENT, "");
+    const bare = withoutTransparentEnd(head);
     if (STARTS_ATTACHED.test(tail) || ENDS_JOINING.test(head) || ENDS_JOINING.test(bare)) continue;
     if (
       leftToRightOnly ||
