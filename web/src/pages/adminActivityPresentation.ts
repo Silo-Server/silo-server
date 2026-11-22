@@ -734,9 +734,6 @@ export function getPlaybackSessionSubtitle(session: AdminSession): string | null
       ? t("web.common.activity.subtitle.episodeTitle", { code, title: session.media_title })
       : code;
   }
-  if (session.media_type === "movie") {
-    return t("web.common.activity.subtitle.movie");
-  }
   if (session.media_type === "series" || session.media_type === "episode") {
     return t("web.common.activity.subtitle.series");
   }
