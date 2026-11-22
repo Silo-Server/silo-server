@@ -752,27 +752,31 @@ type SeasonUserData struct {
 
 // WatchDetail is the playback-oriented payload for /watch/{id}.
 type WatchDetail struct {
-	ContentID                       string                            `json:"content_id"`
-	Type                            string                            `json:"type"`
-	Title                           string                            `json:"title"`
-	Year                            int                               `json:"year,omitempty"`
-	Overview                        string                            `json:"overview,omitempty"`
-	EffectiveSubtitleLanguage       string                            `json:"-"`
-	HasEffectiveSubtitleLang        bool                              `json:"-"`
-	EffectiveSubtitleMode           string                            `json:"-"`
-	HasEffectiveSubtitleMode        bool                              `json:"-"`
-	EffectiveShowForcedSubtitles    bool                              `json:"-"`
-	HasEffectiveShowForcedSubtitles bool                              `json:"-"`
-	Versions                        []FileVersion                     `json:"versions"`
-	PlaybackVariants                []PlaybackVariant                 `json:"playback_variants,omitempty"`
-	Subtitles                       []SubtitleInfo                    `json:"subtitles"`
-	Intro                           *Marker                           `json:"intro,omitempty"`
-	Credits                         *Marker                           `json:"credits,omitempty"`
-	Recap                           *Marker                           `json:"recap,omitempty"`
-	Preview                         *Marker                           `json:"preview,omitempty"`
-	UserData                        *SeasonUserData                   `json:"user_data,omitempty"`
-	SeriesID                        string                            `json:"series_id,omitempty"`
-	SeriesTitle                     string                            `json:"series_title,omitempty"`
+	ContentID                       string            `json:"content_id"`
+	Type                            string            `json:"type"`
+	Title                           string            `json:"title"`
+	Year                            int               `json:"year,omitempty"`
+	Overview                        string            `json:"overview,omitempty"`
+	EffectiveSubtitleLanguage       string            `json:"-"`
+	HasEffectiveSubtitleLang        bool              `json:"-"`
+	EffectiveSubtitleMode           string            `json:"-"`
+	HasEffectiveSubtitleMode        bool              `json:"-"`
+	EffectiveShowForcedSubtitles    bool              `json:"-"`
+	HasEffectiveShowForcedSubtitles bool              `json:"-"`
+	Versions                        []FileVersion     `json:"versions"`
+	PlaybackVariants                []PlaybackVariant `json:"playback_variants,omitempty"`
+	Subtitles                       []SubtitleInfo    `json:"subtitles"`
+	Intro                           *Marker           `json:"intro,omitempty"`
+	Credits                         *Marker           `json:"credits,omitempty"`
+	Recap                           *Marker           `json:"recap,omitempty"`
+	Preview                         *Marker           `json:"preview,omitempty"`
+	UserData                        *SeasonUserData   `json:"user_data,omitempty"`
+	SeriesID                        string            `json:"series_id,omitempty"`
+	SeriesTitle                     string            `json:"series_title,omitempty"`
+	// EpisodeLabels and AirDate let the v2 player label an episode of a
+	// date-labeled series by its air date. Not part of the frozen v1 contract.
+	EpisodeLabels                   string                            `json:"-"`
+	AirDate                         string                            `json:"-"`
 	SeasonNumber                    int                               `json:"season_number,omitempty"`
 	EpisodeNumber                   int                               `json:"episode_number,omitempty"`
 	EffectiveSubtitleTrackSignature *userstore.SubtitleTrackSignature `json:"effective_subtitle_track_signature,omitempty"`
@@ -4065,6 +4069,10 @@ func (s *DetailService) GetWatchDetail(ctx context.Context, contentID string, fi
 		}
 		detail.SeriesTitle = series.Title
 		detail.Year = series.Year
+		detail.EpisodeLabels = series.EpisodeLabels
+		if episode.AirDate != nil {
+			detail.AirDate = episode.AirDate.Format(time.DateOnly)
+		}
 		if !filter.OmitWatchArtwork {
 			detail.BackdropThumbhash = series.BackdropThumbhash
 			detail.BackdropURL = s.PresignImageURL(ctx, series.BackdropPath, "backdrop", string(filter.ImageSizeFor(imagesize.SlotBackdrop)))

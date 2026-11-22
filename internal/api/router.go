@@ -3353,6 +3353,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.LiteraryWorks = literaryWorkHandler
 		v2deps.AdminLiteraryWorks = literaryWorkHandler.Service
 	}
+	v2deps.EpisodeLabels = catalog.NewEpisodeLabelReader(deps.DB)
 	if calendarRepo != nil {
 		calendarPopular := recommendations.NewRepo(deps.DB)
 		calendarTrending := sections.NewTrendingSnapshotRepository(deps.DB)

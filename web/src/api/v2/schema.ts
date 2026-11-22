@@ -37049,6 +37049,11 @@ export interface components {
       title: string;
     };
     WatchDetail: {
+      /**
+       * Format: date
+       * @description An episode's air date, YYYY-MM-DD; sent when episode_labels is air_date
+       */
+      air_date?: string;
       backdrop_thumbhash?: string;
       /**
        * Format: uri-reference
@@ -37069,6 +37074,12 @@ export interface components {
       effective_version_hdr?: boolean;
       /** @description The version resolution the profile last played */
       effective_version_resolution?: string;
+      /**
+       * @description The series' episode labels, as on CatalogItem: air_date means show air_date where the season and episode numbers would go
+       * @example air_date
+       * @enum {string}
+       */
+      episode_labels?: "air_date";
       /** Format: int64 */
       episode_number?: number;
       intro?: components["schemas"]["WatchMarker"];

@@ -355,6 +355,7 @@ func clearPreviousMatch(stored *MetadataResult, locked []MetadataField) {
 		stored.FirstAirDate, stored.LastAirDate = "", ""
 	}
 	stored.OriginalLanguage, stored.ShowStatus, stored.SeasonCount = "", "", 0
+	stored.EpisodeLabels = ""
 	if !isFieldLocked(locked, FieldAirSchedule) {
 		stored.AirTime, stored.AirTimezone = "", ""
 	}

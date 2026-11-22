@@ -406,6 +406,9 @@ type Dependencies struct {
 	LibraryCollections LibraryCollectionService
 	// Calendar answers the airing calendar (*handlers.CalendarHandler).
 	Calendar CalendarService
+	// EpisodeLabels labels listing cards of date-labeled series
+	// (*catalog.EpisodeLabelReader); nil leaves them numbered.
+	EpisodeLabels EpisodeLabelService
 	// HomeDismissals records and clears home-card dismissals
 	// (*handlers.HomeDismissalHandler).
 	HomeDismissals HomeDismissalService

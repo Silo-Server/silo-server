@@ -63,6 +63,19 @@ export function formatEpisodeLabel(item: {
   );
 }
 
+/**
+ * A short episode subtitle for pickers and sheets: "S1 E2", or the air date
+ * when the series is labeled by date.
+ */
+export function episodeSubtitle(
+  episodeLabels: string | undefined,
+  airDate: string | null | undefined,
+  seasonNumber: number,
+  episodeNumber: number,
+): string {
+  return episodeAirDateLabel(episodeLabels, airDate) ?? `S${seasonNumber} E${episodeNumber}`;
+}
+
 export function buildEpisodeCardLabels(item: EpisodeCardLabelItem): EpisodeCardLabels | null {
   if (
     item.type !== "episode" ||

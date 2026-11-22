@@ -97,6 +97,7 @@ func (reg *Registry) listWatchlist(ctx context.Context, cursors *Cursors, in *Wa
 	if p != nil {
 		return nil, p
 	}
+	reg.withEpisodeLabels(ctx, catalogItemPointers(items))
 	return &WatchlistCollectionOutput{Body: WatchlistCollection{Collection: Paginated(items, next)}}, nil
 }
 

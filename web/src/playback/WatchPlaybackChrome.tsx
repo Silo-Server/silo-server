@@ -1,4 +1,5 @@
 import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
+import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import {
   consumeAutomaticStart,
   expectAutomaticStart,
@@ -141,10 +142,19 @@ function buildPlaybackSubtitle(
     series_title?: string;
     season_number?: number;
     episode_number?: number;
+    episode_labels?: string;
+    air_date?: string | null;
   },
 ) {
   if (!item) {
     return undefined;
+  }
+
+  const airDateLabel = item.series_title
+    ? episodeAirDateLabel(item.episode_labels, item.air_date)
+    : null;
+  if (airDateLabel) {
+    return item.title ? `${airDateLabel} • ${item.title}` : airDateLabel;
   }
 
   if (item.series_title && item.season_number != null && item.episode_number != null) {
@@ -1334,6 +1344,7 @@ function WatchPlaybackHostContent() {
               <PlayingNextScreen
                 seriesId={activeItem.series_id}
                 seriesTitle={activeItem.series_title}
+                episodeLabels={activeItem.episode_labels}
                 nextEpisode={nextEpisodeRef ?? undefined}
                 continueWatchingItems={continueWatchingItems}
                 videoEnded={postRollVideoEnded}

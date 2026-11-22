@@ -40,6 +40,7 @@ export function cardOf(item: ShelfItem | BrowseItem | PickerEntry["item"]): Pick
     year: item.year,
     poster_url: item.poster_url,
     poster_thumbhash: item.poster_thumbhash,
+    episode_labels: "episode_labels" in item ? item.episode_labels : undefined,
   };
 }
 

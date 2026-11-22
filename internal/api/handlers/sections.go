@@ -1181,7 +1181,7 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	var imageURLs map[sectionItemImageKey]sectionItemImageURLs
 	var episodeMeta map[string]sections.SectionItemMeta
 	var mangaChapterMeta map[string]sections.SectionItemMeta
-	var episodeLabels map[string]sections.EpisodeLabel
+	var episodeLabels map[string]catalog.EpisodeLabel
 
 	var wg sync.WaitGroup
 
@@ -1467,9 +1467,9 @@ func (h *SectionHandler) listSectionMangaChapterItemMeta(ctx context.Context, it
 
 // listSectionEpisodeLabels finds the series and episodes among the section
 // items whose episodes are labeled by air date instead of numbers.
-func (h *SectionHandler) listSectionEpisodeLabels(ctx context.Context, items []*models.MediaItem) map[string]sections.EpisodeLabel {
+func (h *SectionHandler) listSectionEpisodeLabels(ctx context.Context, items []*models.MediaItem) map[string]catalog.EpisodeLabel {
 	if h == nil || h.fetcher == nil {
-		return map[string]sections.EpisodeLabel{}
+		return map[string]catalog.EpisodeLabel{}
 	}
 	ids := make([]string, 0)
 	seen := make(map[string]struct{})
@@ -1486,7 +1486,7 @@ func (h *SectionHandler) listSectionEpisodeLabels(ctx context.Context, items []*
 	labels, err := h.fetcher.FetchEpisodeLabels(ctx, ids)
 	if err != nil {
 		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section episode labels", "component", "api", "error", err)
-		return map[string]sections.EpisodeLabel{}
+		return map[string]catalog.EpisodeLabel{}
 	}
 	return labels
 }

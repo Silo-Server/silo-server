@@ -139,6 +139,7 @@ func (reg *Registry) libraryCollectionPage(ctx context.Context, c *Cursors, in *
 	for _, i := range v.Items {
 		items = append(items, catalogItemOfListing(i, sel))
 	}
+	reg.withEpisodeLabels(ctx, catalogItemPointers(items))
 	next, e := collectionPageNext(c, scope, v.HasMore, v.Revision, v.Last, v.Query)
 	if e != nil {
 		return nil, e

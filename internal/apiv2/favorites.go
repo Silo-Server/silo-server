@@ -183,6 +183,7 @@ func (reg *Registry) listFavorites(ctx context.Context, cursors *Cursors, in *Fa
 	if p != nil {
 		return nil, p
 	}
+	reg.withEpisodeLabels(ctx, catalogItemPointers(items))
 	return &FavoriteCollectionOutput{Body: FavoriteCollection{Collection: Paginated(items, next)}}, nil
 }
 

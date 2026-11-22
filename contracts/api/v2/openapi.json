@@ -57339,6 +57339,11 @@
       "WatchDetail": {
         "additionalProperties": false,
         "properties": {
+          "air_date": {
+            "description": "An episode's air date, YYYY-MM-DD; sent when episode_labels is air_date",
+            "format": "date",
+            "type": "string"
+          },
           "backdrop_thumbhash": {
             "type": "string"
           },
@@ -57382,6 +57387,16 @@
           },
           "effective_version_resolution": {
             "description": "The version resolution the profile last played",
+            "type": "string"
+          },
+          "episode_labels": {
+            "description": "The series' episode labels, as on CatalogItem: air_date means show air_date where the season and episode numbers would go",
+            "enum": [
+              "air_date"
+            ],
+            "examples": [
+              "air_date"
+            ],
             "type": "string"
           },
           "episode_number": {

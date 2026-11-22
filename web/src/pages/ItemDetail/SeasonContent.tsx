@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
+import { episodeSubtitle } from "@/lib/episodeCardLabels";
 import { useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
 import { useStartShuffle } from "@/hooks/queries/shuffles";
@@ -93,9 +93,12 @@ export default function SeasonContent({
       ? {
           content_id: firstUnwatched.content_id,
           title: firstUnwatched.title,
-          subtitle:
-            episodeAirDateLabel(item.episode_labels, firstUnwatched.air_date) ??
-            `S${firstUnwatched.season_number} E${firstUnwatched.episode_number}`,
+          subtitle: episodeSubtitle(
+            item.episode_labels,
+            firstUnwatched.air_date,
+            firstUnwatched.season_number,
+            firstUnwatched.episode_number,
+          ),
           poster_url: item.poster_url,
           poster_thumbhash: item.poster_thumbhash,
         }

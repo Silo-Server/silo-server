@@ -1,4 +1,5 @@
 import { captureRoomCreationDraft } from "@/api/v2/watchTogetherCreate";
+import { episodeSubtitle } from "@/lib/episodeCardLabels";
 import { updateRoomPolicy } from "@/api/v2/watchTogetherPolicy";
 import { stageRoomItem } from "@/api/v2/watchTogetherStage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -368,7 +369,12 @@ export function StartPartySheet({
                 setTarget({
                   content_id: episode.content_id,
                   title: episode.title,
-                  subtitle: `S${seasonNumber} E${episode.episode_number}`,
+                  subtitle: episodeSubtitle(
+                    item.episode_labels,
+                    episode.air_date,
+                    seasonNumber,
+                    episode.episode_number,
+                  ),
                   poster_url: item.poster_url,
                   poster_thumbhash: item.poster_thumbhash,
                 });

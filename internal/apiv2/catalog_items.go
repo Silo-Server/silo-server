@@ -1049,6 +1049,7 @@ func (reg *Registry) listCatalogItems(ctx context.Context, cursors *Cursors, in 
 	for _, item := range view.Items {
 		items = append(items, catalogItemOfListing(item, sel))
 	}
+	reg.withEpisodeLabels(ctx, catalogItemPointers(items))
 	window, err := cursors.Encode(scope, catalogBrowsePosition{Snapshot: view.Snapshot, Sort: req.ResolvedSort, After: view.CursorScope})
 	if err != nil {
 		return nil, NewProblem(TypeInternalError, "An unexpected error occurred.")
@@ -1426,7 +1427,7 @@ func catalogItemCardOf(d *catalogpkg.ItemDetail) CatalogItem {
 		SeriesID: d.SeriesID, SeriesTitle: d.SeriesTitle, SeasonNumber: d.SeasonNumber, EpisodeNumber: d.EpisodeNumber,
 		Year: d.Year, Runtime: d.Runtime, Genres: NonNil(d.Genres), Keywords: []string{}, Studios: d.Studios, Networks: d.Networks,
 		ContentRating: d.ContentRating, AdvisoryAge: d.AdvisoryAge, AdvisorySource: d.AdvisorySource,
-		ShowStatus: d.ShowStatus, EpisodeLabels: d.EpisodeLabels,
+		ShowStatus: d.ShowStatus, EpisodeLabels: d.EpisodeLabels, AirDate: detailCardAirDate(d),
 		RatingIMDB: d.RatingIMDB, RatingTMDB: d.RatingTMDB, RatingRTCritic: d.RatingRTCritic, RatingRTAudience: d.RatingRTAudience,
 		Overview: d.Overview, ReleaseDate: calendarDatePtr(d.ReleaseDate), LastAirDate: calendarDatePtr(d.LastAirDate),
 		PosterURL: d.PosterURL, PosterThumbhash: d.PosterThumbhash, BackdropURL: d.BackdropURL, BackdropThumbhash: d.BackdropThumbhash, LogoURL: d.LogoURL,
@@ -1523,4 +1524,13 @@ func seasonOf(s handlers.SeasonView) Season {
 	return Season{ContentID: s.ContentID, PlayContentID: s.PlayContentID, SeasonNumber: s.SeasonNumber, IsSpecials: s.IsSpecials, Title: s.Title,
 		Overview: s.Overview, AirDate: datePtr(s.AirDate), EpisodeCount: s.EpisodeCount, PosterURL: s.PosterURL, PosterThumbhash: s.PosterThumbhash,
 		UserData: watchRollupOf(s.UserData), Availability: catalogAvailabilityOf(s.Availability), MachineTranslatedFields: s.MachineTranslatedFields}
+}
+
+// detailCardAirDate is an episode's air date on a card built from its detail,
+// sent only for a date-labeled series, as on section cards.
+func detailCardAirDate(d *catalogpkg.ItemDetail) *string {
+	if d.EpisodeLabels == "" || d.Type != "episode" || d.AirDate == nil {
+		return nil
+	}
+	return datePtr(calendarDate(*d.AirDate))
 }

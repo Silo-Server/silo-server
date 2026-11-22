@@ -1,4 +1,5 @@
 import { ChevronDown, X } from "lucide-react";
+import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import "@/styles/player-hud.css";
 import { useMediaSkipHandlers } from "../hooks/useMediaSkipHandlers";
 import {
@@ -2688,15 +2689,24 @@ export function VideoPlayer({
 
   // Title strip copy passed into the floating HUD.
   const hudTitle = seriesContext?.seriesTitle ?? title;
-  const hudSubtitle = seriesContext
-    ? t(title ? "web.player.hud.episodeWithTitle" : "web.player.hud.episode", {
-        season: codeNumber(seriesContext.currentSeason),
-        episode: codeNumber(seriesContext.currentEpisode),
-        title,
-      })
-    : year
-      ? numberText(year)
-      : undefined;
+  // A date-labeled series (sports) names the game by its date, not its
+  // synthetic season and episode numbers.
+  const airDateLabel = seriesContext
+    ? episodeAirDateLabel(seriesContext.episodeLabels, seriesContext.currentAirDate)
+    : null;
+  const hudSubtitle = airDateLabel
+    ? title
+      ? `${airDateLabel} • ${title}`
+      : airDateLabel
+    : seriesContext
+      ? t(title ? "web.player.hud.episodeWithTitle" : "web.player.hud.episode", {
+          season: codeNumber(seriesContext.currentSeason),
+          episode: codeNumber(seriesContext.currentEpisode),
+          title,
+        })
+      : year
+        ? numberText(year)
+        : undefined;
   const flushWatchProgressRef = useRef(flushWatchProgress);
 
   useEffect(() => {
@@ -5700,16 +5710,18 @@ export function VideoPlayer({
                     : (seriesContext.seriesTitle ?? title)}
                 </span>
                 <span>
-                  {title
-                    ? t("web.player.episode.codeWithTitle", {
-                        season: codeNumber(seriesContext.currentSeason),
-                        episode: codeNumber(seriesContext.currentEpisode),
-                        title,
-                      })
-                    : t("web.player.episode.code", {
-                        season: codeNumber(seriesContext.currentSeason),
-                        episode: codeNumber(seriesContext.currentEpisode),
-                      })}
+                  {airDateLabel
+                    ? hudSubtitle
+                    : title
+                      ? t("web.player.episode.codeWithTitle", {
+                          season: codeNumber(seriesContext.currentSeason),
+                          episode: codeNumber(seriesContext.currentEpisode),
+                          title,
+                        })
+                      : t("web.player.episode.code", {
+                          season: codeNumber(seriesContext.currentSeason),
+                          episode: codeNumber(seriesContext.currentEpisode),
+                        })}
                 </span>
               </>
             ) : (

@@ -437,3 +437,14 @@ func TestPluginProviderReadsEpisodeLabels(t *testing.T) {
 		})
 	}
 }
+
+// Correcting a Sportarr match to a numbered show (an Identify to TVDB) must not
+// leave the series labeling its episodes by date: the new providers never send
+// episode_labels, so a value kept from the wrong match would stick for good.
+func TestClearPreviousMatchClearsEpisodeLabels(t *testing.T) {
+	stored := &MetadataResult{HasMetadata: true, Title: "NBA", EpisodeLabels: "air_date"}
+	clearPreviousMatch(stored, nil)
+	if stored.EpisodeLabels != "" {
+		t.Fatalf("EpisodeLabels = %q after clearing the previous match, want empty", stored.EpisodeLabels)
+	}
+}

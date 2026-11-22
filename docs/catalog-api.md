@@ -616,6 +616,31 @@ source's `name`. They are built from the episode's stored rating columns by the
 same rules as a title page, so a stored 0 (unrated) or a value off the 0-10
 scale is left out, and an episode with no rating omits the field.
 
+## Episodes labeled by air date
+
+Some series number their episodes only so they sort: Sportarr gives a league's
+games `S2026E296`. Such a series carries `episode_labels: "air_date"`, and a
+client shows the episode's `air_date` (a calendar date, no time zone) where it
+would show the season and episode numbers. Sorting, next up and playback still
+use the numbers. An undated episode keeps its numbers, and an absent
+`episode_labels` means numbers, so a client needs no capability check.
+
+The value comes from the series' metadata provider: a plugin's series
+`MetadataItem.metadata` sets `episode_labels` (`air_date` is the only value; any
+other is ignored). It is stored on the series, kept by a refresh, and cleared
+when Identify corrects the match. A refresh fills only empty episode dates, so
+an episode date a provider has since corrected takes "Replace all metadata".
+
+`episode_labels` appears on:
+
+- item detail of the series, and of its seasons and episodes (the series' value)
+- home and library section cards, and the cards of catalog browse and search,
+  personal collections, favorites, the watchlist and watch history; their
+  episode cards also carry `air_date`
+- watch detail (`getWatchDetail`) of an episode, with its `air_date`
+
+`/api/v1` and the Jellyfin-compatible API are unchanged.
+
 ## External IDs on cards
 
 Movie and series cards carry `imdb_id`, `tmdb_id`, and `tvdb_id`, the same IDs

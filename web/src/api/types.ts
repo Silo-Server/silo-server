@@ -1358,6 +1358,10 @@ export interface ItemDetail {
 
 export interface WatchDetail {
   content_id: string;
+  /** "air_date" when the episode's series labels episodes by date. */
+  episode_labels?: string;
+  /** The episode's air date, sent when episode_labels is air_date. */
+  air_date?: string | null;
   type: string;
   title: string;
   year?: number;
