@@ -183,37 +183,7 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	if record == nil {
 		return unarbitratedRealtimeStop(h.persistStopAndHistory(ctx, session)) // Unsequenced bridge play.
 	}
-	var file *models.MediaFile
-	var fileErr error
-	var final *playback.ProgressSampleV3
-	var estimatedFrom playback.WatchTime
-	if record.LastSample == nil && session.Position > 0 {
-		// A bridge progress report may have updated the live session without
-		// a sequenced native sample. Preserve its final resume position.
-		final = &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: session.Position, IsPaused: session.IsPaused}
-	} else if record.LastSample != nil {
-		// The anchor also brings the copy up to a report another replica
-		// accepted, which the play's history needs even without an estimate,
-		// including when another stop already took the row and this worker
-		// finishes it. Only an open row can still take an estimate.
-		if anchor, ok := h.realtimeStopAnchor(ctx, session, record); ok && !sentAt.IsZero() && record.StoppedAt == nil {
-			duration := session.TimelineDuration
-			if duration <= 0 {
-				// The file bounds the final sample. A short budget keeps a
-				// slow catalog read from holding up the stop write; the
-				// result looks it up again after finalization if this one
-				// fails.
-				fileCtx, cancelFile := context.WithTimeout(ctx, realtimeStopReadBudget)
-				file, fileErr = h.loadFileByPreferredID(fileCtx, requestedMediaFileID(session), session.MediaFileID)
-				cancelFile()
-				if fileErr == nil && file != nil {
-					duration = float64(file.Duration)
-				}
-			}
-			final = playedSinceLastReport(record, anchor, sentAt, duration)
-			estimatedFrom = anchor
-		}
-	}
+	final, estimatedFrom, file, fileErr := h.realtimeStopFinal(ctx, session, record, sentAt)
 	// The stop write gets its own budget, whatever the reads above took.
 	writeCtx, cancelWrite := context.WithTimeout(parent, stopFinalizationLease)
 	defer cancelWrite()
@@ -279,6 +249,44 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 			session.Position/result.DurationSeconds > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct)
 	}
 	return realtimeStopOutcome{result: result, reason: endReasonForStop(session.ID, receipt.StopID), notify: notify}
+}
+
+// realtimeStopFinal is the final sample a confirmed stop submits, the
+// measurement an estimated one came from, and the file it was bounded by, if
+// it was looked up.
+func (h *PlaybackHandler) realtimeStopFinal(ctx context.Context, session *playback.Session, record *playback.AttemptRecordV3, sentAt time.Time) (*playback.ProgressSampleV3, playback.WatchTime, *models.MediaFile, error) {
+	if record.LastSample == nil {
+		if session.Position > 0 {
+			// A bridge progress report may have updated the live session
+			// without a sequenced native sample. Preserve its final resume
+			// position.
+			return &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: session.Position, IsPaused: session.IsPaused}, playback.WatchTime{}, nil, nil
+		}
+		return nil, playback.WatchTime{}, nil, nil
+	}
+	// The anchor also brings the copy up to a report another replica
+	// accepted, which the play's history needs even without an estimate,
+	// including when another stop already took the row and this worker
+	// finishes it. Only an open row can still take an estimate.
+	anchor, ok := h.realtimeStopAnchor(ctx, session, record)
+	if !ok || sentAt.IsZero() || record.StoppedAt != nil {
+		return nil, anchor, nil, nil
+	}
+	var file *models.MediaFile
+	var fileErr error
+	duration := session.TimelineDuration
+	if duration <= 0 {
+		// The file bounds the final sample. A short budget keeps a slow
+		// catalog read from holding up the stop write; the result looks it
+		// up again after finalization if this one fails.
+		fileCtx, cancelFile := context.WithTimeout(ctx, realtimeStopReadBudget)
+		file, fileErr = h.loadFileByPreferredID(fileCtx, requestedMediaFileID(session), session.MediaFileID)
+		cancelFile()
+		if fileErr == nil && file != nil {
+			duration = float64(file.Duration)
+		}
+	}
+	return playedSinceLastReport(record, anchor, sentAt, duration), anchor, file, fileErr
 }
 
 // maxPlayedSinceLastReport bounds the play credited after the last progress
