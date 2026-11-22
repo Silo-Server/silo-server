@@ -247,8 +247,9 @@ func (s *webhookSender) processAttempt(ctx context.Context, attempt DeliveryAtte
 		next := time.Now().Add(max(delay, result.RetryAfter))
 		f.outcome, f.next = WebhookOutcomeRetrying, &next
 	default:
-		// Retry schedule exhausted (~24h of consecutive failures).
-		f.outcome, f.disableReason = WebhookOutcomeAutoDisabled, exhaustedDisableReason
+		// Retry schedule exhausted (~24h of consecutive failures). The
+		// attempt records auto_disabled only if it turns the webhook off.
+		f.outcome, f.disableReason = WebhookOutcomeFailed, exhaustedDisableReason
 	}
 	if result.HTTPStatus > 0 {
 		f.status = &result.HTTPStatus
@@ -339,6 +340,9 @@ func (s *webhookSender) commitFinish(ctx context.Context, attempt DeliveryAttemp
 		}
 		if disabled, err = s.webhooks.Disable(ctx, tx, hook.ID, reason); err != nil {
 			return nil, "", err
+		}
+		if disabled && f.disableReason != "" {
+			f.outcome = WebhookOutcomeAutoDisabled
 		}
 	}
 	applied, err := s.webhooks.FinalizeAttempt(ctx, tx, attempt, f.outcome, f.attemptNumber, f.status, f.message, f.next)

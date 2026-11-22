@@ -2,6 +2,7 @@ package notifications
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -12,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/secret"
@@ -30,25 +32,14 @@ func webhookResponse(status int, header http.Header) *http.Response {
 }
 
 type webhookDeliveryHarness struct {
-	t        *testing.T
-	pool     *pgxpool.Pool
-	sender   *webhookSender
-	service  *WebhookService
-	disables atomic.Int32
-	seq      atomic.Int32
-}
-
-// disableCounter counts the sender's auto-disable log records.
-type disableCounter struct{ n *atomic.Int32 }
-
-func (c disableCounter) Enabled(context.Context, slog.Level) bool { return true }
-func (c disableCounter) WithAttrs([]slog.Attr) slog.Handler       { return c }
-func (c disableCounter) WithGroup(string) slog.Handler            { return c }
-func (c disableCounter) Handle(_ context.Context, r slog.Record) error {
-	if r.Message == "webhook auto-disabled" {
-		c.n.Add(1)
-	}
-	return nil
+	t          *testing.T
+	pool       *pgxpool.Pool
+	sender     *webhookSender
+	service    *WebhookService
+	seq        atomic.Int32
+	dispatched atomic.Int32
+	// failNotice makes the auto-disable notice's inbox insert fail.
+	failNotice atomic.Bool
 }
 
 func newWebhookDeliveryHarness(t *testing.T, transport http.RoundTripper) *webhookDeliveryHarness {
@@ -68,8 +59,22 @@ func newWebhookDeliveryHarness(t *testing.T, transport http.RoundTripper) *webho
 	sender := newWebhookSender(repo, NewDeliveryRepository(pool), cipher, settings)
 	sender.client = &http.Client{Transport: transport}
 	h := &webhookDeliveryHarness{t: t, pool: pool, sender: sender}
-	// Each auto-disable logs once, as its notice is posted.
-	sender.logger = slog.New(disableCounter{&h.disables})
+	sender.logger = slog.New(slog.DiscardHandler)
+	// The auto-disable notice goes into the inbox through the sender's
+	// transaction, as the system wires it.
+	sender.noticeWriter = func(context.Context) func(context.Context, pgx.Tx, Delivery) (*InsertedDelivery, error) {
+		return func(ctx context.Context, tx pgx.Tx, notice Delivery) (*InsertedDelivery, error) {
+			if h.failNotice.Load() {
+				return nil, errors.New("inbox insert failed")
+			}
+			inserted, err := NewDeliveryRepository(pool).BulkInsert(ctx, tx, []Delivery{notice})
+			if err != nil || len(inserted) == 0 {
+				return nil, err
+			}
+			return &inserted[0], nil
+		}
+	}
+	sender.dispatchNotice = func(context.Context, InsertedDelivery) { h.dispatched.Add(1) }
 	h.service = newWebhookService(repo, cipher, settings, sender)
 	return h
 }
@@ -110,6 +115,17 @@ func (h *webhookDeliveryHarness) claimNew(webhookID string) DeliveryAttempt {
 		h.t.Fatalf("claim %s = %v, %v; want one attempt", deliveryID, claimed, err)
 	}
 	return claimed[0]
+}
+
+// notices counts the auto-disable notices in the inbox.
+func (h *webhookDeliveryHarness) notices() int {
+	h.t.Helper()
+	var n int
+	if err := h.pool.QueryRow(h.t.Context(), `SELECT count(*) FROM notification_deliveries WHERE type = $1`,
+		DeliveryTypeWebhookAutoDisabled).Scan(&n); err != nil {
+		h.t.Fatal(err)
+	}
+	return n
 }
 
 func (h *webhookDeliveryHarness) webhook(id string) (enabled bool, failures int) {
@@ -153,8 +169,8 @@ func TestWebhookRejectionsAutoDisableDB(t *testing.T) {
 	if enabled, _ := h.webhook("wh"); enabled {
 		t.Fatal("webhook still enabled after three rejected deliveries")
 	}
-	if got := h.disables.Load(); got != 1 {
-		t.Errorf("auto-disables = %d, want 1 (each posts a notice)", got)
+	if got, sent := h.notices(), h.dispatched.Load(); got != 1 || sent != 1 {
+		t.Errorf("%d notices in the inbox, %d dispatched; want one of each", got, sent)
 	}
 
 	on := true
@@ -165,6 +181,89 @@ func TestWebhookRejectionsAutoDisableDB(t *testing.T) {
 	reject()
 	if enabled, _ := h.webhook("wh"); !enabled {
 		t.Fatal("the first rejection after re-enabling disabled the webhook again")
+	}
+}
+
+// The disable and its notice commit with the attempt's outcome and the
+// streaks: when the notice can't be written, none of it applies, and the
+// attempt runs again once its lease runs out.
+func TestWebhookFinishIsAtomicDB(t *testing.T) {
+	h := newWebhookDeliveryHarness(t, roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return webhookResponse(http.StatusNotFound, nil), nil
+	}))
+	ctx := t.Context()
+	h.addWebhook("wh")
+	h.sender.processAttempt(ctx, h.claimNew("wh"))
+	h.sender.processAttempt(ctx, h.claimNew("wh"))
+
+	h.failNotice.Store(true)
+	third := h.claimNew("wh")
+	h.sender.processAttempt(ctx, third)
+	var outcome string
+	if err := h.pool.QueryRow(ctx, `SELECT outcome FROM webhook_delivery_attempts WHERE id = $1`, third.ID).Scan(&outcome); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, failures := h.webhook("wh"); !enabled || failures != 2 || outcome != WebhookOutcomeRetrying || h.notices() != 0 {
+		t.Fatalf("after a failed notice: enabled %v, consecutive_failures %d, outcome %q, %d notices; want nothing applied",
+			enabled, failures, outcome, h.notices())
+	}
+
+	h.failNotice.Store(false)
+	if _, err := h.pool.Exec(ctx, `UPDATE webhook_delivery_attempts SET next_retry_at = now() - interval '1 second' WHERE id = $1`, third.ID); err != nil {
+		t.Fatal(err)
+	}
+	reclaimed, err := h.sender.webhooks.ClaimDue(ctx, 10)
+	if err != nil || len(reclaimed) != 1 {
+		t.Fatalf("reclaim = %v, %v; want the third attempt", reclaimed, err)
+	}
+	h.sender.processAttempt(ctx, reclaimed[0])
+	if enabled, failures := h.webhook("wh"); enabled || failures != 3 || h.notices() != 1 {
+		t.Fatalf("after the retry: enabled %v, consecutive_failures %d, %d notices; want it disabled with one notice",
+			enabled, failures, h.notices())
+	}
+}
+
+// The last scheduled attempt turns the webhook off and records that it did.
+// When its owner turned the webhook off during the send, the attempt just
+// fails and no notice is posted.
+func TestWebhookExhaustedScheduleDisablesOnceDB(t *testing.T) {
+	var h *webhookDeliveryHarness
+	var ownerOff atomic.Bool
+	h = newWebhookDeliveryHarness(t, roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		if ownerOff.Load() {
+			if _, err := h.pool.Exec(r.Context(), `UPDATE notification_webhooks SET enabled = false WHERE id = 'wh'`); err != nil {
+				t.Error(err)
+			}
+		}
+		return webhookResponse(http.StatusBadGateway, nil), nil
+	}))
+	ctx := t.Context()
+	h.addWebhook("wh")
+	last := func() string {
+		t.Helper()
+		attempt := h.claimNew("wh")
+		attempt.AttemptNumber = webhookMaxAttempts - 1
+		h.sender.processAttempt(ctx, attempt)
+		var outcome string
+		if err := h.pool.QueryRow(ctx, `SELECT outcome FROM webhook_delivery_attempts WHERE id = $1`, attempt.ID).Scan(&outcome); err != nil {
+			t.Fatal(err)
+		}
+		return outcome
+	}
+
+	ownerOff.Store(true)
+	if outcome := last(); outcome != WebhookOutcomeFailed || h.notices() != 0 {
+		t.Fatalf("owner turned it off mid-send: outcome %q, %d notices; want failed and no notice", outcome, h.notices())
+	}
+	ownerOff.Store(false)
+	if _, err := h.pool.Exec(ctx, `UPDATE notification_webhooks SET enabled = true WHERE id = 'wh'`); err != nil {
+		t.Fatal(err)
+	}
+	if outcome := last(); outcome != WebhookOutcomeAutoDisabled || h.notices() != 1 {
+		t.Fatalf("schedule exhausted: outcome %q, %d notices; want auto_disabled with one notice", outcome, h.notices())
+	}
+	if enabled, _ := h.webhook("wh"); enabled {
+		t.Fatal("webhook still enabled after its retry schedule ran out")
 	}
 }
 
