@@ -119,6 +119,48 @@ func TestPluginListsKeepWorkingWithAnUnreadableArchiveDB(t *testing.T) {
 	}
 }
 
+// A replacement at the same version can reach the database before a peer
+// invalidates its installation cache, or after its inventory query read the row.
+func TestPluginInventoryDuringReplacementDB(t *testing.T) {
+	pool, h := newPluginHandlerDB(t)
+	ctx := t.Context()
+	var id int
+	if err := pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy)
+		VALUES ($1, '1.0.0', $2, true, 'manual') RETURNING id`,
+		fmt.Sprintf("test.inventory-%d", time.Now().UnixNano()), filepath.Join(t.TempDir(), "plugin")).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, id)
+	})
+	old, err := h.installations.GetByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.service.IsInstallationEnabled(ctx, id); err != nil {
+		t.Fatal(err)
+	}
+	replacement := filepath.Join(t.TempDir(), "plugin")
+	if _, err := pool.Exec(ctx, `UPDATE plugin_installations SET install_path = $2 WHERE id = $1`, id, replacement); err != nil {
+		t.Fatal(err)
+	}
+	check := func(list []PluginInstallationView, err error) {
+		t.Helper()
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		for _, row := range list {
+			if row.ID == id && row.InstallPath == replacement {
+				return
+			}
+		}
+		t.Error("inventory did not return the replacement")
+	}
+	check(h.ListAdminPluginInstallations(ctx))
+	check(h.buildInstallationResponses(ctx, []*plugins.Installation{old}))
+}
+
 func newPluginHandlerDB(t *testing.T) (*pgxpool.Pool, *PluginHandler) {
 	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")

@@ -370,13 +370,13 @@ func (rig *oauthDBRig) node() *OAuthHandler {
 		Store:       NewPGOAuthStore(rig.env.pool, []byte("synthetic-oauth-db-secret")),
 		StateSecret: []byte("synthetic-state-secret"),
 		HostBaseURL: "https://silo.test",
-		ResolveClient: func(ctx context.Context, id int) (OAuthClient, string, error) {
+		ResolveClient: func(ctx context.Context, id int) (OAuthClient, string, string, error) {
 			pp := svc.FindOAuthInstallation(id)
 			if pp == nil {
-				return nil, "", ErrUnknownAuthInstallation
+				return nil, "", "", ErrUnknownAuthInstallation
 			}
 			c, err := pp.OAuthClient(ctx)
-			return c, pp.CapabilityID(), err
+			return c, pp.CapabilityID(), pp.CallbackMode(), err
 		},
 		LoginCompleter: svc,
 		ServerID:       func(context.Context) (string, error) { return testServerID, nil },

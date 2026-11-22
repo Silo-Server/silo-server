@@ -101,7 +101,7 @@ export default function WatchlistTitlesTab({
         <p className="text-muted-foreground text-sm">{watchlistTitlesHint(watchlistRequests)}</p>
         <ViewTransitionLink
           to={DISCOVER_HREF}
-          className="text-primary hover:text-primary/80 shrink-0 text-sm font-medium"
+          className="text-primary shrink-0 text-sm font-medium hover:underline"
         >
           {t("web.library.watchlist.findMore")}
         </ViewTransitionLink>

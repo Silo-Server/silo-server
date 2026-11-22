@@ -23,9 +23,9 @@
       ),
       linear-gradient(
         180deg,
-        color-mix(in srgb, var(--ambient, var(--background)) 34%, var(--background)) 0%,
-        color-mix(in srgb, var(--ambient, var(--background)) 12%, var(--background)) 55%,
-        var(--background) 100%
+        color-mix(in srgb, var(--ambient, var(--background)) 34%, transparent) 0%,
+        color-mix(in srgb, var(--ambient, var(--background)) 12%, transparent) 55%,
+        transparent 100%
       );
   }
 
@@ -50,9 +50,10 @@
       );
   }
 
-  /* Book page. Below lg the cover and the title sit side by side with the
-     listening controls under them; from lg the cover and controls form a
-     sticky column beside everything else. */
+  /* Book page. Below the two-column breakpoint (md for ebooks, lg for
+     audiobooks) the cover and title sit side by side with actions under them;
+     from that breakpoint the cover and actions form a sticky column beside
+     everything else. */
   .audiobook-detail-grid {
     display: grid;
     grid-template-columns: 7rem minmax(0, 1fr);
@@ -94,6 +95,37 @@
     }
   }
 
+  @media (min-width: 48rem) {
+    .audiobook-detail-grid--ebook {
+      grid-template-columns: 13.5rem minmax(0, 1fr);
+      grid-template-rows: auto 1fr;
+      grid-template-areas:
+        "side head"
+        "side body";
+      gap: 1.75rem 2.5rem;
+      align-items: start;
+    }
+
+    .audiobook-detail-grid--ebook .audiobook-detail-side {
+      grid-area: side;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr);
+      gap: 1rem;
+      position: sticky;
+      /* Clear Layout's sticky mobile header (hidden at lg) and the
+         impersonation banner above it. */
+      top: calc(
+        var(--detail-header-height, 4.75rem) + 0.75rem + var(--impersonation-banner-height)
+      );
+      align-self: start;
+    }
+
+    .audiobook-detail-grid--ebook .audiobook-detail-cover,
+    .audiobook-detail-grid--ebook .audiobook-detail-actions {
+      grid-area: auto;
+    }
+  }
+
   @media (min-width: 64rem) {
     .audiobook-detail-grid {
       grid-template-columns: 16.25rem minmax(0, 1fr);
@@ -105,18 +137,18 @@
       align-items: start;
     }
 
-    .audiobook-detail-side {
+    .audiobook-detail-grid .audiobook-detail-side {
       grid-area: side;
       display: grid;
       grid-template-columns: minmax(0, 1fr);
       gap: 1rem;
       position: sticky;
-      top: 1.5rem;
+      top: calc(1.5rem + var(--impersonation-banner-height));
       align-self: start;
     }
 
-    .audiobook-detail-cover,
-    .audiobook-detail-actions {
+    .audiobook-detail-grid .audiobook-detail-cover,
+    .audiobook-detail-grid .audiobook-detail-actions {
       grid-area: auto;
     }
   }

@@ -133,25 +133,25 @@ const ACTIVITY_METHOD_META: Record<string, ActivityMethodStyle> = {
     label: "web.common.activity.method.direct.label",
     description: "web.common.activity.method.direct.description",
     swatchClass: "bg-success",
-    badgeClass: "bg-success/10 text-success border-success/15",
+    badgeClass: "bg-success/10 text-success-label border-success/15",
   },
   remux: {
     label: "web.common.activity.method.remux.label",
     description: "web.common.activity.method.remux.description",
     swatchClass: "bg-info",
-    badgeClass: "bg-info/10 text-info border-info/15",
+    badgeClass: "bg-info/10 text-info-label border-info/15",
   },
   direct_stream: {
     label: "web.common.activity.method.directStream.label",
     description: "web.common.activity.method.directStream.description",
     swatchClass: "bg-warning",
-    badgeClass: "bg-warning/10 text-warning border-warning/15",
+    badgeClass: "bg-warning/10 text-warning-label border-warning/15",
   },
   transcode: {
     label: "web.common.activity.method.transcode.label",
     description: "web.common.activity.method.transcode.description",
     swatchClass: "bg-destructive",
-    badgeClass: "bg-destructive/10 text-destructive border-destructive/15",
+    badgeClass: "bg-destructive/10 text-destructive-label border-destructive/15",
   },
 };
 
@@ -288,15 +288,16 @@ export function formatToneMapSummary(session: AdminSession): ToneMapSummary | nu
   }
 }
 
-// Bitrate units (Mbps, kbps) are written the same way in every language.
+// Bitrate units (Mbps, kbps) are written the same way in every language. A
+// no-break space keeps the unit on its number's line when a narrow cell wraps.
 export function formatSessionBitrate(kbps?: number | null): string | null {
   if (!kbps || kbps <= 0) {
     return null;
   }
   if (kbps >= 1000) {
-    return `${formatDecimal(kbps / 1000, 1)} Mbps`;
+    return `${formatDecimal(kbps / 1000, 1)}\u00a0Mbps`;
   }
-  return `${Math.round(kbps)} kbps`;
+  return `${Math.round(kbps)}\u00a0kbps`;
 }
 
 export interface SessionBitrate {

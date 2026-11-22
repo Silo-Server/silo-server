@@ -536,8 +536,9 @@ func seedFanoutEvent(t *testing.T, pool *pgxpool.Pool, c accessCatalog, profiles
 func newAccessFanoutWorker(pool *pgxpool.Pool, scopes ScopeResolver) *FanoutWorker {
 	worker := NewFanoutWorker(pool, NewReleaseRepository(pool), NewInterestRepository(pool),
 		NewDeliveryRepository(pool), NewPreferencesRepository(pool),
-		NewSettings(mapSettingReader{SettingFanoutSettleSeconds: "0"}), scopes, NewMultiDispatcher())
+		NewSettings(mapSettingReader{}), scopes, NewMultiDispatcher())
 	worker.logger = slog.New(slog.DiscardHandler)
+	worker.settle = 0
 	return worker
 }
 

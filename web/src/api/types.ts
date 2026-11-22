@@ -3979,6 +3979,7 @@ export interface PluginAdminFormField {
 }
 
 export interface PluginCapability {
+  env_managed?: string[];
   type: string;
   id: string;
   display_name: string;
@@ -4023,6 +4024,9 @@ export interface PluginConfigValue {
 }
 
 export interface PluginAuthBinding {
+  env_managed?: string[];
+  callback_mode?: "installation" | "stable";
+  callback_pending?: boolean;
   capability_id: string;
   enabled: boolean;
   display_order: number;
@@ -4112,7 +4116,10 @@ export interface PluginUpdateFailure {
 
 export type PluginSignature = V2Components["schemas"]["AdminPluginSignature"];
 
+export type PluginProvisionOwnership = V2Components["schemas"]["AdminPluginProvisionOwnership"];
+
 export interface PluginInstallation {
+  env_managed?: PluginProvisionOwnership;
   id: number;
   repository_id?: number | null;
   plugin_id: string;
@@ -4489,6 +4496,12 @@ export interface StreamNode {
    * one takes no work. Always false for a proxy; absent on older servers.
    */
   key_issued?: boolean;
+  /**
+   * The API servers' deployment configuration lists this transcode node and
+   * supplies its key, so the key is not issued and the node is not deleted
+   * here. Absent on older servers.
+   */
+  deployment_managed?: boolean;
   /**
    * How this transcode node reads source media: through its own library
    * mount, or over HTTP from the API servers. Absent on proxies and on older

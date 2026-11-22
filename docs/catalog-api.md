@@ -529,6 +529,16 @@ no starting file (for example, when the viewer may access only a later part). `p
 keeps its own order: a variant comes before another when its lowest file ID is lower.
 Audiobook and ebook versions keep their part and file order.
 
+For standalone movies and individual episodes, the server can group recognized
+spellings of a named edition. Every present file the profile may access in the
+family must have a credible catalog duration within five seconds of the others.
+The server resolves the group across authorized files before applying the
+optional catalog-only library scope. When a group qualifies, its files and
+playback variants share the resolved `edition_key`. The `variant_id` uses that
+key, and each file still reports its original `edition_raw`. Resume hints are
+projected to the same edition key. Untagged files and other cuts keep their
+own editions.
+
 Clients choose the edition a detail page opens on in the same way. A picked edition
 wins, then `user_data.last_edition_key`, then the edition holding
 `user_data.last_file_id`. With no history, the edition is chosen by name before

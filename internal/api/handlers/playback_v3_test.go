@@ -21,9 +21,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
+	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/markers"
@@ -322,7 +325,7 @@ func TestQueuedPlaybackStartSideEffectsAreDroppedOnStop(t *testing.T) {
 
 	for i := range playbackStartSideEffectsWorkersV3 {
 		sessionID := fmt.Sprintf("running-%d", i)
-		handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: sessionID}, file, 1, "profile-1", nil)
+		handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: sessionID}, file, nil, 1, "profile-1", nil)
 	}
 	for range playbackStartSideEffectsWorkersV3 {
 		select {
@@ -333,7 +336,7 @@ func TestQueuedPlaybackStartSideEffectsAreDroppedOnStop(t *testing.T) {
 	}
 
 	queuedSessionID := "queued-stop"
-	handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: queuedSessionID}, file, 1, "profile-1", nil)
+	handler.enqueuePlaybackStartSideEffectsV3(context.Background(), &playback.Session{ID: queuedSessionID}, file, nil, 1, "profile-1", nil)
 	handler.cancelPlaybackStartSideEffectsV3(context.Background(), queuedSessionID)
 	close(scrobbler.release)
 	handler.waitForPlaybackStartSideEffectsV3(context.Background(), queuedSessionID)
@@ -4843,6 +4846,400 @@ func TestStartPlaybackV2MultipartSuppressesProgressPersistence(t *testing.T) {
 			}
 			if session.DisableProgressPersistence != tc.wantDisabled {
 				t.Fatalf("DisableProgressPersistence = %v, want %v", session.DisableProgressPersistence, tc.wantDisabled)
+			}
+		})
+	}
+}
+
+// loginBoundPlaybackContextV3 is newAuthorizedPlaybackContext for a request
+// made with an access token, which carries the login session that starts an
+// attempt.
+func loginBoundPlaybackContextV3() context.Context {
+	ctx := apimw.SetClaims(context.Background(), &auth.Claims{UserID: 1, Role: "user", TokenType: auth.TokenTypeAccess, SessionID: "login-session-1"})
+	return apimw.SetProfileID(ctx, "profile-1")
+}
+
+// parallel_range_url names an origin that gets each range request with the
+// plan's stream reference alone, and the reference authorizes only an attempt
+// that a login session started. So a /api/v2 start or replan publishes it only
+// for a login-bound attempt that negotiated the feature, while the admin
+// setting is set. An attempt with no login session keeps stream.url and its st.
+func TestParallelRangeURLV3(t *testing.T) {
+	const origin = "https://media.example.test"
+	tests := []struct {
+		name     string
+		features []string
+		setting  string
+		noLogin  bool
+		// The prefix the published URL adds to stream.url; "none" publishes nothing.
+		want string
+	}{
+		{name: "feature negotiated and origin configured", features: []string{playback.FeatureParallelRangeOriginV1}, setting: origin, want: origin + "/api/v2"},
+		{name: "feature not negotiated", setting: origin, want: "none"},
+		{name: "no origin configured", features: []string{playback.FeatureParallelRangeOriginV1}},
+		{name: "no login session", features: []string{playback.FeatureParallelRangeOriginV1}, setting: origin, noLogin: true, want: "none"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			file := v3HandlerFixtureFile(t)
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler.JWTSecret = "test-secret"
+			handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{config.WebMediaURLSettingKey: tc.setting}}
+			handler.ItemAccess = allowAllPlaybackItemAccess{}
+			start := v3HandlerStartRequest()
+			start.ClientFeatures = append(start.ClientFeatures, tc.features...)
+
+			startCtx := loginBoundPlaybackContextV3()
+			if tc.noLogin {
+				startCtx = newAuthorizedPlaybackContext()
+			}
+			rr := httptest.NewRecorder()
+			serveStartPlaybackV2(t, handler, rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(startCtx))
+			var started playback.DecisionResponseV3
+			if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil {
+				t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
+			}
+			plan := started.PlaybackPlan
+			if plan.Delivery != playback.DeliveryOriginalHTTPV3 || !strings.Contains(plan.Stream.URL, "st=") {
+				t.Fatalf("start plan = %s %q, want original_http with st", plan.Delivery, plan.Stream.URL)
+			}
+			wantURL := ""
+			if tc.want != "none" {
+				wantURL = tc.want + plan.Stream.URL
+				if !strings.Contains(wantURL, "?st=") {
+					t.Fatalf("parallel range URL %q has no st", wantURL)
+				}
+			}
+			if plan.Stream.ParallelRangeURL != wantURL {
+				t.Fatalf("start ParallelRangeURL = %q, want %q", plan.Stream.ParallelRangeURL, wantURL)
+			}
+
+			currentKey := playback.PlanAttemptKeyV3(*plan, start.ClientPlaybackContext.Output.OutputContextID, nil)
+			replan := replanPlaybackRequestRecorderV2(t, handler, started.SessionID, playback.ReplanRequestV3{
+				ProtocolVersion: playback.ProtocolV3, Operation: playback.ReplanOperationQualityChangeV3,
+				PlaybackAttemptID: start.PlaybackAttemptID, ReplanRequestID: "parallel-range-replan-0001",
+				FailedPlanID: plan.PlanID, PlanAttemptID: "parallel-range-attempt-0001",
+				PlanAttemptKey: currentKey, AttemptedPlanKeys: []string{currentKey}, AttemptCount: 1,
+				QualityPreference:     "original",
+				SelectedTracks:        playback.SelectedTracksV3{Audio: plan.SelectedTracks.Audio},
+				Capabilities:          start.Capabilities,
+				ClientPlaybackContext: start.ClientPlaybackContext,
+			})
+			var replanned playback.DecisionResponseV3
+			if replan.Code != http.StatusOK || json.Unmarshal(replan.Body.Bytes(), &replanned) != nil || replanned.PlaybackPlan == nil {
+				t.Fatalf("replan status = %d, body = %s", replan.Code, replan.Body.String())
+			}
+			replannedPlan := replanned.PlaybackPlan
+			if replannedPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
+				t.Fatalf("replan delivery = %s, want original_http", replannedPlan.Delivery)
+			}
+			wantURL = ""
+			if tc.want != "none" {
+				wantURL = tc.want + replannedPlan.Stream.URL
+			}
+			if replannedPlan.Stream.ParallelRangeURL != wantURL {
+				t.Fatalf("replan ParallelRangeURL = %q, want %q", replannedPlan.Stream.ParallelRangeURL, wantURL)
+			}
+		})
+	}
+}
+
+// The other publication checks, unit-level: delivery kind, egress, URL shape,
+// the configured origin, the login session and the access path.
+func TestParallelRangeURLV3Conditions(t *testing.T) {
+	const origin = "https://media.example.test"
+	const node = "https://node.example.test/stream/direct/opaque"
+	feature := []string{playback.FeatureParallelRangeOriginV1}
+	tests := []struct {
+		name     string
+		features []string
+		setting  string
+		delivery playback.DeliveryV3
+		egress   noderouting.Egress
+		url      string
+		noLogin  bool
+		overlay  bool // the client arrived through a network access provider
+		want     string
+	}{
+		{name: "original over the API with a media origin", features: feature, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc", want: origin + "/api/v2/stream/s1?st=abc"},
+		{name: "keeps st and seek", features: feature, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?seek=12.5&st=abc", want: origin + "/api/v2/stream/s1?seek=12.5&st=abc"},
+		{name: "original over the API with no media origin", features: feature, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc", want: "/stream/s1?st=abc"},
+		{name: "media origin, client on a network access provider", features: feature, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc", overlay: true, want: "/stream/s1?st=abc"},
+		{name: "API stream with no login session", features: feature, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc", noLogin: true},
+		{name: "API stream without st", features: feature, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?seek=3"},
+		{name: "without feature", setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc"},
+		{name: "proxy node token route", features: feature, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressProxy, url: node, want: node},
+		{name: "proxy node token route with no login session", features: feature, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressProxy, url: node, noLogin: true, want: node},
+		{name: "proxy node header-authorized route", features: feature, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressProxy, url: "https://node.example.test/stream/v3/s1"},
+		{name: "proxy node without feature", delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressProxy, url: node},
+		{name: "remux over the API", features: feature, setting: origin, delivery: playback.DeliveryRemuxProgressiveV3, egress: noderouting.EgressAPI, url: "/stream/s1?st=abc"},
+		{name: "remux through a proxy node", features: feature, delivery: playback.DeliveryRemuxProgressiveV3, egress: noderouting.EgressProxy, url: "https://node.example.test/stream/remux/opaque"},
+		{name: "header authenticated media", features: []string{playback.FeatureParallelRangeOriginV1, playback.FeatureHeaderAuthenticatedMediaV3}, setting: origin, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressAPI, url: "/stream/s1"},
+		{name: "header authenticated media through a proxy node", features: []string{playback.FeatureParallelRangeOriginV1, playback.FeatureHeaderAuthenticatedMediaV3}, delivery: playback.DeliveryOriginalHTTPV3, egress: noderouting.EgressProxy, url: node},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := &PlaybackHandler{SettingsRepo: &mutablePlaybackSettingsV3{values: map[string]string{config.WebMediaURLSettingKey: tc.setting}}}
+			plan := &playback.PlanV3{Delivery: tc.delivery}
+			ctx := context.Background()
+			if tc.overlay {
+				ctx = netaccess.WithPath(ctx, netaccess.Path{Provider: "overlay"})
+			}
+			h.setPlanStreamURLsV3(ctx, plan, preparedTransportV3{url: tc.url, routingEgress: tc.egress}, tc.features, !tc.noLogin)
+			if plan.Stream.URL != tc.url {
+				t.Fatalf("Stream.URL = %q, want the transport URL %q", plan.Stream.URL, tc.url)
+			}
+			if plan.Stream.ParallelRangeURL != tc.want {
+				t.Fatalf("ParallelRangeURL = %q, want %q", plan.Stream.ParallelRangeURL, tc.want)
+			}
+		})
+	}
+}
+
+// fakeLoginSessionsV3 answers ActiveSession for the login sessions it lists.
+type fakeLoginSessionsV3 map[string]bool
+
+func (s fakeLoginSessionsV3) ActiveSession(_ context.Context, sessionID string, _ int) (auth.SessionAuthority, bool, error) {
+	return auth.SessionAuthority{Role: models.RoleUser, Purpose: models.SessionPurposeAccount}, s[sessionID], nil
+}
+
+// streamRangeFixtureV3 runs one range GET through the same two pieces /api/v2
+// puts in front of a file: RequireStreamReferenceAuth, wired to the attempt
+// store the way the router wires it, then the stream handler.
+type streamRangeFixtureV3 struct {
+	jwt    *auth.JWTService
+	router http.Handler
+}
+
+func newStreamRangeFixtureV3(t *testing.T, stream *StreamHandler, attempts playback.PlanStoreV3) streamRangeFixtureV3 {
+	t.Helper()
+	jwt := auth.NewJWTService("test-secret", 15*time.Minute, 7*24*time.Hour)
+	am := apimw.NewAuthMiddleware(jwt, fakeLoginSessionsV3{"login-session-1": true}, nil, nil)
+	am.SetStreamReferenceVerifier(func(reference string) (*streamtoken.Claims, error) {
+		return streamtoken.Verify(reference, "test-secret")
+	}, func(ctx context.Context, sessionID string) (apimw.StreamReferenceAttempt, error) {
+		identity, err := attempts.GetAttemptIdentity(ctx, sessionID)
+		if errors.Is(err, playback.ErrSessionNotFound) {
+			return apimw.StreamReferenceAttempt{}, nil
+		}
+		if err != nil {
+			return apimw.StreamReferenceAttempt{}, err
+		}
+		return apimw.StreamReferenceAttempt{UserID: identity.UserID, ProfileID: identity.ProfileID, LoginSessionID: identity.LoginSessionID, Live: !identity.Stopped}, nil
+	})
+	router := chi.NewRouter()
+	router.With(am.RequireStreamReferenceAuth).Get("/api/v2/stream/{session_id}", stream.HandleStream)
+	return streamRangeFixtureV3{jwt: jwt, router: router}
+}
+
+// get requests bytes 0-99 of streamURL, with the account's access token when
+// withToken is set.
+func (f streamRangeFixtureV3) get(t *testing.T, streamURL string, withToken bool) *httptest.ResponseRecorder {
+	t.Helper()
+	request := httptest.NewRequest(http.MethodGet, "/api/v2"+streamURL, nil)
+	request.Header.Set("Range", "bytes=0-99")
+	if withToken {
+		token, err := f.jwt.GenerateAccessToken(1, models.RoleUser, "login-session-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer "+token)
+	}
+	rr := httptest.NewRecorder()
+	f.router.ServeHTTP(rr, request)
+	return rr
+}
+
+// startDirectPlayV3 starts a direct-play attempt as ctx and returns its
+// handler, attempt store and plan.
+func startDirectPlayV3(t *testing.T, ctx context.Context) (*PlaybackHandler, playback.PlanStoreV3, *playback.PlanV3) {
+	t.Helper()
+	file := v3HandlerFixtureFile(t)
+	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+	handler.JWTSecret = "test-secret"
+	handler.SettingsRepo = &mutablePlaybackSettingsV3{values: map[string]string{config.WebMediaURLSettingKey: "https://media.example.test"}}
+	handler.ItemAccess = allowAllPlaybackItemAccess{}
+	start := v3HandlerStartRequest()
+	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureParallelRangeOriginV1)
+	rr := httptest.NewRecorder()
+	serveStartPlaybackV2(t, handler, rr, httptest.NewRequest(http.MethodPost, "/api/v2/playback/start", strings.NewReader(marshalV3StartRequest(t, start))).WithContext(ctx))
+	var started playback.DecisionResponseV3
+	if rr.Code != http.StatusCreated || json.Unmarshal(rr.Body.Bytes(), &started) != nil || started.PlaybackPlan == nil ||
+		started.PlaybackPlan.Delivery != playback.DeliveryOriginalHTTPV3 {
+		t.Fatalf("start status = %d, body = %s", rr.Code, rr.Body.String())
+	}
+	return handler, handler.PlanStoreV3, started.PlaybackPlan
+}
+
+// The stream reference alone authorizes each range request of a login-bound
+// attempt: no Authorization header, no account token.
+func TestParallelRangeURLV3StreamReferenceAuthorizesLoginBoundRange(t *testing.T) {
+	handler, attempts, plan := startDirectPlayV3(t, loginBoundPlaybackContextV3())
+	if !strings.HasPrefix(plan.Stream.ParallelRangeURL, "https://media.example.test/api/v2/stream/") {
+		t.Fatalf("ParallelRangeURL = %q, want the media origin", plan.Stream.ParallelRangeURL)
+	}
+	stream := NewStreamHandler(handler.sessionMgr, testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
+	stream.TM = handler.TranscodeManager()
+	stream.JWTSecret = "test-secret"
+	rr := newStreamRangeFixtureV3(t, stream, attempts).get(t, plan.Stream.URL, false)
+	if rr.Code != http.StatusPartialContent {
+		t.Fatalf("range with st only = %d (%s), want 206", rr.Code, rr.Body.String())
+	}
+}
+
+// An attempt with no login session (an API key started it, or it predates the
+// record) is read from stream.url: after its playback session is evicted, st
+// plus the account token still rebuilds the session and answers the range.
+func TestParallelRangeURLV3NoLoginSessionRecoversWithAccountToken(t *testing.T) {
+	_, attempts, plan := startDirectPlayV3(t, newAuthorizedPlaybackContext())
+	if !strings.Contains(plan.Stream.URL, "?st=") {
+		t.Fatalf("stream.url = %q, want st", plan.Stream.URL)
+	}
+	// A fresh session manager stands in for the eviction: the attempt row
+	// survives, the live session does not.
+	manager := playback.NewSessionManager(0, 0)
+	stream := NewStreamHandler(manager, testPlaybackFileResolver{file: v3HandlerFixtureFile(t)})
+	stream.TM = newKeyedPlaybackHandler(manager).TranscodeManager()
+	stream.PlanStoreV3 = attempts
+	stream.JWTSecret = "test-secret"
+	rr := newStreamRangeFixtureV3(t, stream, attempts).get(t, plan.Stream.URL, true)
+	if rr.Code != http.StatusPartialContent {
+		t.Fatalf("range with st and the account token after eviction = %d (%s), want 206", rr.Code, rr.Body.String())
+	}
+}
+
+func TestQualityReplanFindsLowerCopyWhileKeepingAliasSubtitle(t *testing.T) {
+	f := newVersionChangeFixtureV3(t, func(f *versionChangeFixtureV3) {
+		f.source.EditionKey, f.alternate.EditionKey = "extended_cut", "extended"
+		f.source.ProbeUpdatedAt, f.alternate.ProbeUpdatedAt = new(time.Now()), new(time.Now())
+		f.alternate.ExternalSubtitles = append([]models.ExternalSubtitle(nil), f.source.ExternalSubtitles...)
+		f.startRequest.BandwidthEstimateKbps = new(12000)
+		f.startRequest.ClientFeatures = append(f.startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
+		f.handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+		presetLocalRegistryV3(f.handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+			{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
+			{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+		}))
+	})
+	t.Cleanup(func() { f.handler.tm.CloseTranscodeSession(f.started.SessionID, "") })
+	plan := f.started.PlaybackPlan
+	if plan.EffectiveMediaFileID != f.alternate.ID || plan.SelectedTracks.Subtitle == nil {
+		t.Fatalf("initial plan did not play the mounted alias with its subtitle: %+v", plan)
+	}
+	// Add a lighter copy with the playing subtitle. The requested file no
+	// longer carries that track, so the replan keeps the mounted alias first.
+	f.source.ExternalSubtitles = nil
+	light := *f.alternate
+	light.ID, light.EditionKey, light.Bitrate = 126, "extended_version", 1000
+	light.VideoTracks = slices.Clone(light.VideoTracks)
+	light.VideoTracks[0].Bitrate = 1000
+	fetcher := f.handler.FileVersionFetcher.(testPlaybackFileVersionFetcher)
+	fetcher.byContent[f.source.ContentID] = append(fetcher.byContent[f.source.ContentID], &light)
+	response, err := f.handler.ReplanPlaybackV2(newAuthorizedPlaybackContext(), PlaybackCaller{
+		UserID: 1, ProfileID: "profile-1", InstallationID: f.handler.InstallationID,
+	}, f.started.SessionID, PlaybackReplanCommand{Digest: "alias-with-subtitle", Request: playback.ReplanRequestV3{
+		ProtocolVersion: playback.ProtocolV3, ClientFeatures: f.startRequest.ClientFeatures,
+		Operation: playback.ReplanOperationQualityChangeV3, PlaybackAttemptID: f.startRequest.PlaybackAttemptID,
+		ReplanRequestID: "alias-with-subtitle", FailedPlanID: plan.PlanID,
+		PlanAttemptID: "alias-with-subtitle-attempt", PlanAttemptKey: plan.PlanAttemptKey,
+		AttemptedPlanKeys: []string{plan.PlanAttemptKey}, AttemptCount: 1,
+		QualityPreference: "auto", BandwidthEstimateKbps: new(2600), BandwidthEstimateSource: playback.BandwidthEstimateObservedRebufferV3,
+		SelectedTracks: plan.SelectedTracks, Capabilities: f.startRequest.Capabilities,
+		ClientPlaybackContext: f.startRequest.ClientPlaybackContext,
+	}})
+	if err != nil || response.PlaybackPlan == nil {
+		t.Fatalf("replan: %v, terminal = %#v", err, response.Terminal)
+	}
+	got := response.PlaybackPlan
+	if got.EffectiveMediaFileID != light.ID || got.Delivery != playback.DeliveryOriginalHTTPV3 || got.SelectedTracks.Subtitle == nil {
+		t.Fatalf("replan should direct-play the fitting copy and keep subtitles: file=%d delivery=%s subtitle=%v", got.EffectiveMediaFileID, got.Delivery, got.SelectedTracks.Subtitle)
+	}
+}
+
+// Exercise the route used when neither original fits the stream budget and the
+// 1080p alias is useful only as input to an encode.
+func TestPlaybackV2EditionAliasFallback(t *testing.T) {
+	const bandwidthEstimateKbps = 2600
+	for _, mode := range []string{"start", "replan", "replan-conflict", "pinned"} {
+		t.Run(mode, func(t *testing.T) {
+			f := newVersionChangeFixtureV3(t, func(f *versionChangeFixtureV3) {
+				f.source.EditionKey, f.alternate.EditionKey = "extended_cut", "extended"
+				f.source.ProbeUpdatedAt, f.alternate.ProbeUpdatedAt = new(time.Now()), new(time.Now())
+				f.alternate.FilePath = writePlaybackTestMediaFile(t, "movie-hd.mp4")
+				f.startRequest.SubtitleTrackID, f.startRequest.SubtitleTrackIndex = "", nil
+				f.startRequest.ClientFeatures = append(f.startRequest.ClientFeatures, playback.FeatureBufferingQualityV1)
+				f.handler.PlaybackConfig = playbackTestConfig(writePlaybackTestFFmpeg(t), t.TempDir())
+				presetLocalRegistryV3(f.handler, playback.NewTransformationRegistryV3([]playback.TransformationSpecV3{
+					{Name: playback.TransformationVideoToH264V3, RecipeVersion: playback.TransformationVideoToH264RecipeVersionV3, Available: true},
+					{Name: playback.TransformationAudioToAACV3, RecipeVersion: playback.TransformationAudioToAACRecipeVersionV3, Available: true},
+				}))
+				if mode == "start" || mode == "pinned" {
+					f.startRequest.BandwidthEstimateKbps = new(bandwidthEstimateKbps)
+				}
+				if mode == "pinned" {
+					f.startRequest.AllowAlternateVersions = new(false)
+				}
+			})
+			t.Cleanup(func() { f.handler.tm.CloseTranscodeSession(f.started.SessionID, "") })
+			plan := f.started.PlaybackPlan
+			switch mode {
+			case "pinned":
+				if plan.EffectiveMediaFileID != f.source.ID {
+					t.Fatalf("pinned file switched to %d", plan.EffectiveMediaFileID)
+				}
+				return
+			case "replan", "replan-conflict":
+				if plan.EffectiveMediaFileID != f.source.ID {
+					t.Fatalf("initial plan uses file %d, want %d", plan.EffectiveMediaFileID, f.source.ID)
+				}
+				if mode == "replan-conflict" {
+					conflict := *f.alternate
+					conflict.ID, conflict.EditionKey, conflict.Duration = 126, "extended_edition", f.source.Duration+120
+					fetcher := f.handler.FileVersionFetcher.(testPlaybackFileVersionFetcher)
+					fetcher.byContent[f.source.ContentID] = append(fetcher.byContent[f.source.ContentID], &conflict)
+				}
+				response, err := f.handler.ReplanPlaybackV2(newAuthorizedPlaybackContext(), PlaybackCaller{
+					UserID: 1, ProfileID: "profile-1", InstallationID: f.handler.InstallationID,
+				}, f.started.SessionID, PlaybackReplanCommand{Digest: "edition-alias-replan", Request: playback.ReplanRequestV3{
+					ProtocolVersion: playback.ProtocolV3, ClientFeatures: f.startRequest.ClientFeatures,
+					Operation: playback.ReplanOperationQualityChangeV3, PlaybackAttemptID: f.startRequest.PlaybackAttemptID,
+					ReplanRequestID: "edition-alias-replan", FailedPlanID: plan.PlanID,
+					PlanAttemptID: "edition-alias-replan-attempt", PlanAttemptKey: plan.PlanAttemptKey,
+					AttemptedPlanKeys: []string{plan.PlanAttemptKey}, AttemptCount: 1,
+					QualityPreference: "auto", BandwidthEstimateKbps: new(bandwidthEstimateKbps), BandwidthEstimateSource: playback.BandwidthEstimateObservedRebufferV3,
+					SelectedTracks: plan.SelectedTracks, Capabilities: f.startRequest.Capabilities,
+					ClientPlaybackContext: f.startRequest.ClientPlaybackContext,
+				}})
+				if err != nil || response.PlaybackPlan == nil {
+					t.Fatalf("replan: %v, terminal = %#v", err, response.Terminal)
+				}
+				plan = response.PlaybackPlan
+				if mode == "replan-conflict" {
+					if plan.EffectiveMediaFileID != f.source.ID {
+						t.Fatalf("replan used file %d after the alias group split", plan.EffectiveMediaFileID)
+					}
+					return
+				}
+			}
+			if plan.RequestedMediaFileID != f.source.ID || plan.EffectiveMediaFileID != f.alternate.ID ||
+				plan.Delivery != playback.DeliveryTranscodeHLSV3 || plan.EffectiveRecipe.BitrateKbps == nil ||
+				*plan.EffectiveRecipe.BitrateKbps > playback.StreamBudgetKbpsV3(bandwidthEstimateKbps) {
+				t.Fatalf("plan did not transcode the alternate under budget: %+v", plan)
+			}
+			if transport := f.handler.tm.GetTranscodeSession(f.started.SessionID); transport == nil || transport.Opts().InputPath != f.alternate.FilePath {
+				t.Fatal("transcode transport did not open the 1080p input")
+			}
+			f.handler.waitForPlaybackStartSideEffectsV3(t.Context(), f.started.SessionID)
+			preference, err := f.store.GetSeriesPlaybackPreference(t.Context(), "profile-1", f.source.ContentID)
+			if err != nil || preference == nil || preference.FileID != f.source.ID || preference.EditionKey != f.source.EditionKey {
+				t.Fatalf("remembered version = %+v, error = %v", preference, err)
+			}
+			recovered := f.startRequest
+			recovered.PlaybackAttemptID = "edition-alias-recovered"
+			recovered.FileID, recovered.BandwidthEstimateKbps = preference.FileID, nil
+			response := startPlaybackDecisionV2(t, f.handler, marshalV3StartRequest(t, recovered))
+			if response.PlaybackPlan == nil || response.PlaybackPlan.EffectiveMediaFileID != f.source.ID {
+				t.Fatalf("fresh start after bandwidth recovery did not use the requested 4K file: %+v", response)
 			}
 		})
 	}

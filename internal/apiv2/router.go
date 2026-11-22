@@ -32,6 +32,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/literaryworks"
 	"github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/ratingsources"
 	"github.com/Silo-Server/silo-server/internal/recommendations"
 	mediarequests "github.com/Silo-Server/silo-server/internal/requests"
@@ -170,6 +171,7 @@ type Dependencies struct {
 	PlaybackControlSocket          PlaybackControlSocketService
 	EventsCapability               EventsCapabilityService
 	NetworkAccess                  NetworkAccessService
+	DirectConnections              DirectConnectionsService
 	ServerIdentity                 ServerIdentityService
 	ServerConnections              ServerConnections
 	NotificationDestinationCreate  NotificationDestinationCreateService
@@ -234,6 +236,7 @@ type Dependencies struct {
 	AdminPluginRepositoryUpdates  AdminPluginRepositoryUpdateService
 	AdminPluginRepositoryDeletes  AdminPluginRepositoryDeleteService
 	AdminPluginInventory          AdminPluginInventoryService
+	AdminPluginProvisionStatus    func(context.Context) ([]plugins.ProvisionStatus, error)
 	AdminPluginConfiguration      AdminPluginConfigurationService
 	AdminPluginLifecycle          AdminPluginLifecycleService
 	AdminPluginUploads            AdminPluginUploadService
@@ -443,27 +446,32 @@ type Dependencies struct {
 	// layouts for an administrator (*handlers.SectionHandler).
 	AdminProfileSections AdminProfileSectionService
 	// Requests serves media requests and the discovery surface
-	// (*requests.Service, the value *handlers.RequestsHandler wraps).
-	AdminSubtitleInspection            AdminSubtitleInspectionService
-	AdminRequests                      handlers.RequestService
-	Requests                           MediaRequestService
-	RequestLifecycle                   RequestLifecycleService
-	WatchProviders                     WatchProviderService
-	HistoryImports                     HistoryImportService
-	AdminHistoryImports                AdminHistoryImportService
-	AdminSubtitleList                  AdminSubtitleListService
-	AdminSubtitleMetadata              AdminSubtitleMetadataService
-	AdminSubtitleBytes                 AdminSubtitleBytesService
-	AdminSubtitleDelete                AdminSubtitleDeleteService
-	AdminAPIKeys                       AdminAPIKeyService
-	PersonalAPIKeys                    PersonalAPIKeyService
-	PolicyCapability                   PolicyCapabilityService
-	Branding                           BrandingService
-	OverlayImages                      OverlayImageService
-	ArtworkStore                       blobstore.Store
-	ArtworkBackend                     string
-	ArtworkSigner                      *artworkurl.Signer
-	ArtworkRepair                      ArtworkRepairService
+	// (*requests.Service).
+	AdminSubtitleInspection AdminSubtitleInspectionService
+	AdminRequests           handlers.RequestService
+	Requests                MediaRequestService
+	RequestLifecycle        RequestLifecycleService
+	WatchProviders          WatchProviderService
+	HistoryImports          HistoryImportService
+	AdminHistoryImports     AdminHistoryImportService
+	AdminSubtitleList       AdminSubtitleListService
+	AdminSubtitleMetadata   AdminSubtitleMetadataService
+	AdminSubtitleBytes      AdminSubtitleBytesService
+	AdminSubtitleDelete     AdminSubtitleDeleteService
+	AdminAPIKeys            AdminAPIKeyService
+	PersonalAPIKeys         PersonalAPIKeyService
+	PolicyCapability        PolicyCapabilityService
+	Branding                BrandingService
+	OverlayImages           OverlayImageService
+	ArtworkStore            blobstore.Store
+	ArtworkBackend          string
+	ArtworkSigner           *artworkurl.Signer
+	ArtworkRepair           ArtworkRepairService
+	// ItemPosters mints and checks the admin poster URLs (admin session rows,
+	// listAdminCatalogItems) that getItemPoster serves.
+	ItemPosters                        *artworkurl.ItemPosters
+	ItemPosterSource                   ItemPosterSource
+	RemotePosters                      RemotePosterFetcher
 	AdminInviteCodes                   AdminInviteCodeService
 	Invitations                        InvitationService
 	PasswordResets                     PasswordResetService
@@ -544,19 +552,29 @@ func newChiRouter(deps Dependencies) chi.Router {
 	r.Use(joinPreconditionFields)
 	r.Use(rejectMalformedDeviceHeader)
 	r.Use(withRequest)
+	r.Use(playbackMediaCORS)
 	if deps.ActingAdmin != nil {
 		r.Use(apimw.ProvideActingAdmin(deps.ActingAdmin))
 	}
 	r.NotFound(notFound)
 
-	api := humachi.New(r, humaConfig())
+	newConfig := runtimeHumaConfig
+	fromSnapshot := true
+	if deps.testRegister != nil {
+		// Test callbacks register extra routes and may inspect or mutate the
+		// schema map, so build them against a fresh uncached Huma registry and
+		// keep runtimeSchemaRegistry strictly read-only.
+		newConfig = humaConfig
+		fromSnapshot = false
+	}
+	api := humachi.New(r, newConfig())
 	var routeSnapshot []streamtelemetry.WalkedRoute
 	if deps.ObserveRoutes != nil {
-		api = huma.NewAPI(humaConfig(), &routeSnapshotAdapter{Adapter: api.Adapter(), routes: &routeSnapshot})
+		api = huma.NewAPI(newConfig(), &routeSnapshotAdapter{Adapter: api.Adapter(), routes: &routeSnapshot})
 	}
 	api.UseMiddleware(bufferStructuredResponse, observeOperation, defaultHeaders, deprecationHeaders, classGate(deps), observeIdentity, normalizeAccept, encodingGuard, mediaTypeGuard, queryGuard)
 
-	reg := &Registry{api: api, deps: deps}
+	reg := &Registry{api: api, deps: deps, fromSnapshot: fromSnapshot}
 	registerAll(reg)
 	if deps.testRegister != nil {
 		deps.testRegister(reg)
@@ -574,7 +592,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 
 // humaConfig is the framework configuration the contract ratifies. Nothing
 // here is a Huma default accepted implicitly; each choice is locked by a test
-// in router_test.go.
+// in router_test.go. AllowAdditionalPropertiesByDefault and
+// FieldsOptionalByDefault must remain unset while runtimeSchemaRegistry wraps
+// this config, because Huma only forwards those options to its own unexported
+// mapRegistry type.
 func humaConfig() huma.Config {
 	return huma.Config{
 		OpenAPI: &huma.OpenAPI{
@@ -591,8 +612,10 @@ func humaConfig() huma.Config {
 				},
 			},
 			// The document lists only the request media types the listener
-			// accepts; the generator and the served router share this
-			// config, so the artifact and the runtime document agree.
+			// accepts; GenerateOpenAPI builds the canonical contract document
+			// from humaConfig, while newChiRouter uses runtimeHumaConfig with
+			// fromSnapshot so request validation agrees without repeating
+			// base-only documentation passes.
 			OnAddOperation: []huma.AddOpFunc{documentAcceptedRequestMediaTypes},
 		},
 		// Built-in spec, docs and schema routes are disabled: Silo serves the
@@ -648,6 +671,12 @@ func nameMultipartForm(oapi *huma.OpenAPI, op *huma.Operation, media *huma.Media
 	name, _ := op.Metadata[metaFormSchema].(string)
 	if name == "" || media.Schema == nil || media.Schema.Ref != "" {
 		return
+	}
+	if reg, ok := oapi.Components.Schemas.(*runtimeSchemaRegistry); ok {
+		if reg.claimBaseFormSchema(name) {
+			media.Schema = &huma.Schema{Ref: schemaRefPrefix + name}
+			return
+		}
 	}
 	schemas := oapi.Components.Schemas.Map()
 	if prev, taken := schemas[name]; taken && prev != media.Schema {
@@ -848,6 +877,11 @@ func (reg *Registry) methodNotAllowed(w http.ResponseWriter, r *http.Request) {
 	if len(methods) == 0 {
 		methods = pluginContentAllowedMethods(r.URL.Path)
 	}
+	// playbackMediaCORS answers OPTIONS on the media path before routing, so the
+	// registry does not declare it.
+	if isPlaybackMediaPath(r.URL.Path) {
+		methods = append(methods, http.MethodOptions)
+	}
 	if allow := strings.Join(methods, ", "); allow != "" {
 		p = p.WithHeader("Allow", allow)
 	}
@@ -899,6 +933,7 @@ type ProfileSectionService interface {
 	SaveProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery, writes []handlers.SectionOverrideWrite) error
 	ResetProfileOverrides(ctx context.Context, q handlers.SectionOverridesQuery) error
 	ResolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter mediacatalog.AccessFilter) ([]sections.ResolvedSection, error)
+	GetProfileSectionBaseline(ctx context.Context, userID int, scope string, libraryID *int) (handlers.ProfileSectionBaseline, error)
 }
 
 // LibraryService is the slice of *catalog.FolderRepository updateProfile
@@ -1263,7 +1298,7 @@ var externalSignInProblemTypes = map[string]ProblemType{
 // tickets and provider logout.
 type OAuthService interface {
 	Complete(ctx context.Context, code, verifier, browser string) (auth.OAuthCompletion, error)
-	CallbackURL(prefix string, installID int) string
+	CallbackURL(prefix string, installID int, mode string) string
 	PublicURL(path string, query url.Values) string
 	NativeSignInAvailable() bool
 	ServeStart(w http.ResponseWriter, r *http.Request, req auth.OAuthStartRequest, bounceURL string, bounceStatus int)

@@ -84,7 +84,9 @@ go there) and the user store is PostgreSQL (a restore's own backup needs it).
 - `destination` (`default` or `s3`) and `destination_available`, false when
   the destination is missing, not set up, or cannot be reached. `items` lists
   only the current destination's backups; copies at a previous destination
-  stay there.
+  stay there. While `destination_available` is false, `items` is empty because
+  the server could not read the destination, not because it holds no backups;
+  a `destination_unavailable` warning says why.
 - `encrypted`: whether new backups are encrypted: `true` for `s3`, and for
   `default` when it is the private bucket. Clients should offer the key
   confirmation whenever `encrypted` is `true` and `key_confirmed` is not,
@@ -144,7 +146,10 @@ go there) and the user store is PostgreSQL (a restore's own backup needs it).
   nor swept, until they read), and
   `key_not_confirmed` (backups are `encrypted` and the current `SECRET_KEY`
   was never confirmed, or changed since: encrypted backups, and uploads to a
-  bucket, are paused).
+  bucket, are paused). While `sqlite_user_store` or `key_not_confirmed` is
+  present, or the capabilities `state` is `not_configured`, the server
+  refuses every backup, scheduled ones included, so don't present the backup
+  task's `next_run_at` as an upcoming backup.
 
 `status` is one of:
 
@@ -285,6 +290,7 @@ time (see the report's `failed` outcome), which a preview cannot detect.
 | `kept_stricter` | A setting whose backup value would widen access; this server keeps its value and a restore never writes it |
 | `cleared` | A service secret the restore clears, or the service switch it turns off, because it changes where the service connects and the backup has no secret this server can read for it |
 | `unverified_backup` | A setting that connects to an outside service; a backup this server cannot verify never restores it |
+| `managed_by_environment` | This server's environment sets the setting, or sets another setting of the outside-service connection it belongs to (mail's SMTP settings, for example); a restore never writes it and this server keeps its value |
 
 `reason` codes: `same`, `path_in_use` (a folder belongs to another library
 here), `folder_missing`, `library_not_restorable`, `library_not_mapped`,
@@ -306,9 +312,12 @@ neither here nor in the backup; for a row of collections, when none of the
 collections it lists is), and `unreadable` (an entry of the backup the
 reader left out because a value in it cannot be restored; its `id` is
 `unreadable:<n>` and it can never be chosen), `kept_stricter` (a
-settings page whose every differing setting would widen access), and
+settings page whose every differing setting would widen access),
 `unverified_backup` (settings or a plugin configuration that connect to
-outside services, in a backup this server cannot verify).
+outside services, in a backup this server cannot verify), and
+`managed_by_environment` (a settings page whose every differing setting is
+kept because this server's environment sets it or the connection it belongs
+to).
 
 `requires` lists items (`libraries:<id>`, `collections:<item id>`) that must
 be restored with this one: a collection or template collection whose library
@@ -322,8 +331,9 @@ Kind-specific details:
   backup_value, current_value, restart_required}`. `class` is `portable` or
   `external_service` (connects to an outside service). Encrypted and
   sensitive settings are `masked` with both values empty. A setting's
-  `status` is `on_this_server`, `differs`, `needs_another_key`, or
-  `kept_stricter`: an access setting (`access.unrated_content`, the
+  `status` is `on_this_server`, `differs`, `needs_another_key`,
+  `cleared`, `unverified_backup`, `managed_by_environment` (see the status
+  table), or `kept_stricter`: an access setting (`access.unrated_content`, the
   Jellyfin and Audiobookshelf sign-in switches, session and token lifetimes,
   the identity-provider re-check interval and outage policy) whose backup
   value grants more than this server's.
@@ -347,8 +357,9 @@ Kind-specific details:
   `library_ids`, `local_id`, `template_id`, `bundle_id`, and `changes`, the
   fields the admin changed from the template's defaults that a restore
   writes here (`title`, `description`, `visibility`, `featured`,
-  `sort order`, `item sort`, `source`, `sync schedule`, `poster`,
-  `backdrop`).
+  `sort_order`, `item_sort`, `source`, `sync_schedule`, `poster`,
+  `backdrop`), plus `libraries` when it adds the collection to more of
+  them. The values are codes; clients show each in their own words.
 - `home_section` (id `section:<backup section id>`, labeled with its title
   and its page): an admin section of the home page or a library page.
   `home_section` with `scope` (`home` or `library`), `library_id` (the
@@ -356,9 +367,11 @@ Kind-specific details:
   one with the backup's id, else the one section of the page with the same
   type and title, which is `ambiguous` when two of the backup's sections
   share that page, type, and title), and `changes`, what a restore replaces
-  in it (`title`, `position`, `featured`, `item limit`, `enabled`,
-  `web only`, `configuration`, and `N collection items` of the collection it
-  manages). A
+  in it as codes (`type`, `title`, `title_translation`, `position`,
+  `featured`, `item_limit`, `enabled`, `web_only`, `collection_replaced`,
+  `configuration`, and `collection_items`). With `collection_items`,
+  `missing_collection_items` counts the items of the collection it manages
+  that the one here lacks. A
   chosen section replaces the configuration of the one here or is created; a
   section that manages a collection brings it. A row of collections
   (`collection_posters`) lists each collection mapped to the one here, in
@@ -368,7 +381,8 @@ Kind-specific details:
   creates an administrator), `match` (`account_id`, `restored`,
   `username_email`, or `new`), `target` (what the request sends back: the
   local account id, or `new`), `local_id` and `local_username` of a matched
-  account, `group` (the backup's group name, which a new account joins here),
+  account (its username, or its email when it has none), `group` (the
+  backup's group name, which a new account joins here),
   `policy_differences` (`{field, backup, here}` for each policy field this
   server would grant a new account more of), `libraries_left_out` (library
   entries with no library here, dropped), `profile_room` (how many new

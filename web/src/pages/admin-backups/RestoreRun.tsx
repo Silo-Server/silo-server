@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { Link } from "react-router";
 import {
   CircleCheck,
@@ -18,6 +18,7 @@ import type {
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
+import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
 import { useT, type MessageKey } from "@/i18n";
 import { formatTime } from "@/lib/datetime";
 import { DATA_TYPE_LABELS, dataCountsPhrase, titleList } from "@/lib/profileDataTypes";
@@ -57,6 +58,17 @@ const OUTCOME = {
   },
 } satisfies Record<RestoreReportItem["outcome"], { label: MessageKey; [key: string]: unknown }>;
 
+/** Keeps each "·" with the word after it, so a wrapped line never ends on a separator. */
+function keepSeparatorsWithNext(node: ReactNode): ReactNode {
+  if (typeof node === "string") return node.replace(/· /g, "·\u00a0");
+  return Array.isArray(node) ? node.map(keepSeparatorsWithNext) : node;
+}
+
+/** Joins a short status's words ("Left out") with no-break spaces. */
+function nonBreaking(text: string): string {
+  return text.replace(/ /g, "\u00a0");
+}
+
 function ReportRow({ item }: { item: RestoreReportItem }) {
   const t = useT();
   const outcome = OUTCOME[item.outcome];
@@ -77,17 +89,38 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
         ? t("web.admin.backups.restore.run.restart")
         : null,
   ].filter((detail): detail is string => Boolean(detail));
+  const label = displayLabel(item);
+  const [columnRef, columnOverflows] = useOverflowsInline<HTMLDivElement>(item);
   return (
     <li className="border-border/60 flex items-start gap-3 border-b py-3 last:border-b-0">
       <outcome.Icon aria-hidden="true" className={cn("mt-0.5 size-4 shrink-0", outcome.tone)} />
-      <div className="min-w-0 flex-1">
-        <p className="text-sm">
+      {/* Only while a line is still wider than the row after wrapping, such as one holding a
+          long run of joined emoji in a name or a note, does the row clip sideways at its end
+          edge; the words around the run still wrap, and a name's title shows it in full. */}
+      <div ref={columnRef} className={cn("min-w-0 flex-1", columnOverflows && OVERFLOW_CLIP)}>
+        <p className="text-sm wrap-anywhere">
           {t("web.admin.backups.restore.run.itemLine", {
-            label: displayLabel(item),
+            // <bdi>, not the isolate characters a string value gets in right-to-left languages:
+            // the line could break after the opening isolate, before a name that can't wrap,
+            // and leave the first line empty.
+            label: <bdi>{label}</bdi>,
             section: t(SECTION_TITLES[item.section]),
-            outcome: t(outcome.label),
-            b: (chunks) => <span className="font-medium">{chunks}</span>,
-            muted: (chunks) => <span className="text-muted-foreground">{chunks}</span>,
+            // The status stays whole: no break at its spaces or between its Chinese, Japanese,
+            // or Korean characters. One wider than the line still breaks, through
+            // `wrap-anywhere`. (An inline block would let the line break before it, leaving
+            // the message's "·" at the end of a line.) <bdi> keeps the direction isolation a
+            // string value gets in right-to-left languages.
+            outcome: <bdi className="break-keep">{nonBreaking(t(outcome.label))}</bdi>,
+            // The label is isolated in every language, so a right-to-left name or one with a
+            // direction override can't reorder the " · section · outcome" text after it.
+            b: (chunks) => (
+              <bdi title={label} className="font-medium">
+                {chunks}
+              </bdi>
+            ),
+            muted: (chunks) => (
+              <span className="text-muted-foreground">{keepSeparatorsWithNext(chunks)}</span>
+            ),
           })}
         </p>
         {details.map((detail, position) => (
@@ -141,15 +174,32 @@ function AccountReport({
             const outcome = OUTCOME[profile.outcome];
             return (
               <li key={profile.id}>
-                <p className="flex items-center gap-1.5 text-[13px]">
-                  <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
-                  <span className="font-medium">{profile.label}</span>
-                  <span className="text-muted-foreground">
-                    {t("web.admin.backups.restore.run.profileOutcome", {
-                      outcome: profile.created
-                        ? t("web.admin.backups.restore.outcome.created")
-                        : t(outcome.label),
-                    })}
+                {/* rem text with a unitless line height keeps the line taller than the
+                    rem-sized icon at any browser font size, so the icon stays centered on it. */}
+                <p className="flex items-start gap-1.5 text-[0.8125rem] leading-normal">
+                  <span className="flex min-h-lh shrink-0 items-center">
+                    <outcome.Icon aria-hidden="true" className={cn("size-3.5", outcome.tone)} />
+                  </span>
+                  <span className="min-w-0 wrap-anywhere">
+                    {/* The outcome moves to the next line as a unit, so its "·" stays with the
+                        word it introduces, and wraps inside itself only when it can't fit on a
+                        line; a no-break space keeps the "·" with the word then too. The gap is
+                        the name's margin, left behind at the end of the line. */}
+                    <span className="me-1.5 font-medium">
+                      {/* <bdi> isolates the name's direction. It sits inside the span, so the
+                          margin follows the page's direction, not the name's. */}
+                      <bdi title={profile.label}>{profile.label}</bdi>
+                    </span>
+                    <wbr />
+                    <span className="text-muted-foreground inline-block">
+                      {keepSeparatorsWithNext(
+                        t("web.admin.backups.restore.run.profileOutcome", {
+                          outcome: profile.created
+                            ? t("web.admin.backups.restore.outcome.created")
+                            : t(outcome.label),
+                        }),
+                      )}
+                    </span>
                   </span>
                 </p>
                 {[
@@ -177,7 +227,10 @@ function AccountReport({
                           ),
                         })}
                         {data.notes.map((note, position) => (
-                          <span key={position} className="text-muted-foreground block">
+                          <span
+                            key={position}
+                            className="text-muted-foreground block wrap-anywhere"
+                          >
                             {note}
                           </span>
                         ))}
@@ -218,6 +271,13 @@ function downloadReport(job: RestoreJob) {
   anchor.remove();
   URL.revokeObjectURL(url);
 }
+
+/**
+ * The report's actions are never wider than the page: a label too long for
+ * the row wraps inside its button instead of running past the right edge.
+ */
+const RUN_ACTION =
+  "h-auto min-h-9 max-w-full py-1.5 text-start text-balance wrap-anywhere whitespace-normal";
 
 export interface RestoreRunProps {
   job: RestoreJob;
@@ -260,8 +320,10 @@ export function RestoreRun({
     return (
       <div className="max-w-[70rem] space-y-5">
         <div className="surface-panel space-y-3 rounded-2xl p-5" role="status">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+          <div className="flex items-start gap-2 text-sm font-medium wrap-anywhere">
+            <span className="flex min-h-lh shrink-0 items-center">
+              <LoaderCircle aria-hidden="true" className="size-4 motion-safe:animate-spin" />
+            </span>
             {stopping
               ? t("web.admin.backups.restore.run.stopping")
               : job.state === "queued"
@@ -354,12 +416,12 @@ export function RestoreRun({
 
       <div className="flex flex-wrap gap-2">
         {report ? (
-          <Button variant="outline" onClick={() => downloadReport(job)}>
+          <Button variant="outline" className={RUN_ACTION} onClick={() => downloadReport(job)}>
             <Download data-icon="inline-start" aria-hidden="true" />
             {t("web.admin.backups.restore.run.downloadReport")}
           </Button>
         ) : null}
-        <Button variant="outline" onClick={onChooseAgain}>
+        <Button variant="outline" className={RUN_ACTION} onClick={onChooseAgain}>
           {t("web.admin.backups.restore.run.chooseAgain")}
         </Button>
       </div>

@@ -423,32 +423,53 @@ func (r *DeliveryRepository) DeleteAllForProfile(ctx context.Context, userID int
 	return err
 }
 
+// retentionClaimGrace is how long after a retry falls due DeleteOld still
+// keeps its delivery, so the retry sweep can claim it first. It also bounds
+// how long an unclaimed retry holds the row when the sweep has stopped, such
+// as while that channel is turned off.
+const retentionClaimGrace = time.Hour
+
+// unfinishedAttemptGuards keeps DeleteOld from cascading away an attempt that
+// can still run, in each table of per-destination attempts.
+var unfinishedAttemptGuards = func() string {
+	var b strings.Builder
+	for _, table := range []string{
+		"webhook_delivery_attempts",
+		"plugin_destination_delivery_attempts",
+		"push_delivery_attempts",
+		"web_push_delivery_attempts",
+	} {
+		b.WriteString(`
+		  AND NOT EXISTS (SELECT 1 FROM ` + table + ` a
+		                  WHERE a.notification_delivery_id = d.id AND a.outcome IN ('pending', 'retrying')
+		                    AND ((a.outcome = 'retrying' AND a.next_retry_at > now() - $5::interval) OR d.created_at > now() - $4::interval))`)
+	}
+	return b.String()
+}()
+
 // DeleteOld applies retention: rows read longer ago than readCutoff, unread
 // rows created before unreadCutoff. Read rows age from read_at, not
 // created_at — an old notification read today starts a fresh read window.
 // A watchlist.available row created at or after arrivalCutoff, the fanout
 // staleness horizon, is kept whatever the retention settings: it is what
 // stops a later episode inside the horizon from telling the profile again.
-// A row with a webhook or plugin destination attempt still to finish is
-// kept, since its deletion would cascade to the attempt: always while the
-// attempt is claimed or scheduled (retrying with next_retry_at ahead, which
-// covers a live claim lease), and while it waits otherwise for as long as
-// the row is younger than pluginAttemptMaxAge, past which a plugin attempt
-// is finished without a send. The bound lets the row go when an attempt is
-// stranded, such as while webhooks are turned off.
+// A row with a webhook, plugin destination, mobile push, or web push attempt
+// still to finish is kept, since its deletion would cascade to the attempt:
+// always while the attempt is claimed or scheduled (retrying with
+// next_retry_at ahead, which covers a live claim lease and a long
+// Retry-After) or fell due less than retentionClaimGrace ago, and while it waits otherwise for as long as the row is
+// younger than pluginAttemptMaxAge, past which a plugin attempt is finished
+// without a send. The bound lets the row go when an attempt is stranded, such
+// as while webhooks are turned off. Every sender caps how far it schedules a
+// retry, so a scheduled attempt holds its row only for a bounded time.
 func (r *DeliveryRepository) DeleteOld(ctx context.Context, readCutoff, unreadCutoff, arrivalCutoff time.Time) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
 		DELETE FROM notification_deliveries d
 		WHERE ((d.read_at IS NOT NULL AND d.read_at < $1)
 		       OR (d.read_at IS NULL AND d.created_at < $2))
-		  AND NOT (d.type = '`+DeliveryTypeWatchlistAvailable+`' AND d.created_at >= $3)
-		  AND NOT EXISTS (SELECT 1 FROM webhook_delivery_attempts a
-		                  WHERE a.notification_delivery_id = d.id AND a.outcome IN ('pending', 'retrying')
-		                    AND ((a.outcome = 'retrying' AND a.next_retry_at > now()) OR d.created_at > now() - $4::interval))
-		  AND NOT EXISTS (SELECT 1 FROM plugin_destination_delivery_attempts a
-		                  WHERE a.notification_delivery_id = d.id AND a.outcome IN ('pending', 'retrying')
-		                    AND ((a.outcome = 'retrying' AND a.next_retry_at > now()) OR d.created_at > now() - $4::interval))`,
-		readCutoff, unreadCutoff, arrivalCutoff, pluginAttemptMaxAge)
+		  AND NOT (d.type = '`+DeliveryTypeWatchlistAvailable+`' AND d.created_at >= $3)`+
+		unfinishedAttemptGuards,
+		readCutoff, unreadCutoff, arrivalCutoff, pluginAttemptMaxAge, retentionClaimGrace)
 	if err != nil {
 		return 0, err
 	}

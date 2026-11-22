@@ -353,9 +353,7 @@ export default function MangaContent({
                 >
                   <BookOpen className="size-[18px]" />
                   {cta.verb}
-                  <span className="text-primary-foreground/75 text-xs font-semibold">
-                    {cta.label}
-                  </span>
+                  <span className="text-xs font-semibold">{cta.label}</span>
                 </ViewTransitionLink>
               </Button>
             )}

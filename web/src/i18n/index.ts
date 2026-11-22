@@ -17,6 +17,7 @@ export {
   codeNumber,
   createAppIntl,
   englishText,
+  exactAmount,
   messageNumberingSystem,
   numberText,
   serverText,

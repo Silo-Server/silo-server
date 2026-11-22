@@ -52,8 +52,11 @@ function DialogContent({
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
+        // grid-cols-1 keeps the column at the dialog's width. An implicit auto
+        // column grows to fit the widest unwrappable child, such as a long name
+        // cut with `truncate`, and pushes everything past the dialog's edge.
         className={cn(
-          "border-border bg-background data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 overlay-scroll fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-4rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border p-6 shadow-lg outline-none sm:max-w-lg",
+          "border-border bg-background data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95 data-[state=open]:animate-in data-[state=open]:fade-in-0 data-[state=open]:zoom-in-95 overlay-scroll fixed top-[50%] left-[50%] z-50 grid max-h-[calc(100dvh-4rem)] w-full max-w-[calc(100%-2rem)] translate-x-[-50%] translate-y-[-50%] grid-cols-1 gap-4 overflow-y-auto rounded-lg border p-6 shadow-lg outline-none sm:max-w-lg",
           className,
         )}
         {...props}
@@ -77,7 +80,20 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return (
     <div
       data-slot="dialog-header"
-      className={cn("flex flex-col gap-2 text-center sm:text-start", className)}
+      className={cn(
+        "flex flex-col gap-2 text-center sm:text-start",
+        // DialogContent's close button sits in its top end corner, level with
+        // the first line of a header at the top of the default p-6 content. A
+        // title placed directly in the header keeps clear of it at the end side,
+        // and below sm, where the header is centered, at the start side too so
+        // it stays centered. Only the title gives up width; the description
+        // below the button keeps the full column. A header that nests its title
+        // in a row of its own leaves room for the button itself. These rules
+        // outrank padding classes on the title, so change a title's padding
+        // with the same *:data-[slot=dialog-title]: prefix on the header.
+        "*:data-[slot=dialog-title]:pe-6 max-sm:*:data-[slot=dialog-title]:ps-6",
+        className,
+      )}
       {...props}
     />
   );
@@ -112,7 +128,7 @@ function DialogTitle({ className, ...props }: React.ComponentProps<typeof Dialog
   return (
     <DialogPrimitive.Title
       data-slot="dialog-title"
-      className={cn("text-lg leading-none font-semibold", className)}
+      className={cn("text-lg leading-none font-semibold wrap-anywhere", className)}
       {...props}
     />
   );
@@ -125,7 +141,7 @@ function DialogDescription({
   return (
     <DialogPrimitive.Description
       data-slot="dialog-description"
-      className={cn("text-muted-foreground text-sm", className)}
+      className={cn("text-muted-foreground text-sm wrap-anywhere", className)}
       {...props}
     />
   );

@@ -154,6 +154,7 @@ export default function GeneralSettings() {
             description={t("web.admin.settings.general.network.publicUrl.description")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="https://silo.example.com"
+            dir="ltr"
             value={form.getValue("server.public_url")}
             onChange={(v) => form.setValue("server.public_url", v)}
             restartRequired={restartKeys.has("server.public_url")}
@@ -175,6 +176,7 @@ export default function GeneralSettings() {
             description={t("web.admin.settings.general.network.localUrl.description")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="http://192.168.1.20:8080"
+            dir="ltr"
             value={form.getValue(LOCAL_URL_KEY)}
             onChange={(v) => form.setValue(LOCAL_URL_KEY, v)}
             restartRequired={restartKeys.has(LOCAL_URL_KEY)}
@@ -186,6 +188,7 @@ export default function GeneralSettings() {
             description={t("web.admin.settings.general.network.trustedProxies.description")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="172.16.0.0/12, 203.0.113.7/32"
+            dir="ltr"
             value={form.getValue(TRUSTED_PROXIES_KEY)}
             onChange={(v) => form.setValue(TRUSTED_PROXIES_KEY, v)}
             restartRequired={restartKeys.has(TRUSTED_PROXIES_KEY)}
