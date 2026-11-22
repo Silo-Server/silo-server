@@ -1,7 +1,9 @@
 version: "2"
 
 run:
-  timeout: 15m
+  # The full tree on a cold analysis cache needs close to twenty minutes on a
+  # hosted runner; 15m killed a run that then reported nothing.
+  timeout: 30m
   allow-serial-runners: true
   tests: false
   modules-download-mode: readonly

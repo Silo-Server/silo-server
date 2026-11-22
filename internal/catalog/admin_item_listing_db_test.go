@@ -73,7 +73,8 @@ func seedAdminListing(t *testing.T, pool *pgxpool.Pool) adminListingFixture {
 		($3,'movie','Unlisted',2001,'matched','',''), ($4,'series','Show',2010,'matched','','')`, movieA, movieHidden, movieUnlisted, series)
 	exec(`INSERT INTO media_items (content_id,type,title) VALUES ($1,'podcast','Cast'), ($2,'audiobook','Book')`, podcast, book)
 	exec(`UPDATE media_items SET genres='{Crime,Drama}', content_rating='R', rating_imdb=8.5, rating_rt_critic=0, release_date='1999-07-02' WHERE content_id=$1`, movieA)
-	exec(`UPDATE media_items SET first_air_date='2010-05-02', last_air_date='2012-01-08' WHERE content_id=$1`, series)
+	exec(`UPDATE media_items SET first_air_date='2010-05-02', last_air_date='2012-01-08', poster_path='https://image.example/show.jpg' WHERE content_id=$1`, series)
+	exec(`UPDATE media_items SET poster_path='tmdb/movies/11/poster/original.r1.webp' WHERE content_id=$1`, movieA)
 	person := time.Now().UnixNano() % 1_000_000_000_000
 	exec(`INSERT INTO people (id,name,tmdb_id) VALUES ($1,$2,'1158'), ($1+1,$3,'')`, person, p+"-actor", p+"-director")
 	exec(`INSERT INTO item_people (id,content_id,person_id,kind,character,sort_order) VALUES
@@ -184,6 +185,7 @@ func TestListAdminCatalogItemsDB(t *testing.T) {
 		{AdminCatalogItemFilter{ContentIDs: fx.every}, 2},
 		{AdminCatalogItemFilter{ContentIDs: []string{fx.movieA}}, 2},
 		{AdminCatalogItemFilter{ContentIDs: fx.every, People: true}, 3},
+		{AdminCatalogItemFilter{ContentIDs: fx.every, FilePaths: true}, 2},
 	} {
 		tracer.selects.Store(0)
 		page, err := repo.ListAdminCatalogItems(t.Context(), c.filter, "", 50)
@@ -192,6 +194,14 @@ func TestListAdminCatalogItemsDB(t *testing.T) {
 		}
 		if n := tracer.selects.Load(); n != c.want {
 			t.Fatalf("a page of %+v ran %d statements, want %d", c.filter, n, c.want)
+		}
+		if c.filter.FilePaths {
+			p := strings.TrimSuffix(fx.movieA, "-movie-a")
+			ep, movie := page.Items[0], page.Items[1]
+			got := []string{movie.Versions[0].FilePath, movie.Versions[1].FilePath, ep.Versions[0].FilePath}
+			if want := []string{"/" + p + "/a-2160.mkv", "/" + p + "/a-1080.mp4", "/" + p + "/s01e01.mkv"}; !slices.Equal(got, want) {
+				t.Fatalf("file paths = %v, want %v", got, want)
+			}
 		}
 		if c.filter.People {
 			movie := page.Items[1]
@@ -223,6 +233,13 @@ func checkAdminListingItems(t *testing.T, fx adminListingFixture, ep, movie, sho
 		movie.RatingRTCritic == nil || *movie.RatingRTCritic != 0 || movie.RatingTMDB != nil || movie.Cast != nil || movie.Crew != nil ||
 		movie.ReleaseDate == nil || *movie.ReleaseDate != "1999-07-02" || movie.AirDate != nil {
 		t.Fatalf("movie metadata = %+v", movie)
+	}
+	// An episode carries its series' poster, as the session row does.
+	if movie.PosterPath != "tmdb/movies/11/poster/original.r1.webp" || movie.PosterOwnerID != fx.movieA ||
+		show.PosterPath != "https://image.example/show.jpg" || show.PosterOwnerID != fx.series ||
+		ep.PosterPath != show.PosterPath || ep.PosterOwnerID != fx.series {
+		t.Fatalf("posters = movie %q/%q, series %q/%q, episode %q/%q", movie.PosterPath, movie.PosterOwnerID,
+			show.PosterPath, show.PosterOwnerID, ep.PosterPath, ep.PosterOwnerID)
 	}
 	if show.FirstAirDate == nil || *show.FirstAirDate != "2010-05-02" || show.LastAirDate == nil || *show.LastAirDate != "2012-01-08" {
 		t.Fatalf("series dates = %+v", show)

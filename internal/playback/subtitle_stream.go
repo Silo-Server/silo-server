@@ -213,7 +213,12 @@ func StreamExtractSubtitle(ctx context.Context, opts StreamExtractOpts) error {
 		return errors.New("StreamExtractSubtitle: Writer is required")
 	}
 	if opts.InputPath == "" {
-		return errors.New("StreamExtractSubtitle: InputPath is required")
+		// A packet stream is fed to FFmpeg on stdin, so its input spec is the
+		// pipe. Every other caller names a real source.
+		if opts.Packets == nil {
+			return errors.New("StreamExtractSubtitle: InputPath is required")
+		}
+		opts.InputPath = packetStreamInputPath
 	}
 
 	bin := opts.FFmpegPath

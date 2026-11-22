@@ -61,9 +61,11 @@ import (
 	metadatatranslation "github.com/Silo-Server/silo-server/internal/metadata/translation"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/noderecipe"
+	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/onboarding"
 	"github.com/Silo-Server/silo-server/internal/opslog"
@@ -210,7 +212,10 @@ type Dependencies struct {
 	ShuttingDown func() bool
 	// OnConfigChange registers a callback fired after a live config reload
 	// actually changes the config. May be nil when hot reload is not wired.
-	OnConfigChange               func(fn func(old, updated *config.Config))
+	OnConfigChange func(fn func(old, updated *config.Config))
+	// BootstrapEnvVars names the environment variables that seeded this
+	// process's bootstrap settings, so the admin UI can say so.
+	BootstrapEnvVars             map[string]string
 	BootstrapSensitiveConfigured map[string]bool
 	BootstrapSensitiveValues     map[string]string
 	RedisBootstrapAvailable      bool
@@ -267,6 +272,9 @@ type Dependencies struct {
 	TranscodePool            *nodepool.TranscodePool         // transcode node pool (may be nil)
 	NodePlanner              *nodepool.Planner               // group/cap-aware node selection (may be nil)
 	NodeHealthChecker        *nodepool.HealthChecker         // periodic node health/capability sweep (may be nil)
+	NodeKeyRegistry          *nodepool.KeyRegistry           // every stream node's credential (may be nil)
+	NodeKeys                 nodeauth.Keyring                // signs calls to stream nodes
+	SourceGrants             *nodesource.Grants              // mints node source grants
 	// NodeCapabilityInvalidator drops one node's cached capability inventory
 	// outside the playback handler — the prepared-download preparer holds its
 	// own. nil where downloads are not wired; set before NewRouter runs.
@@ -1196,6 +1204,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			return itemRepo.CleanupRequestVirtualMedia(ctx, string(req.MediaType), req.TMDBID, tvdbID, req.IMDbID)
 		})
 		requestSvc.SetGroupPolicyProvider(accessGroupStore)
+		requestSvc.SetProfileStores(deps.UserStoreProvider)
 		if userRepo != nil {
 			requestSvc.SetUserRepository(userRepo)
 		}
@@ -3210,6 +3219,10 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil {
 			sections.StartPurgeRevisionPoller(appCtx, deps.DB, 5*time.Second)
 		}
+		// The audiobook Authors, Narrators and Series tabs read precomputed
+		// groups; the periodic refresh catches enrichment and edits.
+		groupStats := catalog.NewAudiobookGroupStatsRefresher(deps.DB, 10*time.Minute, time.Minute, time.Minute)
+		go groupStats.Run(appCtx)
 		// A scan that adds or removes titles publishes scan_complete with the
 		// library ID. Observing the publish, rather than subscribing, counts
 		// each scan once on the node that ran it, with or without Redis.
@@ -4493,7 +4506,7 @@ type tmdbFranchiseAdapter struct {
 }
 
 func (a *tmdbFranchiseAdapter) GetCollection(ctx context.Context, id int) ([]catalog.TMDBCollectionEntry, error) {
-	collection, err := a.client.GetCollection(ctx, id)
+	collection, err := a.client.GetCollection(ctx, id, "")
 	if err != nil {
 		return nil, err
 	}

@@ -36,7 +36,7 @@ export function LoginSessionRow({
         </span>
         <div className="min-w-0 flex-1 basis-36">
           <div className="flex flex-wrap items-center gap-2 text-sm font-medium">
-            <span>{device.name}</span>
+            <span className="max-w-full min-w-0 wrap-anywhere">{device.name}</span>
             {session.current && (
               <Badge variant="outline">{t("web.settings.sessions.row.thisBrowser")}</Badge>
             )}

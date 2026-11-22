@@ -41,6 +41,10 @@ type TranscodePool struct {
 	// rows, and those still carry the last sweep's verdict. A successful
 	// health result for the node, or the node leaving the pool, clears it.
 	unreachable map[string]struct{}
+	// keyCheck, when set, reports whether a node id has a usable key (the
+	// credential registry's HasKey). Without it each node's KeyIssued stands
+	// in, which only a pool reload updates.
+	keyCheck atomic.Pointer[func(nodeID int) bool]
 }
 
 // suppressedNode is one cooldown entry: the recovery epoch observed when it
@@ -75,6 +79,47 @@ func (p *TranscodePool) poolClock() time.Time {
 // NewTranscodePool creates an empty transcode pool.
 func NewTranscodePool() *TranscodePool {
 	return &TranscodePool{}
+}
+
+// SetKeyCheck makes the pool ask hasKey whether a node can be signed for.
+// Wire it to the credential registry's HasKey, which a missed
+// node_pool_changed event delays by one registry refresh at most.
+func (p *TranscodePool) SetKeyCheck(hasKey func(nodeID int) bool) {
+	p.keyCheck.Store(&hasKey)
+}
+
+// HasKey reports whether a request to n can be signed. A transcode node
+// without a key cannot be, so it takes no new work: it would only fail every
+// job sent to it, and as the node that never has a job it would otherwise win
+// least-loaded selection. It stays pooled, listed, and health-checked.
+func (p *TranscodePool) HasKey(n *Node) bool {
+	if n == nil {
+		return false
+	}
+	// Vio signs worker calls with the shared auth secret rather than issuing
+	// each transcode node its own key, so every pooled node is signable here.
+	// A deployment that starts issuing node keys wires a key check, which then
+	// answers for each node.
+	if p == nil {
+		return true
+	}
+	if check := p.keyCheck.Load(); check != nil && *check != nil {
+		return (*check)(n.ID)
+	}
+	return true
+}
+
+// KeyedNodes returns the pooled nodes a request can be signed for: the only
+// ones new work may go to.
+func (p *TranscodePool) KeyedNodes() []*Node {
+	nodes := p.Nodes()
+	keyed := nodes[:0]
+	for _, n := range nodes {
+		if p.HasKey(n) {
+			keyed = append(keyed, n)
+		}
+	}
+	return keyed
 }
 
 // SetNodes replaces the node list. Node URLs are normalized (trailing slashes

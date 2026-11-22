@@ -1,7 +1,7 @@
 import type { KeyboardEventHandler, ReactNode } from "react";
 import { GripVertical, Users } from "lucide-react";
-import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
+import { useMotionSafeSortable } from "@/hooks/useSortableList";
 
 import type { Collection, LibraryTabCollection } from "@/api/types";
 import { CollectionPosterCard } from "@/components/collections/CollectionPosterCard";
@@ -94,7 +94,7 @@ export function SortableCollectionCard({
     transform,
     transition,
     isDragging,
-  } = useSortable({ id: collection.id, disabled: !canReorder });
+  } = useMotionSafeSortable({ id: collection.id, disabled: !canReorder });
   return (
     <li
       ref={setNodeRef}

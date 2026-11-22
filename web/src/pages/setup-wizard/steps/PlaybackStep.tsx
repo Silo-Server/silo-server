@@ -102,6 +102,7 @@ export function PlaybackStep() {
           description="Off never re-encodes video. Silo still repackages files and converts audio for devices that need it."
           value={transcodeEnabled ? "true" : "false"}
           onChange={(v) => form.setValue("playback.transcode_enabled", v)}
+          managedByEnv={form.envVar("playback.transcode_enabled")}
         />
         <SettingField
           label="Hardware acceleration"
@@ -112,6 +113,7 @@ export function PlaybackStep() {
           value={hwAccel}
           onChange={(v) => form.setValue("playback.hw_accel", v)}
           disabled={!transcodeEnabled}
+          managedByEnv={form.envVar("playback.hw_accel")}
         />
         <SettingField
           label="Allow 4K transcoding"
@@ -159,6 +161,7 @@ export function PlaybackStep() {
             description={`Leave blank to use the FFmpeg that ships with the server, at ${DEFAULT_FFMPEG_PATH}.`}
             value={form.getValue("playback.ffmpeg_path")}
             onChange={(v) => form.setValue("playback.ffmpeg_path", v)}
+            managedByEnv={form.envVar("playback.ffmpeg_path")}
           />
           <PathSettingField
             label="Transcode directory"
@@ -166,6 +169,7 @@ export function PlaybackStep() {
             description={`Fast local storage with room to spare. Leave blank to use ${DEFAULT_TRANSCODE_DIR}.`}
             value={form.getValue("playback.transcode_dir")}
             onChange={(v) => form.setValue("playback.transcode_dir", v)}
+            managedByEnv={form.envVar("playback.transcode_dir")}
           />
         </AdvancedSection>
       </StepSection>

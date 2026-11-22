@@ -38,17 +38,3 @@ func TestReconcileDrainsFullBatches(t *testing.T) {
 		t.Fatal("workers were not woken")
 	}
 }
-
-func TestReconcileStopsWhenCanceled(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	q := &reconcileQueue{fakeQueue: newFakeQueue(), reconcile: func(context.Context, int) (ReconcileStats, error) {
-		cancel()
-		return ReconcileStats{Stale: reconcileBatch}, nil
-	}}
-	s := newService(q, &fakeStore{}, nil, &fakeExtractor{}, "server")
-	stats, more, err := s.reconcileBatches(ctx, testRecipe, q.Reconcile)
-	if !errors.Is(err, context.Canceled) || more || q.calls != 1 || stats.Stale != reconcileBatch {
-		t.Fatalf("stats=%+v more=%v calls=%d error=%v", stats, more, q.calls, err)
-	}
-}

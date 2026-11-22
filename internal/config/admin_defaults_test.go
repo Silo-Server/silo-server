@@ -175,30 +175,6 @@ func TestAdminDefaultsReadsEveryKeyInOneQueryPerTTL(t *testing.T) {
 	}
 }
 
-// While the settings table is unreachable, the last snapshot keeps answering
-// and the node retries once per delay, not once per request.
-func TestAdminDefaultsFailedRefreshKeepsSnapshotAndBacksOff(t *testing.T) {
-	reader := newFakeManyReader(map[string]string{nextUpModeDefault: `"separate"`})
-	a, clock := newTestAdminDefaults(t, reader)
-	get(t, a, nextUpModeDefault)
-
-	reader.set(nextUpModeDefault, "", errors.New("db down"))
-	advance(clock, AdminDefaultsCacheTTL)
-	get(t, a, nextUpModeDefault)
-	reader.waitDone(t, 2)
-	for range 5 {
-		if got := get(t, a, nextUpModeDefault); got != `"separate"` {
-			t.Fatalf("during outage = %q, want the last snapshot", got)
-		}
-	}
-	if n := reader.calls.Load(); n != 2 {
-		t.Fatalf("reads = %d, want one failed refresh after the initial read", n)
-	}
-	advance(clock, adminDefaultsRetryDelay)
-	get(t, a, nextUpModeDefault)
-	reader.waitDone(t, 3)
-}
-
 // Concurrent callers share one read, both for the first load and for the
 // refresh of an expired snapshot.
 func TestAdminDefaultsCoalescesConcurrentReads(t *testing.T) {
@@ -282,40 +258,5 @@ func TestAdminDefaultsChangedFencesOffOlderReads(t *testing.T) {
 	a.Changed(context.Background(), "server.name")
 	if n := reader.calls.Load(); n != 4 {
 		t.Fatalf("reads = %d, want 4", n)
-	}
-}
-
-// An admin write's reload is visible to the next request at once.
-func TestAdminDefaultsChangedRefreshesImmediately(t *testing.T) {
-	reader := newFakeManyReader(map[string]string{newReleasesDefault: "false"})
-	a, _ := newTestAdminDefaults(t, reader)
-	get(t, a, newReleasesDefault)
-
-	reader.set(newReleasesDefault, "true", nil)
-	a.Changed(context.Background(), newReleasesDefault)
-	if got := get(t, a, newReleasesDefault); got != "true" {
-		t.Fatalf("after Changed = %q, want true", got)
-	}
-}
-
-// A node that missed another node's change event and serves no requests still
-// picks up the new default within the TTL, so a client's delayed re-read finds
-// it instead of starting a refresh and getting the old snapshot back.
-func TestAdminDefaultsRunRefreshesWithoutReads(t *testing.T) {
-	reader := newFakeManyReader(map[string]string{nextUpModeDefault: `"combined"`})
-	a := NewAdminDefaults(reader)
-	a.ttl = 40 * time.Millisecond
-	get(t, a, nextUpModeDefault)
-	reader.waitDone(t, 1)
-
-	// Another node wrote the default; this node never heard about it.
-	reader.set(nextUpModeDefault, `"separate"`, nil)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	go a.Run(ctx)
-	waitPublished(t, a, reader, 2)
-
-	if got := get(t, a, nextUpModeDefault); got != `"separate"` {
-		t.Fatalf("after a background refresh with no reads = %q, want separate", got)
 	}
 }

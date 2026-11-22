@@ -11,9 +11,16 @@ import { loadErrorDescription } from "@/components/loadErrorDescription";
 import PageUnavailable from "@/components/PageUnavailable";
 import RefreshFailedNotice from "@/components/RefreshFailedNotice";
 import ScrollToTopButton from "@/components/ScrollToTopButton";
-import { useCatalogLetters, useCatalogWindow, useLibraryHasItems } from "@/hooks/queries/catalog";
+import {
+  useCatalogCount,
+  useCatalogLetters,
+  useCatalogWindow,
+  useLibraryHasItems,
+} from "@/hooks/queries/catalog";
+import { useCatalogVisibleRange } from "@/hooks/useCatalogVisibleRange";
 import type { AudiobookGroupBy } from "@/hooks/queries/audiobookGroups";
-import { useT, type MessageKey } from "@/i18n";
+import { useT, type MessageKey, type Translate } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 import { cn } from "@/lib/utils";
 import { normalizeQuerySortForScope } from "@/lib/querySortOptions";
 import type { CatalogSearchState } from "@/pages/catalogSearchParams";
@@ -108,6 +115,50 @@ function AudiobookAxisTabs({
   );
 }
 
+type CountNoun = "movies" | "series" | "episodes" | "books" | "titles";
+
+/** What the browse lists, for its count: the library's kind, narrowed by the type picker. */
+function countNoun(
+  libraryType: string,
+  browseType: LibraryBrowseType,
+  mediaScope?: string,
+): CountNoun {
+  if (libraryType === "series") {
+    return browseType === "episode" ? "episodes" : "series";
+  }
+  if (libraryType === "movie" || libraryType === "movies") return "movies";
+  if (isAudiobookLibraryType(libraryType) || isEbookLibraryType(libraryType)) return "books";
+  switch (mediaScope) {
+    case "movie":
+      return "movies";
+    case "series":
+      return "series";
+    case "episode":
+      return "episodes";
+    case "audiobook":
+    case "ebook":
+      return "books";
+    default:
+      return "titles";
+  }
+}
+
+function countLabel(t: Translate, noun: CountNoun, count: number): string {
+  const values = { count, shown: count.toLocaleString(formatLocale()) };
+  switch (noun) {
+    case "movies":
+      return t("web.library.browse.countMovies", values);
+    case "series":
+      return t("web.library.browse.countSeries", values);
+    case "episodes":
+      return t("web.library.browse.countEpisodes", values);
+    case "books":
+      return t("web.library.browse.countBooks", values);
+    case "titles":
+      return t("web.catalog.page.titleCount", values);
+  }
+}
+
 function NoMatchingItems({ onClearFilters }: { onClearFilters?: () => void }) {
   const t = useT();
   return (
@@ -163,30 +214,7 @@ export default function LibraryBrowse({
   const showMediaScopeSelector = libraryType === "mixed";
   const filtersKey = JSON.stringify(scopedQueryDefinition);
 
-  const [visibleRangeState, setVisibleRangeState] = useState<{
-    key: string;
-    range: [number, number];
-  }>({
-    key: filtersKey,
-    range: [0, limit - 1],
-  });
-  const visibleRange =
-    visibleRangeState.key === filtersKey
-      ? visibleRangeState.range
-      : ([0, limit - 1] as [number, number]);
-
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const handleVisibleRangeChange = useCallback(
-    (start: number, end: number) => {
-      clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        setVisibleRangeState({ key: filtersKey, range: [start, end] });
-      }, 50);
-    },
-    [filtersKey],
-  );
-
-  useEffect(() => () => clearTimeout(debounceRef.current), []);
+  const [visibleRange, handleVisibleRangeChange] = useCatalogVisibleRange(filtersKey, limit);
 
   const audiobookAxis = isAudiobookLibraryType(libraryType)
     ? audiobookBrowseAxisFromBrowseType(browseType)
@@ -257,8 +285,33 @@ export default function LibraryBrowse({
   // greyed until the index lands, so the grid doesn't reflow and the bar
   // doesn't pop in. It steps aside only when there is nothing to index or the
   // index can't be read at all.
-  const reservesLetterBar =
-    titleOrdered && !browseCameBackEmpty && !(lettersQuery.isError && !lettersQuery.data);
+  const lettersReadable = !(lettersQuery.isError && !lettersQuery.data);
+  const reservesLetterBar = titleOrdered && !browseCameBackEmpty && lettersReadable;
+  // The count beside the filters, from the cheapest read that already knows
+  // it: the letter index in title order, else a first page that holds the
+  // whole result, else a count of its own, read only once the first page shows
+  // there is more.
+  const firstPageComplete = catalogQuery.data?.firstPageComplete;
+  const lettersGiveCount = titleOrdered && lettersReadable;
+  const countQuery = useCatalogCount(state, {
+    enabled: !isGroupedAxis && !lettersGiveCount && firstPageComplete === false,
+  });
+  let resultCount: number | undefined;
+  if (showLetterBar) {
+    resultCount = gridTotalItems;
+  } else if (firstPageComplete) {
+    resultCount = catalogQuery.data.knownItems;
+  } else if (!lettersGiveCount) {
+    resultCount = countQuery.count;
+  }
+  const resultCountLabel = resultCount
+    ? countLabel(t, countNoun(libraryType, browseType, queryDefinition.media_scope), resultCount)
+    : undefined;
+  const resultCountLoading =
+    resultCount === undefined &&
+    (catalogQuery.isLoading ||
+      (lettersGiveCount && lettersQuery.isLoading && totalItems > 0) ||
+      countQuery.isLoading);
   const libraryHasItemsQuery = useLibraryHasItems(libraryId, { enabled: browseCameBackEmpty });
   const isLoading =
     catalogQuery.isLoading || (browseCameBackEmpty && libraryHasItemsQuery.isLoading);
@@ -380,6 +433,8 @@ export default function LibraryBrowse({
         allowPersonalizedSorts
         sortRelevanceScope={sortRelevanceScope}
         libraryType={libraryType}
+        resultCountLabel={resultCountLabel}
+        resultCountLoading={resultCountLoading}
       />
       {refreshFailedMessage ? (
         <RefreshFailedNotice
@@ -416,6 +471,7 @@ export default function LibraryBrowse({
             onVisibleRangeChange={handleVisibleRangeChange}
             onTopRowChange={showLetterBar ? handleTopRowChange : undefined}
             sortField={scopedQueryDefinition.sort.field}
+            posterAspect={isAudiobookLibraryType(libraryType) ? "square" : "portrait"}
             emptyState={emptyState}
           />
         </div>

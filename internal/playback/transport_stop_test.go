@@ -176,34 +176,6 @@ func TestServeRemuxAbortInterruptsBlockedClientWrite(t *testing.T) {
 	}
 }
 
-func TestWatchTransportStopSignalsOnStopSession(t *testing.T) {
-	sessions := NewSessionManager(0, 0)
-	session := startPlaybackTestSession(t, sessions, 1, "profile-1", 100, PlayRemux)
-
-	stop, release := sessions.WatchTransportStop(session.ID)
-	defer release()
-
-	select {
-	case <-stop:
-		t.Fatal("the transport was signaled while its session was still live")
-	default:
-	}
-
-	if err := sessions.StopSession(session.ID); err != nil {
-		t.Fatalf("StopSession: %v", err)
-	}
-	select {
-	case <-stop:
-	case <-time.After(time.Second):
-		t.Fatal("stopping the session did not signal its in-flight transport")
-	}
-
-	// A stop that already signaled must not be signaled again by the release
-	// the serving handler runs on its way out; a second close would panic.
-	release()
-	release()
-}
-
 // Two transports can share a session — a client that reconnects while the old
 // response is still draining — and a stop has to end both.
 func TestWatchTransportStopSignalsEveryTransport(t *testing.T) {

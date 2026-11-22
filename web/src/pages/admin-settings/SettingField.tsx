@@ -82,6 +82,12 @@ export interface SettingFieldRowProps {
   /** Amber "Restart" chip after the label; drive it from `useRestartKeys`. */
   restartRequired?: boolean;
   /**
+   * The environment variable that sets this setting on the server, from
+   * `form.envVar(key)`. The row says so under its description; the field
+   * components also disable their control.
+   */
+  managedByEnv?: string;
+  /**
    * Trailing unit for the control, e.g. "days" or "Mbps". It renders in the
    * row's own unit slot rather than beside the control on purpose: the slot is
    * reserved on every row, so a row that has a unit and a row that does not
@@ -107,6 +113,7 @@ export function SettingFieldRow({
   descriptionId,
   status,
   restartRequired,
+  managedByEnv,
   unit,
   className,
   children,
@@ -143,6 +150,13 @@ export function SettingFieldRow({
           </p>
         ) : null}
         {status ? <div className="mt-1.5">{status}</div> : null}
+        {managedByEnv ? (
+          <div className="mt-1.5">
+            <SettingFieldStatus tone="muted">
+              {t("web.admin.settings.fields.managedByEnv", { env: managedByEnv })}
+            </SettingFieldStatus>
+          </div>
+        ) : null}
       </div>
       {/* `sm:ms-auto` pins the control column to the row's end edge. The
           label column stops growing at its max width, so without it a row
@@ -195,6 +209,8 @@ interface SettingFieldProps {
   disabled?: boolean;
   /** Marks the field with a restart badge; drive it from `useRestartKeys`. */
   restartRequired?: boolean;
+  /** See {@link SettingFieldRowProps.managedByEnv}; disables the control. */
+  managedByEnv?: string;
   className?: string;
 }
 
@@ -210,11 +226,13 @@ export function SettingField({
   onChange,
   options,
   sensitiveConfigured,
-  disabled,
+  disabled: disabledProp,
   restartRequired,
+  managedByEnv,
   className,
 }: SettingFieldProps) {
   const t = useT();
+  const disabled = disabledProp || managedByEnv != null;
   const controlId = useId();
   const hintId = useId();
 
@@ -233,6 +251,7 @@ export function SettingField({
       descriptionId={hintId}
       status={status}
       restartRequired={restartRequired}
+      managedByEnv={managedByEnv}
       unit={unit}
       className={className}
     >

@@ -58,6 +58,8 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		TargetBitrateKbps:       s.TargetBitrateKbps,
 		TranscodeHWAccel:        s.TranscodeHWAccel,
 		ToneMapMode:             string(s.ToneMapMode),
+		AdaptationReasons:       s.AdaptationReasons,
+		Subtitle:                s.Subtitle,
 		RoutingNetworkProvider:  s.RoutingNetworkProvider,
 		RoutingWorkload:         s.RoutingWorkload,
 		RoutingExecution:        s.RoutingExecution,
@@ -69,8 +71,10 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		StartedAt:               s.StartedAt,
 		UpdatedAt:               s.UpdatedAt,
 		PositionSeconds:         s.Position,
+		TimelineDurationSeconds: s.TimelineDuration,
 		IsPaused:                s.IsPaused,
 		HasWebSocket:            s.HasWebSocket,
 		IsJellyfinCompat:        s.IsJellyfinCompat,
+		Watch:                   playback.WatchTimeJSON(s.Watch),
 	}
 }

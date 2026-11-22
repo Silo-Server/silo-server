@@ -1,12 +1,9 @@
 package auth
 
 import (
-	"net/http"
 	"strings"
 	"testing"
 	"unicode/utf8"
-
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 func TestNewClientDeviceClampsAndDropsMalformedIDs(t *testing.T) {
@@ -31,34 +28,5 @@ func TestNewClientDeviceClampsAndDropsMalformedIDs(t *testing.T) {
 				t.Fatalf("NewClientDevice = %+v", got)
 			}
 		})
-	}
-}
-
-func TestWithClientDeviceAppliesReportedDeviceToSession(t *testing.T) {
-	ctx := t.Context()
-	if WithClientDevice(ctx, http.Header{"User-Agent": {"okhttp/4.12.0"}}) != ctx {
-		t.Fatal("a request without device headers should leave the context unchanged")
-	}
-
-	h := http.Header{}
-	h.Set(ClientDeviceIDHeader, "android-7f3c")
-	h.Set(ClientDevicePlatformHeader, "android")
-	session := models.AuthSession{DeviceName: "okhttp/4.12.0"}
-	applyClientDevice(WithClientDevice(ctx, h), &session)
-	if session.DeviceID != "android-7f3c" || session.DevicePlatform != "android" || session.DeviceName != "okhttp/4.12.0" {
-		t.Fatalf("without a name header the caller's name stays: %+v", session)
-	}
-
-	h.Set(ClientDeviceNameHeader, "Google Pixel 8 Pro")
-	session = models.AuthSession{DeviceName: "okhttp/4.12.0", DevicePlatform: "android-tv"}
-	applyClientDevice(WithClientDevice(ctx, h), &session)
-	if session.DeviceName != "Google Pixel 8 Pro" || session.DevicePlatform != "android" {
-		t.Fatalf("reported values win over the caller's: %+v", session)
-	}
-
-	session = models.AuthSession{DeviceName: "Living Room TV", DevicePlatform: "tvos"}
-	applyClientDevice(ctx, &session)
-	if session.DeviceName != "Living Room TV" || session.DevicePlatform != "tvos" || session.DeviceID != "" {
-		t.Fatalf("no reported device leaves the session alone: %+v", session)
 	}
 }

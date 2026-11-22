@@ -38,6 +38,7 @@ export function ConnectStep() {
           description="Runs a Jellyfin-protocol listener alongside the native API."
           value={jellyfinEnabled ? "true" : "false"}
           onChange={(v) => form.setValue("jellyfin_compat.enabled", v)}
+          managedByEnv={form.envVar("jellyfin_compat.enabled")}
         />
         {jellyfinEnabled ? (
           <SettingField
@@ -46,6 +47,7 @@ export function ConnectStep() {
             hint="http://your-server:8096"
             value={form.getValue("jellyfin_compat.public_url")}
             onChange={(v) => form.setValue("jellyfin_compat.public_url", v)}
+            managedByEnv={form.envVar("jellyfin_compat.public_url")}
           />
         ) : null}
       </StepSection>

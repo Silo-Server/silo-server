@@ -16,7 +16,15 @@ import type {
   ScanRun,
   TaskInfo,
 } from "@/api/types";
-import { isCapturedProfileAuthorityActive, type ProfileRequestContextSnapshot } from "@/api/client";
+import {
+  captureSessionIdentity,
+  isCapturedProfileAuthorityActive,
+  isSessionIdentityCurrent,
+  StaleApiRequestContextError,
+  type ProfileRequestContextSnapshot,
+  type SessionIdentitySnapshot,
+} from "@/api/client";
+import { isTransientV2Error, v2RetryDelayMs } from "@/api/v2/request";
 import {
   mintEventsSocketTicket,
   captureEventsAuthority,
@@ -80,6 +88,8 @@ interface JobWaiter {
   timeoutId: number;
   resolve: (job: AdminJob) => void;
   reject: (error: Error) => void;
+  /** Stops waiting on a socket event and polls the job instead. */
+  poll: () => void;
 }
 
 interface UserStatePayload {
@@ -128,6 +138,19 @@ function isRequestNotification(notification: Pick<AppNotification, "type">) {
 export const EVENTS_ACCESS_CHANGED_CLOSE_CODE = 4001;
 
 /**
+ * Close code for a login session, account or profile that is gone or
+ * disabled. Reconnecting with it cannot succeed: refresh the account (which
+ * signs out a revoked session) and wait before trying again.
+ */
+export const EVENTS_CREDENTIAL_INVALID_CLOSE_CODE = 4002;
+
+/** Close code for a server that could not recheck the credential: back off. */
+export const EVENTS_AUTHORITY_UNAVAILABLE_CLOSE_CODE = 4004;
+
+const CREDENTIAL_INVALID_RECONNECT_DELAY_MS = 30_000;
+const AUTHORITY_UNAVAILABLE_RECONNECT_DELAY_MS = 5_000;
+
+/**
  * How long the events socket stays open after the page is hidden. Its frames
  * keep the cache current meanwhile, so a quick tab switch costs no requests. A
  * longer absence closes the socket, and the return refetches active queries
@@ -160,9 +183,48 @@ function isTerminalJob(job: AdminJob) {
   return job.status === "completed" || job.status === "failed" || job.status === "cancelled";
 }
 
-async function pollAdminJobUntilTerminal(jobId: string): Promise<AdminJob> {
+function delay(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+/** The longest a job wait backs off after failed reads; a longer Retry-After still holds. */
+const JOB_POLL_MAX_BACKOFF_MS = 30_000;
+/** setTimeout's limit; a longer delay would fire at once. */
+const MAX_TIMEOUT_MS = 2_147_483_647;
+
+/**
+ * Reads the job until it finishes. A read that may succeed later does not end
+ * the wait, since the job is still running on the server; it backs off while
+ * reads keep failing. Signing out or switching account or server ends it.
+ */
+async function pollAdminJobUntilTerminal(
+  jobId: string,
+  session: SessionIdentitySnapshot,
+): Promise<AdminJob> {
+  let failures = 0;
   for (;;) {
-    const job = await fetchAdminTaskJob(jobId);
+    if (!isSessionIdentityCurrent(session)) {
+      throw new StaleApiRequestContextError();
+    }
+    const read = await fetchAdminTaskJob(jobId).then(
+      (job) => ({ job }),
+      (error: unknown) => ({ error }),
+    );
+    // A read that finished after a sign-out or account switch, either way, is the old session's.
+    if (!isSessionIdentityCurrent(session)) {
+      throw new StaleApiRequestContextError();
+    }
+    if ("error" in read) {
+      if (!isTransientV2Error(read.error)) {
+        throw read.error;
+      }
+      failures += 1;
+      const backoff = Math.min(1_000 * 2 ** failures, JOB_POLL_MAX_BACKOFF_MS);
+      await delay(Math.min(v2RetryDelayMs(read.error, backoff), MAX_TIMEOUT_MS));
+      continue;
+    }
+    failures = 0;
+    const { job } = read;
     if (job.status === "completed") {
       return job;
     }
@@ -172,7 +234,7 @@ async function pollAdminJobUntilTerminal(jobId: string): Promise<AdminJob> {
     if (job.status === "cancelled") {
       throw jobCancelledError(job);
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 1_000));
+    await delay(1_000);
   }
 }
 
@@ -203,7 +265,7 @@ function upsertJob(existing: AdminJob[] | undefined, nextJob: AdminJob, limit = 
   return sortJobs(jobs).slice(0, limit);
 }
 
-export function applyJellyfinCompatOperationUpdate(
+function applyJellyfinCompatOperationUpdate(
   queryClient: QueryClient,
   operation: JellyfinCompatOperationStatus,
   authority: ProfileRequestContextSnapshot | null,
@@ -298,8 +360,13 @@ function catalogEventLibraryID(data: unknown) {
   if (!data || typeof data !== "object" || !("library_id" in data)) {
     return undefined;
   }
+  // The server sends v2 string IDs; the query keys hold the library's number.
+  // A node still on an older build sends the number itself.
   const value = (data as { library_id?: unknown }).library_id;
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+  let id = NaN;
+  if (typeof value === "number") id = value;
+  else if (typeof value === "string" && /^[1-9][0-9]*$/.test(value)) id = Number(value);
+  return Number.isSafeInteger(id) && id > 0 ? id : undefined;
 }
 
 function catalogEventContentID(data: unknown) {
@@ -663,6 +730,11 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         refreshDownloadPreparations();
         refreshDownloadStorage();
         break;
+      case "downloads":
+        // A null snapshot: events may have been missed, so re-read the
+        // device copies and entries the storage views list.
+        refreshDownloadStorage();
+        break;
       case "jobs":
         if (Array.isArray(message.data)) {
           hydrateAdminJobSnapshot(queryClient, message.data as AdminJob[]);
@@ -758,6 +830,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           break;
         }
         refreshDownloadPreparations();
+        break;
+      case "downloads":
+        // A device download was registered, changed status or was removed.
+        refreshDownloadStorage();
         break;
       case "catalog":
         {
@@ -1130,6 +1206,14 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
         } else if (!closedByEffect) {
           droppedSinceCatchUpRef.current = true;
         }
+        if (!closedByEffect && event.code === EVENTS_CREDENTIAL_INVALID_CLOSE_CODE) {
+          // A revoked session fails the refresh and signs out, which ends
+          // this effect; the long delay keeps a lingering one from looping.
+          void refreshAccount().catch(() => {});
+          nextReconnectDelayRef.current = CREDENTIAL_INVALID_RECONNECT_DELAY_MS;
+        } else if (!closedByEffect && event.code === EVENTS_AUTHORITY_UNAVAILABLE_CLOSE_CODE) {
+          nextReconnectDelayRef.current = AUTHORITY_UNAVAILABLE_RECONNECT_DELAY_MS;
+        }
         if (
           event.code !== EVENTS_ACCESS_CHANGED_CLOSE_CODE &&
           !closedByEffect &&
@@ -1158,9 +1242,10 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       closedByEffect = true;
       adminRefresh.cancel();
       clearReconnect();
-      for (const [jobId, waiter] of waitersRef.current) {
+      // The server job outlives this socket: keep waiting on it by polling.
+      for (const waiter of waitersRef.current.values()) {
         window.clearTimeout(waiter.timeoutId);
-        waiter.reject(new Error(`Realtime events provider closed before job ${jobId} finished`));
+        waiter.poll();
       }
       waitersRef.current.clear();
       const socket = activeSocket;
@@ -1193,6 +1278,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
 
   const awaitAdminJob = useCallback(
     (jobId: string) => {
+      const session = captureSessionIdentity();
       const cachedJob = findCachedAdminJob(queryClient, jobId);
       if (cachedJob) {
         if (cachedJob.status === "completed") {
@@ -1210,7 +1296,7 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
       // channel isn't subscribed (not acting as admin), waiting on a live
       // event would hang until the fallback timeout — poll instead.
       if (!actingAdmin || connectionState !== "live") {
-        return pollAdminJobUntilTerminal(jobId);
+        return pollAdminJobUntilTerminal(jobId, session);
       }
 
       return new Promise<AdminJob>((resolve, reject) => {
@@ -1219,12 +1305,13 @@ export function RealtimeEventsProvider({ children }: { children: ReactNode }) {
           window.clearTimeout(existing.timeoutId);
         }
 
+        const poll = () => void pollAdminJobUntilTerminal(jobId, session).then(resolve, reject);
         const timeoutId = window.setTimeout(() => {
           waitersRef.current.delete(jobId);
-          void pollAdminJobUntilTerminal(jobId).then(resolve).catch(reject);
+          poll();
         }, 60_000);
 
-        waitersRef.current.set(jobId, { timeoutId, resolve, reject });
+        waitersRef.current.set(jobId, { timeoutId, resolve, reject, poll });
       });
     },
     [actingAdmin, connectionState, queryClient],

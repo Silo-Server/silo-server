@@ -58,6 +58,8 @@ interface FilterRuleEditorProps {
   mediaScope?: FilterRuleMediaScope;
   /** Where picked values come from; without it, all of the viewer's titles. */
   valueScope?: FacetValueScope;
+  /** False hides Sort by, for a surface whose toolbar owns the sort. */
+  showSortControls?: boolean;
 }
 
 /**
@@ -752,6 +754,7 @@ export default function FilterRuleEditor({
   sortRelevanceScope,
   mediaScope = "all",
   valueScope,
+  showSortControls = true,
 }: FilterRuleEditorProps) {
   const t = useT();
   const config = value || { match: "all", groups: [] };
@@ -856,6 +859,7 @@ export default function FilterRuleEditor({
               variant="ghost"
               size="sm"
               className="text-muted-foreground hover:text-destructive h-7 w-7 p-0"
+              aria-label={t("web.home.addRow.rules.removeGroup", { number: groupIdx + 1 })}
               onClick={() => removeGroup(groupIdx)}
             >
               <Trash2 className="h-3.5 w-3.5" />
@@ -891,17 +895,18 @@ export default function FilterRuleEditor({
         <Plus className="me-1 h-3.5 w-3.5" /> {t("web.catalog.rules.addGroup")}
       </Button>
 
-      {/* Sort controls */}
-      <div className="border-border flex items-center gap-2 border-t pt-2">
-        <span className="text-muted-foreground text-sm">{t("web.catalog.sort.sortBy")}</span>
-        <FilterSortControls
-          sort={config.sort}
-          order={config.order}
-          onChange={updateConfig}
-          allowPersonalizedSorts={allowPersonalizedSorts}
-          sortRelevanceScope={sortRelevanceScope}
-        />
-      </div>
+      {showSortControls ? (
+        <div className="border-border flex items-center gap-2 border-t pt-2">
+          <span className="text-muted-foreground text-sm">{t("web.catalog.sort.sortBy")}</span>
+          <FilterSortControls
+            sort={config.sort}
+            order={config.order}
+            onChange={updateConfig}
+            allowPersonalizedSorts={allowPersonalizedSorts}
+            sortRelevanceScope={sortRelevanceScope}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

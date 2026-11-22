@@ -287,6 +287,23 @@ const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 // (DNS-SD service _silo._tcp, internal/landiscovery) so clients can find it
 // without an address. The responder starts with the API listener, so a change
 // takes effect on restart.
+// JellyfinCompatAddressStreamGrantSettingKey turns on the Jellyfin API's
+// address-only stream grant: a static video stream that carries no credential
+// is served as the owner of a live PlaybackInfo negotiation made from the same
+// client address. Anyone sharing that address (household or carrier NAT, a VPN
+// exit, a proxy that collapses clients to one address) who knows the item and
+// source IDs can then stream the file. The Jellyfin API reads it live on each
+// request that reaches that grant.
+const JellyfinCompatAddressStreamGrantSettingKey = "jellyfin_compat.address_stream_grant_enabled"
+
+// DefaultJellyfinCompatAddressStreamGrantEnabled is the address-only stream
+// grant's value while the setting is unset. Every default of that setting
+// derives from this constant.
+const DefaultJellyfinCompatAddressStreamGrantEnabled = false
+
+// serverLogFormatSettingKey selects text or JSON console logs.
+const serverLogFormatSettingKey = "server.log_format"
+
 const ServerLANDiscoverySettingKey = "server.lan_discovery"
 
 // Backup settings (docs/architecture/backups.md). internal/backup reads them
@@ -369,6 +386,12 @@ const (
 	// address on a Silo account first is the one matched; the match ends the
 	// account's existing sessions, device approvals and API keys.
 	AuthEmailAutoMatchSettingKey = "auth.email_auto_match"
+	// AuthUserAPIKeysSettingKey lets accounts that are not admins, and
+	// profiles other than the primary one, create API keys for themselves.
+	// Those keys carry user scopes only. Off by default: only a server admin
+	// creates keys. Turning it off stops new keys and leaves existing ones
+	// working until they are revoked.
+	AuthUserAPIKeysSettingKey = "auth.user_api_keys" //nolint:gosec // A setting name, not a credential.
 	// AuthProviderRecheckIntervalSettingKey is how old an identity's last
 	// provider check may be before a session refresh asks the provider again.
 	AuthProviderRecheckIntervalSettingKey = "auth.provider_recheck_interval"
@@ -560,16 +583,17 @@ var adminSettingDefaults = map[string]string{
 	playback.TranscodeThrottleEnabledSettingKey:      strconv.FormatBool(playback.DefaultTranscodeThrottleEnabled),
 	playback.TranscodeThrottleSecondsSettingKey:      strconv.Itoa(playback.DefaultTranscodeThrottleSeconds),
 
-	"audiobookshelf_compat.enabled":           "true",
-	"jellyfin_compat.enabled":                 "true",
-	"jellyfin_compat.public_url":              "http://127.0.0.1:8096",
-	"jellyfin_compat.emulated_server_version": DefaultJellyfinCompatEmulatedServerVersion,
-	"jellyfin_compat.server_name":             "Vio",
-	"jellyfin_compat.web_enabled":             "true",
-	"jellyfin_compat.web_version":             DefaultJellyfinWebVersion,
-	"jellyfin_compat.web_install_dir":         DefaultJellyfinWebInstallDir,
-	"jellyfin_compat.session_ttl":             "87600h",
-	"jellyfin_compat.playback_session_ttl":    defaultJellyfinCompatPlaybackSessionTTL,
+	"audiobookshelf_compat.enabled":            "true",
+	"jellyfin_compat.enabled":                  "true",
+	"jellyfin_compat.public_url":               "http://127.0.0.1:8096",
+	"jellyfin_compat.emulated_server_version":  DefaultJellyfinCompatEmulatedServerVersion,
+	"jellyfin_compat.server_name":              "Vio",
+	"jellyfin_compat.web_enabled":              "true",
+	"jellyfin_compat.web_version":              DefaultJellyfinWebVersion,
+	"jellyfin_compat.web_install_dir":          DefaultJellyfinWebInstallDir,
+	"jellyfin_compat.session_ttl":              "87600h",
+	JellyfinCompatAddressStreamGrantSettingKey: strconv.FormatBool(DefaultJellyfinCompatAddressStreamGrantEnabled),
+	"jellyfin_compat.playback_session_ttl":     defaultJellyfinCompatPlaybackSessionTTL,
 
 	"recommendations.enabled":                    "false",
 	"recommendations.embeddings_job_timeout":     "24h",

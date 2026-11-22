@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -19,9 +20,9 @@ const RemoteBundleTimeout = 10 * time.Minute
 // MaxRemoteBundleBytes caps the compressed size of a catalog seed downloaded
 // from a remote URL. Embeddings dominate an export: each title's 1536-value
 // embedding is about 7 KB once gzipped, so a 100,000-title library with its
-// episodes and files stays well under 1 GiB. The importer holds the whole
-// bundle and its decompressed JSON in memory, so a larger download would
-// exhaust memory on most hosts before the import could finish.
+// episodes and files stays well under 1 GiB. The download goes to a temporary
+// file, but the importer holds the decoded bundle in memory, so a larger
+// bundle would exhaust memory on most hosts before the import could finish.
 const MaxRemoteBundleBytes int64 = 2 << 30
 
 var (
@@ -44,13 +45,15 @@ var (
 var remoteBundleClient = netguard.NewClient(RemoteBundleTimeout)
 
 // DownloadRemoteBundle fetches a catalog seed bundle from remoteURL for an
-// admin import. Only admins name the URL, so it may point at a host on the
-// server's local network, like an import source an admin configures.
-func DownloadRemoteBundle(ctx context.Context, remoteURL string) ([]byte, error) {
+// admin import into a temporary file, and returns that file open at its
+// start; closing it removes the file. Only admins name the URL, so it may
+// point at a host on the server's local network, like an import source an
+// admin configures.
+func DownloadRemoteBundle(ctx context.Context, remoteURL string) (io.ReadCloser, error) {
 	return downloadRemoteBundle(ctx, remoteBundleClient, remoteURL, MaxRemoteBundleBytes)
 }
 
-func downloadRemoteBundle(ctx context.Context, client *http.Client, remoteURL string, maxBytes int64) ([]byte, error) {
+func downloadRemoteBundle(ctx context.Context, client *http.Client, remoteURL string, maxBytes int64) (io.ReadCloser, error) {
 	parsed, err := url.Parse(remoteURL)
 	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" ||
 		!strings.HasSuffix(strings.ToLower(parsed.Path), ".json.gz") {
@@ -77,12 +80,36 @@ func downloadRemoteBundle(ctx context.Context, client *http.Client, remoteURL st
 		return nil, ErrRemoteBundleTooLarge
 	}
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxBytes+1))
+	file, err := os.CreateTemp("", "silo-catalog-seed-*.json.gz")
 	if err != nil {
+		return nil, fmt.Errorf("creating temp file for remote catalog seed: %w", err)
+	}
+	download := &removeOnClose{File: file}
+	written, err := io.Copy(file, io.LimitReader(resp.Body, maxBytes+1))
+	if err != nil {
+		_ = download.Close()
 		return nil, fmt.Errorf("reading remote catalog seed: %w", err)
 	}
-	if int64(len(data)) > maxBytes {
+	if written > maxBytes {
+		_ = download.Close()
 		return nil, ErrRemoteBundleTooLarge
 	}
-	return data, nil
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		_ = download.Close()
+		return nil, fmt.Errorf("rewinding remote catalog seed: %w", err)
+	}
+	return download, nil
+}
+
+// removeOnClose is a temporary file that Close also removes.
+type removeOnClose struct {
+	*os.File
+}
+
+func (f *removeOnClose) Close() error {
+	closeErr := f.File.Close()
+	if err := os.Remove(f.Name()); err != nil {
+		return err
+	}
+	return closeErr
 }

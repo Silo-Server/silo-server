@@ -333,14 +333,24 @@ const PAGES = {
  * A settings page as a sidebar entry. Under a topic that also holds tools the
  * page is just "Settings"; the topic already says whose. Its own name stays a
  * keyword, so searching "Logging" still finds Logs › Settings.
+ *
+ * The registry's text is read through getters, so this entry must keep them:
+ * the nav is built while its module evaluates, before the admin catalog has
+ * loaded, and reading the label here would freeze it as an empty string.
  */
 function settingsPage(id: string, label?: string): AdminNavItem {
   const page = ADMIN_SETTINGS_NAV.find((item) => item.id === id);
   if (!page) throw new Error(`Unknown admin settings page ${id}`);
   return {
-    label: label ?? page.label,
-    description: page.description,
-    keywords: ["settings", "configuration", page.label, ...(page.keywords ?? [])],
+    get label() {
+      return label ?? page.label;
+    },
+    get description() {
+      return page.description;
+    },
+    get keywords() {
+      return ["settings", "configuration", page.label, ...(page.keywords ?? [])];
+    },
     settings: page.settings,
     icon: page.icon,
     href: adminSettingsHref(id),

@@ -124,3 +124,39 @@ func TestSafeStorageTransitionJobWaitsForCurrentClaim(t *testing.T) {
 	job.ResultPayload = json.RawMessage(`{"phase":"restart_pending","verified_objects":7,"claim_generation":3,"restart_required":true,"manual_restart_required":true}`)
 	assertResult("restart_pending", 7, true)
 }
+
+// Catalog events reach v2 sockets as published: library_id is a string, as
+// every v2 identifier is, and absent when the event names no library.
+func TestCatalogEventsCarryStringLibraryIDs(t *testing.T) {
+	hub := NewHub("test", &cache.NoopEventBus{})
+	raw, unsubscribe := hub.EventsHub().Subscribe()
+	defer unsubscribe()
+	ctx := context.Background()
+	if err := hub.PublishCatalogItemChanged(ctx, MetadataUpdateEvent{LibraryID: 12, ContentID: "item-1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := hub.PublishCatalogLibraryChanged(ctx, LibraryChangeEvent{LibraryID: 12, New: 1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := hub.PublishCatalogItemChanged(ctx, MetadataUpdateEvent{ContentID: "item-2"}); err != nil {
+		t.Fatal(err)
+	}
+	// catalog.item.changed and metadata.updated for each item change, and
+	// catalog.library.changed, library.changed and library.item_added.
+	for i := range 7 {
+		select {
+		case env := <-raw:
+			var data map[string]json.RawMessage
+			if err := json.Unmarshal(env.Data, &data); err != nil {
+				t.Fatal(err)
+			}
+			id, named := data["library_id"]
+			wantNamed := i < 5
+			if named != wantNamed || (named && string(id) != `"12"`) {
+				t.Fatalf("%s data %s: library_id %s, want %v", env.Event, env.Data, id, wantNamed)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("timed out after %d events", i)
+		}
+	}
+}

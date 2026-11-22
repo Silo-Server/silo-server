@@ -181,7 +181,9 @@ type ManifestBuilder struct {
 	externalTimings subtitles.ExternalTimingLookup
 	// artifact resolves a download's linked prepared artifact so artifact-backed
 	// manifests can describe the delivered file instead of the catalog source.
-	artifact     func(ctx context.Context, id string) (*Artifact, error)
+	artifact func(ctx context.Context, id string) (*Artifact, error)
+	// originalSize resolves a provider-backed original's real size; nil leaves
+	// it unknown.
 	originalSize func(context.Context, *models.MediaFile) (int64, error)
 }
 

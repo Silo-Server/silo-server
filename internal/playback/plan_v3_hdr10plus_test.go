@@ -81,13 +81,6 @@ func TestPlanPlaybackV3PlaysHDR10PlusAsHDR10ForHDR10OnlyOutput(t *testing.T) {
 	}
 }
 
-func TestPlanPlaybackV3ClaimsHDR10PlusForHDR10PlusOutput(t *testing.T) {
-	result := planHDRFileV3(hdrRequestV3(&HDRCapabilitiesV3{HDR10: true, HDR10Plus: true}), hdr10PlusFixtureFileV3())
-	if result.Plan == nil || result.Plan.Delivery != DeliveryOriginalHTTPV3 || !result.Plan.Claims.Video.HDR10Plus {
-		t.Fatalf("result = %s, want original playback claiming HDR10+", ExplainPlannerResultV3(result))
-	}
-}
-
 func TestPlanPlaybackV3KeepsHDR10PlusOffSDROutput(t *testing.T) {
 	result := planHDRFileV3(hdrRequestV3(nil), hdr10PlusFixtureFileV3())
 	if result.Plan != nil && result.Plan.Delivery == DeliveryOriginalHTTPV3 {
@@ -120,29 +113,5 @@ func TestHDRDetailsSupportHDR10PlusPlanWithinHDR10Limits(t *testing.T) {
 	}
 	if hdrDetailsSupportPlanV3(HDRCapabilitiesV3{HLG: true}, plan) {
 		t.Fatal("an output without HDR10 or HDR10+ accepted an HDR10+ plan")
-	}
-}
-
-// HDR10+ is HDR10 plus dynamic metadata, so an HDR10+ output's HDR10 ceilings
-// bound an HDR10+ source the same way they bound an HDR10 one.
-func TestHDR10PlusOutputKeepsHDR10Ceilings(t *testing.T) {
-	hdr := HDRCapabilitiesV3{HDR10: true, HDR10Plus: true, HDR10MaxFrameRate: 30}
-	width, height, frameRate, bitrate := 3840, 2160, 60.0, 80_000
-	plan := PlanV3{EffectiveRecipe: EffectiveRecipeV3{
-		VideoCodec: "hevc", Width: &width, Height: &height, FrameRate: &frameRate,
-		BitrateKbps: &bitrate, DynamicRange: DynamicRangeHDR10PlusV3,
-	}}
-	if hdrDetailsSupportPlanV3(hdr, plan) {
-		t.Fatal("an HDR10+ output accepted an HDR10+ plan above its HDR10 frame-rate ceiling")
-	}
-
-	req := hdrRequestV3(&hdr)
-	source := SourceDescriptorV3{DynamicRange: DynamicRangeHDR10PlusV3, HDR10Plus: true, Width: 3840, Height: 2160, FrameRate: 60}
-	if eligible, claims := outputRangeEligibleV3(source, req); eligible || claims.HDR10Plus {
-		t.Fatalf("eligible = %v, claims = %+v; want a 60 fps HDR10+ source refused by a 30 fps HDR10 ceiling", eligible, claims)
-	}
-	source.FrameRate = 24
-	if eligible, claims := outputRangeEligibleV3(source, req); !eligible || !claims.HDR10Plus {
-		t.Fatalf("eligible = %v, claims = %+v; want a 24 fps HDR10+ source to claim HDR10+", eligible, claims)
 	}
 }

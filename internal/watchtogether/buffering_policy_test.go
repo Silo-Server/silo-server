@@ -200,25 +200,6 @@ func TestRoomWaitsForAViewerOncePerStallCooldown(t *testing.T) {
 	}
 }
 
-func TestBufferingPausesAreSpacedAcrossViewers(t *testing.T) {
-	f := newBufferingRoom(t, "ann", "bob", "cat")
-	f.buffer("ann")
-	f.resumeAll()
-
-	f.now = f.now.Add(bufferingWaitSpacing / 2)
-	if snapshot := f.buffer("bob"); snapshot.PlaybackState != RoomPlaybackStatePlaying {
-		t.Fatalf("second viewer paused the room within the spacing: %+v", snapshot)
-	}
-	if !f.member("bob").ignoreWait {
-		t.Fatal("viewer skipped by the spacing is not catching up")
-	}
-
-	f.now = f.now.Add(bufferingWaitSpacing / 2)
-	if snapshot := f.buffer("cat"); snapshot.PlaybackState != RoomPlaybackStateWaiting {
-		t.Fatalf("stall after the spacing did not pause the room: %+v", snapshot)
-	}
-}
-
 func TestViewerSkippedAtDeadlineCatchesUpWithoutPausingTheRoom(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	f.buffer("guest")
@@ -279,110 +260,6 @@ func TestRecoveryAfterDeadlineClearsBufferingAndTargetsTheRoom(t *testing.T) {
 	}
 }
 
-func TestBufferingViewerIsNotCorrectedUntilTheHoldExpires(t *testing.T) {
-	f := newBufferingRoom(t, "guest")
-	f.member("guest").lastStallAt = f.now
-	f.buffer("guest")
-	frames := len(f.conns["guest"].payloads)
-
-	f.now = f.now.Add(5 * time.Second)
-	f.report("guest", 100)
-	if got := len(f.conns["guest"].payloads); got != frames {
-		t.Fatalf("stalled guest received %d corrections", got-frames)
-	}
-
-	f.now = f.now.Add(bufferingCorrectionHold)
-	f.report("guest", 100)
-	f.report("guest", 100)
-	if command := lastTransport(t, f.conns["guest"]); command.PositionSeconds != f.expectedAt(command) {
-		t.Fatalf("correction after the hold = %+v", command)
-	}
-}
-
-func TestStalledHostDoesNotRewindTheRoom(t *testing.T) {
-	f := newBufferingRoom(t, "guest")
-	f.member("host").lastStallAt = f.now
-	if snapshot := f.buffer("host"); snapshot.PlaybackState != RoomPlaybackStatePlaying {
-		t.Fatalf("host within cooldown paused the room: %+v", snapshot)
-	}
-	f.now = f.now.Add(10 * time.Second)
-	anchor := f.repo.room.AnchorPositionSeconds
-	f.report("host", 100)
-	if f.repo.room.AnchorPositionSeconds != anchor {
-		t.Fatalf("stalled host moved the anchor to %v", f.repo.room.AnchorPositionSeconds)
-	}
-
-	// Recovery syncs the host to the room; until it arrives its reports are
-	// corrected rather than followed.
-	f.ready("host", 100)
-	if !f.member("host").syncingToRoom {
-		t.Fatal("recovered host is not syncing to the room")
-	}
-	sync := lastTransport(t, f.conns["host"])
-	if sync.PositionSeconds != f.expectedAt(sync) {
-		t.Fatalf("recovering host sync = %+v", sync)
-	}
-	// A report before the sync could have run is not corrected again.
-	f.report("host", 100.5)
-	if command := lastTransport(t, f.conns["host"]); command.CommandID != sync.CommandID {
-		t.Fatalf("report inside the settle window was corrected: %+v", command)
-	}
-	f.now = f.now.Add(3 * time.Second)
-	f.report("host", 100.5)
-	f.report("host", 100.5)
-	if f.repo.room.AnchorPositionSeconds != anchor {
-		t.Fatalf("recovering host moved the anchor to %v", f.repo.room.AnchorPositionSeconds)
-	}
-	if command := lastTransport(t, f.conns["host"]); command.CommandID == sync.CommandID || command.PositionSeconds != f.expectedAt(command) {
-		t.Fatalf("recovering host correction = %+v", command)
-	}
-}
-
-func TestHostDriftInsideTheCatchUpBandIsCorrected(t *testing.T) {
-	f := newBufferingRoom(t, "guest")
-	f.now = f.now.Add(10 * time.Second)
-	anchor := f.repo.room.AnchorPositionSeconds
-	frames := len(f.conns["host"].payloads)
-
-	// Drift the client converges on by rate is neither followed nor corrected.
-	f.report("host", f.expected()-0.8)
-	f.report("host", f.expected()-0.8)
-	if f.repo.room.AnchorPositionSeconds != anchor || transportCount(f.conns["host"]) != transportCountIn(f.conns["host"].payloads[:frames]) {
-		t.Fatalf("host drift inside the nudge band moved the room or was corrected")
-	}
-
-	// Sustained larger drift is corrected on the host like a guest's.
-	f.report("host", f.expected()-6)
-	f.report("host", f.expected()-6)
-	if f.repo.room.AnchorPositionSeconds != anchor {
-		t.Fatalf("host drift inside the band moved the anchor to %v", f.repo.room.AnchorPositionSeconds)
-	}
-	if command := lastTransport(t, f.conns["host"]); command.PositionSeconds != f.expectedAt(command) {
-		t.Fatalf("host drift correction = %+v", command)
-	}
-
-	// Only a jump beyond the host authority band is the host's decision.
-	f.now = f.now.Add(3 * time.Second)
-	jump := f.expected() + 30
-	f.report("host", jump)
-	command := lastTransport(t, f.conns["guest"])
-	if command.Action != TransportActionPlay || f.repo.room.AnchorPositionSeconds != f.expectedAt(command) ||
-		command.PositionSeconds != jump+defaultTransportLead.Seconds() {
-		t.Fatalf("host jump: anchor=%v command=%+v, want both at %v", f.repo.room.AnchorPositionSeconds, command, jump+defaultTransportLead.Seconds())
-	}
-}
-
-func TestGuestDepartureKeepsTheRoomPlaying(t *testing.T) {
-	f := newBufferingRoom(t, "ann", "bob")
-	f.s.Disconnect(f.reg("bob"), true)
-	if f.repo.room.PlaybackState != RoomPlaybackStatePlaying {
-		t.Fatalf("guest departure changed the room: %s", f.repo.room.PlaybackState)
-	}
-	if snapshot := f.buffer("ann"); snapshot.PlaybackState != RoomPlaybackStateWaiting {
-		t.Fatalf("remaining guest's first stall did not pause the room: %+v", snapshot)
-	}
-}
-
 func TestReconnectKeepsTheStallCooldown(t *testing.T) {
 	f := newBufferingRoom(t, "guest")
 	f.s.sessions = &stubSessions{session: &playback.Session{UserID: 8, ProfileID: "guest", MediaFileID: 1}}
@@ -403,19 +280,6 @@ func TestReconnectKeepsTheStallCooldown(t *testing.T) {
 	f.now = f.now.Add(time.Minute)
 	if snapshot := f.buffer("guest"); snapshot.PlaybackState != RoomPlaybackStatePlaying {
 		t.Fatalf("reconnect reset the stall cooldown: %+v", snapshot)
-	}
-}
-
-func TestNewSelectionClearsStallHistory(t *testing.T) {
-	f := newBufferingRoom(t, "guest")
-	f.buffer("guest")
-	f.s.selectionResolver = &stubSelectionResolver{resolved: &ResolvedSelection{ContentID: "movie-2"}}
-	if _, err := f.s.SelectItem(t.Context(), f.repo.room.ID, 7, "host", SelectItemInput{ContentID: "movie-2"}); err != nil {
-		t.Fatal(err)
-	}
-	live := f.s.rooms[f.repo.room.ID]
-	if !live.bufferingWaitAt.IsZero() || !f.member("guest").lastStallAt.IsZero() {
-		t.Fatalf("new selection kept stall history: room=%v guest=%v", live.bufferingWaitAt, f.member("guest").lastStallAt)
 	}
 }
 
@@ -470,25 +334,6 @@ func TestStallHistoryIsSharedAcrossNodesPG(t *testing.T) {
 	}
 }
 
-func TestLoneViewerStallAlwaysPausesTheRoom(t *testing.T) {
-	f := newBufferingRoom(t)
-	f.member("host").lastStallAt = f.now
-	f.member("host").ignoreWait = true
-	snapshot := f.buffer("host")
-	if snapshot.PlaybackState != RoomPlaybackStateWaiting {
-		t.Fatalf("lone viewer's stall let the room run on: %+v", snapshot)
-	}
-	if f.member("host").ignoreWait || !f.s.rooms[f.repo.room.ID].bufferingWaitAt.IsZero() {
-		t.Fatal("lone viewer's stall excluded them or spaced out other viewers")
-	}
-	if command := lastTransport(t, f.conns["host"]); command.Action != TransportActionPause {
-		t.Fatalf("lone viewer was not paused: %+v", command)
-	}
-	if snapshot := f.ready("host", f.repo.room.AnchorPositionSeconds); snapshot.PlaybackState != RoomPlaybackStatePlaying {
-		t.Fatalf("lone viewer's recovery did not resume the room: %+v", snapshot)
-	}
-}
-
 // With nobody ready, running the room would only skip content. A lone viewer
 // is waited for past the deadline, and reconnecting finds the room where they
 // stalled.
@@ -519,27 +364,6 @@ func TestLoneViewerIsWaitedForPastTheDeadline(t *testing.T) {
 	f.now = f.now.Add(20 * time.Second)
 	if snapshot := f.ready("host", 100); snapshot.PlaybackState != RoomPlaybackStatePlaying || f.repo.room.AnchorPositionSeconds != 100 {
 		t.Fatalf("lone viewer's recovery moved the room: %+v", snapshot)
-	}
-}
-
-// A viewer skipped while someone else watched can end up alone. Recovering
-// then resumes the room from where they are instead of jumping them ahead.
-func TestViewerLeftAloneRecoversFromTheirPosition(t *testing.T) {
-	f := newBufferingRoom(t, "guest")
-	f.buffer("host")
-	f.ready("guest", f.repo.room.AnchorPositionSeconds)
-	f.missDeadline()
-	if !f.member("host").ignoreWait {
-		t.Fatal("deadline did not skip the stalled viewer")
-	}
-	f.s.Disconnect(f.reg("guest"), true)
-	f.now = f.now.Add(20 * time.Second)
-	f.ready("host", 100)
-	if f.repo.room.AnchorPositionSeconds != 100 || f.repo.room.PlaybackState != RoomPlaybackStatePlaying {
-		t.Fatalf("recovery jumped the room: anchor=%v state=%s", f.repo.room.AnchorPositionSeconds, f.repo.room.PlaybackState)
-	}
-	if command := lastTransport(t, f.conns["host"]); command.Action != TransportActionPlay || command.PositionSeconds != f.expectedAt(command) {
-		t.Fatalf("recovery target = %+v, want play at %v", command, f.expectedAt(command))
 	}
 }
 

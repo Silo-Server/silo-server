@@ -16,7 +16,7 @@ import { adminKeys } from "../keys";
  */
 const SYSTEM_RESOURCES_REFRESH_MS = 15_000;
 
-export interface BuildInfo {
+interface BuildInfo {
   display: string;
   revision: string;
   dirty: boolean;

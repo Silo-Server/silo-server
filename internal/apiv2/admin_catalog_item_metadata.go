@@ -60,7 +60,7 @@ type AdminItemMetadataUpdateInput struct {
 type AdminItemMetadataRefreshInput struct {
 	ID   string `path:"id" minLength:"1" maxLength:"512"`
 	Body struct {
-		Mode string `json:"mode,omitempty" enum:"quick,complete" default:"quick"`
+		Mode string `json:"mode,omitempty" enum:"quick,complete,reset" default:"quick" doc:"quick rescans the item's folder and refreshes its metadata; complete rebuilds the item from its files first; reset is a quick refresh that also clears the item's field locks and every value its providers lack (Reset to Provider in Edit Metadata)"`
 	}
 }
 

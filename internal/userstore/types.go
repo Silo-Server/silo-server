@@ -29,7 +29,11 @@ type Profile struct {
 	// RequireAdvisoryAge hides titles with no advisory age from the profile
 	// (see access.MaturityLimits.RequireAdvisoryAge). It only takes effect
 	// with a MaxAdvisoryAge limit.
-	RequireAdvisoryAge         bool
+	RequireAdvisoryAge bool
+	// RequestsBlocked keeps the profile out of requests and request discovery
+	// even when its account may request. Stored as a block, not an allow, so
+	// the zero value of a profile built anywhere keeps today's behavior.
+	RequestsBlocked            bool
 	QualityPreference          string
 	Language                   string
 	PreferredMetadataLanguage  string // ISO 639-1; "" = inherit library metadata language
@@ -111,7 +115,9 @@ type UpdateProfileInput struct {
 	// positive age sets it.
 	MaxAdvisoryAge *int
 	// RequireAdvisoryAge: nil leaves it untouched.
-	RequireAdvisoryAge         *bool
+	RequireAdvisoryAge *bool
+	// RequestsBlocked: nil leaves it untouched.
+	RequestsBlocked            *bool
 	QualityPreference          *string
 	Language                   *string
 	PreferredMetadataLanguage  *string
@@ -166,11 +172,15 @@ type WatchProgress struct {
 	DurationSeconds float64
 	Completed       bool
 	UpdatedAt       string
-	LastFileID      *int
-	LastResolution  *string
-	LastHDR         *bool
-	LastCodecVideo  *string
-	LastEditionKey  *string
+	// UpdatedAtTime is UpdatedAt at the store's full precision, which
+	// UpdatedAt's whole seconds can lose. Zero when the store sets only
+	// UpdatedAt.
+	UpdatedAtTime  time.Time
+	LastFileID     *int
+	LastResolution *string
+	LastHDR        *bool
+	LastCodecVideo *string
+	LastEditionKey *string
 }
 
 const (
@@ -252,14 +262,38 @@ type WatchIdentity struct {
 }
 
 type WatchHistoryEntry struct {
-	ID              string
-	ProfileID       string
-	MediaItemID     string
-	WatchedAt       string
+	ID          string
+	ProfileID   string
+	MediaItemID string
+	WatchedAt   string
+	// WatchedAtTime is WatchedAt at the store's full precision, which
+	// WatchedAt's whole seconds can lose. Zero when the store sets only
+	// WatchedAt.
+	WatchedAtTime   time.Time
 	DurationSeconds float64
 	Completed       bool
 	Source          WatchHistorySource
 	Identity        WatchIdentity
+}
+
+// CompletedHistoryKey is the keyset position ListCompletedHistory resumes
+// after: the last row a caller already holds, in the fixed (watched_at ASC,
+// id ASC) order. Build it with WatchHistoryEntry.CompletedHistoryKey so
+// WatchedAt keeps the store's full precision; a whole-second key would
+// repeat or skip rows that share its second.
+type CompletedHistoryKey struct {
+	WatchedAt string
+	ID        string
+}
+
+// CompletedHistoryKey returns the keyset position of e, a row
+// ListCompletedHistory returned.
+func (e WatchHistoryEntry) CompletedHistoryKey() *CompletedHistoryKey {
+	watchedAt := e.WatchedAt
+	if !e.WatchedAtTime.IsZero() {
+		watchedAt = e.WatchedAtTime.Format(time.RFC3339Nano)
+	}
+	return &CompletedHistoryKey{WatchedAt: watchedAt, ID: e.ID}
 }
 
 type CompletedHistoryQuery struct {
@@ -267,8 +301,12 @@ type CompletedHistoryQuery struct {
 	MediaItemIDs   []string
 	IncludeSources []WatchHistorySource
 	ExcludeSources []WatchHistorySource
-	Limit          int
-	Offset         int
+	// After, when set, starts the page after this row. Paging by key reads
+	// only the page; Offset re-reads every row before it, and a row added or
+	// hidden mid-walk shifts later pages.
+	After  *CompletedHistoryKey
+	Limit  int
+	Offset int
 }
 
 type CompletedHistoryItemQuery struct {
@@ -278,9 +316,13 @@ type CompletedHistoryItemQuery struct {
 	ExcludeSources []WatchHistorySource
 }
 
+// CompletedHistoryItem is one item's visible completed plays:
+// ListCompletedHistoryItems sets WatchedAt to the latest play and PlayCount to
+// how many plays it has.
 type CompletedHistoryItem struct {
 	MediaItemID string
 	WatchedAt   string
+	PlayCount   int
 }
 
 // Favorite represents a favorited media item.

@@ -14,7 +14,8 @@ import {
   useSetTitleAllowance,
 } from "@/hooks/queries/titleAllowances";
 import { useDebounce } from "@/hooks/useDebounce";
-import { useT, type MessageKey } from "@/i18n";
+import { numberText, useT, type MessageKey } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
 const SEARCH_LIMIT = 10;
 const SEARCH_DEBOUNCE_MS = 250;
@@ -108,7 +109,9 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
               <span className="min-w-0 flex-1 truncate text-sm">
                 {item.title}
                 {item.year ? (
-                  <span className="text-muted-foreground ms-1.5 text-xs">{item.year}</span>
+                  <span className="text-muted-foreground ms-1.5 text-xs">
+                    {numberText(item.year)}
+                  </span>
                 ) : null}
               </span>
               <Button
@@ -169,11 +172,11 @@ export function AllowedTitlesSection({ profileId }: { profileId: string }) {
                     {collection.live
                       ? t("web.profiles.allowedTitles.titleCount", {
                           count: collection.item_count,
-                          count_text: collection.item_count,
+                          count_text: collection.item_count.toLocaleString(formatLocale()),
                         })
                       : t("web.profiles.allowedTitles.titleCountPaused", {
                           count: collection.item_count,
-                          count_text: collection.item_count,
+                          count_text: collection.item_count.toLocaleString(formatLocale()),
                         })}
                   </span>
                 </span>
@@ -294,7 +297,10 @@ function AddAllowedTitle({
                 <span className="min-w-0 flex-1 truncate">
                   {item.title}
                   <span className="text-muted-foreground ms-1.5 text-xs">
-                    {[item.year, t("web.profiles.allowedTitles.resultType", { type: item.type })]
+                    {[
+                      item.year ? numberText(item.year) : null,
+                      t("web.profiles.allowedTitles.resultType", { type: item.type }),
+                    ]
                       .filter(Boolean)
                       .join(" · ")}
                   </span>

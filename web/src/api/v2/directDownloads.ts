@@ -1,12 +1,12 @@
 import {
   captureProfileRequestContext,
   captureSessionIdentity,
-  getAccessToken,
   isCapturedProfileAuthorityActive,
   isSessionIdentityCurrent,
   StaleApiRequestContextError,
 } from "@/api/client";
 import { problemId } from "./problemId";
+import { V2ProblemError, v2 } from "./request";
 
 /** A direct-download attempt the user must be told about, with a concrete reason. */
 export class DirectDownloadError extends Error {
@@ -79,12 +79,13 @@ async function probeProblemCode(res: Response): Promise<string> {
 }
 
 /**
- * A preflighted direct-download link. The URL is the authenticated
- * direct-download endpoint itself; the browser fetches it when the user clicks
- * the save link, so there is no object URL to own or revoke.
+ * A preflighted direct-download link. The URL is the server-minted,
+ * profile-bound direct-download URL; the browser navigates to it when the user
+ * clicks the save link, so there is no object URL to own or revoke and no
+ * account credential in the URL.
  */
 export interface PreparedDirectDownload {
-  /** The authenticated direct-download URL the explicit save link points at. */
+  /** The direct-download URL the explicit save link points at. */
   readonly url: string;
   /** Filename suggested by the server, or a safe fallback. */
   readonly filename: string;
@@ -112,16 +113,18 @@ function probeAccepted(status: number): boolean {
   return status === 200 || status === 206;
 }
 
-// Browser navigation cannot set headers. Retain the existing account-token
-// authority; do not imply that the selected profile/PIN travels in this URL.
+// Browser navigation cannot set headers or headers-backed authority, so the
+// server mints a link bound to the selected profile and the one file
+// (`dl`), and the navigation URL carries only that link. A refusal while
+// minting surfaces as a DirectDownloadError with the server's reason.
 //
 // The ranged GET is a preflight, not delivery proof: it establishes that the
-// captured token is still authorized for this exact verb and URL so a refusal
-// surfaces as text instead of a silent navigation. The bytes are never fetched
-// here — the explicit save link's own navigation performs the transfer, with
-// real user activation behind it. Abort is threaded through the preflight and
-// its body consumption via `signal`; the transfer itself is browser-owned
-// navigation, so there is nothing for JS to abort or revoke on the save path.
+// link still resolves so a refusal surfaces as text instead of a silent
+// navigation. The bytes are never fetched here — the explicit save link's own
+// navigation performs the transfer, with real user activation behind it.
+// Abort is threaded through the mint and the preflight via `signal`; the
+// transfer itself is browser-owned navigation, so there is nothing for JS to
+// abort or revoke on the save path.
 export async function prepareDirectDownload(
   fileId: number,
   isCurrent: () => boolean,
@@ -130,13 +133,11 @@ export async function prepareDirectDownload(
 ): Promise<PreparedDirectDownload> {
   if (!Number.isSafeInteger(fileId) || fileId <= 0)
     throw new DirectDownloadError(0, "Invalid file ID.");
-  const token = getAccessToken();
   const identity = captureSessionIdentity();
   const profile = captureProfileRequestContext();
   const requireCurrent = () => {
     if (
       signal.aborted ||
-      !token ||
       !isCurrent() ||
       !isSessionIdentityCurrent(identity) ||
       (profile && !isCapturedProfileAuthorityActive(profile))
@@ -144,7 +145,28 @@ export async function prepareDirectDownload(
       throw new StaleApiRequestContextError();
   };
   requireCurrent();
-  const url = `/api/v2/direct-download?${new URLSearchParams({ file_id: String(fileId), token: token! })}`;
+  if (!profile) throw new StaleApiRequestContextError();
+
+  let url: string;
+  try {
+    const link = await v2("POST /api/v2/direct-download/links", {
+      body: { file_id: String(fileId) },
+      profileContext: profile,
+    });
+    requireCurrent();
+    url = link.url;
+  } catch (error) {
+    // A rejected mint must not report into a replacement authority either.
+    requireCurrent();
+    if (error instanceof V2ProblemError) {
+      throw new DirectDownloadError(
+        error.status,
+        directDownloadErrorMessage(error.status, error.problemType),
+        error.problemType,
+      );
+    }
+    throw error;
+  }
 
   let probeRes: Response;
   try {

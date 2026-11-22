@@ -211,7 +211,6 @@ func seedRoundTrip(t *testing.T, pool *pgxpool.Pool, settings *catalog.Encrypted
 func TestBackupRestoreRoundTripDB(t *testing.T) {
 	pool, dsn := backuptest.Database(t)
 	tools := testTools(t)
-	ctx := t.Context()
 	masterKey := []byte("round-trip-test-key-0123456789abcdef")
 	cipher, err := secret.New(masterKey)
 	if err != nil {
@@ -221,10 +220,7 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	manifestKey, err := secret.BackupManifestKey(masterKey)
-	if err != nil {
-		t.Fatal(err)
-	}
+	manifestKey := manifestKeyOf(t, masterKey)
 	settings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
 	root := t.TempDir()
 	store, err := blobstore.NewFilesystem(root)
@@ -243,12 +239,7 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 		ManifestKey: manifestKey,
 		FindTools:   func(context.Context) (Tools, error) { return tools, nil },
 	})
-	held, err := svc.opts.Locker.TryLock(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	result, err := svc.Backup(ctx, held, KindManual, "", nil)
-	held.Release(ctx)
+	result, err := backupUnderLock(t, svc, KindManual)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -256,59 +247,73 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 		t.Fatalf("backup result = %+v, want complete with warnings naming %s", result, seed.missingKey)
 	}
 
-	src := openTestSource(t, filepath.Join(root, "backups", serverID, result.ID))
-	into := createDatabase(t, pool, dsn)
-	blobsInto := t.TempDir()
+	folder := filepath.Join(root, "backups", serverID, result.ID)
+	checkManifestTampering(t, openTestSource(t, folder), manifestKey, keyCheck)
+
+	// The restores read the same archive and each writes to its own target.
+	// Open a Source per subtest because validation records authentication on it.
 	loader := PGLoader{Tools: tools}
-	if _, err := RestoreSeparate(ctx, src, loader, SeparateOptions{
-		Validate: ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey}, Into: into, BlobsInto: blobsInto,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	checkManifestTampering(t, src, manifestKey, keyCheck)
-
-	in, err := loader.Inspect(ctx, into)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Everything the manifest counts, less the storage identities, the
-	// signing keys, and the API keys the restore cleared.
-	var signingKeys int64
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM server_settings WHERE key = ANY($1)`, rotatedSettingKeys()).Scan(&signingKeys); err != nil {
-		t.Fatal(err)
-	}
-	want := slices.Clone(src.Manifest.Tables)
-	for i := range want {
-		switch want[i].Name {
-		case "server_settings":
-			want[i].Rows -= int64(len(storageIdentities)) + signingKeys
-		case "api_keys":
-			want[i].Rows = 0
+	t.Run("separate restore", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+		src := openTestSource(t, folder)
+		into := createDatabase(t, pool, dsn)
+		blobsInto := t.TempDir()
+		if _, err := RestoreSeparate(ctx, src, loader, SeparateOptions{
+			Validate: ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey}, Into: into, BlobsInto: blobsInto,
+		}); err != nil {
+			t.Fatal(err)
 		}
-	}
-	if in.GooseVersion != src.Manifest.GooseVersion || !slices.Equal(in.Tables, want) {
-		t.Fatalf("restored inventory %d %+v, want %d %+v", in.GooseVersion, in.Tables, src.Manifest.GooseVersion, want)
-	}
-	if len(src.Manifest.AppliedMigrations) == 0 || !slices.Equal(in.Applied, src.Manifest.AppliedMigrations) {
-		t.Fatalf("restored applied migrations %v, manifest %v", in.Applied, src.Manifest.AppliedMigrations)
-	}
-	restoredPool, err := pgxpool.New(ctx, into)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer restoredPool.Close()
-	checkRestoredFiles(t, seed, blobsInto, restoredPool)
-	checkCredentials(t, loader, pool, dsn, into, restoredPool, seed.userID)
-	restoredSettings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(restoredPool), cipher)
-	if got, err := restoredSettings.Get(ctx, seed.secretKey); err != nil || got != seed.secretValue {
-		t.Fatalf("restored encrypted setting = %q, %v; want %q", got, err, seed.secretValue)
-	}
 
-	if err := VerifyBackup(ctx, src, loader, into, ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey}, io.Discard); err == nil || !strings.Contains(err.Error(), "not empty") {
-		t.Fatalf("verify into a used database = %v, want refusal", err)
-	}
-	checkAnotherKey(t, src, loader, pool, dsn, seed.secretKey)
-	checkDrillAsOrdinaryRole(t, src, loader, pool, dsn, ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey})
+		in, err := loader.Inspect(ctx, into)
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Everything the manifest counts, less the storage identities, the
+		// signing keys, and the API keys the restore cleared.
+		var signingKeys int64
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM server_settings WHERE key = ANY($1)`, rotatedSettingKeys()).Scan(&signingKeys); err != nil {
+			t.Fatal(err)
+		}
+		want := slices.Clone(src.Manifest.Tables)
+		for i := range want {
+			switch want[i].Name {
+			case "server_settings":
+				want[i].Rows -= int64(len(storageIdentities)) + signingKeys
+			case "api_keys":
+				want[i].Rows = 0
+			}
+		}
+		if in.GooseVersion != src.Manifest.GooseVersion || !slices.Equal(in.Tables, want) {
+			t.Fatalf("restored inventory %d %+v, want %d %+v", in.GooseVersion, in.Tables, src.Manifest.GooseVersion, want)
+		}
+		if len(src.Manifest.AppliedMigrations) == 0 || !slices.Equal(in.Applied, src.Manifest.AppliedMigrations) {
+			t.Fatalf("restored applied migrations %v, manifest %v", in.Applied, src.Manifest.AppliedMigrations)
+		}
+		restoredPool, err := pgxpool.New(ctx, into)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer restoredPool.Close()
+		checkRestoredFiles(t, seed, blobsInto, restoredPool)
+		checkCredentials(t, loader, pool, dsn, into, restoredPool, seed.userID)
+		restoredSettings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(restoredPool), cipher)
+		if got, err := restoredSettings.Get(ctx, seed.secretKey); err != nil || got != seed.secretValue {
+			t.Fatalf("restored encrypted setting = %q, %v; want %q", got, err, seed.secretValue)
+		}
+
+		if err := VerifyBackup(ctx, src, loader, into, ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey}, io.Discard); err == nil || !strings.Contains(err.Error(), "not empty") {
+			t.Fatalf("verify into a used database = %v, want refusal", err)
+		}
+	})
+	t.Run("another key", func(t *testing.T) {
+		t.Parallel()
+		checkAnotherKey(t, openTestSource(t, folder), loader, pool, dsn, seed.secretKey)
+	})
+	t.Run("ordinary role drill", func(t *testing.T) {
+		t.Parallel()
+		checkDrillAsOrdinaryRole(t, openTestSource(t, folder), loader, pool, dsn, ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey})
+	})
 }
 
 // checkDrillAsOrdinaryRole: a restore drill runs as the role the docs
@@ -391,10 +396,7 @@ func checkManifestTampering(t *testing.T, src *Source, manifestKey []byte, keyCh
 	if err := os.WriteFile(path, changed, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	tampered, err := OpenSource(src.Folder())
-	if err != nil {
-		t.Fatal(err)
-	}
+	tampered := openTestSource(t, src.Folder())
 	if err := tampered.Validate(t.Context(), ValidateOptions{KeyCheck: keyCheck, ManifestKey: manifestKey}); !errors.Is(err, ErrManifestTampered) {
 		t.Fatalf("validating a changed manifest = %v, want ErrManifestTampered", err)
 	}
@@ -579,14 +581,15 @@ func checkStricterSettings(t *testing.T, loader PGLoader, pool *pgxpool.Pool, ds
 	set(restored, settingTrustedProxies, "10.0.0.0/8, 0.0.0.0/0")
 	set(pool, config.AuthRefreshTokenExpirySettingKey, "30d")
 	set(restored, config.AuthRefreshTokenExpirySettingKey, "7d")
-	set(pool, settingReleaseEvents, "false")
-	set(restored, settingReleaseEvents, "true")
+	const uiEnabled = "notifications.ui_enabled"
+	set(pool, uiEnabled, "false")
+	set(restored, uiEnabled, "true")
 	kept, err := loader.KeepStricterSettings(ctx, into, dsn, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for key, want := range map[string]string{settingLocalPasswordLogin: "false", settingTrustedProxies: "10.0.0.0/8",
-		config.AuthRefreshTokenExpirySettingKey: "7d", settingReleaseEvents: "false"} {
+		config.AuthRefreshTokenExpirySettingKey: "7d", uiEnabled: "false"} {
 		var got string
 		if err := restored.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&got); err != nil || got != want {
 			t.Fatalf("restored %s = %q (%v), want %q", key, got, err, want)
@@ -1189,6 +1192,7 @@ func checkCarryAuthority(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn,
 	exec(restored, `INSERT INTO user_profiles (id, user_id, name) VALUES ($1, $2, 'Deleted since')`, profile+"-gone", userID)
 	keptAs(false, "want the key dropped: the backup has a profile this account no longer has")
 	exec(restored, `DELETE FROM user_profiles WHERE id = $1`, profile+"-gone")
+	checkCarryKeepsRequestsBlock(t, pool, restored, profile, keptAs)
 }
 
 // checkAnotherKey: a backup taken with another SECRET_KEY restores only
@@ -1201,12 +1205,12 @@ func checkAnotherKey(t *testing.T, src *Source, loader PGLoader, pool *pgxpool.P
 	if err != nil {
 		t.Fatal(err)
 	}
+	into := createDatabase(t, pool, dsn)
 	if _, err := RestoreSeparate(ctx, src, loader, SeparateOptions{
-		Validate: ValidateOptions{KeyCheck: "0000-0000-0000-0000"}, Into: createDatabase(t, pool, dsn), DatabaseOnly: true,
+		Validate: ValidateOptions{KeyCheck: "0000-0000-0000-0000"}, Into: into, DatabaseOnly: true,
 	}); !errors.Is(err, ErrKeyMismatch) {
 		t.Fatalf("restore with another key = %v, want ErrKeyMismatch", err)
 	}
-	into := createDatabase(t, pool, dsn)
 	var out strings.Builder
 	if _, err := RestoreSeparate(ctx, src, loader, SeparateOptions{
 		Validate: ValidateOptions{KeyCheck: "0000-0000-0000-0000", AcceptLostCredentials: true, AcceptSuperuser: true}, Cipher: other,
@@ -1842,6 +1846,86 @@ func TestCustomPoliciesComeFromTheLiveServerDB(t *testing.T) {
 	var enabled int
 	if err := restored.QueryRow(ctx, `SELECT count(*) FROM policy_documents WHERE enabled`).Scan(&enabled); err != nil || enabled != 0 || len(off) != 1 {
 		t.Fatalf("with no live policy: %d enabled (%v), reported %v; want the backup's off and reported", enabled, err, off)
+	}
+}
+
+// TestCarryMatchesAProfileWithinItsAccountDB: a profile id is unique only
+// within an account, so a live row naming a profile is carried only when its
+// own account has that profile in the restored data, even where another
+// account has a profile with the same id.
+func TestCarryMatchesAProfileWithinItsAccountDB(t *testing.T) {
+	live, liveURL := backuptest.Database(t)
+	restored, restoredURL := backuptest.Database(t)
+	ctx := t.Context()
+	account := func(name string) (id int) {
+		t.Helper()
+		if err := live.QueryRow(ctx, `INSERT INTO users (role, username) VALUES ('user', $1) RETURNING id`, name).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		dbExec(t, restored, `INSERT INTO users (id, role, username) VALUES ($1, 'user', $2)`, id, name)
+		return id
+	}
+	first, second := account("first"), account("second")
+	for _, db := range []*pgxpool.Pool{live, restored} {
+		testProfile(t, db, first, "kids", "Kids", false, "")
+		testProfile(t, db, second, "default", "Default", false, "")
+	}
+	// Since the backup, the second account added a profile with the id
+	// the first account's profile has, and destinations for it.
+	testProfile(t, live, second, "kids", "Kids", false, "")
+	webhook := func(id, profile string) {
+		dbExec(t, live, `INSERT INTO notification_webhooks (id, user_id, profile_id, name, type, url_ciphertext, url_host)
+			VALUES ($1, $2, $3, $1, 'discord', 'cipher', 'example.invalid')`, id, second, profile)
+	}
+	webhook("hook-kids", "kids")
+	webhook("hook-default", "default")
+	connection := func(id, profile string) {
+		dbExec(t, live, `INSERT INTO webhook_sync_connections (id, user_id, provider, default_profile_id, webhook_secret)
+			VALUES ($1::uuid, $2, 'plex', $3, $1::text)`, id, second, profile)
+	}
+	const kidsConnection, defaultConnection = "00000000-0000-0000-0000-00000000000a", "00000000-0000-0000-0000-00000000000b"
+	connection(kidsConnection, "kids")
+	connection(defaultConnection, "default")
+	mapping := func(profile string) (id int) {
+		t.Helper()
+		if err := live.QueryRow(ctx, `INSERT INTO webhook_sync_profile_mappings (connection_id, external_user_id, silo_profile_id)
+			VALUES ($1, $2, $2) RETURNING id`, defaultConnection, profile).Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	kidsMapping, defaultMapping := mapping("kids"), mapping("default")
+
+	carried, err := PGLoader{}.CarryCredentials(ctx, restoredURL, liveURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantDropped := []string{
+		fmt.Sprintf("notification webhook hook-kids 'hook-kids' (account %d)", second),
+		fmt.Sprintf("webhook sync connection %s '' (account %d)", kidsConnection, second),
+		fmt.Sprintf("webhook sync mapping %d of connection %s", kidsMapping, defaultConnection),
+	}
+	for _, want := range wantDropped {
+		if !slices.Contains(carried.Dropped, want) {
+			t.Errorf("dropped %q, want %q among them", carried.Dropped, want)
+		}
+	}
+	ids := func(sql string) []string {
+		t.Helper()
+		got, err := collectStrings(ctx, restored, sql)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	if got := ids(`SELECT id FROM notification_webhooks ORDER BY id`); !slices.Equal(got, []string{"hook-default"}) {
+		t.Errorf("restored webhooks %v, want only the one for a profile of its account", got)
+	}
+	if got := ids(`SELECT id::text FROM webhook_sync_connections ORDER BY id`); !slices.Equal(got, []string{defaultConnection}) {
+		t.Errorf("restored webhook sync connections %v, want only the one whose default profile is its account's", got)
+	}
+	if got := ids(`SELECT id::text FROM webhook_sync_profile_mappings ORDER BY id`); !slices.Equal(got, []string{strconv.Itoa(defaultMapping)}) {
+		t.Errorf("restored webhook sync mappings %v, want only the one naming a profile of its account", got)
 	}
 }
 

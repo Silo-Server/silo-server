@@ -295,7 +295,21 @@ type Session struct {
 	Position float64
 	IsPaused bool
 	// Watch records measured playback and pause time from progress samples.
-	Watch WatchTime
+	// TimelineDuration is the length in seconds of the timeline Position is
+	// measured on when that is more than the session's file, such as a whole
+	// Audiobookshelf book of several files. Zero means the file's own
+	// duration.
+	TimelineDuration float64
+	// ReportedListening is the highest running listening total the client
+	// has reported for the play (see UpdateProgressReported).
+	ReportedListening float64
+	// AdaptationReasons says why the route changes the file; empty for direct
+	// play or an unplanned session.
+	AdaptationReasons []string
+	// Subtitle is the subtitle the current plan delivers, for the admin views;
+	// nil when it shows none or the session has no plan.
+	Subtitle *SessionSubtitle
+	Watch    WatchTime
 	// ClientCanceled records the last transport cancel observed for this
 	// session, scoped to the route revision and binding generation it happened
 	// on. It is liveness evidence for one request, not a session verdict: the
@@ -1809,55 +1823,55 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 // snapshotSessionStreamStateLocked captures replaceable stream fields while the manager lock is held.
 func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 	return SessionStreamState{
-		PlayMethod:                                 s.PlayMethod,
-		BasePlayMethod:                             s.BasePlayMethod,
-		AudioTrackIndex:                            s.AudioTrackIndex,
-		VirtualAudioSelectionInvalid:               s.VirtualAudioSelectionInvalid,
-		TranscodeAudio:                             s.TranscodeAudio,
-		RemuxDVMode:                                s.RemuxDVMode,
-		DVProfile:                                  s.DVProfile,
-		DVProfilePin:                               s.DVProfilePin,
-		RemuxResumeLeadingPictureDrop:              s.RemuxResumeLeadingPictureDrop,
-		ClientIP:                                   s.ClientIP,
-		ClientName:                                 s.ClientName,
-		ClientVersion:                              s.ClientVersion,
-		ClientUserAgent:                            s.ClientUserAgent,
-		StreamBitrateKbps:                          s.StreamBitrateKbps,
-		TargetResolution:                           s.TargetResolution,
-		TargetVideoCodec:                           s.TargetVideoCodec,
-		OutputContainer:                            s.OutputContainer,
-		OutputProtocol:                             s.OutputProtocol,
-		TargetAudioCodec:                           s.TargetAudioCodec,
-		SourceContainer:                            s.SourceContainer,
-		SourceAudioChannels:                        s.SourceAudioChannels,
-		TargetAudioChannels:                        s.TargetAudioChannels,
-		TargetAudioBitrateKbps:                     s.TargetAudioBitrateKbps,
-		TargetBitrateKbps:                          s.TargetBitrateKbps,
-		TranscodeHWAccel:                           s.TranscodeHWAccel,
-		ToneMapMode:                                s.ToneMapMode,
-		TranscodeNodeURL:                           s.TranscodeNodeURL,
-		TranscodeTransportID:                       s.TranscodeTransportID,
-		TranscodeRouteSet:                          true,
-		RoutingNetworkProvider:                     s.RoutingNetworkProvider,
-		RoutingWorkload:                            s.RoutingWorkload,
-		RoutingExecution:                           s.RoutingExecution,
-		RoutingExecutionNodeID:                     s.RoutingExecutionNodeID,
-		RoutingExecutionNodeURL:                    s.RoutingExecutionNodeURL,
-		RoutingEgress:                              s.RoutingEgress,
-		RoutingEgressNodeID:                        s.RoutingEgressNodeID,
-		RoutingEgressNodeURL:                       s.RoutingEgressNodeURL,
-		RequireMediaAuthorization:                  s.RequireMediaAuthorization,
-		MediaAuthorizationSet:                      true,
-		VirtualSourceURI:                           s.VirtualSourceURI,
-		VirtualSourceOwnerInstallationID:           s.VirtualSourceOwnerInstallationID,
-		VirtualSourceSet:                           true,
-		VirtualSourceOwnershipSet:                  true,
-		VirtualSourceRevision:                      s.VirtualSourceRevision,
-		VirtualSubtitleTracks:                      s.VirtualSubtitleTracks,
-		VirtualExternalSubtitles:                   s.VirtualExternalSubtitles,
-		VirtualAudioTracks:                         s.VirtualAudioTracks,
-		VirtualSubtitleEvidenceURI:                 s.VirtualSubtitleEvidenceURI,
-		VirtualSubtitleEvidenceFileID:              s.VirtualSubtitleEvidenceFileID,
+		PlayMethod:                       s.PlayMethod,
+		BasePlayMethod:                   s.BasePlayMethod,
+		AudioTrackIndex:                  s.AudioTrackIndex,
+		VirtualAudioSelectionInvalid:     s.VirtualAudioSelectionInvalid,
+		TranscodeAudio:                   s.TranscodeAudio,
+		RemuxDVMode:                      s.RemuxDVMode,
+		DVProfile:                        s.DVProfile,
+		DVProfilePin:                     s.DVProfilePin,
+		RemuxResumeLeadingPictureDrop:    s.RemuxResumeLeadingPictureDrop,
+		ClientIP:                         s.ClientIP,
+		ClientName:                       s.ClientName,
+		ClientVersion:                    s.ClientVersion,
+		ClientUserAgent:                  s.ClientUserAgent,
+		StreamBitrateKbps:                s.StreamBitrateKbps,
+		TargetResolution:                 s.TargetResolution,
+		TargetVideoCodec:                 s.TargetVideoCodec,
+		OutputContainer:                  s.OutputContainer,
+		OutputProtocol:                   s.OutputProtocol,
+		TargetAudioCodec:                 s.TargetAudioCodec,
+		SourceContainer:                  s.SourceContainer,
+		SourceAudioChannels:              s.SourceAudioChannels,
+		TargetAudioChannels:              s.TargetAudioChannels,
+		TargetAudioBitrateKbps:           s.TargetAudioBitrateKbps,
+		TargetBitrateKbps:                s.TargetBitrateKbps,
+		TranscodeHWAccel:                 s.TranscodeHWAccel,
+		ToneMapMode:                      s.ToneMapMode,
+		TranscodeNodeURL:                 s.TranscodeNodeURL,
+		TranscodeTransportID:             s.TranscodeTransportID,
+		TranscodeRouteSet:                true,
+		RoutingNetworkProvider:           s.RoutingNetworkProvider,
+		RoutingWorkload:                  s.RoutingWorkload,
+		RoutingExecution:                 s.RoutingExecution,
+		RoutingExecutionNodeID:           s.RoutingExecutionNodeID,
+		RoutingExecutionNodeURL:          s.RoutingExecutionNodeURL,
+		RoutingEgress:                    s.RoutingEgress,
+		RoutingEgressNodeID:              s.RoutingEgressNodeID,
+		RoutingEgressNodeURL:             s.RoutingEgressNodeURL,
+		RequireMediaAuthorization:        s.RequireMediaAuthorization,
+		MediaAuthorizationSet:            true,
+		VirtualSourceURI:                 s.VirtualSourceURI,
+		VirtualSourceOwnerInstallationID: s.VirtualSourceOwnerInstallationID,
+		VirtualSourceSet:                 true,
+		VirtualSourceOwnershipSet:        true,
+		VirtualSourceRevision:            s.VirtualSourceRevision,
+		VirtualSubtitleTracks:            s.VirtualSubtitleTracks,
+		VirtualExternalSubtitles:         s.VirtualExternalSubtitles,
+		VirtualAudioTracks:               s.VirtualAudioTracks,
+		VirtualSubtitleEvidenceURI:       s.VirtualSubtitleEvidenceURI,
+		VirtualSubtitleEvidenceFileID:    s.VirtualSubtitleEvidenceFileID,
 		VirtualSubtitleEvidenceOwnerInstallationID: s.VirtualSubtitleEvidenceOwnerInstallationID,
 		VirtualSubtitleEvidenceSet:                 s.VirtualSubtitleEvidenceSet,
 		VirtualFontBundleKey:                       s.VirtualFontBundleKey,
@@ -3159,6 +3173,22 @@ func (m *SessionManager) SetProgressPersistenceDisabled(sessionID string, disabl
 	return nil
 }
 
+// SetTimelineDuration records the length of the timeline the session's
+// Position is measured on, for a player whose position spans more than the
+// session's file. See Session.TimelineDuration.
+func (m *SessionManager) SetTimelineDuration(sessionID string, seconds float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+
+	s.TimelineDuration = seconds
+	return nil
+}
+
 // TouchActivity refreshes the session's activity timestamp without changing
 // any other playback state.
 // MarkPlanCommitted records that startup planning completed, allowing normal lifecycle accounting.
@@ -3788,4 +3818,30 @@ func (m *SessionManager) sessionIsInactiveLocked(s *Session, now time.Time, acti
 func (s *Session) String() string {
 	return fmt.Sprintf("Session{id=%s user=%d file=%d method=%s pos=%.1f paused=%v}",
 		s.ID, s.UserID, s.MediaFileID, s.PlayMethod, s.Position, s.IsPaused)
+}
+
+// UpdateProgressReported advances the running listening total an ABS client
+// reported, crediting the delta to the session's watch time.
+func (m *SessionManager) UpdateProgressReported(sessionID string, position, total float64) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	s, ok := m.sessions[sessionID]
+	if !ok {
+		return ErrSessionNotFound
+	}
+	s.Position = position
+	s.IsPaused = false
+	s.StopReported = false
+	s.streamRevision++
+	m.touchSessionLocked(s)
+	switch {
+	case total <= 0 && s.ReportedListening <= 0:
+		s.Watch.Observe(position, false, s.UpdatedAt)
+	case total > s.ReportedListening:
+		listened := total - s.ReportedListening
+		s.ReportedListening = total
+		s.Watch.Credit(position, listened, s.StartedAt, s.UpdatedAt)
+	}
+	return nil
 }

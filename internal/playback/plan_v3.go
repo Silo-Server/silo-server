@@ -202,6 +202,10 @@ type PlannerResultV3 struct {
 	Terminal       *TerminalV3
 	PlayMethod     PlayMethod
 	TranscodeAudio bool
+	// AdaptationReasons says why the route changes the file, in
+	// AdaptationReasons order; empty for the original file. Server-side only:
+	// sessions report it to the admin activity views, never on the plan.
+	AdaptationReasons []string
 	// RemuxResumeLeadingPictureDrop asks a progressive remux that starts past
 	// zero to drop the open-GOP leading pictures macOS Firefox rejects. It is
 	// best effort: an executor whose FFmpeg lacks the filter serves the plain
@@ -1277,6 +1281,11 @@ const (
 	// decisionReasonBandwidthCapV3 marks a plan whose recipe was constrained by
 	// the request's bandwidth cap rather than by decode capability.
 	decisionReasonBandwidthCapV3 = "quality_bandwidth_cap"
+	// The quality reasons that name what lowered an automatic or chosen
+	// quality; adaptation reasons translate them.
+	qualityReasonFixedRungV3      = "quality_fixed_rung"
+	qualityReasonDeviceLimitV3    = "quality_device_limit"
+	qualityReasonBandwidthLimitV3 = "quality_bandwidth_limit"
 
 	// decisionReasonClientManagedDynamicRangeV3 marks an original-file plan
 	// whose executor owns source-to-output dynamic-range presentation.
@@ -2677,13 +2686,13 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	if quality != QualityAutoV3 {
 		targetHeight, _ = strconv.Atoi(strings.TrimSuffix(quality, "p"))
 		classLimit = targetHeight
-		reason = "quality_fixed_rung"
+		reason = qualityReasonFixedRungV3
 		explicitRung = true
 	} else {
 		maxHeight := resolutionHeightV3(request.Capabilities.MaxResolution)
 		if maxHeight > 0 && (targetHeight == 0 || maxHeight < targetHeight) {
 			targetHeight = maxHeight
-			reason = "quality_device_limit"
+			reason = qualityReasonDeviceLimitV3
 		}
 		classLimit = maxHeight
 	}
@@ -2699,7 +2708,7 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		}
 		if overSource {
 			overEstimate = true
-			reason = "quality_bandwidth_limit"
+			reason = qualityReasonBandwidthLimitV3
 		}
 	}
 	if targetHeight <= 0 {
@@ -2822,7 +2831,7 @@ func compoundRungQualityResultV3(rung ladderRungV3, source SourceDescriptorV3, c
 	if capApplied {
 		bitrate = capKbps
 	}
-	reason := "quality_fixed_rung"
+	reason := qualityReasonFixedRungV3
 	if capApplied {
 		reason = decisionReasonBandwidthCapV3
 		warnings = append(warnings, DegradationWarningV3{Code: "bandwidth_cap_applied", Message: "Delivery quality is limited by the configured bandwidth cap."})
@@ -3075,6 +3084,7 @@ func toneMapSourceResolutionV3(file *models.MediaFile, source SourceDescriptorV3
 		metadata.DVBLPresent = track.DVBLPresent
 		metadata.DVRPUPresent = track.DVRPUPresent
 		metadata.ColorRange = track.ColorRange
+		metadata.FrameColorRange = track.FrameColorRange
 		metadata.ColorPrimaries = track.ColorPrimaries
 		metadata.ColorTransfer = track.ColorTransfer
 		metadata.ColorSpace = track.ColorSpace

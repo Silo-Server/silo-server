@@ -4,6 +4,13 @@
       "APIKeyScope": {
         "additionalProperties": false,
         "properties": {
+          "audience": {
+            "enum": [
+              "admin",
+              "user"
+            ],
+            "type": "string"
+          },
           "description": {
             "type": "string"
           },
@@ -13,7 +20,8 @@
         },
         "required": [
           "name",
-          "description"
+          "description",
+          "audience"
         ],
         "type": "object"
       },
@@ -12466,9 +12474,11 @@
         "properties": {
           "mode": {
             "default": "quick",
+            "description": "quick rescans the item's folder and refreshes its metadata; complete rebuilds the item from its files first; reset is a quick refresh that also clears the item's field locks and every value its providers lack (Reset to Provider in Edit Metadata)",
             "enum": [
               "quick",
-              "complete"
+              "complete",
+              "reset"
             ],
             "type": "string"
           }
@@ -14851,6 +14861,14 @@
               "string",
               "null"
             ]
+          },
+          "source_access": {
+            "description": "How a transcode node reaches its source media. A proxy is always local.",
+            "enum": [
+              "local",
+              "core"
+            ],
+            "type": "string"
           },
           "url": {
             "format": "uri-reference",
@@ -42053,16 +42071,7 @@
           "enabled": {
             "type": "boolean"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "profile_id": {
@@ -42077,9 +42086,6 @@
         "required": [
           "profile_id",
           "enabled",
-          "notify_favorites",
-          "notify_watchlist",
-          "notify_continue_watching",
           "notify_next_up"
         ],
         "type": "object"
@@ -42315,27 +42321,12 @@
       "NotificationSeriesReasons": {
         "additionalProperties": false,
         "properties": {
-          "continue_watching": {
-            "description": "The profile is partway through the series",
-            "type": "boolean"
-          },
-          "favorite": {
-            "description": "The series is one of the profile's favorites",
-            "type": "boolean"
-          },
           "next_up": {
             "description": "The profile finished an episode and waits for the next",
-            "type": "boolean"
-          },
-          "watchlist": {
-            "description": "The series is on the profile's watchlist",
             "type": "boolean"
           }
         },
         "required": [
-          "favorite",
-          "watchlist",
-          "continue_watching",
           "next_up"
         ],
         "type": "object"
@@ -42736,12 +42727,6 @@
             "minLength": 1,
             "type": "string"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
             "type": "boolean"
           },
@@ -42749,9 +42734,6 @@
             "type": "boolean"
           },
           "notify_requests": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "type": {
@@ -42837,12 +42819,6 @@
           "name": {
             "type": "string"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
             "type": "boolean"
           },
@@ -42850,9 +42826,6 @@
             "type": "boolean"
           },
           "notify_requests": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "type": {
@@ -42873,9 +42846,6 @@
           "type",
           "url_host",
           "enabled",
-          "notify_favorites",
-          "notify_watchlist",
-          "notify_continue_watching",
           "notify_next_up",
           "notify_requests",
           "notify_ratings",
@@ -42909,12 +42879,6 @@
           "name": {
             "type": "string"
           },
-          "notify_continue_watching": {
-            "type": "boolean"
-          },
-          "notify_favorites": {
-            "type": "boolean"
-          },
           "notify_next_up": {
             "type": "boolean"
           },
@@ -42922,9 +42886,6 @@
             "type": "boolean"
           },
           "notify_requests": {
-            "type": "boolean"
-          },
-          "notify_watchlist": {
             "type": "boolean"
           },
           "url": {
@@ -55795,6 +55756,10 @@
           },
           "dv_rpu_present": {
             "type": "boolean"
+          },
+          "frame_color_range": {
+            "description": "Color range FFmpeg reported on the first decoded frame of a PQ track (tv, pc, or unknown when the frame carried none); absent when the frame was not read. Can differ from color_range, the container's tag",
+            "type": "string"
           },
           "frame_rate": {
             "type": "string"
@@ -241356,7 +241321,7 @@
         }
       },
       {
-        "description": "Reload configuration and tear down active sessions and delivery authority. Failure can follow partial effects.",
+        "description": "Reread configuration from the core, ask the core to revoke this node's recipes (POST /api/internal/nodes/self/revoke-recipes), and tear down active sessions. A failed revocation fails the command after the teardown. Failure can follow partial effects.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -241386,21 +241351,11 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Service Unavailable"
           }
         }
       },
       {
-        "description": "Reload configuration without tearing down active sessions. No durable replay receipt.",
+        "description": "Reread configuration from the core without tearing down active sessions; the core calls it after an admin change to this node. No durable replay receipt.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -241430,16 +241385,6 @@
               }
             },
             "description": "Internal Server Error"
-          },
-          "503": {
-            "content": {
-              "text/plain": {
-                "schema": {
-                  "type": "string"
-                }
-              }
-            },
-            "description": "Service Unavailable"
           }
         }
       },
@@ -242744,7 +242689,7 @@
           },
           "required": true
         },
-        "description": "Synchronously prepare or reuse a node-local MP4 under an artifact lifecycle lock. The JSON decoder reads at most 64 KiB, ignores unknown keys and uses zero values for omitted options. Input path authority and GPU admission apply. Ordinary nonempty artifacts can be reused by ID alone; requested execution attestations require a matching receipt. Missing/mismatched receipts may cause replacement. Request cancellation is not proof that no artifact was published; there is no durable job admission or automatic replay guarantee.",
+        "description": "Synchronously prepare or reuse a node-local MP4 under an artifact lifecycle lock. The JSON decoder reads at most 64 KiB, ignores unknown keys and uses zero values for omitted options. Source grant and GPU admission apply. Ordinary nonempty artifacts can be reused by ID alone; requested execution attestations require a matching receipt. Missing/mismatched receipts may cause replacement. Request cancellation is not proof that no artifact was published; there is no durable job admission or automatic replay guarantee. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503. The execution fingerprint excludes source_grant. A node that declares a job cap refuses new work once it runs that many jobs (the jobs health reports as active_jobs, admitted and not yet counted included) with 503, X-Silo-Node-Refusal: at_capacity and Retry-After; a request for an artifact the node is preparing or has prepared continues a job the node holds and is never refused at the cap. A node that declares a prepared-download budget refuses a new preparation once its last measurement of the directory reaches it, with 503 and X-Silo-Node-Refusal: storage_full.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -242781,6 +242726,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "422": {
             "content": {
@@ -242820,6 +242775,22 @@
             },
             "description": "Service Unavailable",
             "headers": {
+              "Retry-After": {
+                "description": "Seconds, with the refusal header.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-Node-Refusal": {
+                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
+                "schema": {
+                  "enum": [
+                    "at_capacity",
+                    "storage_full"
+                  ],
+                  "type": "string"
+                }
+              },
               "X-Vio-Tone-Map-Execution-Error": {
                 "description": "Bounded tone-map refusal code when available; not present on all failures.",
                 "schema": {
@@ -244065,9 +244036,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "On a release (fence=0), the start_id of the start being released; a job another start published under the ID is left running. Ignored on a fenced stop.",
+            "in": "query",
+            "name": "start_id",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
-        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; stored recipe deletion is required when configured. Local teardown may precede a 503 authority-deletion or shutdown failure. A missing session/recipe returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
+        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; a fenced stop also fences a progressive remux under the ID. A release ends only the job it was sent for and answers 404 for another: with start_id, the HLS job that start published; without it, the HLS job running when the release arrived or a rebuild published while it waited for the lock, not a job a start published then. A fenced stop ends any job. The core deletes the stored recipe itself before it calls; the node closes the session's source. Local teardown may precede a 503 progressive-remux shutdown failure. A transport that runs nothing here returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "DELETE",
@@ -244076,7 +244055,7 @@
         "auth_class": "node_bearer",
         "responses": {
           "204": {
-            "description": "Legacy teardown and configured authority deletion completed; no body. Local file/session close errors are logged rather than changing this status."
+            "description": "Teardown completed; no body. Local file/session close errors are logged rather than changing this status."
           },
           "401": {
             "content": {
@@ -244121,7 +244100,7 @@
           },
           "required": true
         },
-        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may move an early hardware startup failure to a safer path: under hw_accel=auto CPU decode with GPU encode, then software; otherwise the VideoToolbox software retry. Monitoring runs asynchronously. No durable admission/replay receipt or automatic caller retry is implied.",
+        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may move an early hardware startup failure to a safer path: under hw_accel=auto CPU decode with GPU encode, then software; otherwise the VideoToolbox software retry. No durable admission/replay receipt or automatic caller retry is implied. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open), runs FFmpeg on the path the core approves, never on input_path, and keeps the source open for the session's life; a source the core withdraws ends the session. With core source access the input is a loopback relay URL. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a text subtitle burn-in that cannot be staged on a node reading its source through the core 409 (libass would read the whole file through the core), a core the node cannot reach 503. playback_session_id, user_id, profile_id and media_file_id name the playback session the node files its session record and stream telemetry under. A node that declares a job cap refuses new work once it runs that many jobs (the jobs health reports as active_jobs, admitted and not yet counted included) with 503, X-Silo-Node-Refusal: at_capacity and Retry-After; a same-id replacement, or a start for a playback_session_id the node already runs a session or progressive remux for continues a job the node holds and is never refused at the cap.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -244163,6 +244142,16 @@
             },
             "description": "Unauthorized"
           },
+          "409": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "422": {
             "content": {
               "text/plain": {
@@ -244201,6 +244190,22 @@
             },
             "description": "Service Unavailable",
             "headers": {
+              "Retry-After": {
+                "description": "Seconds, with the refusal header.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-Node-Refusal": {
+                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
+                "schema": {
+                  "enum": [
+                    "at_capacity",
+                    "storage_full"
+                  ],
+                  "type": "string"
+                }
+              },
               "X-Vio-Tone-Map-Execution-Error": {
                 "description": "Existing tone-map refusal code when available.",
                 "schema": {
@@ -245130,6 +245135,14 @@
             }
           },
           {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
             "in": "query",
             "name": "remux_range",
@@ -245277,6 +245290,14 @@
             }
           },
           {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
             "in": "query",
             "name": "remux_range",
@@ -245338,6 +245359,14 @@
             "description": "Existing progressive seek interpretation; proxy-local and remote-node validation differ.",
             "in": "query",
             "name": "seek",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
             "schema": {
               "type": "string"
             }
@@ -245485,6 +245514,14 @@
             "description": "Existing progressive seek interpretation; proxy-local and remote-node validation differ.",
             "in": "query",
             "name": "seek",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
             "schema": {
               "type": "string"
             }
@@ -245918,6 +245955,14 @@
             }
           },
           {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Set by the server when the attempt negotiated progressive_range_refusal_v1: a GET whose Range starts past byte 0, or is a suffix range, answers 409 instead of streaming from the origin.",
             "in": "query",
             "name": "remux_range",
@@ -246081,6 +246126,14 @@
             "description": "Existing progressive seek interpretation; proxy-local and remote-node validation differ.",
             "in": "query",
             "name": "seek",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Set by the server beside seek when the plan asked for the macOS Firefox HEVC resume workaround: the plan's stream origin in seconds, the keyframe the copy starts on. Without it the remux serves the plain seeked copy.",
+            "in": "query",
+            "name": "origin",
             "schema": {
               "type": "string"
             }
@@ -246554,7 +246607,7 @@
             }
           },
           {
-            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
+            "description": "Stream token a relay forwards; the node passes it unread to the core's resolve, which verifies it. Not a native user access token.",
             "in": "header",
             "name": "X-Vio-Stream-Token",
             "required": true,
@@ -246563,7 +246616,7 @@
             }
           },
           {
-            "description": "Parsed float; parse errors and negative values return400. No byte-range resume contract.",
+            "description": "Parsed float; parse errors and negative values return 400. No byte-range resume contract.",
             "in": "query",
             "name": "seek",
             "schema": {
@@ -246571,7 +246624,7 @@
             }
           }
         ],
-        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Audio-downmix recipes require the exact stereo shape. A theme_aac_v1 recipe converts one detail-page theme to AAC; the theme authority approves its id, path, size and modification time in place of the media-file catalog. Input authority and current configuration are checked. A session carrying the deny marker, or revoked/stopped authority, returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
+        "description": "Every GET and HEAD resolves the transport at the core (POST /api/internal/nodes/self/resolve, purpose remux), passing the stream token unread; a transport this process stopped is refused with 410 first, and a GET for a transport that already has a request running (409) or on a node that has reported itself drained (503) is refused before the core is asked. The core's refusals map to the node's answers: invalid_token 401, wrong_route 503, denied and stopped 410, source_changed 400, not_found 404, anything else (the core unavailable, or its per-node budget answering 429) 503. The token must bind the exact transport and this node's remux-execution/proxy-egress route; audio-downmix recipes require the exact stereo shape; a theme_aac_v1 recipe converts one detail-page theme to AAC. A GET opens the source the resolution grants (a refused grant 400, a mount that does not show the approved revision 409, the core unreachable 503) and reads only that path; a concurrent GET returns 409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; a committed 200 can truncate on encoder/read failure, and a source the core withdraws ends it. HEAD validates authority but opens no source and starts no encoder. Process-local fences are not durable across node replacement. A node that declares a job cap refuses new work once it runs that many jobs (the jobs health reports as active_jobs, admitted and not yet counted included) with 503, X-Silo-Node-Refusal: at_capacity and Retry-After; a GET for a playback session the node runs a session or progressive remux for, or served a progressive remux for within the last ten minutes (a seek or a reconnect) continues a job the node holds and is never refused at the cap.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/remux/{session_id}",
@@ -246665,7 +246718,25 @@
                 }
               }
             },
-            "description": "Service Unavailable"
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds, with the refusal header.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-Node-Refusal": {
+                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
+                "schema": {
+                  "enum": [
+                    "at_capacity",
+                    "storage_full"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },
@@ -246680,7 +246751,7 @@
             }
           },
           {
-            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
+            "description": "Stream token a relay forwards; the node passes it unread to the core's resolve, which verifies it. Not a native user access token.",
             "in": "header",
             "name": "X-Vio-Stream-Token",
             "required": true,
@@ -246689,7 +246760,7 @@
             }
           },
           {
-            "description": "Parsed float; parse errors and negative values return400. No byte-range resume contract.",
+            "description": "Parsed float; parse errors and negative values return 400. No byte-range resume contract.",
             "in": "query",
             "name": "seek",
             "schema": {
@@ -246697,7 +246768,7 @@
             }
           }
         ],
-        "description": "Node bearer plus independently verified playback recipe token must bind exact transport and this node's remux-execution/proxy-egress route. Audio-downmix recipes require the exact stereo shape. A theme_aac_v1 recipe converts one detail-page theme to AAC; the theme authority approves its id, path, size and modification time in place of the media-file catalog. Input authority and current configuration are checked. A session carrying the deny marker, or revoked/stopped authority, returns410 and a concurrent GET returns409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; committed200 can truncate on encoder/read failure. HEAD validates authority but does not check actual file existence or start an encoder. Process-local fences are not durable across node replacement.",
+        "description": "Every GET and HEAD resolves the transport at the core (POST /api/internal/nodes/self/resolve, purpose remux), passing the stream token unread; a transport this process stopped is refused with 410 first, and a GET for a transport that already has a request running (409) or on a node that has reported itself drained (503) is refused before the core is asked. The core's refusals map to the node's answers: invalid_token 401, wrong_route 503, denied and stopped 410, source_changed 400, not_found 404, anything else (the core unavailable, or its per-node budget answering 429) 503. The token must bind the exact transport and this node's remux-execution/proxy-egress route; audio-downmix recipes require the exact stereo shape; a theme_aac_v1 recipe converts one detail-page theme to AAC. A GET opens the source the resolution grants (a refused grant 400, a mount that does not show the approved revision 409, the core unreachable 503) and reads only that path; a concurrent GET returns 409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; a committed 200 can truncate on encoder/read failure, and a source the core withdraws ends it. HEAD validates authority but opens no source and starts no encoder. Process-local fences are not durable across node replacement.",
         "listener": "transcode_node",
         "method": "HEAD",
         "path": "/remux/{session_id}",
@@ -246741,7 +246812,7 @@
             }
           },
           {
-            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
+            "description": "Stream token a relay forwards; the node passes it unread to the core's resolve, which verifies it. Not a native user access token.",
             "in": "header",
             "name": "X-Vio-Stream-Token",
             "schema": {
@@ -246749,7 +246820,7 @@
             }
           },
           {
-            "description": "Value1 requests source-aligned manifest; raw query is preserved in segment links.",
+            "description": "Value 1 requests a source-aligned manifest; raw query is preserved in segment links.",
             "in": "query",
             "name": "source_timeline",
             "schema": {
@@ -246757,7 +246828,7 @@
             }
           }
         ],
-        "description": "Node bearer protects the worker listener. A session carrying the deny marker returns410 and is neither served nor reconstructed. Missing process-local sessions may reconstruct through existing signed-token/stored-recipe, input and execution authority guards; a missing/refused reconstruction can return404. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Build the playback manifest; unavailable manifest returns503. No-store response contains relative segment links.",
+        "description": "Node bearer protects the worker listener. A live process-local session is served without asking the core; the relays check the deny marker before forwarding. A missing session is rebuilt from the recipe the core resolves (POST /api/internal/nodes/self/resolve, purpose hls, the stream token passed unread) and the source it grants, unless this process stopped the transport, which returns 410 before the core is asked. The core denying the session returns 410, any other refusal 404, a core the node cannot reach 503. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Build the playback manifest; an unavailable manifest returns 503. No-store response contains relative segment links.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/transcode/{session_id}/master.m3u8",
@@ -246853,7 +246924,7 @@
             }
           },
           {
-            "description": "Signed recipe reference for node-side validation and deny-marker lookup; not a native user access token.",
+            "description": "Stream token a relay forwards; the node passes it unread to the core's resolve, which verifies it. Not a native user access token.",
             "in": "header",
             "name": "X-Vio-Stream-Token",
             "schema": {
@@ -246869,7 +246940,7 @@
             }
           },
           {
-            "description": "Value1 defers completion accounting to downstream acknowledgment and returns private generation metadata.",
+            "description": "Value 1 defers completion accounting to downstream acknowledgment and returns private generation metadata.",
             "in": "header",
             "name": "X-Vio-Transcode-Proxy",
             "schema": {
@@ -246919,7 +246990,7 @@
             }
           }
         ],
-        "description": "Node bearer protects the worker listener. A session carrying the deny marker returns410 and is neither served nor reconstructed. Missing process-local sessions may reconstruct through existing signed-token/stored-recipe, input and execution authority guards; a missing/refused reconstruction can return404. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Open an exact segment lease; missing media can wait or trigger guarded seek/restart recovery. Non-numbered init data can also wait. ServeContent supplies extension/sniffed media, conditions and ranges. Private generation is emitted only on a marked proxy hop. Direct complete GET reports generation-bound completion; proxied reads await separate acknowledgment. Partial/failed responses do not advance completion and may truncate after headers.",
+        "description": "Node bearer protects the worker listener. A live process-local session is served without asking the core; the relays check the deny marker before forwarding. A missing session is rebuilt from the recipe the core resolves (POST /api/internal/nodes/self/resolve, purpose hls, the stream token passed unread) and the source it grants, unless this process stopped the transport, which returns 410 before the core is asked. The core denying the session returns 410, any other refusal 404, a core the node cannot reach 503. Reads refresh liveness; no durable session availability, unscoped reconstruction or native route is promised. Open an exact segment lease; missing media can wait or trigger guarded seek/restart recovery. Non-numbered init data can also wait. ServeContent supplies extension/sniffed media, conditions and ranges. Private generation is emitted only on a marked proxy hop. Direct complete GET reports generation-bound completion; proxied reads await separate acknowledgment. Partial/failed responses do not advance completion and may truncate after headers.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/transcode/{session_id}/segment/{name}",
@@ -247355,6 +247426,9 @@
             "format": "double",
             "type": "number"
           },
+          "source_grant": {
+            "type": "string"
+          },
           "tone_map": {
             "type": "boolean"
           }
@@ -247415,9 +247489,6 @@
             "format": "int64",
             "type": "integer"
           },
-          "canonical_input_path": {
-            "type": "string"
-          },
           "input_path": {
             "type": "string"
           },
@@ -247433,6 +247504,13 @@
           "source_audio_channels": {
             "format": "int64",
             "type": "integer"
+          },
+          "source_frame_rate": {
+            "format": "double",
+            "type": "number"
+          },
+          "source_grant": {
+            "type": "string"
           },
           "source_video_bit_depth": {
             "format": "int64",
@@ -247505,7 +247583,7 @@
         },
         "required": [
           "artifact_id",
-          "input_path"
+          "source_grant"
         ],
         "type": "object"
       },
@@ -247848,6 +247926,9 @@
           "sheets": {
             "$ref": "#/x-silo-worker-protocols/schemas/mediasample_SheetsOutput"
           },
+          "source_grant": {
+            "type": "string"
+          },
           "stats": {
             "$ref": "#/x-silo-worker-protocols/schemas/mediasample_StatsOutput"
           },
@@ -247864,7 +247945,8 @@
           }
         },
         "required": [
-          "input"
+          "input",
+          "source_grant"
         ],
         "type": "object"
       },
@@ -249312,7 +249394,7 @@
         },
         "required": [
           "session_id",
-          "input_path"
+          "source_grant"
         ],
         "type": "object"
       },

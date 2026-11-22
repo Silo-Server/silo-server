@@ -18,6 +18,7 @@ import {
   fetchWithSession,
   isProfileRequestContextCurrent,
   reportProfileUnverified,
+  SessionRefreshUnavailableError,
   StaleApiRequestContextError,
   type ProfileRequestContextSnapshot,
 } from "../client";
@@ -331,6 +332,44 @@ export function isNotFoundProblem(error: unknown): boolean {
   return error instanceof V2ProblemError && error.status === 404;
 }
 
+/**
+ * The text to show for a failed v2 request: the server's answer (a
+ * `V2ProblemError`) or the session layer's translated notice that a refresh
+ * got no verdict, else `fallback`. A failed fetch (`TypeError`), a
+ * `V2TimeoutError`, or a `V2TransportError` (a proxy's error page) carries
+ * developer English, not text written for the reader.
+ */
+export function v2ErrorText(error: unknown, fallback: string): string {
+  return error instanceof V2ProblemError || error instanceof SessionRefreshUnavailableError
+    ? error.message
+    : fallback;
+}
+
+/**
+ * Whether a failed v2 request may succeed if sent again later: the server was
+ * busy (429, 5xx), never answered (a network error, the deadline), or a
+ * session refresh got no verdict. Any other 4xx is the server's answer.
+ */
+export function isTransientV2Error(error: unknown): boolean {
+  if (error instanceof V2ProblemError) return error.status === 429 || error.status >= 500;
+  if (error instanceof V2TransportError)
+    return error.status === 0 || error.status === 429 || error.status >= 500;
+  return (
+    error instanceof TypeError ||
+    error instanceof V2TimeoutError ||
+    error instanceof SessionRefreshUnavailableError
+  );
+}
+
+/** How long to wait before retrying `error`: `fallbackMs`, or longer when the server sent `Retry-After`. */
+export function v2RetryDelayMs(error: unknown, fallbackMs: number): number {
+  const retryAfter =
+    error instanceof V2ProblemError || error instanceof V2TransportError
+      ? error.retryAfterSeconds
+      : null;
+  return retryAfter === null ? fallbackMs : Math.max(fallbackMs, retryAfter * 1000);
+}
+
 /** Parses a delta-seconds `Retry-After` header; an HTTP-date form is not a contract shape. */
 function retryAfterSecondsOf(res: Response): number | null {
   const raw = res.headers.get("Retry-After");
@@ -348,11 +387,19 @@ function retryAfterSecondsOf(res: Response): number | null {
 export class V2TransportError extends Error {
   readonly operationId: string;
   readonly status: number;
+  /** The `Retry-After` delay in seconds when the response carried one (a proxy's 429 or 503). */
+  readonly retryAfterSeconds: number | null;
 
-  constructor(operationId: string, status: number, reason: string) {
+  constructor(
+    operationId: string,
+    status: number,
+    reason: string,
+    retryAfterSeconds: number | null = null,
+  ) {
     super(`${operationId}: ${reason} (HTTP ${status})`);
     this.name = "V2TransportError";
     this.operationId = operationId;
+    this.retryAfterSeconds = retryAfterSeconds;
     this.status = status;
   }
 }
@@ -387,7 +434,7 @@ export const V2_CLIENT_HEADERS: Readonly<Record<string, string>> = {
   "X-Silo-Client-Version": typeof __SILO_WEB_VERSION__ === "string" ? __SILO_WEB_VERSION__ : "dev",
 };
 
-function isProblem(value: unknown): value is Problem {
+export function isProblem(value: unknown): value is Problem {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return (
@@ -438,12 +485,22 @@ async function readBody(res: Response, operationId: string): Promise<unknown> {
   const text = await res.text();
   if (text.trim() === "") return undefined;
   if (!isJsonMediaType(res.headers.get("Content-Type"))) {
-    throw new V2TransportError(operationId, res.status, "the response body is not JSON");
+    throw new V2TransportError(
+      operationId,
+      res.status,
+      "the response body is not JSON",
+      retryAfterSecondsOf(res),
+    );
   }
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    throw new V2TransportError(operationId, res.status, "the response body is not valid JSON");
+    throw new V2TransportError(
+      operationId,
+      res.status,
+      "the response body is not valid JSON",
+      retryAfterSecondsOf(res),
+    );
   }
 }
 
@@ -503,16 +560,33 @@ export async function v2<K extends V2OperationKey>(
   if (timeoutMs === false) {
     return sendV2(key, url, init, snapshot, options);
   }
-  // The deadline covers the whole exchange, body included: a server can send
-  // the headers and then stall.
+  return withV2Deadline(key, timeoutMs, options.signal, (signal) => {
+    init.signal = signal;
+    return sendV2(key, url, init, snapshot, options);
+  });
+}
+
+/**
+ * Runs one v2 exchange under a deadline: `send` gets a signal that aborts
+ * after `timeoutMs` or when `callerSignal` does, and must finish reading the
+ * response under it, since a server can send the headers and then stall. A
+ * failure the deadline caused rejects with `V2TimeoutError`. Exposed for the
+ * few callers that issue the fetch themselves (an explicit bearer token
+ * outside the shared session).
+ */
+export async function withV2Deadline<T>(
+  key: V2OperationKey,
+  timeoutMs: number,
+  callerSignal: AbortSignal | null | undefined,
+  send: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
   const deadline = startRequestDeadline(
     timeoutMs,
     () => new V2TimeoutError(v2Operations[key], timeoutMs),
-    options.signal,
+    callerSignal,
   );
-  init.signal = deadline.signal;
   try {
-    return await sendV2(key, url, init, snapshot, options);
+    return await send(deadline.signal);
   } catch (err) {
     // A network or abort failure after the deadline fired is the deadline's
     // doing; a server answer or a context change that arrived in time stands.
@@ -587,6 +661,7 @@ export async function decodeV2Response<K extends V2OperationKey>(
       operationId,
       res.status,
       "the error response is not a problem document",
+      retryAfterSecondsOf(res),
     );
   }
   throw new V2ProblemError(

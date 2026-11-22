@@ -13,6 +13,8 @@ export interface CollectionOption {
   group: string;
   library_id?: number;
   library_name?: string;
+  /** Every library that shows this collection; the pickers filter by these. */
+  libraries?: CollectionLibrary[];
   collection_type?: LibraryCollection["collection_type"];
   last_sync_status?: LibraryCollection["last_sync_status"];
   item_count?: number;
@@ -20,7 +22,11 @@ export interface CollectionOption {
   poster_thumbhash?: string;
 }
 
-type LibrarySummary = { id: number; name: string };
+export interface CollectionLibrary {
+  id: number;
+  name: string;
+}
+
 type UserCollectionSummary = Pick<Collection, "id" | "name"> &
   Partial<
     Pick<
@@ -29,8 +35,8 @@ type UserCollectionSummary = Pick<Collection, "id" | "name"> &
     >
   >;
 
-export function buildAllUserCollectionOptions(
-  libraries: readonly LibrarySummary[],
+function buildAllUserCollectionOptions(
+  libraries: readonly CollectionLibrary[],
   userCollections: readonly UserCollectionSummary[] | undefined,
   libraryCollectionsByLibrary: ReadonlyArray<readonly LibraryCollection[] | undefined>,
 ): CollectionOption[] {
@@ -50,36 +56,38 @@ export function buildAllUserCollectionOptions(
     });
   }
 
-  const libraryOptions = new Map<string, { option: CollectionOption; libraryNames: string[] }>();
+  type LibraryOption = CollectionOption & { libraries: CollectionLibrary[] };
+  const libraryOptions = new Map<string, LibraryOption>();
 
   for (let i = 0; i < libraries.length; i++) {
     const library = libraries[i]!;
     for (const collection of libraryCollectionsByLibrary[i] ?? []) {
       const existing = libraryOptions.get(collection.id);
       if (existing) {
-        if (!existing.libraryNames.includes(library.name)) {
-          existing.libraryNames.push(library.name);
-          const group = existing.libraryNames.join(", ");
-          existing.option.group = group;
-          existing.option.library_name = group;
+        if (!existing.libraries.some((shown) => shown.id === library.id)) {
+          existing.libraries.push({ id: library.id, name: library.name });
+          const group = existing.libraries.map((shown) => shown.name).join(", ");
+          existing.group = group;
+          existing.library_name = group;
         }
         continue;
       }
 
-      const option: CollectionOption = {
+      const option: LibraryOption = {
         id: collection.id,
         title: collection.title,
         source: "library",
         group: library.name,
         library_id: library.id,
         library_name: library.name,
+        libraries: [{ id: library.id, name: library.name }],
         collection_type: collection.collection_type,
         last_sync_status: collection.last_sync_status,
         item_count: collection.item_count,
         poster_url: collection.poster_url,
         poster_thumbhash: collection.poster_thumbhash,
       };
-      libraryOptions.set(collection.id, { option, libraryNames: [library.name] });
+      libraryOptions.set(collection.id, option);
       collections.push(option);
     }
   }

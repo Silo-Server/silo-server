@@ -103,7 +103,7 @@ func (reg *Registry) getRating(ctx context.Context, in *RatingItemInput) (*Ratin
 	if !found {
 		return nil, NewProblem(TypeNotFound, "The profile has not rated the item.")
 	}
-	return &RatingEntryOutput{Body: RatingEntry{ItemID: ID(r.MediaItemID), Rating: r.Rating, RatedAt: NewInstant(r.RatedAt)}}, nil
+	return &RatingEntryOutput{Body: RatingEntry{ItemID: ID(r.MediaItemID), Rating: r.Score, RatedAt: NewInstant(r.RatedAt)}}, nil
 }
 
 // setRating records the rating for an item the viewer may see, with the
@@ -175,7 +175,7 @@ func (reg *Registry) listRatings(ctx context.Context, cursors *Cursors, in *Rati
 	}
 	items := make([]RatingEntry, 0, len(ratings))
 	for _, r := range ratings {
-		items = append(items, RatingEntry{ItemID: ID(r.MediaItemID), Rating: r.Rating, RatedAt: NewInstant(r.RatedAt)})
+		items = append(items, RatingEntry{ItemID: ID(r.MediaItemID), Rating: r.Score, RatedAt: NewInstant(r.RatedAt)})
 	}
 	return &RatingCollectionOutput{Body: RatingCollection{Collection: Paginated(items, next)}}, nil
 }

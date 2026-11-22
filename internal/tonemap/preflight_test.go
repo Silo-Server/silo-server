@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"os"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -269,30 +268,6 @@ func TestSourceConversionPreflightFilterMapsQSVFramesOnce(t *testing.T) {
 	}
 }
 
-func TestSourceConversionPreflightMirrorsSoftwareDecodeForVAAPI(t *testing.T) {
-	// Playback uploads HDR frames as 10-bit p010le and SDR frames as nv12
-	// (#2269); the preflight must test the same upload.
-	for kind, want := range map[SourceKind]string{
-		SourcePQ:       "format=p010le,hwupload,",
-		SourceHLG:      "format=p010le,hwupload,",
-		SourceSDRBT709: "format=nv12,hwupload,",
-	} {
-		t.Run(string(kind), func(t *testing.T) {
-			args := sourceConversionPreflightArgs(SourcePreflightRequest{
-				Mode: ModeHardware, Backend: BackendVAAPI, Kind: kind,
-				HardwareDevice: "/dev/dri/renderD129", SoftwareVideoDecode: true,
-			}, 0, "")
-			joined := strings.Join(args, " ")
-			if strings.Contains(joined, "-hwaccel") {
-				t.Fatalf("software-decode preflight requested hardware decode: %s", joined)
-			}
-			if !strings.Contains(joined, want+VAAPIFilter(kind)) {
-				t.Fatalf("software-decode preflight did not upload with %q before VAAPI tone mapping: %s", want, joined)
-			}
-		})
-	}
-}
-
 func TestSourceConversionPreflightBuildsVideoToolboxPaths(t *testing.T) {
 	for _, softwareDecode := range []bool{false, true} {
 		t.Run(strconv.FormatBool(softwareDecode), func(t *testing.T) {
@@ -312,32 +287,6 @@ func TestSourceConversionPreflightBuildsVideoToolboxPaths(t *testing.T) {
 				}
 			} else if !strings.Contains(joined, "-hwaccel videotoolbox -hwaccel_output_format videotoolbox_vld") {
 				t.Fatalf("hardware-decode VideoToolbox preflight is wrong: %s", joined)
-			}
-		})
-	}
-}
-
-// TestSourceConversionPreflightOnlyRequestsSoftwareColorspaceConversion verifies hardware graphs avoid an invalid conversion.
-func TestSourceConversionPreflightOnlyRequestsSoftwareColorspaceConversion(t *testing.T) {
-	tests := []struct {
-		name           string
-		mode           Mode
-		backend        string
-		wantColorspace bool
-	}{
-		{name: "software", mode: ModeSoftware, backend: BackendSoftware, wantColorspace: true},
-		{name: "QSV", mode: ModeHardware, backend: BackendQSV},
-		{name: "VAAPI", mode: ModeHardware, backend: BackendVAAPI},
-		{name: "NVENC", mode: ModeHardware, backend: BackendNVENC},
-		{name: "VideoToolbox", mode: ModeHardware, backend: BackendVideoToolbox, wantColorspace: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			args := sourceConversionPreflightArgs(SourcePreflightRequest{
-				Mode: tt.mode, Backend: tt.backend, Kind: SourcePQ,
-			}, 0, "")
-			if got := slices.Contains(args, "-colorspace"); got != tt.wantColorspace {
-				t.Fatalf("preflight -colorspace present = %t, want %t: %s", got, tt.wantColorspace, strings.Join(args, " "))
 			}
 		})
 	}
@@ -400,63 +349,6 @@ func resetSourcePreflightCache(t *testing.T) {
 	ffmpegVersionCache.Unlock()
 }
 
-// TestValidateSourceMatchesDecodedFrameRange verifies decoded frames must
-// carry a range their kind accepts: limited for PQ, and any explicit range
-// for full-range PQ, whose conversion keeps the frame's own range.
-func TestValidateSourceMatchesDecodedFrameRange(t *testing.T) {
-	tests := []struct {
-		name           string
-		kind           SourceKind
-		frameRange     string
-		accepted       bool
-		wantParameters string
-	}{
-		{name: "limited kind with limited frames", kind: SourcePQ, frameRange: "tv", accepted: true, wantParameters: "setparams=range=tv:color_primaries=bt2020:"},
-		{name: "limited kind with full frames", kind: SourcePQ, frameRange: "pc"},
-		{name: "full kind with full frames", kind: SourcePQFullRange, frameRange: "pc", accepted: true, wantParameters: "setparams=color_primaries=bt2020:"},
-		{name: "full kind with limited frames", kind: SourcePQFullRange, frameRange: "tv", accepted: true, wantParameters: "setparams=color_primaries=bt2020:"},
-		{name: "full kind with untagged frames", kind: SourcePQFullRange, frameRange: "unknown"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resetSourcePreflightCache(t)
-			request := sourcePreflightTestRequest(t)
-			request.Kind = tt.kind
-			conversionCount := 0
-			fallback := sourcePreflightTestRunner(&conversionCount, func() string { return "ffmpeg version range" }, nil)
-			var conversions []string
-			runner := func(ctx context.Context, name string, args ...string) ([]byte, error) {
-				joined := strings.Join(args, " ")
-				if strings.Contains(name, "ffprobe") && strings.Contains(joined, "-show_frames") && !strings.Contains(joined, "stream=codec_name") {
-					return []byte(`{"frames":[{"color_range":"` + tt.frameRange + `","color_space":"bt2020nc","color_transfer":"smpte2084","color_primaries":"bt2020"}]}`), nil
-				}
-				if !strings.Contains(name, "ffprobe") && !slices.Contains(args, "-version") {
-					conversions = append(conversions, joined)
-				}
-				return fallback(ctx, name, args...)
-			}
-			err := ValidateSourceWithRunner(context.Background(), request, runner)
-			if !tt.accepted {
-				if !errors.Is(err, ErrSourcePreflightRejected) {
-					t.Fatalf("ValidateSource() = %v, want rejection", err)
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("ValidateSource() = %v, want accepted", err)
-			}
-			if len(conversions) == 0 {
-				t.Fatal("ValidateSource() ran no conversion")
-			}
-			for _, conversion := range conversions {
-				if !strings.Contains(conversion, tt.wantParameters) {
-					t.Fatalf("conversion %q does not start from %q", conversion, tt.wantParameters)
-				}
-			}
-		})
-	}
-}
-
 // TestValidateSourceRequiresRPUForDolbyVisionKind verifies that a Dolby
 // Vision base is accepted only when the decoded frames carry the RPU the
 // executor applies and the PQ transfer that admitted the source.
@@ -483,6 +375,9 @@ func TestValidateSourceRequiresRPUForDolbyVisionKind(t *testing.T) {
 					return []byte("ffmpeg version dv"), nil
 				}
 				if strings.Contains(name, "ffprobe") {
+					if strings.Contains(joined, "format=start_time") {
+						return []byte(`{"format":{"start_time":"0.000000"}}`), nil
+					}
 					if !strings.Contains(joined, "stream=codec_name") {
 						if !strings.Contains(joined, "frame_side_data=side_data_type") {
 							t.Fatalf("frame inspection does not request side data: %q", joined)

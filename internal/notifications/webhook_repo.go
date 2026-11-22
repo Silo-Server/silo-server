@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -25,8 +24,7 @@ func NewWebhookRepository(pool *pgxpool.Pool) *WebhookRepository {
 const webhookColumns = `
 	id, user_id, profile_id, name, type, url_ciphertext, url_host,
 	signing_secret_ciphertext, enabled,
-	notify_favorites, notify_watchlist, notify_continue_watching, notify_next_up,
-	notify_requests, notify_ratings,
+	notify_next_up, notify_requests, notify_ratings,
 	consecutive_failures, disabled_reason,
 	last_success_at, last_failure_at, last_failure_status, last_failure_message,
 	created_at, updated_at, revision`
@@ -36,8 +34,7 @@ func scanWebhook(row pgx.Row) (*Webhook, error) {
 	err := row.Scan(
 		&hook.ID, &hook.UserID, &hook.ProfileID, &hook.Name, &hook.Type,
 		&hook.URLCiphertext, &hook.URLHost, &hook.SigningSecretCiphertext, &hook.Enabled,
-		&hook.NotifyFavorites, &hook.NotifyWatchlist, &hook.NotifyContinueWatching, &hook.NotifyNextUp,
-		&hook.NotifyRequests, &hook.NotifyRatings,
+		&hook.NotifyNextUp, &hook.NotifyRequests, &hook.NotifyRatings,
 		&hook.ConsecutiveFailures, &hook.DisabledReason,
 		&hook.LastSuccessAt, &hook.LastFailureAt, &hook.LastFailureStatus, &hook.LastFailureMessage,
 		&hook.CreatedAt, &hook.UpdatedAt, &hook.Revision,
@@ -64,17 +61,17 @@ func scanWebhooks(rows pgx.Rows) ([]Webhook, error) {
 // HasRatingSubscribers reports whether the profile has at least one enabled
 // webhook with notify_ratings set. Used by the rating notifier's cheap
 // pre-check so a rating on a profile with no rating-enabled webhook never
-// creates a delivery row at all (C2/C8). Errors from the query surface as
-// false so the caller's best-effort path still degrades to dispatching.
-func (r *WebhookRepository) HasRatingSubscribers(ctx context.Context, profileID string) (bool, error) {
+// creates a delivery row at all. Errors surface as false so the caller's
+// best-effort path still degrades to dispatching.
+func (r *WebhookRepository) HasRatingSubscribers(ctx context.Context, userID int, profileID string) (bool, error) {
 	var has bool
 	err := r.pool.QueryRow(ctx, `
 		SELECT EXISTS (
 			SELECT 1 FROM notification_webhooks
-			WHERE profile_id = $1 AND enabled AND notify_ratings
+			WHERE user_id = $1 AND profile_id = $2 AND enabled AND notify_ratings
 			LIMIT 1
 		)`,
-		profileID,
+		userID, profileID,
 	).Scan(&has)
 	if err != nil {
 		return false, fmt.Errorf("check rating webhook subscribers: %w", err)
@@ -195,13 +192,11 @@ func (r *WebhookRepository) InsertWithLimit(ctx context.Context, hook Webhook, m
 		INSERT INTO notification_webhooks
 			(id, user_id, profile_id, name, type, url_ciphertext, url_host,
 			 signing_secret_ciphertext, enabled,
-			 notify_favorites, notify_watchlist, notify_continue_watching, notify_next_up,
-			 notify_requests, notify_ratings)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+			 notify_next_up, notify_requests, notify_ratings)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 		hook.ID, hook.UserID, hook.ProfileID, hook.Name, hook.Type,
 		hook.URLCiphertext, hook.URLHost, hook.SigningSecretCiphertext, hook.Enabled,
-		hook.NotifyFavorites, hook.NotifyWatchlist, hook.NotifyContinueWatching, hook.NotifyNextUp,
-		hook.NotifyRequests, hook.NotifyRatings); err != nil {
+		hook.NotifyNextUp, hook.NotifyRequests, hook.NotifyRatings); err != nil {
 		if isWebhookNameViolation(err) {
 			return ErrWebhookNameTaken
 		}
@@ -220,11 +215,10 @@ func (r *WebhookRepository) Delete(ctx context.Context, userID int, profileID, i
 	return err
 }
 
-// DeleteAllForProfile removes a deleted account profile's webhooks.
+// DeleteAllForProfile removes a deleted account profile's webhooks (see
+// deleteProfileTargetsInOrder for the locking).
 func (r *WebhookRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
-	_, err := r.pool.Exec(ctx,
-		`DELETE FROM notification_webhooks WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
-	return err
+	return deleteProfileTargetsInOrder(ctx, r.pool, "notification_webhooks", userID, profileID)
 }
 
 // RecordSuccess resets the failure streak after a delivered attempt.
@@ -293,30 +287,13 @@ func scanDeliveryAttempts(rows pgx.Rows) ([]DeliveryAttempt, error) {
 }
 
 // EnqueueAttempts inserts `pending` outbox rows inside the fanout
-// transaction. attempt_number starts at 0 (no send tried yet).
+// transaction. attempt_number starts at 0 (no send tried yet). A webhook
+// deleted after the caller listed it gets no attempt instead of aborting the
+// delivery transaction on the foreign key (see
+// PluginDestinationRepository.EnqueueAttempts).
 func (r *WebhookRepository) EnqueueAttempts(ctx context.Context, tx pgx.Tx, attempts []DeliveryAttempt) error {
-	if len(attempts) == 0 {
-		return nil
-	}
-	var sb strings.Builder
-	sb.WriteString(`
-		INSERT INTO webhook_delivery_attempts
-			(id, notification_delivery_id, webhook_id, attempt_number, outcome)
-		VALUES `)
-	args := make([]any, 0, len(attempts)*5)
-	for i, attempt := range attempts {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		base := len(args)
-		fmt.Fprintf(&sb, "($%d,$%d,$%d,$%d,$%d)", base+1, base+2, base+3, base+4, base+5)
-		args = append(args, attempt.ID, attempt.NotificationDeliveryID, attempt.TargetID, 0, WebhookOutcomePending)
-	}
-	sb.WriteString(" ON CONFLICT DO NOTHING")
-	if _, err := tx.Exec(ctx, sb.String(), args...); err != nil {
-		return fmt.Errorf("enqueue webhook attempts: %w", err)
-	}
-	return nil
+	_, err := enqueueAttemptsForLiveTargets(ctx, tx, "webhook_delivery_attempts", "webhook_id", "notification_webhooks", attempts)
+	return err
 }
 
 // claimLease is how long a claimed attempt is invisible to other claimers. A
@@ -474,12 +451,10 @@ func (r *WebhookRepository) UpdateGuarded(ctx context.Context, userID int, profi
 	}
 	row, err := scanWebhook(tx.QueryRow(ctx, `UPDATE notification_webhooks SET
  name=$4, url_ciphertext=$5, url_host=$6, enabled=$7,
- notify_favorites=$8, notify_watchlist=$9, notify_continue_watching=$10,
- notify_next_up=$11, notify_requests=$12, consecutive_failures=$13,
- disabled_reason=$14, updated_at=now()
+ notify_next_up=$8, notify_requests=$9, consecutive_failures=$10,
+ disabled_reason=$11, updated_at=now()
  WHERE user_id=$1 AND profile_id=$2 AND id=$3 RETURNING `+webhookColumns,
 		userID, profile, id, hook.Name, hook.URLCiphertext, hook.URLHost, hook.Enabled,
-		hook.NotifyFavorites, hook.NotifyWatchlist, hook.NotifyContinueWatching,
 		hook.NotifyNextUp, hook.NotifyRequests, hook.ConsecutiveFailures, hook.DisabledReason))
 	if isWebhookNameViolation(err) {
 		return nil, ErrWebhookNameTaken

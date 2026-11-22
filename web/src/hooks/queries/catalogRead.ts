@@ -1,5 +1,5 @@
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useCallback } from "react";
+import { hashKey, useQuery, useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useCallback, useEffect, useState } from "react";
 
 import { api } from "@/api/client";
 import type {
@@ -155,6 +155,59 @@ export function useCatalogItemDetail(id: string | undefined, libraryId?: number,
   });
 }
 
+/**
+ * Reads an item's detail from the server whatever the cache holds, and returns
+ * the item only once that read has landed; from then on it follows the cache.
+ * A cached copy can predate a write: an unobserved query isn't refetched when
+ * invalidated, so a stale copy renders while the reopening refetch runs.
+ */
+export function useFreshCatalogItemDetail(id: string, libraryId?: number) {
+  const queryClient = useQueryClient();
+  const queryHash = hashKey(catalogKeys.itemDetail(id, libraryId));
+  const [read, setRead] = useState<{ queryHash: string; error: unknown }>();
+  const current = read?.queryHash === queryHash ? read : undefined;
+  const { data, fetchStatus, refetch } = useCatalogItemDetail(id, libraryId);
+
+  // Only a server response counts: a cache update is a manual success, and a
+  // cancelled fetch reverts without one. Once the item is shown it stays.
+  useEffect(
+    () =>
+      queryClient.getQueryCache().subscribe((event) => {
+        if (event.type !== "updated" || event.query.queryHash !== queryHash) return;
+        const { action } = event;
+        if (action.type === "success" && !action.manual) {
+          setRead({ queryHash, error: null });
+        } else if (action.type === "error") {
+          setRead((prev) =>
+            prev?.queryHash === queryHash && prev.error === null
+              ? prev
+              : { queryHash, error: action.error },
+          );
+        }
+      }),
+    [queryClient, queryHash],
+  );
+
+  // Read on opening, replacing a read already running: it may have started
+  // before a write that has since landed.
+  useEffect(() => {
+    void refetch();
+  }, [queryHash, refetch]);
+
+  // Read again when another caller cancels the read before it lands.
+  const waiting = current === undefined;
+  useEffect(() => {
+    const live = queryClient.getQueryCache().get(queryHash)?.state.fetchStatus;
+    if (waiting && fetchStatus === "idle" && live === "idle") void refetch();
+  }, [queryClient, queryHash, waiting, fetchStatus, refetch]);
+
+  return {
+    item: current?.error === null ? data : undefined,
+    error: current?.error ?? null,
+    retry: () => setRead(undefined),
+  };
+}
+
 export function useCatalogItemVersions(id: string | undefined) {
   return useQuery({
     queryKey: catalogKeys.itemVersions(id!),
@@ -193,37 +246,45 @@ export function useCatalogItemEpisodes(id: string | undefined, libraryId?: numbe
 }
 
 /**
- * Returns a callback that warms the cache for a season detail page (item
- * detail + episodes), so navigating there from a series page renders without
- * a request waterfall. Prefetches are no-ops while the cached data is fresh.
+ * Warms an item's detail query ahead of opening it. It keeps the app's retry
+ * policy: an item page opened while this is still running joins this request.
  */
-export function usePrefetchCatalogSeason(libraryId?: number) {
-  const queryClient = useQueryClient();
-  return useCallback(
-    (seasonId: string) => {
-      void queryClient.prefetchQuery({
-        queryKey: catalogKeys.itemDetail(seasonId, libraryId),
-        queryFn: ({ signal }) => fetchCatalogItemDetail(seasonId, libraryId, { signal }),
-      });
-      void queryClient.prefetchQuery({
-        queryKey: catalogKeys.itemEpisodes(seasonId, libraryId),
-        queryFn: ({ signal }) => fetchCatalogItemEpisodes(seasonId, libraryId, { signal }),
-      });
-    },
-    [queryClient, libraryId],
-  );
+export function prefetchCatalogItemDetail(
+  queryClient: QueryClient,
+  id: string,
+  libraryId?: number,
+): Promise<void> {
+  return queryClient.prefetchQuery({
+    queryKey: catalogKeys.itemDetail(id, libraryId),
+    queryFn: ({ signal }) => fetchCatalogItemDetail(id, libraryId, { signal }),
+  });
 }
 
 /** Warms an episode's detail query when the user shows intent to open it. */
 export function usePrefetchCatalogItemDetail(libraryId?: number) {
   const queryClient = useQueryClient();
   return useCallback(
-    (itemId: string) => {
-      void queryClient.prefetchQuery({
-        queryKey: catalogKeys.itemDetail(itemId, libraryId),
-        queryFn: ({ signal }) => fetchCatalogItemDetail(itemId, libraryId, { signal }),
-      });
-    },
+    (itemId: string) => prefetchCatalogItemDetail(queryClient, itemId, libraryId),
+    [queryClient, libraryId],
+  );
+}
+
+/**
+ * Returns a callback that warms a season detail page (item detail + episodes),
+ * so opening it from a series page renders without a request waterfall.
+ * Prefetches are no-ops while the cached data is fresh.
+ */
+export function usePrefetchCatalogSeason(libraryId?: number) {
+  const queryClient = useQueryClient();
+  return useCallback(
+    (seasonId: string) =>
+      Promise.all([
+        prefetchCatalogItemDetail(queryClient, seasonId, libraryId),
+        queryClient.prefetchQuery({
+          queryKey: catalogKeys.itemEpisodes(seasonId, libraryId),
+          queryFn: ({ signal }) => fetchCatalogItemEpisodes(seasonId, libraryId, { signal }),
+        }),
+      ]),
     [queryClient, libraryId],
   );
 }

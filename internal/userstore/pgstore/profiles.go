@@ -26,7 +26,7 @@ func scanProfile(scanner interface {
 	var createdAt, updatedAt time.Time
 	err := scanner.Scan(append([]any{
 		&p.ID, &p.Name, &p.Avatar, &p.PINHash, &p.IsChild, &p.IsPrimary, &p.MaxContentRating, &p.MaxAdvisoryAge,
-		&p.RequireAdvisoryAge,
+		&p.RequireAdvisoryAge, &p.RequestsBlocked,
 		&p.QualityPreference, &p.Language, &p.PreferredMetadataLanguage, &p.SubtitleLanguage, &p.SubtitleMode,
 		&p.AutoSkipIntro, &p.AutoSkipCredits, &p.AutoSkipRecap, &p.AutoPlayNextPreview,
 		&p.LibraryRestrictionsEnabled,
@@ -82,14 +82,14 @@ func createProfile(
 	_, err := exec.Exec(ctx, `
 		INSERT INTO user_profiles (
 			id, user_id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, max_advisory_age,
-			require_advisory_age,
+			require_advisory_age, requests_blocked,
 			quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 			auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview,
 			library_restrictions_enabled,
 			show_forced_subtitles, max_playback_quality, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24)`,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)`,
 		p.ID, userID, p.Name, p.Avatar, p.PINHash, p.IsChild, p.IsPrimary, p.MaxContentRating, p.MaxAdvisoryAge,
-		p.RequireAdvisoryAge,
+		p.RequireAdvisoryAge, p.RequestsBlocked,
 		p.QualityPreference, p.Language, p.PreferredMetadataLanguage, p.SubtitleLanguage, p.SubtitleMode,
 		p.AutoSkipIntro, p.AutoSkipCredits, p.AutoSkipRecap, p.AutoPlayNextPreview,
 		p.LibraryRestrictionsEnabled,
@@ -131,7 +131,7 @@ func QueueProfile(batch *pgx.Batch, userID int, id string) func(pgx.BatchResults
 // ascending id order, so a profile costs one statement.
 var profileByIDQuery = `
 	SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
-	       require_advisory_age,
+	       require_advisory_age, requests_blocked,
 	       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 	       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
 	       show_forced_subtitles, max_playback_quality, pin_revision, created_at, updated_at,
@@ -215,7 +215,7 @@ func profileFromRow(row pgx.Row, id string) (*userstore.Profile, error) {
 func (s *PostgresUserStore) ListProfiles(ctx context.Context) ([]userstore.Profile, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, COALESCE(max_advisory_age, 0),
-		       require_advisory_age,
+		       require_advisory_age, requests_blocked,
 		       quality_preference, language, preferred_metadata_language, subtitle_language, subtitle_mode,
 		       auto_skip_intro, auto_skip_credits, auto_skip_recap, auto_play_next_preview, library_restrictions_enabled,
 		       show_forced_subtitles, max_playback_quality, pin_revision, created_at, updated_at
@@ -261,6 +261,7 @@ func updateProfile(
 		u.MaxContentRating != nil ||
 		u.MaxAdvisoryAge != nil ||
 		u.RequireAdvisoryAge != nil ||
+		u.RequestsBlocked != nil ||
 		u.LibraryRestrictionsEnabled != nil ||
 		u.AllowedLibraryIDs != nil ||
 		u.MaxPlaybackQuality != nil
@@ -301,6 +302,9 @@ func updateProfile(
 	}
 	if u.RequireAdvisoryAge != nil {
 		addArg("require_advisory_age", *u.RequireAdvisoryAge)
+	}
+	if u.RequestsBlocked != nil {
+		addArg("requests_blocked", *u.RequestsBlocked)
 	}
 	if u.QualityPreference != nil {
 		addArg("quality_preference", *u.QualityPreference)
@@ -394,7 +398,6 @@ var profileCascadeTables = []string{
 	"user_history_hidden_items",
 	"user_home_item_dismissals",
 	"user_collection_sort_preferences",
-	"user_personal_collections",
 	"user_personal_collection_profiles",
 	"user_audio_preferences",
 	"user_subtitle_preferences",
@@ -407,6 +410,9 @@ var profileCascadeTables = []string{
 	// Leaves titles no profile watchlists any more; the profile
 	// handler's watchlist-title purge sweeps those under the title lock.
 	"user_watchlist_titles",
+	// Promotion records the watchlist arrival notice reads; the same purge
+	// clears them after a delete from the SQLite store.
+	"watchlist_title_promotions",
 	// Recommendation state. A deleted profile's ratings would otherwise
 	// keep shaping other accounts' Similar Users rows, and its taste
 	// would be rebuilt every night.
@@ -446,7 +452,7 @@ func (s *PostgresUserStore) lockProfileForDelete(ctx context.Context, tx pgx.Tx,
 	return deleted, nil
 }
 
-func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) error {
+func (s *PostgresUserStore) DeleteProfile(ctx context.Context, id string) ([]string, error) {
 	return s.DeleteProfileAudited(ctx, id, nil)
 }
 
@@ -455,24 +461,26 @@ var _ userstore.AuditedProfileDeleter = (*PostgresUserStore)(nil)
 // DeleteProfileAudited is DeleteProfile with audit run in the delete's
 // transaction before it commits; a nil audit records nothing. The profile row
 // is locked before it is read, so audit sees the image that was deleted.
-func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *userstore.Profile) error) error {
+//
+//nolint:funlen // The audited delete keeps its checks in one transaction.
+func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string, audit func(tx pgx.Tx, deleted *userstore.Profile) error) ([]string, error) {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("beginning transaction for profile delete: %w", err)
+		return nil, fmt.Errorf("beginning transaction for profile delete: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 	// The account locks before any row, in the order imports take them
 	// (LockAccountForImport), so a deletion and an import of the same
 	// account wait on each other's locks rather than on each other's rows.
 	if err := LockAccountForImport(ctx, tx, s.userID); err != nil {
-		return err
+		return nil, err
 	}
 
 	// Deleting the account locks it before its cascade reaches the profile
 	// and its collections, so the audit row's account keys come first.
 	if audit != nil {
 		if err := auditmutation.LockActors(ctx, tx); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -489,13 +497,13 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 		))
 		ORDER BY id FOR UPDATE`,
 		s.userID, id); err != nil {
-		return fmt.Errorf("locking collections of profile %s: %w", id, err)
+		return nil, fmt.Errorf("locking collections of profile %s: %w", id, err)
 	}
 
 	var deleted *userstore.Profile
 	if audit != nil {
 		if deleted, err = s.lockProfileForDelete(ctx, tx, id); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
@@ -506,7 +514,7 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 		WHERE user_id = $1 AND collection_kind = 'user' AND collection_id IN (
 			SELECT id FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2
 		)`, s.userID, id); err != nil {
-		return fmt.Errorf("deleting collection sort preferences for profile %s: %w", id, err)
+		return nil, fmt.Errorf("deleting collection sort preferences for profile %s: %w", id, err)
 	}
 
 	_, err = tx.Exec(ctx, `
@@ -515,7 +523,7 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 			SELECT id FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2
 		)`, s.userID, id)
 	if err != nil {
-		return fmt.Errorf("deleting collection items for profile %s: %w", id, err)
+		return nil, fmt.Errorf("deleting collection items for profile %s: %w", id, err)
 	}
 
 	// Visibility rows of the profile's own collections go with them, as
@@ -525,39 +533,60 @@ func (s *PostgresUserStore) DeleteProfileAudited(ctx context.Context, id string,
 		WHERE user_id = $1 AND collection_id IN (
 			SELECT id FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2
 		)`, s.userID, id); err != nil {
-		return fmt.Errorf("deleting collection visibility for profile %s: %w", id, err)
+		return nil, fmt.Errorf("deleting collection visibility for profile %s: %w", id, err)
 	}
 
 	// Jellyfin display preferences carry the profile in their key.
 	if _, err := tx.Exec(ctx,
 		`DELETE FROM jellycompat_displayprefs WHERE user_id = $1 AND left(prefs_id, length($2)) = $2`,
 		s.userID, userstore.ProfileDisplayPrefsPrefix(id)); err != nil {
-		return fmt.Errorf("deleting display preferences for profile %s: %w", id, err)
+		return nil, fmt.Errorf("deleting display preferences for profile %s: %w", id, err)
+	}
+	// Jellyfin-compatible sessions signed in as the profile end with it. Every
+	// lookup reads the stored row, so deleting it ends them on all replicas.
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM jellycompat_sessions WHERE streamapp_user_id = $1 AND profile_id = $2`,
+		s.userID, id); err != nil {
+		return nil, fmt.Errorf("deleting Jellyfin sessions for profile %s: %w", id, err)
 	}
 	if err := deleteProfileSectionOverrides(ctx, tx, s.userID, id); err != nil {
-		return err
+		return nil, err
+	}
+
+	// The profile's own collections, returned so the caller can remove their
+	// artwork once this commits.
+	rows, err := tx.Query(ctx, "DELETE FROM user_personal_collections WHERE user_id = $1 AND profile_id = $2 RETURNING id", s.userID, id)
+	if err != nil {
+		return nil, fmt.Errorf("deleting collections for profile %s: %w", id, err)
+	}
+	collectionIDs, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return nil, fmt.Errorf("deleting collections for profile %s: %w", id, err)
 	}
 
 	for _, table := range profileCascadeTables {
 		if _, err := tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id = $1 AND profile_id = $2", table), s.userID, id); err != nil {
-			return fmt.Errorf("deleting from %s for profile %s: %w", table, id, err)
+			return nil, fmt.Errorf("deleting from %s for profile %s: %w", table, id, err)
 		}
 	}
 
 	result, err := tx.Exec(ctx, "DELETE FROM user_profiles WHERE user_id = $1 AND id = $2", s.userID, id)
 	if err != nil {
-		return fmt.Errorf("deleting profile %s: %w", id, err)
+		return nil, fmt.Errorf("deleting profile %s: %w", id, err)
 	}
 	if result.RowsAffected() == 0 {
-		return fmt.Errorf("profile %s not found", id)
+		return nil, fmt.Errorf("profile %s not found", id)
 	}
 	if audit != nil {
 		if err := audit(tx, deleted); err != nil {
-			return err
+			return nil, err
 		}
 	}
 
-	return tx.Commit(ctx)
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return collectionIDs, nil
 }
 
 func (s *PostgresUserStore) VerifyPIN(ctx context.Context, profileID, pin string) (bool, error) {
@@ -657,6 +686,7 @@ type RestoredProfile struct {
 	MaxContentRating           string
 	MaxAdvisoryAge             int
 	RequireAdvisoryAge         bool
+	RequestsBlocked            bool
 	LibraryRestrictionsEnabled bool
 	AllowedLibraryIDs          []int
 	MaxPlaybackQuality         string
@@ -699,10 +729,10 @@ func CreateRestoredProfileInTx(ctx context.Context, tx pgx.Tx, userID int, p Res
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO user_profiles (id, user_id, name, avatar, pin_hash, is_child, is_primary, max_content_rating, max_advisory_age,
-			require_advisory_age, library_restrictions_enabled, max_playback_quality)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12)`,
+			require_advisory_age, requests_blocked, library_restrictions_enabled, max_playback_quality)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULLIF($9::smallint, 0), $10, $11, $12, $13)`,
 		p.ID, userID, p.Name, p.Avatar, p.PINHash, p.IsChild, primary, p.MaxContentRating, p.MaxAdvisoryAge,
-		p.RequireAdvisoryAge, p.LibraryRestrictionsEnabled, p.MaxPlaybackQuality); err != nil {
+		p.RequireAdvisoryAge, p.RequestsBlocked, p.LibraryRestrictionsEnabled, p.MaxPlaybackQuality); err != nil {
 		return false, fmt.Errorf("inserting restored profile: %w", err)
 	}
 	return primary, replaceProfileAllowedLibraries(ctx, tx, userID, p.ID, p.AllowedLibraryIDs)

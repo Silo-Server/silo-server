@@ -1,6 +1,9 @@
 package playback
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Watch-time measurement limits. Clients do not report a playback rate, so a
 // position advance is accepted as viewing when it fits a rate up to
@@ -90,6 +93,30 @@ func (w *WatchTime) Observe(position float64, paused bool, now time.Time) {
 	w.lastPaused = paused
 }
 
+// Credit records a sample from a player that reports how many seconds it
+// played since its previous sample, such as an Audiobookshelf sync's
+// timeListened. That time is credited instead of being inferred from the
+// position, so a seek within the interval does not discard what was played
+// around it, and a fast playback rate is not mistaken for one. It is capped at
+// the time that passed plus reporting slack, so a sample cannot claim more
+// than its interval held. start is when the play began, which bounds a first
+// sample.
+func (w *WatchTime) Credit(position, listened float64, start, now time.Time) {
+	position, listened = max(position, 0), max(listened, 0)
+	if !w.Measured {
+		w.Measured = true
+		w.StartPosition = max(position-listened, 0)
+		w.Since = start
+		w.Until = start
+	}
+	elapsed := secondsBetween(w.Until, now)
+	w.PlayedSeconds += min(listened, elapsed+watchTimeSlackSeconds)
+	w.Until = now
+	w.lastPosition = position
+	w.lastPaused = false
+	w.pausedAt = time.Time{}
+}
+
 // Pause records that the player confirmed a pause at now without reporting
 // where it held. If the next sample is still paused, it supplies that
 // position: the advance to it is judged against the playing time before now,
@@ -98,6 +125,75 @@ func (w *WatchTime) Observe(position float64, paused bool, now time.Time) {
 func (w *WatchTime) Pause(now time.Time) {
 	if w.Measured && !w.lastPaused && w.pausedAt.IsZero() {
 		w.pausedAt = now
+	}
+}
+
+// watchTimeJSON is WatchTime as it is persisted, with the state the next
+// sample is judged against, so another server can carry on measuring.
+type watchTimeJSON struct {
+	Measured      bool       `json:"measured"`
+	StartPosition float64    `json:"start_position"`
+	PlayedSeconds float64    `json:"played_seconds"`
+	PausedSeconds float64    `json:"paused_seconds"`
+	Since         time.Time  `json:"since"`
+	Until         time.Time  `json:"until"`
+	LastPosition  float64    `json:"last_position"`
+	LastPaused    bool       `json:"last_paused"`
+	PausedAt      *time.Time `json:"paused_at,omitempty"`
+}
+
+// MarshalJSON persists the measurement with the state its next sample needs.
+func (w WatchTime) MarshalJSON() ([]byte, error) {
+	out := watchTimeJSON{
+		Measured: w.Measured, StartPosition: w.StartPosition,
+		PlayedSeconds: w.PlayedSeconds, PausedSeconds: w.PausedSeconds,
+		Since: w.Since, Until: w.Until,
+		LastPosition: w.lastPosition, LastPaused: w.lastPaused,
+	}
+	if !w.pausedAt.IsZero() {
+		out.PausedAt = &w.pausedAt
+	}
+	return json.Marshal(out)
+}
+
+// UnmarshalJSON restores a measurement MarshalJSON persisted.
+func (w *WatchTime) UnmarshalJSON(data []byte) error {
+	var in watchTimeJSON
+	if err := json.Unmarshal(data, &in); err != nil {
+		return err
+	}
+	*w = WatchTime{
+		Measured: in.Measured, StartPosition: in.StartPosition,
+		PlayedSeconds: in.PlayedSeconds, PausedSeconds: in.PausedSeconds,
+		Since: in.Since, Until: in.Until,
+		lastPosition: in.LastPosition, lastPaused: in.LastPaused,
+	}
+	if in.PausedAt != nil {
+		w.pausedAt = *in.PausedAt
+	}
+	return nil
+}
+
+// WatchTimeJSON is w as it is persisted, or nil when it has no measurement
+// to keep.
+func WatchTimeJSON(w WatchTime) json.RawMessage {
+	if !w.Measured {
+		return nil
+	}
+	data, err := json.Marshal(w)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+// Restore adopts a persisted measurement of the same play in place of an
+// empty one: a session rebuilt after a restart, or one recorded on a server
+// that never held it, carries on from what the play's last copy measured. A
+// measurement already under way is kept.
+func (w *WatchTime) Restore(persisted WatchTime) {
+	if !w.Measured && persisted.Measured {
+		*w = persisted
 	}
 }
 

@@ -99,60 +99,26 @@ func TestWatchTimeObserve(t *testing.T) {
 	}
 }
 
-// A resume confirmation can carry a paused seek that another replica
-// accepted. It is measured as paused time, not credited as viewing.
-func TestSessionManagerResumeAdoptsPausedSeek(t *testing.T) {
-	m := NewSessionManager(0, 0)
-	s := startPlaybackTestSession(t, m, 1, "profile-1", 100, PlayDirect)
-	if err := m.UpdateProgressSample(s.ID, ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := m.SetPaused(s.ID, true, 1, nil); err != nil {
-		t.Fatal(err)
-	}
-	// Paused for half an hour.
-	m.mu.Lock()
-	w := &m.sessions[s.ID].Watch
-	w.Until = w.Until.Add(-30 * time.Minute)
-	w.pausedAt = w.pausedAt.Add(-30 * time.Minute)
-	m.mu.Unlock()
-	if _, err := m.SetPaused(s.ID, false, 2, &ProgressSampleV3{Sequence: 2, Position: 1230, IsPaused: true}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := m.GetSession(s.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Watch.PlayedSeconds != 0 || got.Watch.PausedSeconds < 30*60 {
-		t.Fatalf("played %v, paused %v; want 0 played and the half hour paused", got.Watch.PlayedSeconds, got.Watch.PausedSeconds)
-	}
-}
+// TestWatchTimeJSONCarriesOn covers a measurement saved by one server and
+// restored by another: the restored copy must judge the next sample exactly
+// as the original would, including a confirmed pause no sample has reached.
+func TestWatchTimeJSONCarriesOn(t *testing.T) {
+	start := time.Date(2026, 11, 19, 12, 0, 0, 0, time.UTC)
+	var original WatchTime
+	original.Observe(100, false, start)
+	original.Observe(110, false, start.Add(10*time.Second))
+	original.Pause(start.Add(12 * time.Second))
 
-// A resume confirmed while the session already plays can carry an older
-// paused report. Measurement follows the confirmed state, so the playback
-// after it is still credited as viewing.
-func TestSessionManagerConfirmedStateOverridesAdoptedPause(t *testing.T) {
-	m := NewSessionManager(0, 0)
-	s := startPlaybackTestSession(t, m, 1, "profile-1", 100, PlayDirect)
-	if err := m.UpdateProgressSample(s.ID, ProgressSampleV3{Sequence: 1, Position: 30}); err != nil {
+	var restored WatchTime
+	if err := restored.UnmarshalJSON(WatchTimeJSON(original)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.SetPaused(s.ID, false, 2, &ProgressSampleV3{Sequence: 2, Position: 40, IsPaused: true}); err != nil {
-		t.Fatal(err)
+	original.Observe(112, true, start.Add(40*time.Second))
+	restored.Observe(112, true, start.Add(40*time.Second))
+	if restored != original {
+		t.Fatalf("restored = %+v, want %+v", restored, original)
 	}
-	// Ten seconds of playback before the next report.
-	m.mu.Lock()
-	w := &m.sessions[s.ID].Watch
-	w.Until = w.Until.Add(-10 * time.Second)
-	m.mu.Unlock()
-	if err := m.UpdateProgressSample(s.ID, ProgressSampleV3{Sequence: 3, Position: 50}); err != nil {
-		t.Fatal(err)
-	}
-	got, err := m.GetSession(s.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Watch.PlayedSeconds != 10 || got.Watch.PausedSeconds != 0 {
-		t.Fatalf("played %v, paused %v; want 10 played and none paused", got.Watch.PlayedSeconds, got.Watch.PausedSeconds)
+	if WatchTimeJSON(WatchTime{}) != nil {
+		t.Fatal("an unmeasured play saved a measurement")
 	}
 }

@@ -39,6 +39,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/watchsync"
 )
 
+// sharedSecretKeyring adapts Vio's shared auth secret to nodeauth.Keyring.
+type sharedSecretKeyring string
+
+func (k sharedSecretKeyring) KeyFor(nodeauth.Target, string) (string, error) {
+	return string(k), nil
+}
+
 const (
 	compatRoutingPolicyUnsatisfiedCode = "RoutingPolicyUnsatisfied"
 	compatRouteCapacityUnavailableCode = "RouteCapacityUnavailable"
@@ -1699,7 +1706,7 @@ func (h *PlaybackHandler) proxyRemoteCompatSegment(w http.ResponseWriter, r *htt
 		return nil
 	}
 	if generation != "" && r.Method == http.MethodGet && sw.CompletedFullResponse(transcodeproxy.FullRepresentationSize(resp)) {
-		if err := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), nodepool.NodeEndpoint(nodeURL, ""), path, h.JWTSecret, generation); err != nil {
+		if err := transcodeproxy.Acknowledge(r.Context(), transcodeproxy.NodeClient(), nodepool.NodeEndpoint(nodeURL, ""), path, sharedSecretKeyring(h.JWTSecret), generation); err != nil {
 			slog.WarnContext(r.Context(), "acknowledge Jellyfin-compatible transcode segment", "component", "jellycompat", "error", err, "playback_session_id", upstreamSessionID)
 		}
 	}

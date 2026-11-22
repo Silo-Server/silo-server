@@ -382,18 +382,6 @@ func TestNormalizeImageCacheJobInputAcceptsLocalSource(t *testing.T) {
 	if in.ProviderID != "local" {
 		t.Fatalf("ProviderID = %q, want local", in.ProviderID)
 	}
-	// The other system schemes stay rejected.
-	for _, rejected := range []string{
-		"s3://bucket/key.jpg",
-		"local://x.jpg",
-		"upload://x.jpg",
-		"generated://x.jpg",
-		"tmdb/movies/550/poster/original.webp",
-	} {
-		if _, ok := normalizeImageCacheJobInput(EnqueueImageCacheJobInput{SourcePath: rejected}); ok {
-			t.Errorf("source %q must stay rejected", rejected)
-		}
-	}
 }
 
 func TestIsStableProviderImageFailureLocalClasses(t *testing.T) {

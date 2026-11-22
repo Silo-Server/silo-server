@@ -22,13 +22,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
-	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 const (
-	maxFFprobeOutputBytes = 8 << 20
-	maxFFprobeStreams     = 256
-	maxFFprobeChapters    = 10000
+	maxFFprobeStreams  = 256
+	maxFFprobeChapters = 10000
 
 	// ffprobe's default analysis window (5 s / 5 MB) can finish against a
 	// relayed provider stream before any audio or video stream is visible:
@@ -38,29 +36,13 @@ const (
 	// metadata probe sees the same stream table playback does.
 	probeAnalyzeDuration = "10M" // 10 s (10,000,000 us)
 	probeSizeLimit       = "32M" // 32 MiB
+
+	// ffprobe option names and the error log level, repeated by the probe
+	// builders and the bounded runner.
+	ffprobeErrorLevel        = "error"
+	probeSizeFlag            = "-probesize"
+	probeAnalyzeDurationFlag = "-analyzeduration"
 )
-
-var errFFprobeOutputTooLarge = fmt.Errorf("ffprobe output exceeds %d bytes", maxFFprobeOutputBytes)
-
-type boundedProbeBuffer struct {
-	buffer   bytes.Buffer
-	limit    int
-	overflow bool
-}
-
-func (b *boundedProbeBuffer) Write(p []byte) (int, error) {
-	if len(p) > b.limit-b.buffer.Len() {
-		b.overflow = true
-		remaining := b.limit - b.buffer.Len()
-		if remaining > 0 {
-			_, _ = b.buffer.Write(p[:remaining])
-		}
-		return len(p), errFFprobeOutputTooLarge
-	}
-	return b.buffer.Write(p)
-}
-
-func (b *boundedProbeBuffer) Bytes() []byte { return b.buffer.Bytes() }
 
 // ErrPrimaryVideoNotFound reports that FFprobe completed successfully but did
 // not describe a playable primary video stream.
@@ -80,6 +62,7 @@ type ffprobeFormat struct {
 	Filename       string            `json:"filename"`
 	FormatName     string            `json:"format_name"`
 	FormatLongName string            `json:"format_long_name"`
+	ProbeScore     int               `json:"probe_score"`
 	StartTime      string            `json:"start_time"`
 	Duration       string            `json:"duration"`
 	Size           string            `json:"size"`
@@ -102,24 +85,6 @@ type ffprobeChapter struct {
 type ffprobeSideData = mediaprobe.SideData
 type ffprobeDisp = mediaprobe.Disposition
 
-// buildProbeArgs returns the bounded metadata-probe argv for ffprobe. It is
-// split out so tests can assert the remote-stream analysis limits without
-// executing a process.
-func buildProbeArgs(filePath string) []string {
-	// Errors go to stderr (kept on the *exec.ExitError) so IsProbeRejection
-	// can tell an unreadable source from damaged content; stdout stays JSON.
-	return []string{
-		"-v", "error",
-		"-print_format", "json",
-		"-show_format",
-		"-show_streams",
-		"-show_chapters",
-		"-probesize", probeSizeLimit,
-		"-analyzeduration", probeAnalyzeDuration,
-		filePath,
-	}
-}
-
 // probeLimits bounds ProbeFile's ffprobe runs. Reading a file's format,
 // streams, and chapters touches its header and index, which takes seconds
 // even on network storage, so a probe still running after two minutes is
@@ -134,6 +99,9 @@ type probeLimits struct {
 	// waitDelay bounds how long a killed ffprobe's output may stay open,
 	// which a child it started, as a wrapper script does, can hold.
 	waitDelay time.Duration
+	// inputOptions are extra ffprobe options for the stream probe, such as a
+	// longer analysis window (see deepProbeLimits).
+	inputOptions []string
 }
 
 var defaultProbeLimits = probeLimits{
@@ -172,49 +140,6 @@ func ProbeFile(ctx context.Context, ffprobePath string, filePath string) (*Probe
 	return probeFileWithin(ctx, ffprobePath, filePath, defaultProbeLimits)
 }
 
-// Fast version-candidate preprobe limits. A candidate preprobe only needs the
-// stream table and the format-level identity fields; it does not need ffprobe
-// to demux enough of the container to find every stream, which is what makes a
-// probe over a slow provider relay take seconds. -probesize 32 (bytes!) and
-// -analyzeduration 0 stop ffprobe from reading ahead, and
-// +discardcorrupt+fastseek+nobuffer keeps it from buffering or seeking
-// backwards on the relay. Note there is deliberately no -find_stream_info
-// option: it takes no argument, and a written "0" value breaks parsing. Its
-// absence is the fast behavior. A run whose result cannot support the caller's
-// identity or completeness gates escalates to the full probe (see
-// virtualFastProbeUsable), so the reduction never changes a verdict.
-const (
-	fastProbeSizeLimit       = "32"
-	fastProbeAnalyzeDuration = "0"
-	fastProbeFlags           = "+discardcorrupt+fastseek+nobuffer"
-	// fastProbeFFlagsOption names the fflags input option so the flag
-	// stays a single literal across the builder and its tests.
-	fastProbeFFlagsOption = "-fflags"
-)
-
-// buildFastProbeArgs returns the version-candidate preprobe argv. It is split
-// out so tests can assert the fast flags without executing a process.
-func buildFastProbeArgs(filePath string) []string {
-	return []string{
-		"-v", "error",
-		"-print_format", "json",
-		"-show_format",
-		"-show_streams",
-		"-show_chapters",
-		"-probesize", fastProbeSizeLimit,
-		"-analyzeduration", fastProbeAnalyzeDuration,
-		fastProbeFFlagsOption, fastProbeFlags,
-		filePath,
-	}
-}
-
-// probeFileFast runs the version-candidate preprobe argv. Unlike ProbeFile it
-// never falls back to a packet scan: a result that would need one is the
-// caller's signal to escalate to the full probe.
-func probeFileFast(ctx context.Context, ffprobePath string, filePath string) (*ProbeData, error) {
-	return probeFileFastWithin(ctx, ffprobePath, filePath, defaultProbeLimits)
-}
-
 // probeFileStreamsOnly is ProbeFile without the first-frame read. Playback's
 // probe repair runs under a short budget and does not need HDR10+ status (an
 // unchecked HDR10+ file plays as HDR10), so it leaves the track unchecked for
@@ -227,86 +152,161 @@ func probeFileWithin(ctx context.Context, ffprobePath string, filePath string, l
 	return probeMediaFile(ctx, ffprobePath, filePath, limits, true)
 }
 
-// toolCommandContext runs an external media tool in its own process group so a
-// deadline or a stop kills the wrapper's children too, decoding an fspath-
-// encoded binary path and arguments for non-UTF-8 file names.
-func toolCommandContext(ctx context.Context, name string, args ...string) *exec.Cmd {
-	return procgroup.CommandContext(ctx, fspath.Decode(name), fspath.DecodeAll(args)...)
-}
-
-// probeFileFastWithin runs the version-candidate preprobe argv through the
-// shared probe core and stops there: no first-frame read and no packet scan, so
-// a fast run never silently turns into a whole-file read.
-func probeFileFastWithin(ctx context.Context, ffprobePath string, filePath string, limits probeLimits) (*ProbeData, error) {
-	raw, err := runProbeArgs(ctx, ffprobePath, filePath, buildFastProbeArgs(filePath), limits)
+func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, limits probeLimits, readFrameSideData bool) (*ProbeData, error) {
+	probeCtx, cancel := context.WithTimeout(ctx, limits.probe)
+	defer cancel()
+	// Errors go to stderr (kept on the *exec.ExitError) so IsProbeRejection
+	// can tell an unreadable source from damaged content; stdout stays JSON.
+	output, err := runFFprobeBounded(probeCtx, ctx, ffprobePath, filePath, buildProbeArgs(filePath, limits.inputOptions...), limits)
 	if err != nil {
 		return nil, err
 	}
-	probe := convertProbeData(raw)
-	applyMatroskaSubtitleTracks(ctx, filePath, probe)
-	return probe, nil
-}
 
-// probeMediaFile runs the full metadata probe. A PQ primary video also has its
-// first frame read for HDR10+ metadata when readFrameSideData is set, and a
-// video with no container duration falls back to a bounded packet scan.
-func probeMediaFile(ctx context.Context, ffprobePath string, filePath string, limits probeLimits, readFrameSideData bool) (*ProbeData, error) {
-	raw, err := runProbeArgs(ctx, ffprobePath, filePath, buildProbeArgs(filePath), limits)
-	if err != nil {
-		return nil, err
+	var raw ffprobeOutput
+	if err := json.Unmarshal(output, &raw); err != nil {
+		return nil, fmt.Errorf("ffprobe JSON parse failed for %s: %w", filePath, err)
+	}
+	if len(raw.Streams) > maxFFprobeStreams {
+		return nil, fmt.Errorf("ffprobe returned %d streams (maximum %d)", len(raw.Streams), maxFFprobeStreams)
+	}
+	if len(raw.Chapters) > maxFFprobeChapters {
+		return nil, fmt.Errorf("ffprobe returned %d chapters (maximum %d)", len(raw.Chapters), maxFFprobeChapters)
+	}
+	if demuxer := guessedContainerDemuxer(raw.Format, filePath); demuxer != "" {
+		if err := confirmContainer(ctx, ffprobePath, filePath, demuxer, raw.Format, limits); err != nil {
+			return nil, err
+		}
 	}
 	if readFrameSideData {
 		if err := applyPrimaryVideoFrameSideData(ctx, ffprobePath, filePath, raw.Streams); err != nil {
 			return nil, err
 		}
 	}
-	probe := convertProbeData(raw)
+
+	probe := convertProbeData(&raw)
 	applyMatroskaSubtitleTracks(ctx, filePath, probe)
 	if probe.Duration == 0 {
-		applyVideoPacketDuration(ctx, ffprobePath, filePath, raw, probe, limits)
+		if frameRate, hasVideo := primaryVideoFrameRate(raw.Streams); hasVideo {
+			// A failed or empty packet scan must not discard the codec and
+			// track metadata that already parsed successfully: callers persist
+			// the partial probe, and the repair layer retries rows whose
+			// duration is still unknown.
+			size, _ := strconv.ParseInt(raw.Format.Size, 10, 64)
+			duration, packetErr := probeVideoPacketDuration(ctx, ffprobePath, filePath, frameRate, limits.packetScan(size), limits.waitDelay)
+			if packetErr == nil && duration > 0 {
+				probe.Duration = duration
+			}
+			if errors.Is(packetErr, errProbeTimeout) {
+				slog.WarnContext(ctx, "scanner: ffprobe packet scan timed out; the duration stays unknown until a later probe",
+					"component", "scanner",
+					"path", filePath,
+					"error", packetErr,
+				)
+			}
+		}
 	}
 
 	return probe, nil
 }
 
-// applyVideoPacketDuration derives a duration for a video whose container
-// carries none, by reading the video packets' timestamps. A failed or empty
-// packet scan must not discard the codec and track metadata that already parsed
-// successfully: callers persist the partial probe, and the repair layer retries
-// rows whose duration is still unknown.
-func applyVideoPacketDuration(ctx context.Context, ffprobePath, filePath string, raw *ffprobeOutput, probe *ProbeData, limits probeLimits) {
-	frameRate, hasVideo := primaryVideoFrameRate(raw.Streams)
-	if !hasVideo {
-		return
+// probeScoreRetry is FFmpeg's AVPROBE_SCORE_RETRY. A format detected at or
+// below it is a guess: FFmpeg warns "misdetection possible" when it settles
+// on one.
+const probeScoreRetry = 25
+
+// guessedContainerDemuxer returns the demuxer filePath's extension names when
+// ffprobe only guessed the format and guessed a different one, such as an AVI
+// with a damaged header read as a bare MPEG-4 stream at score 5. It returns
+// "" for a confident reading, a guess the extension agrees with, and an
+// extension with no entry in containerDemuxers.
+func guessedContainerDemuxer(format ffprobeFormat, filePath string) string {
+	if format.ProbeScore <= 0 || format.ProbeScore > probeScoreRetry {
+		return ""
 	}
-	size, _ := strconv.ParseInt(raw.Format.Size, 10, 64)
-	duration, packetErr := probeVideoPacketDuration(ctx, ffprobePath, filePath, frameRate, limits.packetScan(size), limits.waitDelay)
-	if packetErr == nil && duration > 0 {
-		probe.Duration = duration
+	demuxer := containerDemuxers[strings.ToLower(filepath.Ext(filePath))]
+	if demuxer == "" || slices.Contains(strings.Split(format.FormatName, ","), demuxer) {
+		return ""
 	}
-	if errors.Is(packetErr, errProbeTimeout) {
-		slog.WarnContext(ctx, "scanner: ffprobe packet scan timed out; the duration stays unknown until a later probe",
-			"component", "scanner",
-			"path", filePath,
-			"error", packetErr,
-		)
-	}
+	return demuxer
 }
 
-// runProbeArgs runs one ffprobe argv and parses its bounded JSON output. It is
-// the shared core of the metadata probe and the fast candidate preprobe; the
-// packet-scan fallback stays with the full probe so a fast run never silently
-// turns into a whole-file read.
+// confirmContainer decides whether a guessed format stands. It asks ffprobe
+// to read filePath with demuxer, the one its extension names. A file that
+// reads is healthy and keeps the guess: a stream of a few frames scores low
+// too, and FFmpeg detects the same format again when the file is played.
 //
-// It returns the parsed output so the full probe can still read format.size for
-// the packet-scan deadline, and the stream table the first-frame read mutates,
-// without a second execution.
-func runProbeArgs(ctx context.Context, ffprobePath string, filePath string, args []string, limits probeLimits) (*ffprobeOutput, error) {
-	probeCtx, cancel := context.WithTimeout(ctx, limits.probe)
-	defer cancel()
-	// Errors go to stderr (kept on the *exec.ExitError) so IsProbeRejection
-	// can tell an unreadable source from damaged content; stdout stays JSON.
-	cmd := toolCommandContext(probeCtx, ffprobePath, args...)
+// A file that does not read may still be healthy under the wrong extension:
+// a bare stream at a high bitrate scores low because FFmpeg's default
+// look-ahead holds only a few of its frames. So ffprobe detects the format
+// once more over probeWideFormatBytes, and a confident reading of the same
+// format there keeps the guess as well. A confident reading of another
+// format settles nothing: the guess is not stored, and the file is not
+// called damaged either, so the failure is one IsProbeRejection lets pass. Otherwise the file fails with the exit error of the
+// demuxer read, which IsProbeRejection classifies like any other refusal.
+// A demuxer read that failed on storage says nothing about the file and is
+// returned as it is. When the wider detection itself fails, its error is
+// returned instead, so a timeout or a storage failure there stays retryable.
+func confirmContainer(ctx context.Context, ffprobePath, filePath, demuxer string, guess ffprobeFormat, limits probeLimits) error {
+	_, err := runFormatProbe(ctx, ffprobePath, filePath, limits, "-f", demuxer)
+	if err == nil || errors.Is(err, errProbeTimeout) {
+		return err
+	}
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) && probeStderrAccessFailure(exitErr.Stderr) != nil {
+		return fmt.Errorf("ffprobe failed for %s: %w", filePath, err)
+	}
+	output, wideErr := runFormatProbe(ctx, ffprobePath, filePath, limits, "-formatprobesize", probeWideFormatBytes)
+	if wideErr != nil {
+		if errors.Is(wideErr, errProbeTimeout) {
+			return wideErr
+		}
+		return fmt.Errorf("ffprobe failed for %s: %w", filePath, wideErr)
+	}
+	var wide ffprobeOutput
+	if err := json.Unmarshal(output, &wide); err != nil {
+		return fmt.Errorf("ffprobe JSON parse failed for %s: %w", filePath, err)
+	}
+	if wide.Format.ProbeScore > probeScoreRetry {
+		if wide.Format.FormatName == guess.FormatName {
+			return nil
+		}
+		return fmt.Errorf("ffprobe guessed that %s is %s (probe score %d), but it reads as %s (probe score %d) over %s bytes",
+			filePath, guess.FormatName, guess.ProbeScore, wide.Format.FormatName, wide.Format.ProbeScore, probeWideFormatBytes)
+	}
+	return fmt.Errorf("ffprobe only guessed that %s is %s (probe score %d) and could not read it as %s: %w",
+		filePath, guess.FormatName, guess.ProbeScore, demuxer, err)
+}
+
+// probeWideFormatBytes is how much of a file ffprobe may read to detect its
+// format when confirmContainer asks again: five times FFmpeg's default limit
+// of 1 MiB.
+const probeWideFormatBytes = "5242880"
+
+// buildProbeArgs returns the bounded metadata-probe argv for ffprobe. It is
+// split out so tests can assert the remote-stream analysis limits without
+// executing a process. inputOptions come after the defaults so a caller's
+// deeper window wins, as ffprobe keeps the last value of a repeated option.
+func buildProbeArgs(filePath string, inputOptions ...string) []string {
+	args := []string{
+		"-v", ffprobeErrorLevel,
+		"-print_format", "json",
+		"-show_format",
+		"-show_streams",
+		"-show_chapters",
+		probeSizeFlag, probeSizeLimit,
+		probeAnalyzeDurationFlag, probeAnalyzeDuration,
+	}
+	args = append(args, inputOptions...)
+	return append(args, filePath)
+}
+
+// runFFprobeBounded runs one ffprobe argv and returns its stdout. Output is
+// capped at maxFFprobeOutputBytes: a provider-controlled source must not be
+// able to grow this process's memory with a stream table nobody will publish.
+// Errors go to stderr, kept on the *exec.ExitError, so IsProbeRejection can
+// tell an unreadable source from damaged content.
+func runFFprobeBounded(ctx context.Context, parent context.Context, ffprobePath, filePath string, args []string, limits probeLimits) ([]byte, error) {
+	cmd := toolCommandContext(ctx, ffprobePath, args...)
 	cmd.WaitDelay = limits.waitDelay
 
 	output := &boundedProbeBuffer{limit: maxFFprobeOutputBytes}
@@ -314,7 +314,7 @@ func runProbeArgs(ctx context.Context, ffprobePath string, filePath string, args
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Run(); err != nil {
-		processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, probeCtx.Err())
+		processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, ctx.Err())
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) && len(exitErr.Stderr) == 0 {
 			exitErr.Stderr = stderr.Bytes()
@@ -324,7 +324,7 @@ func runProbeArgs(ctx context.Context, ffprobePath string, filePath string, args
 		if output.overflow || errors.Is(err, errFFprobeOutputTooLarge) {
 			return nil, errFFprobeOutputTooLarge
 		}
-		if probeTimedOut(ctx, probeCtx) {
+		if probeTimedOut(parent, ctx) {
 			return nil, fmt.Errorf("%w: no result for %s within %s", errProbeTimeout, filePath, limits.probe)
 		}
 		return nil, fmt.Errorf("ffprobe failed for %s: %w", filePath, err)
@@ -335,26 +335,26 @@ func runProbeArgs(ctx context.Context, ffprobePath string, filePath string, args
 	if output.overflow {
 		return nil, errFFprobeOutputTooLarge
 	}
-	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, nil, probeCtx.Err())
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, nil, ctx.Err())
+	return output.Bytes(), nil
+}
 
-	var raw ffprobeOutput
-	if err := json.Unmarshal(output.Bytes(), &raw); err != nil {
-		return nil, fmt.Errorf("ffprobe JSON parse failed for %s: %w", filePath, err)
-	}
-	if len(raw.Streams) > maxFFprobeStreams {
-		return nil, fmt.Errorf("ffprobe returned %d streams (maximum %d)", len(raw.Streams), maxFFprobeStreams)
-	}
-	if len(raw.Chapters) > maxFFprobeChapters {
-		return nil, fmt.Errorf("ffprobe returned %d chapters (maximum %d)", len(raw.Chapters), maxFFprobeChapters)
-	}
-	return &raw, nil
+// runFormatProbe runs ffprobe on filePath with inputOptions and returns its
+// JSON output, which holds the format without the streams.
+func runFormatProbe(ctx context.Context, ffprobePath, filePath string, limits probeLimits, inputOptions ...string) ([]byte, error) {
+	runCtx, cancel := context.WithTimeout(ctx, limits.probe)
+	defer cancel()
+	args := append(slices.Clone(inputOptions), "-v", ffprobeErrorLevel, "-print_format", "json", "-show_entries", "format=format_name,probe_score", filePath)
+	return runFFprobeBounded(runCtx, ctx, ffprobePath, filePath, args, limits)
 }
 
 // IsProbeRejection reports whether err, returned by ProbeFile for filePath
 // under ctx, means ffprobe ran to completion and refused the file's content:
 // a non-zero exit status while the caller's context was still live, for a file
 // this process can read, with no sign that ffprobe itself hit a read failure.
-// Zero-byte, corrupt, and truncated media end this way.
+// Zero-byte, corrupt, and truncated media end this way, and so does a file
+// whose format ffprobe only guessed and whose own container demuxer then
+// refused it (confirmContainer).
 //
 // ffprobe exits the same way when it cannot read the file (permission denied,
 // an I/O error or timeout on a network mount, a stale handle, a file that
@@ -552,9 +552,10 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 			pd.Bitrate = br / 1000
 		}
 	}
-	// ffprobe reports the byte count of the container it read. Playback keeps
-	// it as evidence of what the provider actually served, separate from the
-	// catalog row's declared file size.
+
+	// ffprobe's byte count for the container it read; virtual playback compares
+	// it with the row's declared size to catch a provider serving another
+	// release under the row's URL.
 	if raw.Format.Size != "" {
 		if size, err := strconv.ParseInt(raw.Format.Size, 10, 64); err == nil && size > 0 {
 			pd.FormatSize = size
@@ -607,6 +608,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				VideoRange:          normalized.VideoRange,
 				VideoRangeType:      normalized.VideoRangeType,
 				ColorRange:          normalized.ColorRange,
+				FrameColorRange:     normalized.FrameColorRange,
 				ColorPrimaries:      normalized.ColorPrimaries,
 				ColorSpace:          normalized.ColorSpace,
 				ColorTransfer:       normalized.ColorTransfer,
@@ -622,33 +624,20 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				pd.HDR = isHDR(s.ColorTransfer) || normalized.DVProfile > 0 || track.HDR10Plus
 			}
 		case "audio":
-			rawLang := lang.CompatibleTag(s.Tags["language"])
-			var languages []string
-			switch lang.Canonical(rawLang) {
-			case "", "und", "mul":
-				// MULTI/DUAL releases often carry no (or an unhelpful) language
-				// tag but list the languages in the track title ("English /
-				// French"). Parse the title so the languages array has real
-				// values, and promote the first one to the display language.
-				languages = lang.ParseLanguages(s.Tags["title"])
-				if len(languages) > 0 {
-					rawLang = languages[0]
-				}
-			}
 			track := AudioTrackInfo{
-				Index:         s.Index,
 				Title:         firstNonEmpty(s.Tags["title"], s.CodecLongName, strings.ToUpper(s.CodecName)),
 				EmbeddedTitle: s.Tags["title"],
-				Language:      rawLang,
-				Languages:     languages,
-				Codec:         s.CodecName,
-				Profile:       s.Profile,
-				Layout:        s.ChannelLayout,
-				Channels:      s.Channels,
-				Bitrate:       parseNumeric(s.BitRate) / 1000,
-				SampleRate:    parseNumeric(s.SampleRate),
-				BitDepth:      parseBitDepth(s),
-				Default:       s.Disposition.Default == 1,
+				// Preserve BCP 47 region and script subtags (for example pt-BR
+				// versus pt-PT) just as we do for subtitle tracks.
+				Language:   lang.CompatibleTag(s.Tags["language"]),
+				Codec:      s.CodecName,
+				Profile:    s.Profile,
+				Layout:     s.ChannelLayout,
+				Channels:   s.Channels,
+				Bitrate:    mediaprobe.StreamBitrateKbps(s),
+				SampleRate: parseNumeric(s.SampleRate),
+				BitDepth:   parseBitDepth(s),
+				Default:    s.Disposition.Default == 1,
 			}
 			pd.AudioTracks = append(pd.AudioTracks, track)
 			if pd.CodecAudio == "" {
@@ -719,49 +708,14 @@ const (
 
 	longVideoDurationAbsoluteToleranceSeconds = 1
 	longVideoDurationRelativeTolerance        = 0.001
+
+	// trackSpanToleranceSeconds and trackSpanRelativeTolerance bound how far
+	// a container duration and a track length may differ and still count as
+	// the same end: a subtitle track's length ends at its last cue while the
+	// container rounds to its last block, which can differ by a few seconds.
+	trackSpanToleranceSeconds  = 5
+	trackSpanRelativeTolerance = 0.01
 )
-
-// A video duration is implausible when it is either far too short in absolute
-// terms, or when it implies a bitrate no real medium reaches. Both are
-// signatures of malformed container timestamps (and of the legacy probe that
-// divided large durations by one million).
-//
-// The absolute rule alone cannot catch a feature film that probed as, say, 61
-// seconds — well past the floor, yet still wrong by two orders of magnitude.
-// Size and duration together pin an implied bitrate, which separates the two
-// cases the absolute rule conflates: a genuine short clip has an ordinary
-// bitrate, while a 100 GB file claiming 61 seconds implies ~13 Gbps.
-//
-// The ceiling sits far above any real medium — UHD Blu-ray peaks near
-// 150 Mbps and ProRes 4444 XQ at 4K near 500 Mbps — so legitimate content
-// cannot trip it. This also makes the rule safer than the absolute floor
-// alone, which false-positives on a genuine high-bitrate short.
-//
-// The shape is shared with the repair triggers in probe_repair.go and
-// scanner.go so the probe parser and the repair layers cannot drift apart.
-const (
-	implausiblyShortVideoMaxSeconds = 10
-	implausiblyShortVideoMinBytes   = 100 * 1024 * 1024
-	implausibleVideoBitrateBps      = 1_000_000_000
-)
-
-func videoDurationImplausible(durationSeconds float64, sizeBytes int64, hasVideo bool) bool {
-	if !hasVideo || durationSeconds <= 0 || sizeBytes <= 0 {
-		return false
-	}
-	if durationSeconds <= implausiblyShortVideoMaxSeconds && sizeBytes >= implausiblyShortVideoMinBytes {
-		return true
-	}
-	return impliedBitrateBps(sizeBytes, durationSeconds) > implausibleVideoBitrateBps
-}
-
-// impliedBitrateBps is the bitrate a file's size and duration imply. Callers
-// use it as a duration-sanity signal, not as a real bitrate estimate: it
-// counts container overhead and every stream, which is precisely what makes it
-// a conservative upper bound.
-func impliedBitrateBps(sizeBytes int64, durationSeconds float64) float64 {
-	return float64(sizeBytes) * 8 / durationSeconds
-}
 
 func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	if raw == nil {
@@ -774,6 +728,9 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 		return truncatedDuration(formatDuration), true
 	}
 	if durationIsReasonable(formatDuration) && !durationLooksImplausible(raw, formatDuration) {
+		if span, ok := audioVideoSpan(raw, formatDuration); ok && !durationLooksImplausible(raw, span) {
+			return truncatedDuration(span), true
+		}
 		return truncatedDuration(formatDuration), true
 	}
 
@@ -799,6 +756,94 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 		return truncatedDuration(duration), true
 	}
 	return 0, false
+}
+
+// audioVideoSpan returns how long a video file's video and audio run when a
+// subtitle or other non-A/V track is what made formatDuration longer. A
+// container duration covers every track (Matroska's segment duration does),
+// so a subtitle track that runs past the film, such as one holding its cue
+// list twice, stretches it, and every consumer of the stored duration (seek
+// previews, runtime, progress) then reaches past the end of the video.
+//
+// It answers only when every primary video and audio track reports a
+// length, the longest falls short of formatDuration by more than the
+// tolerance, and another track's own length accounts for formatDuration. A
+// missing or unparseable length is unknown, not short, and the last
+// condition keeps track lengths that understate the media (stale Matroska
+// statistics tags) from shortening a file on their own: with nothing else
+// explaining the container duration, it stands.
+//
+// A track that starts late ends at its offset plus its length. Muxers
+// disagree on whether a DURATION tag already counts that offset (ffmpeg
+// writes the end, mkvmerge the span), so video and audio take the later
+// reading, which can only keep a duration longer, and another track
+// accounts for the container duration under either reading.
+func audioVideoSpan(raw *ffprobeOutput, formatDuration float64) (float64, bool) {
+	tolerance := max(trackSpanToleranceSeconds, formatDuration*trackSpanRelativeTolerance)
+	formatStart := parseFloat(raw.Format.StartTime)
+	var audioVideo float64
+	hasVideo, accounted := false, false
+	for _, stream := range raw.Streams {
+		length, known := trackLength(stream)
+		end := max(0, parseFloat(stream.StartTime)-formatStart) + length
+		switch {
+		case mediaprobe.IsPrimaryVideoStream(stream) || stream.CodecType == "audio":
+			if !known {
+				return 0, false
+			}
+			hasVideo = hasVideo || stream.CodecType == "video"
+			audioVideo = max(audioVideo, end)
+		case stream.CodecType == "video":
+			// Attached pictures carry no timeline.
+		case known:
+			accounted = accounted || math.Abs(formatDuration-length) <= tolerance ||
+				math.Abs(formatDuration-end) <= tolerance
+		}
+	}
+	if !hasVideo || !accounted || !durationIsPositiveFinite(audioVideo) || formatDuration-audioVideo <= tolerance {
+		return 0, false
+	}
+	return audioVideo, true
+}
+
+// trackLength is a stream's own length: ffprobe's duration when it reports
+// one, else the DURATION statistics tag Matroska muxers write per track.
+// ffprobe names a tag with a language DURATION-<language>; with several, the
+// longest counts, and one that does not parse leaves the length unknown.
+func trackLength(stream ffprobeStream) (float64, bool) {
+	if duration := parseFloat(stream.Duration); durationIsPositiveFinite(duration) {
+		return duration, true
+	}
+	var length float64
+	for key, value := range stream.Tags {
+		key = strings.ToUpper(key)
+		if key != "DURATION" && !strings.HasPrefix(key, "DURATION-") {
+			continue
+		}
+		parsed, ok := parseMatroskaTagDuration(value)
+		if !ok {
+			return 0, false
+		}
+		length = max(length, parsed)
+	}
+	return length, length > 0
+}
+
+// parseMatroskaTagDuration parses a Matroska DURATION tag,
+// HH:MM:SS.nnnnnnnnn.
+func parseMatroskaTagDuration(value string) (float64, bool) {
+	parts := strings.Split(strings.TrimSpace(value), ":")
+	if len(parts) != 3 {
+		return 0, false
+	}
+	hours, errH := strconv.Atoi(parts[0])
+	minutes, errM := strconv.Atoi(parts[1])
+	seconds, errS := strconv.ParseFloat(parts[2], 64)
+	if errH != nil || errM != nil || errS != nil || hours < 0 || minutes < 0 || minutes >= 60 || seconds < 0 || seconds >= 60 {
+		return 0, false
+	}
+	duration := float64(hours)*3600 + float64(minutes)*60 + seconds
+	return duration, durationIsPositiveFinite(duration)
 }
 
 // corroboratedLongVideoDuration accepts an extended-range video duration only
@@ -884,7 +929,7 @@ func durationLooksImplausible(raw *ffprobeOutput, duration float64) bool {
 		return false
 	}
 	size := int64(parseFloat(raw.Format.Size))
-	return videoDurationImplausible(duration, size, hasVideoStream(raw.Streams))
+	return models.VideoDurationImplausible(duration, size, hasVideoStream(raw.Streams))
 }
 
 func durationAfterStart(end, start float64) float64 {
@@ -942,15 +987,16 @@ func primaryVideoFrameRate(streams []ffprobeStream) (string, bool) {
 	return "", false
 }
 
-// frameSideDataProbeTimeout bounds the one-frame decode that reads HDR10+
+// frameSideDataProbeTimeout bounds each first-frame read that looks for HDR10+
 // metadata. A 4K HEVC frame decodes in well under a second; the margin covers
-// slow network storage.
+// slow network storage and the longer read of a stream that starts mid-GOP.
 const frameSideDataProbeTimeout = 30 * time.Second
 
 // applyPrimaryVideoFrameSideData reads the first decoded frame of the primary
-// video stream when that stream is PQ, and records the frame's side data on
-// the stream so normalization can see HDR10+ metadata. Only the primary
-// stream is checked because it is the one playback and the badges describe.
+// video stream when that stream is PQ, and records the frame's side data and
+// color range on the stream so normalization can see HDR10+ metadata and the
+// range the decoder takes from the bitstream. Only the primary stream is
+// checked because it is the one playback and the badges describe.
 //
 // A failed frame read is not fatal: the file keeps its stream-level facts,
 // plays and labels as HDR10, and stays unchecked, so the HDR10+ backfill reads
@@ -965,7 +1011,7 @@ func applyPrimaryVideoFrameSideData(ctx context.Context, ffprobePath, filePath s
 		if !mediaprobe.NeedsFrameSideData(streams[i]) {
 			return nil
 		}
-		sideData, err := probeVideoFrameSideData(ctx, ffprobePath, filePath, strconv.Itoa(streams[i].Index))
+		frame, err := probeFirstVideoFrame(ctx, ffprobePath, filePath, strconv.Itoa(streams[i].Index))
 		if err != nil {
 			if ctxErr := ctx.Err(); ctxErr != nil {
 				return ctxErr
@@ -977,7 +1023,8 @@ func applyPrimaryVideoFrameSideData(ctx context.Context, ffprobePath, filePath s
 			)
 			return nil
 		}
-		streams[i].FrameSideDataList = sideData
+		streams[i].FrameSideDataList = frame.SideData
+		streams[i].FrameColorRange = frame.ColorRange
 		streams[i].FrameSideDataRead = true
 		return nil
 	}
@@ -993,63 +1040,163 @@ var (
 	errNoFrameDecoded = errors.New("ffprobe returned no decoded video frame")
 )
 
-// probeVideoFrameSideData decodes the first frame of the stream that
-// streamSpecifier selects and returns the side data FFmpeg attached to it.
+// firstVideoFrame is what the scanner reads from a stream's first decoded
+// frame.
+type firstVideoFrame struct {
+	// SideData is the side data FFmpeg attached to the frames read.
+	SideData []ffprobeSideData
+	// ColorRange is the first frame's range, which the decoder takes from
+	// the bitstream before the container's tag. Empty when FFmpeg reported
+	// none.
+	ColorRange string
+}
+
+// probeFirstVideoFrame decodes the first frame of the stream that
+// streamSpecifier selects and returns its side data and color range.
 //
 // One packet normally decodes to the first frame. A stream whose first packet
 // does not decode on its own, such as one that starts mid-GOP, is read again
-// over frameSideDataFallbackPackets before it counts as having no frame.
-func probeVideoFrameSideData(ctx context.Context, ffprobePath, filePath, streamSpecifier string) ([]ffprobeSideData, error) {
-	sideData, err := probeVideoFrameSideDataPackets(ctx, ffprobePath, filePath, streamSpecifier, 1)
+// over frameSideDataFallbackPackets. When its first keyframe lies further in,
+// a last read goes up to frameSideDataLongGOPPackets and stops at the first
+// decoded frame before the stream counts as having no frame.
+func probeFirstVideoFrame(ctx context.Context, ffprobePath, filePath, streamSpecifier string) (firstVideoFrame, error) {
+	frame, err := probeFirstVideoFramePackets(ctx, ffprobePath, filePath, streamSpecifier, 1, false)
 	if errors.Is(err, errNoFrameDecoded) {
-		return probeVideoFrameSideDataPackets(ctx, ffprobePath, filePath, streamSpecifier, frameSideDataFallbackPackets)
+		frame, err = probeFirstVideoFramePackets(ctx, ffprobePath, filePath, streamSpecifier, frameSideDataFallbackPackets, false)
 	}
-	return sideData, err
+	if errors.Is(err, errNoFrameDecoded) {
+		frame, err = probeFirstVideoFramePackets(ctx, ffprobePath, filePath, streamSpecifier, frameSideDataLongGOPPackets, true)
+	}
+	return frame, err
 }
 
-// frameSideDataFallbackPackets is the second read's packet budget: about a
-// second of video, enough to reach a keyframe in common GOP layouts.
-const frameSideDataFallbackPackets = 24
+const (
+	// frameSideDataFallbackPackets is the second read's packet budget: about
+	// a second of video, enough to reach a keyframe in common GOP layouts.
+	frameSideDataFallbackPackets = 24
+	// frameSideDataLongGOPPackets is the last read's packet budget. It covers
+	// the longest default keyframe interval of common encoders (x264 and x265
+	// use 250 frames). The read stops at the first decoded frame, so it reads
+	// and decodes only a few packets past the first keyframe; decoding all
+	// 300 packets of a 4K stream would take most of frameSideDataProbeTimeout.
+	frameSideDataLongGOPPackets = 300
+)
 
-func probeVideoFrameSideDataPackets(ctx context.Context, ffprobePath, filePath, streamSpecifier string, packets int) ([]ffprobeSideData, error) {
+// probeFirstVideoFramePackets reads up to packets packets of the stream and
+// returns the frames ffprobe decoded from them. With stopAtFirstFrame it stops
+// ffprobe as soon as the first decoded frame is written, which ffprobe does
+// while it is still reading.
+func probeFirstVideoFramePackets(ctx context.Context, ffprobePath, filePath, streamSpecifier string, packets int, stopAtFirstFrame bool) (firstVideoFrame, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, frameSideDataProbeTimeout)
 	defer cancel()
-	cmd := toolCommandContext(probeCtx, ffprobePath,
-		"-v", "error",
+	cmd := fspath.CommandContext(probeCtx, ffprobePath,
+		"-v", ffprobeErrorLevel,
 		"-read_intervals", "%+#"+strconv.Itoa(packets),
 		"-select_streams", streamSpecifier,
 		"-show_frames",
-		"-show_entries", "frame=media_type:frame_side_data=side_data_type",
+		"-show_entries", "frame=media_type,color_range:frame_side_data=side_data_type",
 		"-print_format", "json",
 		filePath,
 	)
 	// As for the other ffprobe runs: a wrapper's child dies with it, and a
 	// child that still holds stdout cannot keep the read open past its deadline.
 	cmd.WaitDelay = defaultProbeLimits.waitDelay
-	output, err := cmd.Output()
-	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, err, probeCtx.Err())
+	stdout, err := cmd.StdoutPipe()
 	if err != nil {
-		if errors.Is(probeCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil {
-			return nil, fmt.Errorf("%w after %s for %s", errFrameSideDataTimeout, frameSideDataProbeTimeout, filePath)
+		return firstVideoFrame{}, fmt.Errorf("opening ffprobe frame output for %s: %w", filePath, err)
+	}
+	if err := cmd.Start(); err != nil {
+		processmetrics.Record(processmetrics.Probe, nil, err, probeCtx.Err())
+		return firstVideoFrame{}, fmt.Errorf("ffprobe frame side data failed for %s: %w", filePath, err)
+	}
+	// WaitDelay does not reach a pipe read before Wait, so the deadline
+	// closes it too, for a child that outlives the killed ffprobe.
+	stopClose := context.AfterFunc(probeCtx, func() { _ = stdout.Close() })
+	frames, parseErr := decodeProbeFrames(stdout, stopAtFirstFrame)
+	stopped := stopAtFirstFrame && parseErr == nil && len(frames) > 0
+	if stopped {
+		cancel() // kills ffprobe and closes the pipe
+	} else {
+		// Drain the rest while Wait runs, as cmd.Output does: output after
+		// the JSON cannot block ffprobe from exiting, and WaitDelay still
+		// ends a read held open by a child that outlives it.
+		go func() { _, _ = io.Copy(io.Discard, stdout) }()
+	}
+	stopClose()
+	waitErr := cmd.Wait()
+	processmetrics.Record(processmetrics.Probe, cmd.ProcessState, waitErr, probeCtx.Err())
+	switch {
+	case stopped:
+	case (waitErr != nil || parseErr != nil) && probeTimedOut(ctx, probeCtx):
+		return firstVideoFrame{}, fmt.Errorf("%w after %s for %s", errFrameSideDataTimeout, frameSideDataProbeTimeout, filePath)
+	case waitErr != nil:
+		return firstVideoFrame{}, fmt.Errorf("ffprobe frame side data failed for %s: %w", filePath, waitErr)
+	case parseErr != nil:
+		return firstVideoFrame{}, fmt.Errorf("ffprobe frame side data JSON parse failed for %s: %w", filePath, parseErr)
+	case len(frames) == 0:
+		return firstVideoFrame{}, fmt.Errorf("%w for %s", errNoFrameDecoded, filePath)
+	}
+	frame := firstVideoFrame{ColorRange: frames[0].ColorRange}
+	for _, decoded := range frames {
+		frame.SideData = append(frame.SideData, decoded.SideDataList...)
+	}
+	return frame, nil
+}
+
+type probeFrame struct {
+	ColorRange   string            `json:"color_range"`
+	SideDataList []ffprobeSideData `json:"side_data_list"`
+}
+
+// decodeProbeFrames reads the frames array of ffprobe's JSON output as it
+// arrives. With firstOnly it returns once the first frame is complete.
+func decodeProbeFrames(r io.Reader, firstOnly bool) ([]probeFrame, error) {
+	dec := json.NewDecoder(r)
+	if err := expectJSONDelim(dec, '{'); err != nil {
+		return nil, err
+	}
+	var frames []probeFrame
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
+			return frames, err
 		}
-		return nil, fmt.Errorf("ffprobe frame side data failed for %s: %w", filePath, err)
+		if key != "frames" {
+			var skip json.RawMessage
+			if err := dec.Decode(&skip); err != nil {
+				return frames, err
+			}
+			continue
+		}
+		if err := expectJSONDelim(dec, '['); err != nil {
+			return frames, err
+		}
+		for dec.More() {
+			var frame probeFrame
+			if err := dec.Decode(&frame); err != nil {
+				return frames, err
+			}
+			frames = append(frames, frame)
+			if firstOnly {
+				return frames, nil
+			}
+		}
+		if err := expectJSONDelim(dec, ']'); err != nil {
+			return frames, err
+		}
 	}
-	var payload struct {
-		Frames []struct {
-			SideDataList []ffprobeSideData `json:"side_data_list"`
-		} `json:"frames"`
+	return frames, expectJSONDelim(dec, '}')
+}
+
+func expectJSONDelim(dec *json.Decoder, want json.Delim) error {
+	tok, err := dec.Token()
+	if err != nil {
+		return err
 	}
-	if err := json.Unmarshal(output, &payload); err != nil {
-		return nil, fmt.Errorf("ffprobe frame side data JSON parse failed for %s: %w", filePath, err)
+	if tok != want {
+		return fmt.Errorf("unexpected JSON token %v, want %v", tok, want)
 	}
-	if len(payload.Frames) == 0 {
-		return nil, fmt.Errorf("%w for %s", errNoFrameDecoded, filePath)
-	}
-	var sideData []ffprobeSideData
-	for _, frame := range payload.Frames {
-		sideData = append(sideData, frame.SideDataList...)
-	}
-	return sideData, nil
+	return nil
 }
 
 // probeVideoPacketDuration derives a duration for files whose duration
@@ -1067,8 +1214,8 @@ func probeVideoPacketDuration(
 ) (int, error) {
 	packetCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := toolCommandContext(packetCtx, ffprobePath,
-		"-v", "error",
+	cmd := fspath.CommandContext(packetCtx, ffprobePath,
+		"-v", ffprobeErrorLevel,
 		"-select_streams", "v:0",
 		"-show_entries", "packet=pts_time",
 		"-of", "csv=p=0",
@@ -1380,6 +1527,18 @@ const (
 	containerMPEGTS = "ts"
 	containerBDAV   = "m2ts"
 	containerOgg    = "ogg"
+)
+
+// Names ffprobe gives its container demuxers, as they appear in format_name
+// and as its -f option takes them.
+const (
+	demuxerMatroska = "matroska"
+	demuxerMOV      = "mov"
+	demuxerAVI      = "avi"
+	demuxerMPEGTS   = "mpegts"
+	demuxerASF      = "asf"
+	demuxerFLV      = "flv"
+	demuxerOgg      = "ogg"
 )
 
 // detectContainer maps ffprobe format names to common container names.

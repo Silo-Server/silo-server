@@ -100,7 +100,7 @@ once when it is made and the host does not store.
 
 ## List sync rows
 
-`watch_provider_list_items` holds one row per library item on a synced
+`watch_provider_list_items` holds one row per item on a synced
 favorites or watchlist, unique on `(connection_id, list_kind, media_item_id)`.
 The `provider_item_key` is not unique. The key is the item's IMDb, TMDB, or TVDB
 id without its kind, and `media_items` does not keep those ids unique, so two
@@ -114,14 +114,54 @@ Several items with one key follow these rules:
   off the provider too.
 - With removal sync on, an import does not add back an item whose local
   removal has not reached the provider yet, unless the provider dated its
-  listing after the removal. An undated listing never counts as newer.
+  listing after the removal. An undated listing never counts as newer. A run
+  whose import of a list fails sends none of that list's removals, since the
+  import may have stopped before the newer listing that drops one.
 - A full import counts every IMDb, TMDB, and TVDB id on a provider row as
   present for that row's kind, since a plugin's key can use a different id than
   the one stored at export (a provider may key shows by TVDB id first). A row or stored
   item without a kind matches any kind.
 - A remote tombstone removes every row with its key, and with its kind when it
-  names one. Plugin tombstones carry only the key, so one whose rows name more
+  names one. A library item that took over watchlist title rows at promotion
+  also matches the keys and IDs those rows knew. Plugin tombstones carry only the key, so one whose rows name more
   than one kind of title changes nothing and adds a warning.
+
+A watchlist title the library doesn't have
+([external-watchlist.md](external-watchlist.md)) has a row whose
+`media_item_id` is `watchlist-title:<kind>:<tmdb id>`. Promotion deletes the
+title and its IDs, so the row's `title_ids` keep every ID the title has held
+(`tmdb:550`, `imdb:tt0137523`, `tvdb:121361`). Writes only add to them. Each
+import and removal pass refreshes them from the title while its entry stands,
+and promotion and the profile's removal add the title's IDs to the profile's
+rows for it, under the title lock, before deleting the title. Sync finds the
+library item through them and the row's provider key:
+
+- An entry gone from the watchlist is a promotion, not a local removal, while a
+  library item with one of those IDs is on the library watchlist. When exactly
+  one is, its row takes over the title row's remote presence and IDs, and its
+  provider key when it has no row yet or the provider doesn't list its row,
+  before the title row retires. A provider removal before the next import then
+  still reaches it, and a complete read listing the title under another of its
+  IDs keeps it. Listed title rows hand over first.
+- A complete read that keeps a title row, or the library item that took one
+  over, through another of the title's IDs moves the row to the provider key
+  that listing carried, as does a listing a pending local removal waits on. A
+  removal sends only the row's key, and plugins send the provider the one ID
+  in it, so a removal under an old key could leave the provider's entry
+  listed.
+- A provider removal of the title also takes that one library item off the
+  library watchlist, for a promotion that ran after the pass read the entry.
+- A pending local removal of a title also holds a listing under another TMDB
+  ID that shares one of the row's IDs or its provider key. A title can have
+  several such rows, one per TMDB ID it was listed under; a listing dated after
+  all of their removals is a new add and drops every one of them.
+- A pending local removal holds the title in its other form too, matched the
+  same way. A removed title row holds a listing that now matches a library
+  item, unless that item is already on the list. A removed library item holds
+  a listing of the title outside the library once the library lost the item.
+  Other library items that share an ID don't hold each other's listings. A
+  listing dated after the removals is a new add, and drops the other form's
+  removal too.
 
 ## Sync-run admission
 

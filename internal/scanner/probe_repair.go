@@ -144,11 +144,11 @@ func carryUnprobedChapters(previous []models.MediaChapter, next *models.MediaFil
 	next.Chapters = previous
 }
 
-// carryCheckedHDR10Plus keeps the primary track's recorded HDR10+ status
-// across playback's probe repair, which skips the frame read, when the
-// reprobed stream is the one that was checked. The fields a repair fills in
-// (a missing color range, legacy Dolby Vision provenance) don't count as a
-// difference. Any other difference leaves the track unchecked for the HDR10+
+// carryCheckedHDR10Plus keeps the primary track's recorded HDR10+ status and
+// first-frame color range across playback's probe repair, which skips the
+// frame read, when the reprobed stream is the one that was checked. The
+// fields a repair fills in (a missing color range, legacy Dolby Vision
+// provenance) don't count as a difference. Any other difference leaves the track unchecked for the HDR10+
 // backfill.
 func carryCheckedHDR10Plus(previous, next []models.VideoTrack) {
 	if len(previous) == 0 || len(next) == 0 || previous[0].HDR10PlusUnchecked || !next[0].HDR10PlusUnchecked {
@@ -170,6 +170,7 @@ func carryCheckedHDR10Plus(previous, next []models.VideoTrack) {
 	}
 	next[0].HDR10PlusUnchecked = false
 	next[0].HDR10Plus = previous[0].HDR10Plus
+	next[0].FrameColorRange = previous[0].FrameColorRange
 	if previous[0].HDR10Plus {
 		next[0].VideoRangeType = mediaprobe.RangeTypeWithHDR10Plus(next[0])
 	}
@@ -1053,7 +1054,7 @@ func reprobeMayScanPackets(file *models.MediaFile) bool {
 		return false
 	}
 	return file.Duration <= 0 ||
-		videoDurationImplausible(float64(file.Duration), file.FileSize, true)
+		models.VideoDurationImplausible(float64(file.Duration), file.FileSize, true)
 }
 
 // legacyProbeDurationFixTime marks the revision of the duration-validity rule
@@ -1077,7 +1078,7 @@ func needsLegacyDurationRepair(file *models.MediaFile) bool {
 }
 
 func legacyDurationRepairNeeded(duration int, sizeBytes int64, hasVideo bool, probeUpdatedAt *time.Time) bool {
-	if !videoDurationImplausible(float64(duration), sizeBytes, hasVideo) {
+	if !models.VideoDurationImplausible(float64(duration), sizeBytes, hasVideo) {
 		return false
 	}
 	return probeUpdatedAt == nil || probeUpdatedAt.Before(legacyProbeDurationFixTime)

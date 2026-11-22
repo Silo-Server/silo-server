@@ -130,7 +130,7 @@ func TestMediaSampleReportsSamplingFailure(t *testing.T) {
 	// The client turns the refusal into a RemoteError the caller can classify.
 	node := httptest.NewServer(server.router())
 	defer node.Close()
-	_, err := mediasample.RemoteClient{}.Run(context.Background(), node.URL+mediasample.RemotePath, testSecret,
+	_, err := mediasample.RemoteClient{}.Run(context.Background(), node.URL+mediasample.RemotePath, nodeauthtest.NodeKey(testSecret),
 		mediasample.Request{Input: "/m.mkv", Window: &mediasample.Window{DurationSeconds: 1}, Audio: &mediasample.AudioOutput{Speech: &mediasample.SpeechParams{}}})
 	var remoteErr *mediasample.RemoteError
 	if !errors.As(err, &remoteErr) || remoteErr.Status != http.StatusUnprocessableEntity || remoteErr.Infrastructure() {
@@ -146,7 +146,7 @@ func TestMediaSampleRefusalsClassifyForFallback(t *testing.T) {
 	node := httptest.NewServer(server.router())
 	defer node.Close()
 	run := func(req mediasample.Request) *mediasample.RemoteError {
-		_, err := mediasample.RemoteClient{}.Run(context.Background(), node.URL+mediasample.RemotePath, testSecret, req)
+		_, err := mediasample.RemoteClient{}.Run(context.Background(), node.URL+mediasample.RemotePath, nodeauthtest.NodeKey(testSecret), req)
 		var remoteErr *mediasample.RemoteError
 		if !errors.As(err, &remoteErr) {
 			t.Fatalf("error %#v", err)

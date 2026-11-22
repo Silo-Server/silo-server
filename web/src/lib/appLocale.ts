@@ -23,8 +23,22 @@ export const SHIPPED_LANGUAGES = [
   { tag: "de", endonym: "Deutsch" },
   { tag: "fr", endonym: "Français" },
   { tag: "pt-BR", endonym: "Português (Brasil)" },
+  { tag: "nl", endonym: "Nederlands" },
+  { tag: "it", endonym: "Italiano" },
+  { tag: "pl", endonym: "Polski" },
+  { tag: "tr", endonym: "Türkçe" },
+  { tag: "sv", endonym: "Svenska" },
+  { tag: "da", endonym: "Dansk" },
+  { tag: "nb", endonym: "Norsk bokmål" },
+  { tag: "fi", endonym: "Suomi" },
+  { tag: "cs", endonym: "Čeština" },
+  { tag: "hr", endonym: "Hrvatski" },
+  { tag: "ru", endonym: "Русский" },
+  { tag: "uk", endonym: "Українська" },
   { tag: "ja", endonym: "日本語" },
+  { tag: "ko", endonym: "한국어" },
   { tag: "zh-Hans", endonym: "简体中文" },
+  { tag: "zh-Hant", endonym: "繁體中文" },
   { tag: "ar", endonym: "العربية" },
 ] as const;
 
@@ -124,15 +138,18 @@ const SHIPPED_MAXIMIZED = SHIPPED_LANGUAGES.map((shipped) => ({
  * The shipped language a tag selects, or null. A tag matches the shipped
  * language with the same language and script once both are maximized, so a
  * regional tag gets its language (`es-MX` → `es`, `pt-PT` → `pt-BR`) and
- * Chinese follows its script (`zh-CN`, `zh-SG` → `zh-Hans`; `zh-TW` → none).
+ * Chinese follows its script (`zh-CN`, `zh-SG` → `zh-Hans`; `zh-TW`, `zh-HK` →
+ * `zh-Hant`). Norwegian reported as the macrolanguage `no` is Bokmål; Nynorsk
+ * (`nn`) selects nothing.
  */
 export function matchShippedLanguage(tag: string | null | undefined): AppLanguage | null {
   if (!tag) return null;
   const locale = maximized(tag);
   if (!locale) return null;
+  // CLDR keeps `no` and `nb` apart when maximizing, and browsers send either.
+  const language = locale.language === "no" ? "nb" : locale.language;
   const match = SHIPPED_MAXIMIZED.find(
-    (shipped) =>
-      shipped.locale.language === locale.language && shipped.locale.script === locale.script,
+    (shipped) => shipped.locale.language === language && shipped.locale.script === locale.script,
   );
   return match?.tag ?? null;
 }
@@ -230,6 +247,17 @@ export function getAppLocale(): AppLocale {
 /** The interface language, for text: lists, relative times, language names. */
 export function appLanguage(): AppLanguage {
   return current.language;
+}
+
+/**
+ * A plain list of values in the interface language's separators ("A, B, C"; a
+ * Japanese or Arabic list uses its own). Use it instead of `join(", ")` for
+ * anything shown. Call it while rendering: it reads the current language.
+ * Pass the whole list: some languages put "and" before the last item, so a
+ * prefix joined here contradicts a message that adds its own "or".
+ */
+export function joinList(items: readonly string[]): string {
+  return new Intl.ListFormat(appLanguage(), { type: "unit", style: "short" }).format(items);
 }
 
 /** The locale for dates and numbers; pass it where `toLocale*String` took none. */

@@ -7,11 +7,13 @@ import (
 	"strconv"
 )
 
+const globalRequestsPerSecondSetting = "ratelimit.global.requests_per_second"
+
+// Session quota settings.
 const (
-	globalRequestsPerSecondSetting = "ratelimit.global.requests_per_second"
-	sessionModeSetting             = "ratelimit.session.mode"
-	sessionRequestsPerHourSetting  = "ratelimit.session.requests_per_hour"
-	sessionBurstSetting            = "ratelimit.session.burst"
+	sessionModeSetting            = "ratelimit.session.mode"
+	sessionRequestsPerHourSetting = "ratelimit.session.requests_per_hour"
+	sessionBurstSetting           = "ratelimit.session.burst"
 )
 
 // SettingsStore is the interface for reading/writing server_settings.
@@ -59,6 +61,7 @@ func ConfigFromSettings(all map[string]string) Config {
 	cfg.IPReqPerSecond = parseRate(all, "ratelimit.ip.requests_per_second", defaults.IPReqPerSecond, MaxRequestsPerWindow)
 	cfg.IPReqPerMinute = parseRate(all, "ratelimit.ip.requests_per_minute", defaults.IPReqPerMinute, MaxRequestsPerWindow)
 	cfg.IPBurst = parseInt(all, "ratelimit.ip.burst", defaults.IPBurst)
+
 	cfg.Session = SessionQuotaConfig{
 		Mode:            parseSessionMode(all, defaults.Session.Mode),
 		RequestsPerHour: parseRate(all, sessionRequestsPerHourSetting, defaults.Session.RequestsPerHour, MaxRequestsPerWindow),
@@ -91,9 +94,6 @@ func DefaultSettings() map[string]string {
 		"ratelimit.ip.requests_per_second":                   "120",
 		"ratelimit.ip.requests_per_minute":                   "6000",
 		"ratelimit.ip.burst":                                 "120",
-		sessionModeSetting:                                   SessionQuotaLog,
-		sessionRequestsPerHourSetting:                        "10000",
-		sessionBurstSetting:                                  "30000",
 		"ratelimit.auth.login.requests_per_minute":           "20",
 		"ratelimit.auth.login.burst":                         "10",
 		"ratelimit.auth.signup.requests_per_minute":          "10",
@@ -108,6 +108,11 @@ func DefaultSettings() map[string]string {
 		"ratelimit.auth.device_lookup.burst":                 "20",
 		"ratelimit.auth.device_poll.requests_per_minute":     "120",
 		"ratelimit.auth.device_poll.burst":                   "30",
+		"ratelimit.auth.item_poster.requests_per_minute":     "600",
+		"ratelimit.auth.item_poster.burst":                   "400",
+		sessionModeSetting:                                   SessionQuotaLog,
+		sessionRequestsPerHourSetting:                        "10000",
+		sessionBurstSetting:                                  "30000",
 	}
 }
 
@@ -207,6 +212,7 @@ func parseRate(m map[string]string, key string, def, maxValue float64) float64 {
 	return def
 }
 
+// ValidSessionQuotaMode reports whether mode is one the session quota knows.
 func ValidSessionQuotaMode(mode string) bool {
 	switch mode {
 	case SessionQuotaOff, SessionQuotaLog, SessionQuotaEnforce:

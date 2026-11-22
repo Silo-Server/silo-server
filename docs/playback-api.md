@@ -879,7 +879,7 @@ reanchor, and is excluded from plan identity.
 | Operation | Method and path |
 | --- | --- |
 | Original bytes | GET/HEAD `/api/v2/stream/{session_id}` |
-| HLS manifest | GET `/api/v2/playback/transcode/{session_id}/master.m3u8` |
+| HLS manifest | GET/HEAD `/api/v2/playback/transcode/{session_id}/master.m3u8` |
 | HLS segment | GET `/api/v2/playback/transcode/{session_id}/segment/{name}`; `sub_NNNNN.vtt` names a subtitle rendition segment, `sub_<track>_NNNNN.vtt` one of an on-demand rendition (`hls_subtitle_renditions_all_v1`) |
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
@@ -899,9 +899,17 @@ These reuse the shared byte-delivery handlers behind the v2 listener, as the raw
 playback registry allows. The plan's URLs
 carry the signed stream reference `st`; a media element that cannot set headers
 may send the account bearer as the `token` query parameter, and the viewer
-headers select the profile. Account authentication and viewer authorization are
-always required. After a restart the session is rebuilt from the token the
-client re-presents
+headers select the profile. Without an account credential, `st` on its own
+authorizes the media, sidecar and HLS requests of the one session it names, as
+its account and profile: a Google Cast receiver gets only the URL. Viewer
+authorization still runs for that profile. The reference is bound to the login
+session that started playback, and the session's playback attempt must still be
+live, so stopping the session, signing out or disabling the account ends it
+before its 24-hour expiry. A session started with an API key keeps needing the
+account credential. After a restart the session is rebuilt from the token the
+client re-presents. Plans that negotiated `header_authenticated_media_v1` carry
+no `st`; the API rebuilds those from its Redis recovery card for the
+authenticated owner, while the card exists
 ([restart-resilient playback](architecture/restart-resilient-playback.md)).
 Ranges, conditional requests and HEAD keep their HTTP semantics; an
 unsatisfiable range is `416 range_not_satisfiable`. A `server_remux_progressive`
@@ -1018,6 +1026,48 @@ behaves like a single-node seek. Clients should let that request finish; if the
 ceiling expires it answers `412` while the restart keeps producing, so refetch
 the playlist as above.
 
+A plan may carry `stream.parallel_range_url`: a URL the client may read the
+file's byte ranges from over several connections. The server sets it only for an
+`original_http` plan whose attempt sent client feature
+`parallel_range_origin_v1` without `header_authenticated_media_v1`, and names
+one of three:
+
+- the plan's own stream, as a reference relative to the API root like
+  `stream.url`, when the API serves the file. The server names it only for an
+  attempt a login session started;
+- the same stream on the media origin the administrator set in
+  `server.web_media_url`, in place of the first, when one is set and the client
+  did not arrive through a network access provider;
+- the proxy node's own URL, the one `stream.url` already carries, when a node
+  serves the file.
+
+The URL authorizes itself (`st`, or the token in a node URL's path). A client
+uses it exactly as given and adds no account token, header or cookie to it. A
+client reads parallel ranges only over connections that are separate: on the
+page's own origin, the web player does so only when the page loaded over
+HTTP/1.1, and it stops when the browser reports that a range came over HTTP/2
+or HTTP/3 (the stream answers carry `Timing-Allow-Origin: *` for that). A plan
+without `parallel_range_url` is read from `stream.url`.
+`stream.url` stays valid; a client may also read the warm head, overflow ranges,
+or a natively played file from it.
+
+Three kinds of response are readable from another origin. Each carries
+`Access-Control-Allow-Origin: *` and no `Access-Control-Allow-Credentials`:
+
+- The original-file stream, `GET` and `HEAD` on `/api/v2/stream/{session_id}`,
+  refusals included, with `Range` allowed and `Content-Range` exposed. The web player reads it from
+  the media origin. The `OPTIONS` preflight answers `204` before any
+  credential is read, with `GET, HEAD, OPTIONS` and the `Range` header allowed,
+  and `Access-Control-Max-Age: 600` so a browser that preflights `Range` does
+  not repeat it for every range.
+- The HLS manifest and segment answers, refusals included, with `Range` allowed
+  and the range and validator headers exposed, so a player such as a Google Cast receiver can
+  read them. The API answers no `OPTIONS` preflight there; Cast receivers
+  fetch playlists and segments with plain GETs and have not been seen to send
+  one.
+- Subtitle sidecars, from their handler. A refusal before the handler runs
+  carries no CORS header.
+
 Subtitle inventory URLs in v2 playback responses use the `/api/v2/stream/`
 mount, including relative `/stream/` values produced by the shared inventory
 builder. The web player applies the same mapping to realtime subtitle URLs.
@@ -1034,13 +1084,21 @@ it mirrors the server's own sidecar de-duplication discriminator. `path_key` is
 absent on embedded tracks and on servers that predate it: a client falls back
 to `file_name` there, which cannot separate same-basename sidecars.
 
+An external subtitle whose only title is its file name is labeled by that
+name only for a viewer who may see file names (see
+[File paths and names](catalog-api.md#file-paths-and-names)). Everyone else
+gets its embedded title or language as the `label`, numbered like the catalog
+title when several share a language, format and flags. Realtime subtitle
+events never label a sidecar by its file name, for any viewer.
+
 ## Revocation
 
 Stop, session expiry or abort, and admin stop or terminate write the
 Redis key `silo:streamauth:<session_id>` with a TTL equal to the stream token
-lifetime. The API checks it before it serves or reconstructs a session, and the
-proxy and transcode nodes check it on every token-verified serve, so a
-still-valid token cannot revive a session on any replica. Lookups are cached in
+lifetime. The API checks it before it serves or reconstructs a session, the
+proxy checks it on every token-verified serve, and every relay to a transcode
+node checks it before forwarding, as the API does before a node rebuilds a
+session, so a still-valid token cannot revive a session on any replica. Lookups are cached in
 process for two seconds. When Redis is unavailable the check fails open with a
 warning: serving never waits on Redis. A deployment without Redis keeps the
 token TTL as its bound.

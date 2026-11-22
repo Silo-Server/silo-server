@@ -1,5 +1,5 @@
 import { t } from "@/i18n";
-import type { OverlayDef } from "../types";
+import type { OverlayData, OverlayDef } from "../types";
 
 // "Ribbon" overlays — status badges that sit in the visual register of corner
 // ribbons. Only entries backed by a real API field belong in this registry;
@@ -7,6 +7,15 @@ import type { OverlayDef } from "../types";
 
 // Amber, for a title TMDB no longer lists as saved.
 export const ATTENTION_ACCENT = "#f59e0b";
+export const COMPLETE_ACCENT = "#21c452";
+
+/** Whether a series or season poster is complete, partly in the library, or has no badge. */
+function availabilityState(d: OverlayData): "complete" | "partial" | null {
+  const have = d.availability_have;
+  const total = d.availability_total;
+  if (have == null || total == null || total <= 0) return null;
+  return have >= total ? "complete" : "partial";
+}
 
 type ShowStatusKey = "Returning" | "Ended" | "Cancelled" | "Upcoming";
 
@@ -87,5 +96,38 @@ export const RIBBON_OVERLAYS: readonly OverlayDef[] = [
     getValue: (d) => d.request_status || null,
     getIcon: (d) => d.request_status_icon ?? null,
     getAccent: (d) => (d.request_status_attention ? ATTENTION_ACCENT : null),
+  },
+  {
+    id: "availability",
+    category: "ribbons",
+    get label() {
+      return t("web.settings.overlays.badge.availability.label");
+    },
+    get description() {
+      return t("web.settings.overlays.badge.availability.description");
+    },
+    defaultPosition: "top-left",
+    defaultEnabled: false,
+    iconCapable: true,
+    introducedInManifest: 29,
+    getValue: (d) => {
+      switch (availabilityState(d)) {
+        case "complete":
+          return t("web.settings.overlays.badge.availability.value.complete");
+        case "partial":
+          return t("web.settings.overlays.badge.availability.value.fraction", {
+            have: d.availability_have ?? 0,
+            total: d.availability_total ?? 0,
+          });
+        default:
+          return null;
+      }
+    },
+    getIcon: (d) => (availabilityState(d) === "complete" ? "check" : null),
+    getAccent: (d) => {
+      const state = availabilityState(d);
+      if (state === null) return null;
+      return state === "complete" ? COMPLETE_ACCENT : ATTENTION_ACCENT;
+    },
   },
 ];

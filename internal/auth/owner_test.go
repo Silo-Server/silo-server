@@ -21,7 +21,7 @@ func TestOwnerChecks(t *testing.T) {
 	disable := models.UpdateUserInput{Enabled: new(false)}
 	rename := models.UpdateUserInput{Username: new("renamed")}
 	// A non-Owner admin the Owner restricted.
-	limited := &models.User{ID: 5, Role: models.RoleAdmin, Enabled: true, MaxStreams: new(2), LibraryIDs: []int{2, 1}, DownloadTranscodeAllowed: new(false), MaxProfiles: new(2)}
+	limited := &models.User{ID: 5, Role: models.RoleAdmin, Enabled: true, MaxStreams: new(2), LibraryIDs: []int{2, 1}, DownloadTranscodeAllowed: new(false), MaxProfiles: new(2), Permissions: []string{"marker_edit"}}
 	resend := models.UpdateUserInput{
 		MaxStreams:               models.SetValue(2),
 		LibraryIDs:               models.SetValue([]int{1, 2}),
@@ -79,7 +79,11 @@ func TestOwnerChecks(t *testing.T) {
 		{"admin clears own libraries", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{LibraryIDs: models.ClearValue[[]int]()}), ErrAdminPolicyProtected},
 		{"admin raises own profile limit", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{MaxProfiles: models.SetValue(10)}), ErrAdminPolicyProtected},
 		{"admin clears own profile limit", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{MaxProfiles: models.ClearValue[int]()}), ErrAdminPolicyProtected},
+		{"admin grants itself a permission", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{Permissions: &[]string{"marker_edit", "metadata_curation"}}), ErrAdminPolicyProtected},
+		{"admin drops own permission", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{Permissions: &[]string{}}), ErrAdminPolicyProtected},
 		{"admin resends own policy", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, resend), nil},
+		{"admin resends own permissions reordered", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{Permissions: &[]string{" marker_edit", "marker_edit"}}), nil},
+		{"owner grants admin a permission", CheckOwnerUpdate(asOwner, limited, models.UpdateUserInput{Permissions: &[]string{"metadata_curation"}}), nil},
 		{"admin edits own email beside policy", CheckOwnerUpdate(OwnerActor{ID: limited.ID}, limited, models.UpdateUserInput{Email: new("new@example.test"), MaxStreams: models.SetValue(2)}), nil},
 		{"owner limits admin", CheckOwnerUpdate(asOwner, admin, models.UpdateUserInput{MaxStreams: models.SetValue(2)}), nil},
 		{"owner lifts admin limit", CheckOwnerUpdate(asOwner, limited, models.UpdateUserInput{MaxStreams: models.ClearValue[int]()}), nil},

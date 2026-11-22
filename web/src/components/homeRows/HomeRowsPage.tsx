@@ -23,6 +23,7 @@ import { RowLine } from "./RowLine";
 import { RowList } from "./RowList";
 import { MAX_SELECTED_ROWS } from "./SelectModeBar";
 import type { RowFocus } from "./useRowFocus";
+import { motionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 /** Select mode. While it is on, rows carry checkboxes instead of grips and cannot be dragged. */
 export interface HomeRowsSelection {
@@ -116,7 +117,7 @@ export function HomeRowsPage({
     if (!highlightShown || !highlightRowId) return;
     list.current
       ?.querySelector(`[data-row-id=${JSON.stringify(highlightRowId)}]`)
-      ?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+      ?.scrollIntoView?.({ block: "nearest", behavior: motionScrollBehavior() });
   }, [highlightRowId, highlightShown]);
   const { rows, surface, page } = adapter;
   const label = pageLabel(page, adapter.pages);

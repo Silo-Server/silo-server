@@ -94,6 +94,8 @@ var restoredFlagSettings = map[string]string{
 	"notifications.discord.allow_per_episode":              "message granularity on a channel its own switch gates",
 	"notifications.email.allow_per_episode":                "message granularity on a channel its own switch gates",
 	"notifications.server_channels.mention_requesters":     "message content on channels their own switch gates",
+	"notifications.fanout_enabled":                         "fanout to the destinations the backup names",
+	"notifications.release_events_enabled":                 "release announcements on the channels their own switches gate",
 	"overlays.enabled":                                     "presentation",
 	"playback.allow_hevc_encoding":                         whyCapacity,
 	"playback.bandwidth_probe_automatic":                   whyTuning,

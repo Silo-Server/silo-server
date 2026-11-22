@@ -107,9 +107,6 @@ func (h *AuthHandler) HandleDeviceStart(w http.ResponseWriter, r *http.Request) 
 		BaseURL:        requestBaseURL(r),
 		ClientPurpose:  req.ClientPurpose,
 		Temporary:      req.Temporary,
-		// v1 keeps its frozen answer: the request origin, not public_url,
-		// and a 10-minute request linked by browser code.
-		Legacy: true,
 	})
 	if err != nil {
 		writeAPIError(w, err)

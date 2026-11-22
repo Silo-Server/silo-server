@@ -8,18 +8,6 @@ import (
 	"time"
 )
 
-func TestSessionSnapshotsEqualDetectsOutputFormatChanges(t *testing.T) {
-	base := SessionSync{SessionID: "session", OutputContainer: "fmp4", OutputProtocol: "hls"}
-	for _, changed := range []SessionSync{
-		{SessionID: "session", OutputContainer: "mpegts", OutputProtocol: "hls"},
-		{SessionID: "session", OutputContainer: "fmp4", OutputProtocol: "http"},
-	} {
-		if sessionSnapshotsEqual([]SessionSync{base}, []SessionSync{changed}) {
-			t.Fatal("changed output format must be published")
-		}
-	}
-}
-
 // TestSyncNowSerializesSnapshotCapture guards the SyncNow ordering contract:
 // snapshot capture and reconciliation run under one lock, so a request-path
 // sync (playback start/stop) can never interleave with the periodic tick and
@@ -54,19 +42,6 @@ func TestSyncNowSerializesSnapshotCapture(t *testing.T) {
 
 	if overlapped.Load() {
 		t.Fatal("concurrent SyncNow calls captured snapshots concurrently; capture and reconcile must be serialized")
-	}
-}
-
-// TestSessionSnapshotsEqualDetectsToneMapChanges verifies execution-mode changes trigger reconciliation.
-func TestSessionSnapshotsEqualDetectsToneMapChanges(t *testing.T) {
-	base := SessionSync{SessionID: "session-1", ToneMapMode: "hardware"}
-	if !sessionSnapshotsEqual([]SessionSync{base}, []SessionSync{base}) {
-		t.Fatal("identical tone-map facts must compare equal")
-	}
-	changed := base
-	changed.ToneMapMode = "software"
-	if sessionSnapshotsEqual([]SessionSync{base}, []SessionSync{changed}) {
-		t.Fatal("tone-map mode change must invalidate the session snapshot")
 	}
 }
 

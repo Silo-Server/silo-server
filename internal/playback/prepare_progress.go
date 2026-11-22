@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // PrepareProgress is one reading of a prepared-download encode, taken from
@@ -220,4 +222,17 @@ func (w *prepareLogWriter) setHWAccel(hwAccel string) {
 	w.mu.Lock()
 	w.attrs.HWAccel = hwAccel
 	w.mu.Unlock()
+}
+
+// FileFrameRate is the frame rate of file's video, which a prepared file
+// keeps, or zero for an audio-only file or one whose probe recorded none.
+func FileFrameRate(file *models.MediaFile) float64 {
+	if file == nil || file.IsAudioOnly() || len(file.VideoTracks) == 0 {
+		return 0
+	}
+	rate := parseFrameRateV3(file.VideoTracks[0].FrameRate)
+	if rate <= 0 || math.IsNaN(rate) || math.IsInf(rate, 0) {
+		return 0
+	}
+	return rate
 }

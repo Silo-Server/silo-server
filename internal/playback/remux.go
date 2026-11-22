@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -781,7 +782,25 @@ const (
 
 // RemuxServeOptions carries the optional serving concerns that not every
 // caller sets, keeping the positional argument list from growing further.
+// RemuxStreamOriginQueryParam is the query parameter a seeked progressive
+// remux URL carries when its plan asked for the resume leading-picture drop:
+// the plan's stream origin in seconds (RemuxServeOptions.StreamOriginSeconds).
+const RemuxStreamOriginQueryParam = "origin"
+
+// RemuxStreamOrigin returns the stream origin a progressive remux URL
+// carries, or nil when it has none or it isn't a finite, non-negative number.
+func RemuxStreamOrigin(query url.Values) *float64 {
+	origin, err := strconv.ParseFloat(query.Get(RemuxStreamOriginQueryParam), 64)
+	if err != nil || origin < 0 || math.IsInf(origin, 0) || math.IsNaN(origin) {
+		return nil
+	}
+	return &origin
+}
+
 type RemuxServeOptions struct {
+	// StreamOriginSeconds is the plan's stream origin from the URL; see
+	// RemuxStreamOrigin. Nil serves the plain copy.
+	StreamOriginSeconds *float64
 	// DVMode is the explicitly declared Dolby Vision recipe. The zero value
 	// decodes as the legacy auto behavior, matching old stream tokens.
 	DVMode RemuxDVMode

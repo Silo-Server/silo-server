@@ -105,43 +105,6 @@ func (s *Service) listAccountPage(ctx context.Context, userID int, after *Regist
 	return page, nil
 }
 
-// ListPage preserves the separate account-ephemeral and profile/device modes.
-// ID breaks timestamp ties; creation time remains stable through status reports.
-func (s *Service) ListPage(ctx context.Context, userID int, profileID, deviceID string, after *RegistryPosition, limit int, filter catalog.AccessFilter) (RegistryPage, error) {
-	if deviceID == "" {
-		return s.listAccountPage(ctx, userID, after, limit, filter)
-	}
-	if profileID == "" {
-		return RegistryPage{}, ErrProfileRequired
-	}
-	rows, err := s.repo.ListPage(ctx, userID, profileID, deviceID, after, limit+1)
-	if err != nil {
-		return RegistryPage{}, err
-	}
-	page := RegistryPage{}
-	if len(rows) > limit {
-		rows = rows[:limit]
-		last := rows[len(rows)-1]
-		page.Next = &RegistryPosition{CreatedAt: last.CreatedAt, ID: last.ID}
-	}
-	if after == nil {
-		// A registry read is the device syncing: it is how a revoked copy
-		// reaches the device, and what makes "last seen" mean something.
-		if err := s.repo.TouchDeviceSeen(ctx, userID, profileID, deviceID); err != nil {
-			slog.WarnContext(ctx, "recording device sync failed", "component", "downloads", "error", err)
-		}
-	}
-	if err := s.repo.attachPreparations(ctx, rows); err != nil {
-		// Progress is decoration; the registry is still correct without it.
-		slog.WarnContext(ctx, "download preparation progress unavailable", "component", "downloads", "error", err)
-	}
-	page.Items = rows
-	return page, nil
-}
-func (r *Repository) ListPage(ctx context.Context, userID int, profileID, deviceID string, after *RegistryPosition, limit int) ([]*Download, error) {
-	return r.listRegistryPage(ctx, userID, profileID, deviceID, "", after, limit)
-}
-
 // Get returns one registry entry in the same mode listRegistryPage uses: the
 // device-managed row when deviceID is set (scoped on profile and device), else
 // the account's ephemeral row. A managed row is never reachable through the
@@ -184,6 +147,43 @@ func (s *Service) attachPreparation(ctx context.Context, dl *Download) {
 	if err := s.repo.attachPreparations(ctx, rows); err != nil {
 		slog.WarnContext(ctx, "download preparation progress unavailable", "component", "downloads", "download_id", dl.ID, "error", err)
 	}
+}
+
+// ListPage preserves the separate account-ephemeral and profile/device modes.
+// ID breaks timestamp ties; creation time remains stable through status reports.
+func (s *Service) ListPage(ctx context.Context, userID int, profileID, deviceID string, after *RegistryPosition, limit int, filter catalog.AccessFilter) (RegistryPage, error) {
+	if deviceID == "" {
+		return s.listAccountPage(ctx, userID, after, limit, filter)
+	}
+	if profileID == "" {
+		return RegistryPage{}, ErrProfileRequired
+	}
+	rows, err := s.repo.ListPage(ctx, userID, profileID, deviceID, after, limit+1)
+	if err != nil {
+		return RegistryPage{}, err
+	}
+	page := RegistryPage{}
+	if len(rows) > limit {
+		rows = rows[:limit]
+		last := rows[len(rows)-1]
+		page.Next = &RegistryPosition{CreatedAt: last.CreatedAt, ID: last.ID}
+	}
+	if after == nil {
+		// A registry read is the device syncing: it is how a revoked copy
+		// reaches the device, and what makes "last seen" mean something.
+		if err := s.repo.TouchDeviceSeen(ctx, userID, profileID, deviceID); err != nil {
+			slog.WarnContext(ctx, "recording device sync failed", "component", "downloads", "error", err)
+		}
+	}
+	if err := s.repo.attachPreparations(ctx, rows); err != nil {
+		// Progress is decoration; the registry is still correct without it.
+		slog.WarnContext(ctx, "download preparation progress unavailable", "component", "downloads", "error", err)
+	}
+	page.Items = rows
+	return page, nil
+}
+func (r *Repository) ListPage(ctx context.Context, userID int, profileID, deviceID string, after *RegistryPosition, limit int) ([]*Download, error) {
+	return r.listRegistryPage(ctx, userID, profileID, deviceID, "", after, limit)
 }
 func (r *Repository) listRegistryPage(ctx context.Context, userID int, profileID, deviceID, batchID string, after *RegistryPosition, limit int) ([]*Download, error) {
 	if limit < 1 || limit > registryPageMaxRows {

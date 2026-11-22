@@ -8,6 +8,7 @@ import {
 } from "@/hooks/queries/settingValues";
 import { useOptionalAuth } from "@/hooks/useAuth";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
+import { refusedOffline, reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { storage } from "@/utils/storage";
 
@@ -264,7 +265,9 @@ export function libraryPageStateWriteRetryDelay(
   error: unknown,
   fallbackDelayMs: number,
 ): number | null {
-  if (!shouldRetryLibraryPageStateWrite(error)) {
+  // A write refused offline is not retried: by the time a retry runs, the view
+  // it was built from may be older than one another tab saved meanwhile.
+  if (!shouldRetryLibraryPageStateWrite(error) || refusedOffline(error)) {
     return null;
   }
   if (error instanceof LibraryPreferenceWriteCancelledError) {
@@ -413,6 +416,9 @@ export function useLibraryPageStatePreference() {
           return result;
         },
         (error: unknown) => {
+          // A write refused offline was never sent and isn't retried; settling it
+          // as definitive drops it, so it can't ride along in the next save.
+          if (mutationStarted) reportOfflineSettingFailure(error);
           settlePreferenceWrite(
             queue,
             pendingWrite,

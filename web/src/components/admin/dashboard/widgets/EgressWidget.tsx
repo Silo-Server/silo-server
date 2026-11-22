@@ -1,7 +1,6 @@
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { Card, CardContent } from "@/components/ui/card";
-import { cn } from "@/lib/utils";
 import { useAdminTimeseries } from "@/hooks/queries/admin/dashboardInsights";
 import { formatDataTotal, formatMbps, formatMbpsValue } from "../format";
 import {
@@ -14,6 +13,7 @@ import {
 import { useWidgetRange } from "../widgetChrome";
 import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
+import { WidgetViewToggle } from "../WidgetViewToggle";
 import { buildEgressBands } from "./egressBands";
 import { TimeseriesChartBody } from "./timeseriesChart";
 import { buildTimeseriesPoints } from "./timeseriesSeries";
@@ -43,9 +43,10 @@ export function EgressWidget() {
   const t = useT();
   // buildEgressBands names the "Other" band, so the bands follow the language.
   const language = useAppLanguage();
-  const { range } = useWidgetRange();
+  // The view is stored with the placement, so Nodes survives a reload.
+  const { range, view, setView } = useWidgetRange();
   const query = useAdminTimeseries(rangeHours(range));
-  const [byNode, setByNode] = useState(false);
+  const byNode = view === "nodes";
   // eslint-disable-next-line react-hooks/exhaustive-deps -- language re-runs the labels
   const bands = useMemo(() => buildEgressBands(query.data), [query.data, language]);
   const showBands = byNode && bands !== null;
@@ -84,7 +85,24 @@ export function EgressWidget() {
         <span className="text-muted-foreground text-[11px] whitespace-nowrap tabular-nums">
           {t("web.admin.dashboard.widgets.egress.peak", { value: formatMbps(peak) })}
         </span>
-        {bands ? <EgressViewToggle byNode={byNode} onChange={setByNode} /> : null}
+        {bands ? (
+          <WidgetViewToggle
+            value={byNode ? "nodes" : "total"}
+            options={[
+              {
+                value: "total",
+                label: t("web.admin.dashboard.widgets.egress.viewTotal"),
+                ariaLabel: t("web.admin.dashboard.widgets.egress.viewTotalLabel"),
+              },
+              {
+                value: "nodes",
+                label: t("web.admin.dashboard.widgets.egress.viewNodes"),
+                ariaLabel: t("web.admin.dashboard.widgets.egress.viewNodesLabel"),
+              },
+            ]}
+            onChange={setView}
+          />
+        ) : null}
         <WidgetRangePicker />
       </WidgetHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">
@@ -117,57 +135,5 @@ export function EgressWidget() {
         />
       </CardContent>
     </Card>
-  );
-}
-
-/**
- * Total/Nodes switch, styled like the range picker beside it. Two toggle
- * buttons rather than one: each says which view it shows, and the pressed
- * state tells a screen reader which one is on.
- */
-function EgressViewToggle({
-  byNode,
-  onChange,
-}: {
-  byNode: boolean;
-  onChange: (byNode: boolean) => void;
-}) {
-  const t = useT();
-  const options = [
-    {
-      byNode: false,
-      label: t("web.admin.dashboard.widgets.egress.viewTotal"),
-      ariaLabel: t("web.admin.dashboard.widgets.egress.viewTotalLabel"),
-    },
-    {
-      byNode: true,
-      label: t("web.admin.dashboard.widgets.egress.viewNodes"),
-      ariaLabel: t("web.admin.dashboard.widgets.egress.viewNodesLabel"),
-    },
-  ];
-  return (
-    <div className="border-border/60 bg-muted/20 flex shrink-0 items-center gap-0.5 rounded-full border p-0.5">
-      {options.map((option) => {
-        const active = option.byNode === byNode;
-        return (
-          <button
-            key={String(option.byNode)}
-            type="button"
-            aria-pressed={active}
-            aria-label={option.ariaLabel}
-            className={cn(
-              "cursor-pointer rounded-full px-1.5 py-0.5 text-[10px] leading-none font-semibold transition-colors",
-              "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
-              active
-                ? "border-primary/40 bg-primary/15 text-foreground"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/60",
-            )}
-            onClick={() => onChange(option.byNode)}
-          >
-            {option.label}
-          </button>
-        );
-      })}
-    </div>
   );
 }

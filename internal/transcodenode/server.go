@@ -412,6 +412,9 @@ type Server struct {
 	// shuttingDown is guarded by reloadMu. Once set, no fresh or reconstructed
 	// session may register after the shutdown drain has taken its snapshot.
 	shuttingDown bool
+	// jobCap is the node's own job cap, 0 for none.
+	jobCap atomic.Int32
+
 	// startThrottler is a test seam; production falls back to session.StartThrottler.
 	startThrottler func(*playback.TranscodeSession, int)
 

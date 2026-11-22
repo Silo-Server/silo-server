@@ -27,7 +27,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback/dovirpu"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
-	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -861,7 +860,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 	log.Printf("playback: ffmpeg cmd: %s %s", bin, strings.Join(args, " "))
 	s.logFFmpegEvent(ctx, "ffmpeg process starting", "")
 
-	cmd := procgroup.CommandContext(ctx, fspath.Decode(bin), fspath.DecodeAll(args)...)
+	cmd := fspath.CommandContext(ctx, bin, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -1175,7 +1174,7 @@ func validateToneMapSource(ctx context.Context, opts TranscodeOpts) error {
 	if isVirtualOrHTTP {
 		return nil
 	}
-	if err := opts.ToneMapSourceRevision.ValidatePath(opts.InputPath); err != nil {
+	if err := opts.ToneMapSourceRevision.ValidatePath(ctx, opts.InputPath); err != nil {
 		if errors.Is(err, tonemap.ErrSourceRevisionChanged) {
 			return err
 		}
@@ -5081,7 +5080,7 @@ func (s *TranscodeSession) restart(
 	// As on initial start, the caller bounds synchronous validation; the new
 	// FFmpeg process keeps running after the segment request completes.
 	ctx, cancel := context.WithCancel(context.WithoutCancel(ctx))
-	cmd := procgroup.CommandContext(ctx, fspath.Decode(bin), fspath.DecodeAll(args)...)
+	cmd := fspath.CommandContext(ctx, bin, args...)
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()

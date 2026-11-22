@@ -288,7 +288,7 @@ An empty `contexts` list is refused at the schema (`resolve_effective_settings_c
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
+  "detail": "expected array length >= 1",
   "instance": "urn:silo:request:000000000000000000000038",
   "errors": [
     {
@@ -319,7 +319,7 @@ plugin installation id that names nothing (numeric or not; identifiers are opaqu
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
+  "detail": "No setting named no.such exists in this server's contract",
   "instance": "urn:silo:request:000000000000000000000035",
   "errors": [
     {
@@ -427,7 +427,7 @@ A missing `values` member (`update_plugin_settings_values_required.json`):
   "type": "https://siloserver.org/docs/api/v2/problems/validation_failed",
   "title": "Validation failed",
   "status": 422,
-  "detail": "The request did not pass validation; see errors.",
+  "detail": "expected required property values to be present",
   "instance": "urn:silo:request:000000000000000000000029",
   "errors": [
     {
@@ -983,6 +983,15 @@ identity keeps the exact root that identity names instead, normally
 with no recorded identity adopts the default. Artwork storage settings take
 effect after a server restart.
 
+A write of `artwork.local_path` is refused with a `422` validation problem when
+a local store could not open that folder: the path names an existing file or
+symbolic link, or a path inside a file. The check applies whichever backend is
+selected, since startup and storage transitions refuse such a folder too. The
+field error is at `body.values.artwork.local_path` (batch) or `body.value`
+(single key), with code `invalid`. The check runs on the server that takes the
+write and creates no folders; a folder that does not exist yet is accepted and
+created at startup.
+
 The first write to the assets store records its storage identity; writes to a
 shared local root count too. At startup, Silo records any configured private
 bucket, even if it is empty. A direct settings write that changes a recorded
@@ -1053,7 +1062,9 @@ cleared, so the item's or season's own artwork shows. Items with locked
 artwork keep what they have; choosing artwork in Edit Metadata locks it, for a
 season or episode on the whole series. Banner, landscape thumb, clear art, and
 disc art come only from local files, so copies already stored stay. Nothing is
-deleted directly; the artwork revision GC collects the displaced copies.
+deleted directly; the artwork revision GC collects the displaced copies. Frames
+taken from a video, the extras' stills and the posters of movies with no
+poster, are stored regardless of the setting.
 Turning the setting back on caches artwork for later refreshes; the Backfill
 Metadata Images task stores the provider artwork already served by URL.
 

@@ -728,6 +728,7 @@ func allowedChannelsForRole(role string) []evt.EventChannel {
 			evt.ChannelScans,
 			evt.ChannelSettings,
 			evt.ChannelDownloadPreparations,
+			evt.ChannelDownloads,
 		)
 	}
 	return channels

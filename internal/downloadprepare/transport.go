@@ -22,6 +22,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/downloadstorage"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
+	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
@@ -33,8 +34,8 @@ const (
 	resultToneMapRecipeVersionHeader             = "X-Vio-Tone-Map-Recipe-Version"
 	resultToneMapModeHeader                      = "X-Vio-Tone-Map-Mode"
 	resultToneMapSourceRevisionFingerprintHeader = "X-Vio-Tone-Map-Source-Revision-Fingerprint"
-	resultExecutionFingerprintHeader             = "X-Vio-Download-Execution-Fingerprint"
-	resultArtifactSizeHeader                     = "X-Vio-Download-Artifact-Size"
+	resultExecutionFingerprintHeader             = "X-Silo-Download-Execution-Fingerprint"
+	resultArtifactSizeHeader                     = "X-Silo-Download-Artifact-Size"
 	maxResultAttestationHeaderBytes              = 1024
 )
 
@@ -45,6 +46,13 @@ var (
 	ErrRelayReadIdle    = errors.New("remote download artifact read stalled")
 	// ErrProgressUnsupported means the node predates the progress endpoint.
 	ErrProgressUnsupported = errors.New("remote download prepare progress unsupported")
+	// ErrNodeAtCapacity is a node that refused the preparation at its own
+	// job cap (nodepool.RefusalAtCapacity). It started nothing.
+	ErrNodeAtCapacity = errors.New("remote download prepare: node is at its job limit")
+	// ErrNodeStorageFull is a node that refused the preparation at the
+	// prepared-download budget it declares (nodepool.RefusalStorageFull). It
+	// started nothing.
+	ErrNodeStorageFull = errors.New("remote download prepare: node's prepared-download directory is at its budget")
 )
 
 func newHTTPClient(responseHeaderTimeout time.Duration) *http.Client {
@@ -75,16 +83,11 @@ var (
 // output path. ArtifactID is an opaque handle, never a caller-selected path.
 type Request struct {
 	ArtifactID string `json:"artifact_id"`
-	// InputPath is the concrete source the node opens. For a virtual title it is
-	// a short-lived relay URL that rotates between attempts.
-	InputPath string `json:"input_path"`
-	// CanonicalInputPath is the durable source identity a virtual title was
-	// resolved from (`virtual://...`). It is empty for a local file, whose
-	// InputPath is already durable. The execution fingerprint is derived from
-	// this value when present, so rotating a relay URL never changes the recipe
-	// while a real source or quality change still does. The node never opens it;
-	// it exists to keep the frozen fingerprint canonical on both sides.
-	CanonicalInputPath         string                 `json:"canonical_input_path,omitempty"`
+	InputPath  string `json:"input_path"`
+	// SourceGrant is the core's source grant for InputPath, naming the node
+	// the job is sent to. It changes with every dispatch, so the execution
+	// fingerprint leaves it out.
+	SourceGrant                string                 `json:"source_grant,omitempty" required:"true"`
 	SourceVideoCodec           string                 `json:"source_video_codec,omitempty"`
 	SourceVideoProfile         string                 `json:"source_video_profile,omitempty"`
 	SourceVideoBitDepth        int                    `json:"source_video_bit_depth,omitempty"`
@@ -123,6 +126,10 @@ type Request struct {
 	// therefore cannot return the matching execution fingerprint.
 	AudioOnly     bool    `json:"audio_only,omitempty"`
 	TotalDuration float64 `json:"total_duration,omitempty"`
+	// SourceFrameRate lets the node read the encode's progress from its
+	// frames. It never affects bytes, so the execution fingerprint excludes
+	// it; older nodes ignore it and report FFmpeg's output time.
+	SourceFrameRate float64 `json:"source_frame_rate,omitempty"`
 	// LogSessionID labels the node's FFmpeg log lines with the durable job's
 	// key (playback.DownloadPrepareLogSessionID), so every attempt of one
 	// artifact reads as one stream. It never affects bytes, so the execution
@@ -262,18 +269,12 @@ func (r Request) ValidToneMapAttestation() bool {
 }
 
 // ExecutionFingerprint identifies every transported byte-affecting field while
-// deliberately excluding the idempotency handle. A virtual title's transient
-// relay URL is replaced by its canonical source identity before hashing, so the
-// fingerprint is stable across relay rotation and identical on the API host and
-// the transcode node (see CanonicalInputPath). A local file has no canonical
-// path and hashes exactly as before.
+// deliberately excluding the idempotency handle.
 func (r Request) ExecutionFingerprint() string {
 	r.ArtifactID = ""
+	r.SourceGrant = ""
 	r.LogSessionID = ""
-	if r.CanonicalInputPath != "" {
-		r.InputPath = r.CanonicalInputPath
-	}
-	r.CanonicalInputPath = ""
+	r.SourceFrameRate = 0
 	data, err := json.Marshal(r)
 	if err != nil {
 		return ""
@@ -288,7 +289,6 @@ func NewRequest(artifactID string, opts playback.TranscodeOpts) Request {
 	request := Request{
 		ArtifactID:                 artifactID,
 		InputPath:                  opts.InputPath,
-		CanonicalInputPath:         opts.CanonicalInputPath,
 		SourceVideoCodec:           opts.SourceVideoCodec,
 		SourceVideoProfile:         opts.SourceVideoProfile,
 		SourceVideoBitDepth:        opts.SourceVideoBitDepth,
@@ -312,6 +312,7 @@ func NewRequest(artifactID string, opts playback.TranscodeOpts) Request {
 		AudioTrackIndex:            opts.AudioTrackIndex,
 		AudioOnly:                  opts.AudioOnly,
 		TotalDuration:              opts.TotalDuration,
+		SourceFrameRate:            opts.SourceFrameRate,
 		LogSessionID:               opts.SessionID,
 	}
 	if opts.PreparedTracks != nil {
@@ -330,7 +331,6 @@ func NewRequest(artifactID string, opts playback.TranscodeOpts) Request {
 func (r Request) TranscodeOpts(ffmpegPath, hwAccel, hwDevice string, sink playback.FFmpegLogSink) playback.TranscodeOpts {
 	return playback.TranscodeOpts{
 		InputPath:                  r.InputPath,
-		CanonicalInputPath:         r.CanonicalInputPath,
 		SourceVideoCodec:           r.SourceVideoCodec,
 		SourceVideoProfile:         r.SourceVideoProfile,
 		SourceVideoBitDepth:        r.SourceVideoBitDepth,
@@ -360,6 +360,7 @@ func (r Request) TranscodeOpts(ffmpegPath, hwAccel, hwDevice string, sink playba
 		HWAccel:                    hwAccel,
 		HWDevice:                   hwDevice,
 		TotalDuration:              r.TotalDuration,
+		SourceFrameRate:            r.SourceFrameRate,
 		NodeType:                   "transcode",
 		ExecutionMode:              "download_prepare",
 		FFmpegLogSink:              sink,
@@ -378,9 +379,9 @@ func (r Request) logSessionID() string {
 
 // RemotePreparer executes and manages artifacts on a selected transcode node.
 type RemotePreparer interface {
-	Prepare(ctx context.Context, nodeURL, jwtSecret string, req Request) (Result, error)
-	Stat(ctx context.Context, nodeURL, jwtSecret, artifactID string) (Result, error)
-	Delete(ctx context.Context, nodeURL, jwtSecret, artifactID string) error
+	Prepare(ctx context.Context, nodeURL string, keys nodeauth.Keyring, req Request) (Result, error)
+	Stat(ctx context.Context, nodeURL string, keys nodeauth.Keyring, artifactID string) (Result, error)
+	Delete(ctx context.Context, nodeURL string, keys nodeauth.Keyring, artifactID string) error
 }
 
 // HTTPPreparer implements RemotePreparer over signed node APIs. A
@@ -391,13 +392,13 @@ type HTTPPreparer struct {
 	ReadIdleTimeout time.Duration
 }
 
-func (p HTTPPreparer) Prepare(ctx context.Context, nodeURL, jwtSecret string, req Request) (Result, error) {
+func (p HTTPPreparer) Prepare(ctx context.Context, nodeURL string, keys nodeauth.Keyring, req Request) (Result, error) {
 	body, err := json.Marshal(req)
 	if err != nil {
 		return Result{}, fmt.Errorf("remote download prepare: marshal request: %w", err)
 	}
 	responseCtx, cancel := context.WithCancel(ctx)
-	httpReq, err := p.request(responseCtx, http.MethodPost, nodeURL, jwtSecret, "/downloads/prepare", bytes.NewReader(body))
+	httpReq, err := p.request(responseCtx, http.MethodPost, nodeURL, keys, "/downloads/prepare", bytes.NewReader(body))
 	if err != nil {
 		cancel()
 		return Result{}, fmt.Errorf("remote download prepare: %w", err)
@@ -412,14 +413,22 @@ func (p HTTPPreparer) Prepare(ctx context.Context, nodeURL, jwtSecret string, re
 	// once the node starts its small JSON result body, each read must make progress.
 	resp.Body = newIdleReadCloser(resp.Body, p.readIdleTimeout(), cancel)
 	defer func() { _ = resp.Body.Close() }()
+	if nodepool.RefusedAtCapacity(resp) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return Result{}, ErrNodeAtCapacity
+	}
+	if nodepool.RefusedStorageFull(resp) {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+		return Result{}, ErrNodeStorageFull
+	}
 	return decodeResult(resp, "remote download prepare")
 }
 
-func (p HTTPPreparer) Stat(ctx context.Context, nodeURL, jwtSecret, artifactID string) (Result, error) {
+func (p HTTPPreparer) Stat(ctx context.Context, nodeURL string, keys nodeauth.Keyring, artifactID string) (Result, error) {
 	if !ValidArtifactID(artifactID) {
 		return Result{}, fmt.Errorf("remote download artifact stat: invalid artifact id")
 	}
-	httpReq, err := p.request(ctx, http.MethodHead, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
+	httpReq, err := p.request(ctx, http.MethodHead, nodeURL, keys, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
 	if err != nil {
 		return Result{}, fmt.Errorf("remote download artifact stat: %w", err)
 	}
@@ -452,11 +461,11 @@ func (p HTTPPreparer) Stat(ctx context.Context, nodeURL, jwtSecret, artifactID s
 // Progress reads a node's live progress for one prepare attempt. It returns
 // ErrProgressUnsupported when the node answers 404, which only nodes that
 // predate the endpoint do: a current node reports an unknown id as not running.
-func (p HTTPPreparer) Progress(ctx context.Context, nodeURL, jwtSecret, artifactID string) (Progress, error) {
+func (p HTTPPreparer) Progress(ctx context.Context, nodeURL string, keys nodeauth.Keyring, artifactID string) (Progress, error) {
 	if !ValidArtifactID(artifactID) {
 		return Progress{}, fmt.Errorf("remote download prepare progress: invalid artifact id")
 	}
-	httpReq, err := p.request(ctx, http.MethodGet, nodeURL, jwtSecret, "/downloads/prepare/"+url.PathEscape(artifactID)+"/progress", nil)
+	httpReq, err := p.request(ctx, http.MethodGet, nodeURL, keys, "/downloads/prepare/"+url.PathEscape(artifactID)+"/progress", nil)
 	if err != nil {
 		return Progress{}, fmt.Errorf("remote download prepare progress: %w", err)
 	}
@@ -481,12 +490,12 @@ func (p HTTPPreparer) Progress(ctx context.Context, nodeURL, jwtSecret, artifact
 	return progress, nil
 }
 
-func (p HTTPPreparer) Delete(ctx context.Context, nodeURL, jwtSecret, artifactID string) error {
+func (p HTTPPreparer) Delete(ctx context.Context, nodeURL string, keys nodeauth.Keyring, artifactID string) error {
 	if !ValidArtifactID(artifactID) {
 		return fmt.Errorf("remote download artifact delete: invalid artifact id")
 	}
 	deleteCtx, cancel := context.WithCancel(ctx)
-	httpReq, err := p.request(deleteCtx, http.MethodDelete, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
+	httpReq, err := p.request(deleteCtx, http.MethodDelete, nodeURL, keys, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
 	if err != nil {
 		cancel()
 		return fmt.Errorf("remote download artifact delete: %w", err)
@@ -515,8 +524,8 @@ const maxArtifactListingBytes = 16 << 20
 var ErrArtifactListingUnsupported = errors.New("node does not list prepared download files")
 
 // ListArtifacts reads a node's prepared-download directory listing.
-func (p HTTPPreparer) ListArtifacts(ctx context.Context, nodeURL, jwtSecret string) (downloadstorage.Listing, error) {
-	httpReq, err := p.request(ctx, http.MethodGet, nodeURL, jwtSecret, "/downloads/artifacts", nil)
+func (p HTTPPreparer) ListArtifacts(ctx context.Context, nodeURL string, keys nodeauth.Keyring) (downloadstorage.Listing, error) {
+	httpReq, err := p.request(ctx, http.MethodGet, nodeURL, keys, "/downloads/artifacts", nil)
 	if err != nil {
 		return downloadstorage.Listing{}, fmt.Errorf("remote download artifact listing: %w", err)
 	}
@@ -541,7 +550,7 @@ func (p HTTPPreparer) ListArtifacts(ctx context.Context, nodeURL, jwtSecret stri
 
 // Open returns an authenticated streaming response for a GET or HEAD relay.
 // The caller owns closing the body and copying only safe response headers.
-func (p HTTPPreparer) Open(ctx context.Context, nodeURL, jwtSecret, artifactID, method string, sourceHeader http.Header) (*http.Response, error) {
+func (p HTTPPreparer) Open(ctx context.Context, nodeURL string, keys nodeauth.Keyring, artifactID, method string, sourceHeader http.Header) (*http.Response, error) {
 	if !ValidArtifactID(artifactID) {
 		return nil, fmt.Errorf("remote download artifact open: invalid artifact id")
 	}
@@ -549,7 +558,7 @@ func (p HTTPPreparer) Open(ctx context.Context, nodeURL, jwtSecret, artifactID, 
 		return nil, fmt.Errorf("remote download artifact open: unsupported method %s", method)
 	}
 	relayCtx, cancel := context.WithCancel(ctx)
-	httpReq, err := p.request(relayCtx, method, nodeURL, jwtSecret, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
+	httpReq, err := p.request(relayCtx, method, nodeURL, keys, "/downloads/artifacts/"+url.PathEscape(artifactID), nil)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("remote download artifact open: %w", err)
@@ -673,7 +682,7 @@ func (r *idleReadCloser) watch() {
 	}
 }
 
-func (p HTTPPreparer) request(ctx context.Context, method, nodeURL, jwtSecret, path string, body io.Reader) (*http.Request, error) {
+func (p HTTPPreparer) request(ctx context.Context, method, nodeURL string, keys nodeauth.Keyring, path string, body io.Reader) (*http.Request, error) {
 	base, err := url.Parse(strings.TrimSpace(nodeURL))
 	if err != nil || (base.Scheme != "http" && base.Scheme != "https") || base.Host == "" {
 		return nil, fmt.Errorf("invalid node URL")
@@ -691,7 +700,7 @@ func (p HTTPPreparer) request(ctx context.Context, method, nodeURL, jwtSecret, p
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
-	if err := nodeauth.Sign(req, signingBase, jwtSecret); err != nil {
+	if err := nodeauth.SignTranscode(req, signingBase, keys); err != nil {
 		return nil, err
 	}
 	return req, nil

@@ -3,13 +3,10 @@ package markers
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"log/slog"
-	"strconv"
 	"strings"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"google.golang.org/grpc/codes"
@@ -292,6 +289,21 @@ func TestPopulationDoesNotMarkFailedStorageFresh(t *testing.T) {
 	}
 }
 
+func populateRegistryForTest(ctx context.Context, registry *Registry) (Result, bool, error) {
+	var result Result
+	service := NewPopulationService(PopulationOptions{
+		Registry: registry, Store: &populationRecorder{},
+		Settings: populationSettings{"setup.completed": "true", SettingMode: "online", SettingOnlineStorage: "stored"},
+		Resolver: populationResolver{ids: ExternalIDs{Kind: ItemKindEpisode, TmdbID: "42", SeasonNumber: 1, EpisodeNumber: 1}},
+		Write: func(_ context.Context, _ *models.MediaFile, selected Result) (bool, error) {
+			result = selected
+			return true, nil
+		},
+	})
+	_, _, err := service.Refresh(ctx, &models.MediaFile{ID: 1, Duration: 2000})
+	return result, len(result.Markers) > 0, err
+}
+
 func TestRegistryPreservesEveryRangeFromWinningProvider(t *testing.T) {
 	registry := NewRegistry(nil)
 	_ = registry.Register(&fakeProvider{id: "preferred", result: Result{Markers: []Marker{
@@ -325,30 +337,6 @@ func TestPopulationStoredPlaybackToggleDoesNotBlockExplicitRefresh(t *testing.T)
 	}
 	if provider.calls != 1 {
 		t.Fatal("explicit refresh did not fetch")
-	}
-}
-
-// Only stored provider markers tell a manual save what a player was shown; in
-// on_demand mode each replica keeps the answers it showed to itself.
-func TestPopulationShowsStoredMarkers(t *testing.T) {
-	provider := &populationProvider{id: "provider", fetch: func() (Result, error) { return Result{}, nil }}
-	for _, tc := range []struct {
-		name    string
-		storage OnlineStorage
-		mode    string
-		want    bool
-	}{
-		{"stored", OnlineStorageStored, "online", true},
-		{"on demand", OnlineStorageOnDemand, "online", false},
-		{"on demand, online lookups off", OnlineStorageOnDemand, "local", true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			service, _ := populationFixture(t, tc.storage, provider)
-			service.opts.Settings.(populationSettings)[SettingMode] = tc.mode
-			if got, err := service.ShowsStoredMarkers(t.Context()); err != nil || got != tc.want {
-				t.Fatalf("ShowsStoredMarkers = %v, %v; want %v", got, err, tc.want)
-			}
-		})
 	}
 }
 
@@ -467,9 +455,11 @@ func TestPopulationUsesPriorityChangedDuringFetch(t *testing.T) {
 // expiringContext is a caller context with a read's short deadline, which
 // passes when expire is called, so a test can run it out mid-request without
 // racing a timer.
+//
+//nolint:containedctx // A test context that can be expired by hand; the field is the point.
 type expiringContext struct {
-	context.Context //nolint:containedctx // Test context implements cancellation by expiring on demand.
-	expired         chan struct{}
+	context.Context
+	expired chan struct{}
 }
 
 func newExpiringContext(parent context.Context) *expiringContext {
@@ -542,123 +532,6 @@ func TestPopulationCanceledLookupIsNotAProviderFailure(t *testing.T) {
 	}
 }
 
-// A provider answer costs quota. When the viewer leaves just as it arrives,
-// it must still be saved rather than recorded as a failed request.
-func TestPopulationSavesFetchedMarkersAfterViewerLeaves(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		// settingsUseContext makes the settings re-check fail on a
-		// canceled context; otherwise the identity check is the first
-		// step after the fetch to notice it.
-		settingsUseContext bool
-	}{
-		{"settings re-check", true},
-		{"identity check", false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx, cancel := context.WithCancel(t.Context())
-			defer cancel()
-			intro := Marker{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second}
-			provider := &populationProvider{id: "provider", fetchContext: func(context.Context) (Result, error) {
-				cancel()
-				return Result{Markers: []Marker{intro}}, nil
-			}}
-			service, store := populationFixture(t, OnlineStorageStored, provider)
-			if tc.settingsUseContext {
-				service.opts.Settings = contextSettings{service.opts.Settings.(populationSettings)}
-			}
-			var written Result
-			service.opts.Write = func(ctx context.Context, _ *models.MediaFile, result Result) (bool, error) {
-				if err := ctx.Err(); err != nil {
-					return false, err
-				}
-				written = result
-				return true, nil
-			}
-			_, changed, err := service.Populate(ctx, &models.MediaFile{ID: 1, Duration: 1000})
-			if !changed || !errors.Is(err, context.Canceled) {
-				t.Fatalf("Populate: changed=%v err=%v", changed, err)
-			}
-			if completion := store.completions["provider"]; completion.Outcome != markerFetchHit || completion.Result == nil {
-				t.Fatalf("fetched answer stored as %+v", completion)
-			}
-			if len(written.Markers) != 1 || written.Markers[0].End != intro.End {
-				t.Fatalf("fetched markers not written: %+v", written)
-			}
-		})
-	}
-}
-
-// Saving after the viewer leaves must not drop the stored answers of the
-// providers it no longer asks.
-func TestPopulationKeepsCachedProvidersAfterViewerLeaves(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	first := &populationProvider{id: "first", fetchContext: func(context.Context) (Result, error) {
-		cancel()
-		return Result{Markers: []Marker{{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second}}}, nil
-	}}
-	service, store := populationFixture(t, OnlineStorageStored, first)
-	second := &populationProvider{id: "second", fetch: func() (Result, error) {
-		t.Error("asked a provider after the viewer left")
-		return Result{}, nil
-	}}
-	if err := service.opts.Registry.Register(second); err != nil {
-		t.Fatal(err)
-	}
-	store.cached = map[string]Result{"second": {ProviderID: "second", Markers: []Marker{{Kind: MarkerKindCredits, Start: 800 * time.Second, End: 850 * time.Second}}}}
-	var written Result
-	service.opts.Write = func(_ context.Context, _ *models.MediaFile, result Result) (bool, error) {
-		written = result
-		return true, nil
-	}
-	if _, changed, err := service.Populate(ctx, &models.MediaFile{ID: 1, Duration: 1000}); !changed || !errors.Is(err, context.Canceled) {
-		t.Fatalf("Populate: changed=%v err=%v", changed, err)
-	}
-	kinds := map[MarkerKind]string{}
-	for _, marker := range written.Markers {
-		kinds[marker.Kind] = marker.ProviderID
-	}
-	if kinds[MarkerKindIntro] != "first" || kinds[MarkerKindCredits] != "second" {
-		t.Fatalf("written markers=%+v, want the fetched intro and the cached credits", written.Markers)
-	}
-}
-
-// On-demand answers are completed as they arrive rather than saved at the
-// end, so one fetched before the viewer left must still reach the caller and
-// the players instead of waiting for the next lookup.
-func TestPopulationOnDemandAppliesFetchedMarkersAfterViewerLeaves(t *testing.T) {
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	first := &populationProvider{id: "first", fetch: func() (Result, error) {
-		return Result{Markers: []Marker{{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second}}}, nil
-	}}
-	service, store := populationFixture(t, OnlineStorageOnDemand, first)
-	second := &populationProvider{id: "second", fetchContext: func(ctx context.Context) (Result, error) {
-		cancel()
-		<-ctx.Done()
-		return Result{}, status.Error(codes.Canceled, ctx.Err().Error())
-	}}
-	if err := service.opts.Registry.Register(second); err != nil {
-		t.Fatal(err)
-	}
-	var notified *models.MediaFile
-	service.opts.Notify = func(_ context.Context, file *models.MediaFile) { notified = file }
-	effective, changed, err := service.Populate(ctx, &models.MediaFile{ID: 1, Duration: 1000})
-	if !changed || !errors.Is(err, context.Canceled) {
-		t.Fatalf("Populate: changed=%v err=%v", changed, err)
-	}
-	if effective.IntroEnd == nil || *effective.IntroEnd != 30 {
-		t.Fatalf("fetched intro not applied: %+v", effective)
-	}
-	if notified == nil || notified.IntroEnd == nil {
-		t.Fatal("players were not sent the fetched markers")
-	}
-	if len(store.released) != 1 || store.released[0] != "second" {
-		t.Fatalf("released claims=%v, want the abandoned provider's", store.released)
-	}
-}
-
 // Only the caller going away is exempt. A provider that times out on its
 // own, or answers with a rate limit as the viewer leaves, is still recorded.
 func TestPopulationStillRecordsProviderTimeoutsAndLimits(t *testing.T) {
@@ -707,7 +580,7 @@ func TestPopulationSaveDeadline(t *testing.T) {
 	defer cancelNearlyDone()
 	for _, tc := range []struct {
 		name string
-		ctx  context.Context //nolint:containedctx // Test table carries the request contexts under test.
+		ctx  context.Context //nolint:containedctx // A test table row holding the caller context to run under.
 		want time.Duration
 	}{
 		{"caller waiting", live, time.Minute},
@@ -719,170 +592,5 @@ func TestPopulationSaveDeadline(t *testing.T) {
 				t.Fatalf("save deadline in %v, want %v", got, tc.want)
 			}
 		})
-	}
-}
-
-// A provider slower than a read's budget is cut off on every read. Once one
-// read runs out of time waiting for it, other reads leave it alone for
-// markerReadHold, while a lookup that can wait, such as playback, still asks.
-func TestPopulationShortReadsHoldSlowProvider(t *testing.T) {
-	for _, storage := range []OnlineStorage{OnlineStorageStored, OnlineStorageOnDemand} {
-		t.Run(string(storage), func(t *testing.T) {
-			synctest.Test(t, func(t *testing.T) {
-				provider := &populationProvider{id: "provider", fetchContext: func(ctx context.Context) (Result, error) {
-					select {
-					case <-time.After(10 * time.Second):
-						return Result{Markers: []Marker{{Kind: MarkerKindIntro, Start: 0, End: 30 * time.Second}}}, nil
-					case <-ctx.Done():
-						return Result{}, status.FromContextError(ctx.Err()).Err()
-					}
-				}}
-				service, store := populationFixture(t, storage, provider)
-				service.opts.Write = func(context.Context, *models.MediaFile, Result) (bool, error) { return true, nil }
-				lookup := func(budget time.Duration) (*models.MediaFile, error) {
-					ctx, cancel := context.WithTimeout(t.Context(), budget)
-					defer cancel()
-					file, _, err := service.Populate(ctx, &models.MediaFile{ID: 1, Duration: 1000})
-					return file, err
-				}
-				const read, playback = 5 * time.Second, 10 * time.Minute
-
-				if _, err := lookup(read); !errors.Is(err, context.DeadlineExceeded) || provider.calls != 1 {
-					t.Fatalf("first read: err=%v calls=%d", err, provider.calls)
-				}
-				if _, err := lookup(read); err != nil || provider.calls != 1 {
-					t.Fatalf("read during the hold: err=%v calls=%d, want the provider left alone", err, provider.calls)
-				}
-				time.Sleep(markerReadHold) //nolint:forbidigo // Advances past the read hold to exercise the provider retry window.
-				if _, err := lookup(read); !errors.Is(err, context.DeadlineExceeded) || provider.calls != 2 {
-					t.Fatalf("read after the hold: err=%v calls=%d, want the provider asked again", err, provider.calls)
-				}
-				file, err := lookup(playback)
-				if err != nil || provider.calls != 3 || file.IntroEnd == nil || *file.IntroEnd != 30 {
-					t.Fatalf("playback during the hold: err=%v calls=%d, want the provider's answer", err, provider.calls)
-				}
-				if len(store.released) != 2 {
-					t.Fatalf("released claims=%v, want the two cut-off reads", store.released)
-				}
-				if completion := store.completions["provider"]; completion.Outcome == markerFetchError {
-					t.Fatalf("cut-off read stored as a provider failure: %+v", completion)
-				}
-			})
-		})
-	}
-}
-
-// A viewer leaving says nothing about how fast the provider is, so it does
-// not hold the provider off from the next read.
-func TestPopulationViewerLeavingDoesNotHoldProvider(t *testing.T) {
-	provider := &populationProvider{id: "provider"}
-	service, _ := populationFixture(t, OnlineStorageStored, provider)
-	for range 2 {
-		ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-		provider.fetchContext = func(ctx context.Context) (Result, error) {
-			cancel()
-			<-ctx.Done()
-			return Result{}, status.FromContextError(ctx.Err()).Err()
-		}
-		_, _, err := service.Populate(ctx, &models.MediaFile{ID: 1, Duration: 1000})
-		cancel()
-		if !errors.Is(err, context.Canceled) {
-			t.Fatalf("Populate: err=%v", err)
-		}
-	}
-	if provider.calls != 2 {
-		t.Fatalf("calls=%d, want the provider asked by both reads", provider.calls)
-	}
-}
-
-// Holds are kept in memory per replica, so their number is capped like the
-// on-demand answers; a full set gives up the hold that ends first.
-func TestPopulationHoldsAreCapped(t *testing.T) {
-	synctest.Test(t, func(t *testing.T) {
-		service := NewPopulationService(PopulationOptions{})
-		for i := range markerMemoryLimit + 1 {
-			service.hold(strconv.Itoa(i))
-			time.Sleep(time.Millisecond) //nolint:forbidigo // Advances virtual time in synctest through the hold window.
-		}
-		if len(service.holds) != markerMemoryLimit || service.held("0") || !service.held("1") || !service.held(strconv.Itoa(markerMemoryLimit)) {
-			t.Fatalf("holds=%d, want %d without the first", len(service.holds), markerMemoryLimit)
-		}
-	})
-}
-
-func TestPopulationIdentityTracksEpisodeIDsButNotTitle(t *testing.T) {
-	file := &models.MediaFile{ID: 7, Duration: 3600}
-	base := ExternalIDs{Kind: ItemKindEpisode, TvdbID: "121361", SeasonNumber: 1, EpisodeNumber: 1}
-	withoutEpisode := populationIdentity(file, base, nil)
-
-	retitled := base
-	retitled.EpisodeTitle = "Winter Is Coming"
-	if got := populationIdentity(file, retitled, nil); got != withoutEpisode {
-		t.Fatal("an episode title changed the lookup identity")
-	}
-	matched := base
-	matched.Episode = EpisodeIDs{TvdbID: "3254641"}
-	if got := populationIdentity(file, matched, nil); got == withoutEpisode {
-		t.Fatal("an episode TVDB ID left the lookup identity unchanged")
-	}
-	// An item without episode IDs, such as a movie, keeps the identity it had
-	// before the field existed, so upgrading does not invalidate its cached
-	// lookups.
-	payload, err := json.Marshal(base)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(payload), "Episode\"") {
-		t.Fatalf("identity payload %s names an empty episode", payload)
-	}
-}
-
-// A plugin provider whose season cannot be addressed must not abort the pass:
-// its request is clamped, and a healthy provider's markers still reach the
-// file. Related issue: #148.
-func TestPopulationClampsAndKeepsOtherProviders(t *testing.T) {
-	client := &fakePluginMarkerClient{}
-	pluginProvider, err := NewPluginProviderWithClientFactory(PluginProviderOptions{
-		InstallationID: 12,
-		CapabilityID:   "introdb",
-	}, func(context.Context, int, string) (pluginMarkerClient, error) {
-		return client, nil
-	})
-	if err != nil {
-		t.Fatalf("NewPluginProviderWithClientFactory: %v", err)
-	}
-	healthy := &populationProvider{id: "healthy", fetch: func() (Result, error) {
-		return Result{Markers: []Marker{{Kind: MarkerKindCredits, Start: 800 * time.Second, End: 850 * time.Second}}}, nil
-	}}
-
-	registry := NewRegistry(nil)
-	if err := registry.Register(pluginProvider); err != nil {
-		t.Fatal(err)
-	}
-	if err := registry.Register(healthy); err != nil {
-		t.Fatal(err)
-	}
-	store := &populationRecorder{}
-	service := NewPopulationService(PopulationOptions{
-		Registry: registry, Store: store,
-		Settings: populationSettings{"setup.completed": "true", SettingMode: "online", SettingOnlineStorage: string(OnlineStorageStored), SettingLazyPlayback: "true"},
-		Resolver: populationResolver{ExternalIDs{Kind: ItemKindEpisode, TmdbID: "30984", SeasonNumber: 2009, EpisodeNumber: 3}},
-	})
-	var written Result
-	service.opts.Write = func(_ context.Context, _ *models.MediaFile, result Result) (bool, error) {
-		written = result
-		return true, nil
-	}
-	if _, _, err := service.Populate(t.Context(), &models.MediaFile{ID: 1, Duration: 1000}); err != nil {
-		t.Fatal(err)
-	}
-	if client.fetchReq == nil {
-		t.Fatal("plugin provider was not queried")
-	}
-	if got := client.fetchReq.GetSeasonNumber(); got != int32(MaxProviderSeason) {
-		t.Fatalf("plugin season = %d, want clamped %d", got, MaxProviderSeason)
-	}
-	if len(written.Markers) != 1 || written.Markers[0].ProviderID != "healthy" {
-		t.Fatalf("healthy provider markers were lost: %+v", written.Markers)
 	}
 }

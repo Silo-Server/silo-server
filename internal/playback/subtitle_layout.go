@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/mediaprobe"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -198,7 +198,10 @@ func ProbeSubtitleLayoutWithin(ctx context.Context, ffprobePathOrFFmpeg, inputUR
 	defer cancel()
 
 	var stdout bytes.Buffer
-	cmd := exec.CommandContext(probeCtx, probeSubtitleBin(ffprobePathOrFFmpeg),
+	// The guarded launcher admits a relayed input only for the relay's own
+	// protocols and demuxers; this probe reads a relay URL like any other
+	// subtitle demux.
+	cmd := fspath.CommandContext(probeCtx, probeSubtitleBin(ffprobePathOrFFmpeg),
 		"-v", "error",
 		"-print_format", "json",
 		"-show_streams",

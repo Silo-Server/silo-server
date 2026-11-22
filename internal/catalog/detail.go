@@ -2050,7 +2050,10 @@ func (s *DetailService) GetItemDetailWithOptions(ctx context.Context, contentID 
 	}
 }
 
-const detailTypeAudiobook = "audiobook"
+const (
+	detailTypeAudiobook = "audiobook"
+	detailTypeEbook     = "ebook"
+)
 
 // GetItemVersions builds the browse version selector without loading unrelated
 // presentation data. It shares detail authorization and playback metadata, but
@@ -6366,4 +6369,49 @@ func cachedImageVariantKey(imageType, size string) string {
 		}
 		return "w500"
 	}
+}
+
+// appendLibraryAudiobookAccessConditions is appendAudiobookItemAccessConditions
+// for a query whose every row is joined to the item's media_item_libraries row
+// in libraryID (0 when the query joins none). That row already proves the item
+// sits in a library, and in an allowed one when libraryID is allowed, so those
+// EXISTS checks are left out. The disabled-library and rating checks stay.
+func appendLibraryAudiobookAccessConditions(
+	alias string,
+	libraryID int,
+	filter AccessFilter,
+	conditions *[]string,
+	args *[]any,
+	argIdx *int,
+) bool {
+	joined := libraryID > 0
+	switch {
+	case filter.AllowedLibraryIDs == nil:
+		if !joined {
+			*conditions = append(*conditions, InSomeLibraryWhere(alias+".content_id"))
+		}
+	case len(filter.AllowedLibraryIDs) == 0:
+		return false
+	case !joined || !slices.Contains(filter.AllowedLibraryIDs, libraryID):
+		*conditions = append(*conditions, fmt.Sprintf(`
+			EXISTS (
+				SELECT 1 FROM media_item_libraries mil_allowed
+				WHERE mil_allowed.content_id = %s.content_id
+				  AND mil_allowed.media_folder_id = ANY($%d)
+			)`, alias, *argIdx))
+		*args = append(*args, filter.AllowedLibraryIDs)
+		*argIdx = *argIdx + 1
+	}
+	if len(filter.DisabledLibraryIDs) > 0 {
+		*conditions = append(*conditions, fmt.Sprintf(`
+			NOT EXISTS (
+				SELECT 1 FROM media_item_libraries mil_disabled
+				WHERE mil_disabled.content_id = %s.content_id
+				  AND mil_disabled.media_folder_id = ANY($%d)
+			)`, alias, *argIdx))
+		*args = append(*args, filter.DisabledLibraryIDs)
+		*argIdx = *argIdx + 1
+	}
+	ApplySectionAccessFilter(alias, AccessFilter{MaturityLimits: filter.MaturityLimits}, conditions, args, argIdx)
+	return true
 }

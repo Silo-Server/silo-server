@@ -95,8 +95,8 @@ func seedBoxSets(t *testing.T) boxSetFixture {
 		exec(`INSERT INTO media_item_tmdb_collections(content_id,checked_tmdb_id,tmdb_collection_id) VALUES($1,$2,$3)`, f.id(m.id), m.checked, collection)
 	}
 	for _, c := range []TMDBMovieCollection{
-		{ID: f.franchise, Name: f.prefix + " Saga Collection", MemberTMDBIDs: []int64{101, 102, 103, 104, 105}},
-		{ID: f.single, Name: f.prefix + " Lonely Collection", MemberTMDBIDs: []int64{200, 201}},
+		{ID: f.franchise, Name: f.prefix + " Saga Collection", MemberTMDBIDs: []int64{101, 102, 103, 104, 105}, Language: "en"},
+		{ID: f.single, Name: f.prefix + " Lonely Collection", MemberTMDBIDs: []int64{200, 201}, Language: "en"},
 	} {
 		if err := f.repo.UpsertCollection(ctx, c); err != nil {
 			t.Fatal(err)
@@ -260,16 +260,19 @@ func TestBoxSetSearchAndSyncDB(t *testing.T) {
 func TestBoxSetCollectionsOfDisabledLibraryDB(t *testing.T) {
 	f := seedBoxSets(t)
 	ctx := t.Context()
-	if _, err := f.pool.Exec(ctx, `UPDATE tmdb_movie_collections SET fetched_at = now() - interval '30 days' WHERE tmdb_collection_id = $1`, f.franchise); err != nil {
-		t.Fatal(err)
-	}
 	refetch := func() bool {
 		t.Helper()
-		ids, err := f.repo.CollectionsNeedingFetch(ctx, time.Now().Add(-time.Hour), 10_000, nil)
+		fetches, err := f.repo.CollectionsNeedingFetch(ctx, time.Now().Add(-time.Hour), 10_000, nil)
 		if err != nil {
 			t.Fatal(err)
 		}
-		return slices.Contains(ids, f.franchise)
+		return slices.ContainsFunc(fetches, func(c CollectionFetch) bool { return c.ID == f.franchise })
+	}
+	if refetch() {
+		t.Fatal("a fresh collection is due for a fetch")
+	}
+	if _, err := f.pool.Exec(ctx, `UPDATE tmdb_movie_collections SET fetched_at = now() - interval '30 days' WHERE tmdb_collection_id = $1`, f.franchise); err != nil {
+		t.Fatal(err)
 	}
 	if !refetch() {
 		t.Fatal("a stale collection of a box set library is not due for a fetch")
@@ -291,6 +294,80 @@ func TestBoxSetCollectionsOfDisabledLibraryDB(t *testing.T) {
 	}
 	if !refetch() {
 		t.Fatal("a collection of a library that turned box sets back on is not fetched anew")
+	}
+}
+
+// TestBoxSetCollectionLanguageDB checks that a collection is fetched in the
+// metadata language of its box set library, and fetched again once that
+// language changes, rather than only when the stored copy goes stale.
+func TestBoxSetCollectionLanguageDB(t *testing.T) {
+	f := seedBoxSets(t)
+	ctx := t.Context()
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		if _, err := f.pool.Exec(ctx, sql, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	due := func() (string, bool) {
+		t.Helper()
+		fetches, err := f.repo.CollectionsNeedingFetch(ctx, time.Now().Add(-time.Hour), 10_000, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range fetches {
+			if c.ID == f.franchise {
+				return c.Language, true
+			}
+		}
+		return "", false
+	}
+	store := func(language string) {
+		t.Helper()
+		if err := f.repo.UpsertCollection(ctx, TMDBMovieCollection{ID: f.franchise, Name: "Saga", Language: language}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	store("en")
+	if language, ok := due(); ok {
+		t.Fatalf("a fresh collection in its library's language is due for a fetch in %q", language)
+	}
+	exec(`UPDATE media_folders SET metadata_language = 'de' WHERE id = $1`, f.lib)
+	if language, ok := due(); !ok || language != "de" {
+		t.Fatalf("after the library switched to de, due = %q, %v; want a fetch in de", language, ok)
+	}
+	store("de")
+	if language, ok := due(); ok {
+		t.Fatalf("a collection stored in de is still due for a fetch in %q", language)
+	}
+	if stored, err := f.repo.Collections(ctx, []int64{f.franchise}); err != nil || stored[f.franchise].Language != "de" {
+		t.Fatalf("stored collection = %+v, %v; want language de", stored[f.franchise], err)
+	}
+
+	// Another library ahead of it in the library order holds the
+	// collection's movies: its language wins once it holds enough of them to
+	// show the box set, and every run asks for the same.
+	var first int
+	if err := f.pool.QueryRow(ctx, `INSERT INTO media_folders(type,name,enabled,box_sets_enabled,metadata_language,sort_order) VALUES('movies',$1,true,true,'fr',-1) RETURNING id`, f.prefix+"-fr").Scan(&first); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _, _ = f.pool.Exec(context.Background(), `DELETE FROM media_folders WHERE id=$1`, first) })
+	exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, f.id("first"), first)
+	if language, ok := due(); ok {
+		t.Fatalf("a French library below its box set minimum made the collection due in %q", language)
+	}
+	exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$2)`, f.id("second"), first)
+	if language, ok := due(); !ok || language != "fr" {
+		t.Fatalf("with a French library first, due = %q, %v; want a fetch in fr", language, ok)
+	}
+	// A collection TMDB no longer serves is not asked for again in the same
+	// language on every run.
+	if err := f.repo.TouchCollection(ctx, f.franchise, "fr"); err != nil {
+		t.Fatal(err)
+	}
+	if language, ok := due(); ok {
+		t.Fatalf("a touched collection is still due for a fetch in %q", language)
 	}
 }
 

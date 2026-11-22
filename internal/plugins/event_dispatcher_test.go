@@ -10,6 +10,7 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/oklog/ulid/v2"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 	"github.com/Silo-Server/silo-server/internal/events"
@@ -124,14 +125,18 @@ func (s *memoryDeliveryStore) busy() bool {
 	return false
 }
 
-// dispatchBusEvent runs event through d the way the API server that
-// published it does, then delivers everything due and waits for it.
-func (d *EventDispatcher) dispatchBusEvent(ctx context.Context, event cache.Event) {
-	d.store(ctx, busEvent(event))
-	d.deliverDue(ctx)
+// catalogEnvelope is a catalog event as this server's hub hands it over.
+func catalogEnvelope(name, data string) events.Envelope {
+	return events.Envelope{Event: name, EventID: ulid.Make().String(), Data: json.RawMessage(data)}
 }
 
-// dispatchEnvelope is dispatchBusEvent for an envelope published on d's hub.
+// scanCompleted is a scan.completed event with a minimal payload.
+func scanCompleted() events.Envelope {
+	return catalogEnvelope("scan.completed", `{"id":"scan-1","library_id":7,"status":"completed"}`)
+}
+
+// dispatchEnvelope runs env through d the way the API server that published
+// it does, then delivers everything due and waits for it.
 func (d *EventDispatcher) dispatchEnvelope(ctx context.Context, env events.Envelope) {
 	d.store(ctx, hubEvent(env))
 	d.deliverDue(ctx)
@@ -189,6 +194,21 @@ type fakeInstallationStore struct {
 
 func (s *fakeInstallationStore) ListEnabled(_ context.Context) ([]*Installation, error) {
 	return s.installations, nil
+}
+func (s *fakeInstallationStore) ListEnabledWithCapabilityTypes(_ context.Context, types []string) ([]*Installation, error) {
+	var installations []*Installation
+	for _, installation := range s.installations {
+		if installation == nil {
+			continue
+		}
+		for _, capability := range s.capabilities[installation.ID] {
+			if capability != nil && slices.Contains(types, capability.Type) {
+				installations = append(installations, installation)
+				break
+			}
+		}
+	}
+	return installations, nil
 }
 func (s *fakeInstallationStore) ListCapabilities(_ context.Context, id int) ([]*Capability, error) {
 	return s.capabilities[id], nil
@@ -257,13 +277,11 @@ func newFixture(t *testing.T, subs []string, want int) (cache.EventBus, *events.
 	if err := d.Start(ctx); err != nil {
 		t.Fatalf("start dispatcher: %v", err)
 	}
-	observed := cache.NewObservedEventBus(bus)
-	observed.ObservePublishes(d.ObservePublish)
 	t.Cleanup(func() {
 		cancel()
 		d.Stop()
 	})
-	return observed, hub, client
+	return bus, hub, client
 }
 
 func waitFor(t *testing.T, c *recordingClient) {
@@ -285,57 +303,34 @@ func waitFor(t *testing.T, c *recordingClient) {
 	}
 }
 
-func TestDispatcher_BusEvent_DecodesJSONPayloadIntoFields(t *testing.T) {
-	bus, _, client := newFixture(t, []string{"library.media_added"}, 1)
+// A catalog event reaches plugins in its public shape: fields the host adds
+// for its own clients are dropped, IDs are strings, and a notification names
+// its account, since profile IDs repeat across accounts.
+func TestDispatcher_NotificationReachesConsumerInItsPublicShape(t *testing.T) {
+	_, hub, client := newFixture(t, []string{"notification.created"}, 1)
 
-	body, _ := json.Marshal(map[string]any{
-		"libraryId": "lib-1",
-		"mediaType": "movie",
-		"mediaId":   "media-xyz",
-		"tmdbId":    603,
-	})
-	_ = bus.Publish(context.Background(), cache.ChannelCatalog, cache.Event{
-		Type:    "library.media_added",
-		Payload: string(body),
-	})
-
-	waitFor(t, client)
-	got := client.get()
-	if len(got) != 1 {
-		t.Fatalf("got %d events", len(got))
-	}
-	p := got[0].GetPayload().AsMap()
-	if p["libraryId"] != "lib-1" {
-		t.Errorf("libraryId: got %v want lib-1; full payload=%v", p["libraryId"], p)
-	}
-	if _, wrapped := p["payload"]; wrapped {
-		t.Error("payload should not be wrapped under \"payload\" key")
-	}
-}
-
-func TestDispatcher_HubPluginEvent_ReachesConsumer(t *testing.T) {
-	const eventName = "plugin.silo.arrproxy.submitted"
-	_, hub, client := newFixture(t, []string{eventName}, 1)
-
-	body, _ := json.Marshal(map[string]any{"requestId": "01J", "error": ""})
 	if err := hub.Publish(context.Background(), events.Envelope{
-		Channel: events.ChannelPlugins,
-		Event:   eventName,
-		Data:    body,
+		Channel:   events.ChannelNotifications,
+		Event:     "notification.created",
+		Data:      json.RawMessage(`{"id":"d1","type":"episode.available","profile_id":"p1","library_id":3,"series_title":"Severance","poster_thumbhash":"abc","read_at":null,"reason_flags":{"next_up":true,"favorite":true},"created_at":"2026-11-04T10:00:00Z"}`),
+		UserID:    7,
+		ProfileID: "p1",
 	}); err != nil {
 		t.Fatalf("publish: %v", err)
 	}
 
 	waitFor(t, client)
-	got := client.get()
-	if len(got) != 1 {
-		t.Fatalf("got %d events", len(got))
+	payload := client.get()[0].GetPayload().AsMap()
+	if payload["user_id"] != "7" || payload["profile_id"] != "p1" || payload["library_id"] != "3" || payload["series_title"] != "Severance" {
+		t.Fatalf("payload = %v, want the account, profile, library and title, IDs as strings", payload)
 	}
-	if got[0].GetEventName() != eventName {
-		t.Errorf("event name: got %q want %q", got[0].GetEventName(), eventName)
-	}
-	p := got[0].GetPayload().AsMap()
-	if p["requestId"] != "01J" {
-		t.Errorf("requestId: got %v want 01J; full payload=%v", p["requestId"], p)
+	for _, internal := range []string{"poster_thumbhash", "read_at"} {
+		if _, leaked := payload[internal]; leaked {
+			t.Errorf("payload carries %q, which isn't in the event catalog: %v", internal, payload)
+		}
+	} // A nested object is allowlisted too.
+	flags, _ := payload["reason_flags"].(map[string]any)
+	if _, leaked := flags["favorite"]; flags["next_up"] != true || leaked {
+		t.Errorf("reason_flags = %v, want only the catalog's fields", flags)
 	}
 }

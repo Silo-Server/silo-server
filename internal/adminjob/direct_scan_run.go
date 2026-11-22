@@ -43,6 +43,14 @@ func activeScanRunID(run *models.ScanRun) string {
 // startDirectScanHeartbeat keeps run alive while a direct scan is ingesting. A nil
 // run means the scan is not owned by this caller, so there is nothing to touch.
 func startDirectScanHeartbeat(repo directScanRunRepository, run *models.ScanRun, interval time.Duration) func() {
+	return startDirectScanHeartbeatUntilLost(repo, run, interval, nil)
+}
+
+// startDirectScanHeartbeatUntilLost is startDirectScanHeartbeat that calls
+// lost once when the run is no longer running under this claim: canceled,
+// possibly on another server, or failed as abandoned. A transient heartbeat
+// error does not count. A nil lost only logs, as for every direct scan.
+func startDirectScanHeartbeatUntilLost(repo directScanRunRepository, run *models.ScanRun, interval time.Duration, lost func()) func() {
 	if run == nil {
 		return func() {}
 	}
@@ -61,6 +69,11 @@ func startDirectScanHeartbeat(repo directScanRunRepository, run *models.ScanRun,
 				touchCtx, touchCancel := context.WithTimeout(ctx, directScanHeartbeatTimeout)
 				err := repo.TouchHeartbeat(touchCtx, runID, startedAt)
 				touchCancel()
+				if lost != nil && errors.Is(err, scanqueue.ErrScanRunNotFound) {
+					slog.Warn("direct scan run is no longer running; stopping the scan", "scan_id", runID)
+					lost()
+					return
+				}
 				if err != nil && !errors.Is(err, context.Canceled) {
 					slog.Warn("direct scan heartbeat failed", "scan_id", runID, "error", err)
 				}

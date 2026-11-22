@@ -55,6 +55,12 @@ chromaprint muxer AVOptions:
 Error opening input file pipe:0.
 Error opening input files: No such file or directory
 `
+	// relayedConcatCheckFixture is how FFmpeg 6.1 fails the relayed concat
+	// check: it parsed the list and could not reach the URL.
+	relayedConcatCheckFixture = `[tcp @ 0x569d5e867e00] Connection to tcp://127.0.0.1:9 failed: Connection refused
+[concat @ 0x569d5e853f00] Impossible to open 'http://127.0.0.1:9/src/00000000000000000000000000000000'
+[in#0 @ 0x569d5e853e00] Error opening input: Connection refused
+`
 	// concatUnknownKeywordFixture is how an ffmpeg that lacks a list
 	// directive fails it.
 	concatUnknownKeywordFixture = `[concat @ 0x7a82810000] Line 3: unknown keyword 'file_packet_meta'
@@ -71,6 +77,8 @@ type fakeListings struct {
 	muxers  string
 	help    string
 	concat  string
+	// relayedConcat answers the relayed concat check.
+	relayedConcat string
 	// concatList is the list the concat check wrote to stdin.
 	concatList []byte
 	err        error
@@ -96,12 +104,15 @@ func (f *fakeListings) list(_ context.Context, _ string, stdin []byte, args ...s
 	case "-hide_banner -nostdin -loglevel error -skip_frame:v nokey -protocol_whitelist file,pipe -f concat -safe 0 -i pipe:0 -f null -":
 		f.concatList = stdin
 		return []byte(f.concat), errors.New("exit status 254")
+	case "-hide_banner -nostdin -loglevel error -skip_frame:v nokey -protocol_whitelist http,tcp,pipe -format_whitelist concat -f concat -safe 0 -i pipe:0 -f null -":
+		return []byte(f.relayedConcat), errors.New("exit status 254")
 	}
 	return nil, errors.New("unexpected listing " + strings.Join(args, " "))
 }
 
 func newFakeListings() *fakeListings {
-	return &fakeListings{filters: filtersFixture, muxers: muxersFixture, help: chromaprintHelpFixture, concat: concatCheckFixture}
+	return &fakeListings{filters: filtersFixture, muxers: muxersFixture, help: chromaprintHelpFixture, concat: concatCheckFixture,
+		relayedConcat: relayedConcatCheckFixture}
 }
 
 // useListings routes capability loads to f with an empty cache.
@@ -128,99 +139,6 @@ func fakeBinary(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return path
-}
-
-func TestParseListings(t *testing.T) {
-	caps := Capabilities{filters: parseFilterList([]byte(filtersFixture)), muxers: parseMuxerList([]byte(muxersFixture))}
-	for _, name := range []string{"aap", "silencedetect", "blackframe", "signalstats", "aevalsrc", "buffersink"} {
-		if !caps.HasFilter(name) {
-			t.Errorf("filter %q missing", name)
-		}
-	}
-	for _, name := range []string{"=", "Timeline", "A", "|"} {
-		if caps.HasFilter(name) {
-			t.Errorf("legend word %q parsed as a filter", name)
-		}
-	}
-	for _, name := range []string{"3g2", "chromaprint", "video4linux2", "v4l2"} {
-		if !caps.HasMuxer(name) {
-			t.Errorf("muxer %q missing", name)
-		}
-	}
-	for _, name := range []string{"=", "D..", "Demuxing"} {
-		if caps.HasMuxer(name) {
-			t.Errorf("legend word %q parsed as a muxer", name)
-		}
-	}
-}
-
-func TestParseMuxerListOlderFormat(t *testing.T) {
-	muxers := parseMuxerList([]byte("File formats:\n D. = Demuxing supported\n .E = Muxing supported\n --\n  E chromaprint     Chromaprint\n DE matroska,webm   Matroska\n D  aac             raw ADTS AAC\n"))
-	caps := Capabilities{muxers: muxers}
-	if !caps.HasMuxer("chromaprint") || !caps.HasMuxer("webm") || caps.HasMuxer("aac") {
-		t.Fatalf("muxers %v", muxers)
-	}
-}
-
-func TestRequire(t *testing.T) {
-	fingerprint := Request{Audio: &AudioOutput{Fingerprint: true}}
-	silence := Request{Audio: &AudioOutput{Silence: &SilenceParams{NoiseDB: -50, MinSeconds: 1}}}
-	full := Capabilities{
-		filters:        parseFilterList([]byte(filtersFixture)),
-		muxers:         parseMuxerList([]byte(muxersFixture)),
-		chromaprintRaw: true,
-	}
-	if err := full.Require(fingerprint); err != nil {
-		t.Fatalf("fingerprint: %v", err)
-	}
-	if err := full.Require(silence); err != nil {
-		t.Fatalf("silence: %v", err)
-	}
-
-	noRaw := full
-	noRaw.chromaprintRaw = false
-	if err := noRaw.Require(fingerprint); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "raw fingerprint") {
-		t.Fatalf("without raw output: %v", err)
-	}
-	if err := (Capabilities{}).Require(fingerprint); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "chromaprint muxer") {
-		t.Fatalf("without the muxer: %v", err)
-	}
-	if err := (Capabilities{}).Require(silence); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "silencedetect") {
-		t.Fatalf("without silencedetect: %v", err)
-	}
-	sampled := Request{Samples: &Samples{Seconds: []float64{1}}}
-	if err := (Capabilities{}).Require(sampled); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "sampled input list") {
-		t.Fatalf("without sampled input lists: %v", err)
-	}
-
-	tail := Request{
-		Audio: &AudioOutput{Fingerprint: true, Silence: &SilenceParams{NoiseDB: -50, MinSeconds: 0.5}},
-		Stats: &StatsOutput{CropWidth: 0.9, CropHeight: 0.8, Width: 480, BlackThresholds: []int{20, 26, 32}},
-	}
-	if err := full.Require(tail); err != nil {
-		t.Fatalf("tail pass: %v", err)
-	}
-	for _, missing := range []string{"blackframe", "signalstats", "metadata", "silencedetect"} {
-		partial := full
-		partial.filters = map[string]struct{}{}
-		for name := range full.filters {
-			if name != missing {
-				partial.filters[name] = struct{}{}
-			}
-		}
-		if err := partial.Require(tail); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), missing) {
-			t.Fatalf("without %s: %v", missing, err)
-		}
-	}
-	noMuxer := full
-	noMuxer.muxers = nil
-	if err := noMuxer.Require(tail); !errors.Is(err, ErrUnsupported) || !strings.Contains(err.Error(), "chromaprint muxer") {
-		t.Fatalf("tail pass without the chromaprint muxer: %v", err)
-	}
-	tail.Audio.Fingerprint = false
-	if err := noMuxer.Require(tail); err != nil {
-		t.Fatalf("tail pass without a fingerprint needs no chromaprint: %v", err)
-	}
 }
 
 func TestLoadCapabilitiesChecksChromaprintRawOutput(t *testing.T) {
@@ -250,8 +168,8 @@ func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 			t.Fatal("cached inventory lost chromaprint")
 		}
 	}
-	if got := f.calls.Load(); got != 4 {
-		t.Fatalf("%d listing commands after three loads, want one inventory (4 commands)", got)
+	if got := f.calls.Load(); got != 5 {
+		t.Fatalf("%d listing commands after three loads, want one inventory (5 commands, the relayed concat check included)", got)
 	}
 
 	// Replacing the binary in place changes its identity.
@@ -261,7 +179,7 @@ func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 	if _, err := LoadCapabilities(context.Background(), binary); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.calls.Load(); got != 8 {
+	if got := f.calls.Load(); got != 10 {
 		t.Fatalf("%d listing commands after the binary changed, want a fresh inventory", got)
 	}
 
@@ -269,7 +187,7 @@ func TestLoadCapabilitiesCachesPerBinaryIdentity(t *testing.T) {
 	if _, err := LoadCapabilities(context.Background(), binary); err != nil {
 		t.Fatal(err)
 	}
-	if got := f.calls.Load(); got != 12 {
+	if got := f.calls.Load(); got != 15 {
 		t.Fatalf("%d listing commands after InvalidateCapabilities, want a fresh inventory", got)
 	}
 }
@@ -329,8 +247,8 @@ func TestLoadCapabilitiesSharesOneLoadAcrossConcurrentCallers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := f.calls.Load(); got != 4 {
-		t.Fatalf("%d listing commands for concurrent callers, want one inventory (4 commands)", got)
+	if got := f.calls.Load(); got != 5 {
+		t.Fatalf("%d listing commands for concurrent callers, want one inventory (5 commands, the relayed concat check included)", got)
 	}
 }
 

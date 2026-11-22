@@ -43,12 +43,7 @@ func (s *Service) resolveItemDecisions(
 	decisions := make([]QualityDecision, 0, len(items))
 	var skipped []SkippedDownload
 	for _, it := range items {
-		file, err := s.resolveDownloadMetadata(ctx, it.file)
-		var decision QualityDecision
-		if err == nil {
-			it.file = file
-			decision, err = s.policy.Resolve(ctx, quality, user, cfg, it.file, caps, s.artifacts != nil, deviceID)
-		}
+		decision, err := s.policy.Resolve(ctx, quality, user, cfg, it.file, caps, s.artifacts != nil, deviceID)
 		if err == nil && decision.RequiresArtifact {
 			decision.PrepareTarget, err = s.artifacts.resolveToneMapTarget(ctx, it.file, decision.PrepareTarget)
 		}

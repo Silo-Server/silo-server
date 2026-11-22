@@ -42,6 +42,11 @@ func (m candidateMarker) present() bool {
 	return m.Start != nil && m.End != nil
 }
 
+// overlaps reports whether the present marker m shares any time with segment.
+func (m candidateMarker) overlaps(segment Segment) bool {
+	return *m.Start < segment.End && segment.Start < *m.End
+}
+
 // providerAbsent reports whether m is an online provider's answer that the
 // file has no segment of the kind: a provider source without bounds.
 func (m candidateMarker) providerAbsent() bool {

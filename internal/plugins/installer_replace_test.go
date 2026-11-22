@@ -6,9 +6,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/encoding/protojson"
 
@@ -26,7 +28,7 @@ func TestInstallerInstallBinaryPersistsPackagedArchive(t *testing.T) {
 	checksum := sha256.Sum256(binaryData)
 	manifest.Checksum = hex.EncodeToString(checksum[:])
 
-	result, err := installer.installBinary(ctx, binaryData, manifest.GetChecksum(), manifest, nil, nil)
+	result, err := installer.installBinary(ctx, binaryData, manifest.GetChecksum(), manifest, nil, nil, unsignedSignature)
 	if err != nil {
 		t.Fatalf("installBinary() returned error: %v", err)
 	}
@@ -34,10 +36,11 @@ func TestInstallerInstallBinaryPersistsPackagedArchive(t *testing.T) {
 	if result.Installation.ID != 1 {
 		t.Fatalf("result installation id = %d, want 1", result.Installation.ID)
 	}
-	if len(store.saveArchiveIDs) != 1 || store.saveArchiveIDs[0] != 1 {
-		t.Fatalf("SaveArchive() ids = %#v, want [1]", store.saveArchiveIDs)
+	if len(store.createInputs) != 1 {
+		t.Fatalf("Create() calls = %d, want 1", len(store.createInputs))
 	}
-	assertStoredPluginArchive(t, store.saveArchiveBytes, store.saveArchiveManifest, binaryData)
+	created := store.createInputs[0]
+	assertStoredPluginArchive(t, created.Archive.Bytes, created.Archive.ManifestJSON, binaryData)
 }
 
 func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
@@ -58,7 +61,8 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 	manifest.Checksum = hex.EncodeToString(checksum[:])
 
 	oldRepository := 7
-	result, err := installer.replaceBinary(ctx, &Installation{
+	oldRepo, verifiedAt := "https://github.com/Silo-Server/silo-plugin-metadb", time.Now()
+	prepared, err := installer.prepareBinary(&Installation{
 		ID:            15,
 		RepositoryID:  &oldRepository,
 		PluginID:      "silo.metadb",
@@ -66,21 +70,27 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 		InstallPath:   oldPath,
 		Enabled:       true,
 		UpdateFailure: &UpdateFailure{Version: "0.0.19", Reason: "refused earlier"},
-	}, binaryData, hex.EncodeToString(checksum[:]), manifest, nil, nil)
+		Signature:     Signature{State: SignatureStateVerified, SourceRepo: &oldRepo, VerifiedAt: &verifiedAt},
+	}, binaryData, hex.EncodeToString(checksum[:]), manifest, nil, nil, unsignedSignature)
 	if err != nil {
-		t.Fatalf("replaceBinary() returned error: %v", err)
+		t.Fatalf("prepareBinary() returned error: %v", err)
+	}
+	result, err := prepared.Apply(ctx)
+	if err != nil {
+		t.Fatalf("Apply() returned error: %v", err)
 	}
 
 	if len(store.createInputs) != 0 {
 		t.Fatalf("Create() called %d times, want 0", len(store.createInputs))
 	}
-	if len(store.saveArchiveIDs) != 1 || store.saveArchiveIDs[0] != 15 {
-		t.Fatalf("SaveArchive() ids = %#v, want [15]", store.saveArchiveIDs)
-	}
-	assertStoredPluginArchive(t, store.saveArchiveBytes, store.saveArchiveManifest, binaryData)
 	if len(store.updateIDs) != 1 || store.updateIDs[0] != 15 {
 		t.Fatalf("Update() ids = %#v, want [15]", store.updateIDs)
 	}
+	archive := store.updateInputs[0].Archive
+	if archive == nil {
+		t.Fatal("Update() stored no archive with the replacement")
+	}
+	assertStoredPluginArchive(t, archive.Bytes, archive.ManifestJSON, binaryData)
 	if result.Installation.ID != 15 {
 		t.Fatalf("result installation id = %d, want 15", result.Installation.ID)
 	}
@@ -96,7 +106,7 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 		t.Fatalf("result update failure = %+v, want nil after a replacement", result.Installation.UpdateFailure)
 	}
 	if result.Installation.InstallPath == oldPath {
-		t.Fatal("expected replaceBinary() to move the installation to a new path")
+		t.Fatal("expected the replacement to move the installation to a new path")
 	}
 	if result.Installation.InstallPath != result.BinaryPath {
 		t.Fatalf("result install path = %q, want binary path %q", result.Installation.InstallPath, result.BinaryPath)
@@ -117,14 +127,20 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 	if !update.SetRepository || update.RepositoryID != nil || result.Installation.RepositoryID != nil {
 		t.Fatalf("update repository = %t/%v, result repository = %v; want cleared", update.SetRepository, update.RepositoryID, result.Installation.RepositoryID)
 	}
+	// Nor may it keep the verified signature of the package it replaced.
+	if update.Signature == nil || update.Signature.State != SignatureStateUnsigned || result.Installation.Signature.State != SignatureStateUnsigned {
+		t.Fatalf("update signature = %+v, result signature = %+v; want unsigned", update.Signature, result.Installation.Signature)
+	}
 	if update.Version == nil || *update.Version != "0.0.19" {
 		t.Fatalf("update version = %v, want 0.0.19", update.Version)
 	}
 	if update.InstallPath == nil || *update.InstallPath != result.BinaryPath {
 		t.Fatalf("update install_path = %v, want %q", update.InstallPath, result.BinaryPath)
 	}
-	if update.Enabled == nil || !*update.Enabled {
-		t.Fatalf("update enabled = %v, want true", update.Enabled)
+	// The enabled flag is the admin's, and may have changed while the
+	// package was prepared, so the replacement leaves it alone.
+	if update.Enabled != nil {
+		t.Fatalf("update enabled = %v, want unchanged", *update.Enabled)
 	}
 	if len(update.Capabilities) != 1 || update.Capabilities[0].ID != "metadb" {
 		t.Fatalf("update capabilities = %#v, want metadata_provider.v1/metadb", update.Capabilities)
@@ -149,14 +165,18 @@ func TestInstallerReplaceArchiveRequestsVirtualMediaCleanup(t *testing.T) {
 
 	store := newRecordingInstallationStore()
 	installer := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()})
-	if _, err := installer.replaceArchive(ctx, &Installation{
+	prepared, err := installer.prepareArchive(&Installation{
 		ID:          16,
 		PluginID:    "silo.metadb",
 		Version:     "0.0.19",
 		InstallPath: oldPath,
 		Enabled:     true,
-	}, archiveData, InstallArchiveRequest{}); err != nil {
-		t.Fatalf("replaceArchive() returned error: %v", err)
+	}, archiveData, InstallArchiveRequest{})
+	if err != nil {
+		t.Fatalf("prepareArchive() returned error: %v", err)
+	}
+	if _, err := prepared.Apply(ctx); err != nil {
+		t.Fatalf("apply() returned error: %v", err)
 	}
 
 	if len(store.updateInputs) != 1 || store.updateInputs[0].RemoveVirtualMedia {
@@ -280,4 +300,88 @@ func (s *recordingInstallationStore) Update(_ context.Context, id int, input Upd
 func (s *recordingInstallationStore) Delete(_ context.Context, id int) error {
 	s.deleteIDs = append(s.deleteIDs, id)
 	return nil
+}
+
+// A replacement applies only to the installation it was prepared for. An
+// automatic update still downloading when an admin installs a newer release
+// is refused once it finishes, and the newer release, its stored archive and
+// its files stay.
+func TestInstallerReplacementRefusedAfterInstallationChangedDB(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	ctx := t.Context()
+	store := NewInstallationStore(pool)
+	installer := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()})
+	pluginID := "silo.test.replace-race" + time.Now().UTC().Format("-20060102150405.000000000")
+
+	release := func(version string) ([]byte, string, *pluginv1.PluginManifest) {
+		binary := []byte("#!/bin/sh\n# " + version + "\nexit 0\n")
+		checksum := sha256Hex(binary)
+		manifest := packageErrorTestManifest(pluginID, version)
+		manifest.Checksum = checksum
+		return binary, checksum, manifest
+	}
+	binary, checksum, manifest := release("1.0.0")
+	installed, err := installer.installBinary(ctx, binary, checksum, manifest, nil, nil, unsignedSignature)
+	if err != nil {
+		t.Fatalf("install 1.0.0: %v", err)
+	}
+	id := installed.Installation.ID
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, id)
+	})
+	snapshot, err := store.GetByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	binary, checksum, manifest = release("1.1.0")
+	stale, err := installer.prepareBinary(snapshot, binary, checksum, manifest, nil, nil, unsignedSignature)
+	if err != nil {
+		t.Fatalf("prepare 1.1.0: %v", err)
+	}
+	binary, checksum, manifest = release("2.0.0")
+	newer, err := installer.prepareBinary(snapshot, binary, checksum, manifest, nil, nil, unsignedSignature)
+	if err != nil {
+		t.Fatalf("prepare 2.0.0: %v", err)
+	}
+	applied, err := newer.Apply(ctx)
+	if err != nil {
+		t.Fatalf("apply 2.0.0: %v", err)
+	}
+
+	if _, err := stale.Apply(ctx); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("apply 1.1.0 after 2.0.0 = %v, want ErrInstallationChanged", err)
+	}
+	current, err := store.GetByID(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if current.Version != "2.0.0" || current.InstallPath != applied.BinaryPath {
+		t.Fatalf("installation = %s at %s, want 2.0.0 at %s", current.Version, current.InstallPath, applied.BinaryPath)
+	}
+	archive, err := store.GetArchive(ctx, id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if archive.Checksum != checksum {
+		t.Fatalf("stored archive checksum = %s, want the 2.0.0 package's %s", archive.Checksum, checksum)
+	}
+	// The guard holds for a write that changes no column, too.
+	staleArchive := &ArchiveInput{ManifestJSON: archive.ManifestJSON, Checksum: "stale", Bytes: archive.Bytes}
+	if err := store.Update(ctx, id, UpdateInstallationInput{Archive: staleArchive, IfInstallPath: &snapshot.InstallPath}); !errors.Is(err, ErrInstallationChanged) {
+		t.Fatalf("archive-only write guarded on the old path = %v, want ErrInstallationChanged", err)
+	}
+	if archive, err := store.GetArchive(ctx, id); err != nil || archive.Checksum != checksum {
+		t.Fatalf("stored archive after a refused archive-only write = %+v, %v; want the 2.0.0 package", archive, err)
+	}
+	if _, err := os.Stat(applied.BinaryPath); err != nil {
+		t.Fatalf("2.0.0 binary: %v", err)
+	}
+	staleRoot, err := pluginVersionRoot(installer.baseDir, pluginID, "1.1.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entries, _ := os.ReadDir(staleRoot); len(entries) != 0 {
+		t.Fatalf("refused 1.1.0 left %d install dirs behind", len(entries))
+	}
 }

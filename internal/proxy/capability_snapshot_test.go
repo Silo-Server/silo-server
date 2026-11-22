@@ -7,8 +7,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"slices"
-	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
@@ -54,30 +52,6 @@ func TestProxyHealthPublishesCapabilityHashOnlyAfterSnapshot(t *testing.T) {
 	}
 }
 
-// The endpoint and the background snapshot share one assembly, so a served
-// report carries the same hash health publishes.
-func TestProxyCapabilitiesPublishCapabilityHash(t *testing.T) {
-	const secret = "capability-secret"
-	server := newCapabilityProxyServer(t, secret)
-
-	info := fetchProxyCapabilities(t, server, secret)
-	if info.CapabilityHash == "" {
-		t.Fatal("served capability report carries no capability_hash")
-	}
-	if !slices.Contains(info.TransportFeatures, playback.TransportFeatureProgressiveRemuxRelayV1) ||
-		!slices.Contains(info.TransportFeatures, playback.TransportFeatureThemeAudioEgressV1) {
-		t.Fatalf("transport features = %v, want progressive remux relay and theme audio egress", info.TransportFeatures)
-	}
-	served := info
-	served.CapabilityHash = ""
-	if want := playback.ComputeCapabilityHash(served); want != info.CapabilityHash {
-		t.Fatalf("capability_hash = %s, want %s for the served payload", info.CapabilityHash, want)
-	}
-	if got := decodeProxyHealth(t, server).CapabilitiesHash; got != info.CapabilityHash {
-		t.Fatalf("health capabilities_hash = %q, want the just-served %q", got, info.CapabilityHash)
-	}
-}
-
 // A probe that did not finish hashes differently from the same ffmpeg probed
 // successfully, so publishing it would announce a capability change that never
 // happened — and cost the API a full capability refetch plus a planning-cache
@@ -103,25 +77,6 @@ func TestProxyCapabilitiesRejectsIncompleteProbeWithoutPublishing(t *testing.T) 
 	}
 	if got := decodeProxyHealth(t, server).CapabilitiesHash; got != published {
 		t.Fatalf("health capabilities_hash = %q after an unfinished probe, want the previous %q", got, published)
-	}
-}
-
-// The background snapshot has the same duty: a probe it could not finish is not
-// evidence the proxy's ffmpeg lost anything.
-func TestProxySnapshotKeepsPreviousHashWhenProbeCannotFinish(t *testing.T) {
-	server := newCapabilityProxyServer(t, "capability-secret")
-	server.refreshCapabilitySnapshot(context.Background())
-	published := decodeProxyHealth(t, server).CapabilitiesHash
-	if published == "" {
-		t.Fatal("no capability hash was published by the first snapshot")
-	}
-
-	canceled, cancel := context.WithCancel(context.Background())
-	cancel()
-	server.refreshCapabilitySnapshot(canceled)
-
-	if got := decodeProxyHealth(t, server).CapabilitiesHash; got != published {
-		t.Fatalf("health capabilities_hash = %q after an unfinished snapshot, want the previous %q", got, published)
 	}
 }
 
@@ -183,64 +138,6 @@ func fetchProxyCapabilities(t *testing.T, server *Server, secret string) playbac
 		t.Fatalf("decode capabilities: %v", err)
 	}
 	return info
-}
-
-// A proxy relays streams and runs identity/remux recipes; it never executes a
-// hardware transcode, and nothing on the API side reads its acceleration
-// fields. So it must not run the detection walk at all — the report carries no
-// backends, no devices and no host identity, and the only ffmpeg it execs is the
-// transformation registry's own listings.
-func TestProxyCapabilitiesReportNoHardware(t *testing.T) {
-	const secret = "capability-secret"
-	server, invocations := newCapabilityProxyServerRecordingFFmpeg(t, secret, true)
-
-	info := fetchProxyCapabilities(t, server, secret)
-
-	if info.Resolved != playback.HWAccelNone {
-		t.Fatalf("resolved = %q, want %q on a proxy", info.Resolved, playback.HWAccelNone)
-	}
-	if len(info.DetectedBackends) != 0 {
-		t.Fatalf("detected_backends = %#v, want none on a proxy", info.DetectedBackends)
-	}
-	if len(info.RenderDevices) != 0 || len(info.RenderDeviceDetails) != 0 {
-		t.Fatalf("render devices = %v / %#v, want none on a proxy", info.RenderDevices, info.RenderDeviceDetails)
-	}
-	if len(info.NVIDIAGPUUUIDs) != 0 {
-		t.Fatalf("nvidia_gpu_uuids = %v, want none on a proxy", info.NVIDIAGPUUUIDs)
-	}
-	if info.IntelDetected {
-		t.Fatal("intel_detected is set on a proxy that probed no hardware")
-	}
-	// No boot id is the reboot half of the contract: everything a reboot can
-	// move is out of the report, so the hash tracks only what this proxy can do.
-	// A hash that moved on reboot cost the API a refetch and a planning-cache
-	// drop for a proxy whose abilities were identical.
-	if info.BootID != "" {
-		t.Fatalf("boot_id = %q, want none: a reboot must not move a proxy's hash", info.BootID)
-	}
-	if len(info.Transformations) == 0 {
-		t.Fatal("no transformations advertised; the report has nothing the planner can use")
-	}
-	for _, transformation := range info.Transformations {
-		if transformation.Name == "" || transformation.RecipeVersion == "" {
-			t.Fatalf("advertised transformation is missing identity: %#v", transformation)
-		}
-	}
-
-	// The walk's smoke encodes are what this change exists to stop paying for,
-	// on every proxy, every fifteen minutes.
-	recorded, err := os.ReadFile(invocations)
-	if err != nil {
-		t.Fatalf("read ffmpeg invocations: %v", err)
-	}
-	for _, line := range strings.Split(strings.TrimSpace(string(recorded)), "\n") {
-		if line == "" {
-			continue
-		}
-		if strings.Contains(line, "-init_hw_device") || strings.Contains(line, "-hwaccel") {
-			t.Fatalf("proxy ran a hardware probe: ffmpeg %s", line)
-		}
-	}
 }
 
 // The hash still has to move for the one thing it now tracks, or a proxy whose

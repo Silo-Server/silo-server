@@ -127,11 +127,10 @@ download host and refuses redirects to another host.
 
 Catalog artwork is not always in Silo's own storage. A provider URL stays on
 the item until its image-cache job succeeds, and stays for good when caching
-fails, so an address the cache refused can still be served. Three places fetch
-catalog artwork themselves instead of handing the URL to the client: the
-jellycompat image proxy (Infuse, and requests with a proxy tag), offline
-download artwork, and collection collages. Each uses a netguard transport, and
-`artworkurl.FetchContext` decides the trust per URL:
+fails, so an address the cache refused can still be served. The jellycompat
+image proxy (Infuse and requests with a proxy tag), offline download artwork
+and collection collages use a netguard transport. For these three callers,
+`artworkurl.FetchContext` sets the policy for each URL.
 
 - A direct URL to the artwork store is trusted with the local network, where
   S3-compatible storage often runs. It must match the scheme, host, and path
@@ -146,6 +145,25 @@ proxy redirects to and downloads read from the store, so neither goes over
 HTTP. A provider URL under the artwork store's own prefix is trusted like a
 store URL. Trust carries across redirects, as for every netguard request, so
 the store is relied on not to redirect into the local network.
+
+The signed poster route (`getItemPoster`) serves links from admin reads and
+household session lists. A signature covers the item's content ID and expiry
+in a separate signing domain (`artworkurl.ItemPosters`). It authorizes the
+holder to read the item's current poster. Stored artwork keys redirect the
+client to the signed object.
+
+For provider URLs and URLs returned by a plugin, `imagecache.RemoteFetcher`
+downloads the poster through the image cache's guarded transport. Every dial
+and redirect must reach a Public address, even when the URL matches the
+artwork store's direct URL prefix. Downloads use the cache's timeout and a
+4 MiB limit of their own, and the bytes must sniff as JPEG, PNG, WebP or GIF. An address
+refusal returns the same `404` as a missing poster.
+
+Concurrent requests for one item and URL share a download. Each server runs
+at most four downloads at a time and remembers a success for five minutes
+and a failure for 30 seconds. A request can queue the item's image-cache
+job once per item per ten minutes on each server. The queue upsert preserves
+a failed job's backoff.
 
 ## Collection artwork
 
@@ -194,7 +212,14 @@ TLS handshake, response headers, and the body read-idle timeout) and no
 whole-request deadline. Requests are trusted with the local network so
 LAN-hosted repositories keep working. A blocked address, reached directly or by
 redirect, fails as a permanent `PackageError`, not a transient one, because a
-retry cannot change it.
+retry cannot change it. A release's Sigstore bundle (`bundle_url`) comes the
+same way, capped at 256 KiB.
+
+The Sigstore TUF metadata that release signatures are checked against
+([plugin trust](plugin-trust.md#release-signatures)) is fetched through the
+same netguard transport, but without the local-network trust: the mirror is
+Sigstore's public CDN, so those requests reach public addresses only. Each
+TUF download has a 30-second limit, because go-tuf's fetcher takes no context.
 
 ## Limits
 
@@ -207,7 +232,8 @@ that also applies to traffic from the container if that matters.
 
 Because guarded transports ignore proxy environment variables, a server whose
 only route to the internet is an HTTP proxy cannot download remote catalog
-seeds, plugin repository catalogs, or plugin packages.
+seeds, plugin repository catalogs, plugin packages, or the Sigstore TUF
+metadata, so it cannot verify plugin release signatures either.
 
 A resolver that answers public names with addresses netguard classes as
 Private makes those hosts unreachable for untrusted requests, provider artwork

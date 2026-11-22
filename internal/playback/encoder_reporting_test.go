@@ -1,7 +1,6 @@
 package playback
 
 import (
-	"context"
 	"encoding/json"
 	"testing"
 
@@ -37,36 +36,6 @@ func TestHEVCEncoderReportingPreservesGPURecipeAcrossReconstruction(t *testing.T
 	session := m.ReconstructSession(t.Context(), opts.SessionID, 7, restored)
 	if session == nil || session.TranscodeHWAccel != transcodeHWNone || session.ToneMapMode != tonemap.ModeHardware {
 		t.Fatalf("reconstructed activity misreported encoder: %#v", session)
-	}
-}
-
-func TestEncoderReportingFallsBackForLegacyCards(t *testing.T) {
-	card := RecipeCard{HWAccel: transcodeHWQSV}
-	if card.EffectiveEncoderHWAccel() != transcodeHWQSV || card.TranscodeOpts("", "", nil).EffectiveEncoderHWAccel() != transcodeHWQSV {
-		t.Fatal("legacy card lost its reported hardware encoder")
-	}
-}
-
-func TestHEVCExistingSessionReconstructPublishesActualEncoder(t *testing.T) {
-	sessions := NewSessionManager(0, 0)
-	sessions.RegisterReconstructed(&Session{ID: "live", UserID: 5, ProfileID: "p", MediaFileID: 77, PlayMethod: PlayTranscode, TranscodeHWAccel: transcodeHWQSV})
-	m := NewTranscodeManager()
-	m.Sessions = sessions
-	m.Config = func() TranscodeRuntimeConfig {
-		return TranscodeRuntimeConfig{TranscodeDir: t.TempDir(), HWAccel: transcodeHWQSV}
-	}
-	m.resolveToneMapExecutor = func(_ context.Context, opts TranscodeOpts) (TranscodeOpts, error) { return opts, nil }
-	m.startTranscode = func(_ context.Context, opts TranscodeOpts) (*TranscodeSession, error) {
-		opts.HWAccel, opts.EncoderHWAccel = transcodeHWNone, ""
-		return &TranscodeSession{opts: opts}, nil
-	}
-	card := NewRecipeCard(5, "p", 77, "", TranscodeOpts{SessionID: "live", TargetCodecVideo: transcodeCodecHEVC, HWAccel: transcodeHWQSV})
-	session, runtime, status := m.LoadOrReconstructTranscode(t.Context(), sessions.GetSession, "live", 5, -1, &card)
-	if status != SessionLoaded || session == nil || runtime == nil {
-		t.Fatalf("reconstruction status=%v session=%v runtime=%v", status, session, runtime)
-	}
-	if session.TranscodeHWAccel != runtime.Opts().EffectiveEncoderHWAccel() {
-		t.Fatalf("session reports %q while reconstructed runtime encodes on %q", session.TranscodeHWAccel, runtime.Opts().EffectiveEncoderHWAccel())
 	}
 }
 

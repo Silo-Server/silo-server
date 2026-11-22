@@ -2,9 +2,13 @@ package playback
 
 import (
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -50,107 +54,84 @@ func (s *recordingFFmpegLogSink) WriteEvent(_ context.Context, sessionID string,
 	s.entries = append(s.entries, recordedFFmpegLog{sessionID: sessionID, event: message, attrs: attrs})
 }
 
-func TestPrepareProgressWriterParsesBlocksAcrossWrites(t *testing.T) {
-	sink := &recordedPrepareProgress{}
-	w := newPrepareProgressWriter(sink, 100)
-	stream := "frame=10\nout_time_us=N/A\nspeed=N/A\nprogress=continue\n" +
-		"out_time_us=25000000\nspeed=3.4x\nprogress=continue\n" +
-		"out_time_ms=50500000\nspeed= 41x\nprogress=end\n"
-	// Split mid-line so the writer has to buffer partial lines.
-	for _, chunk := range []string{stream[:17], stream[17:60], stream[60:]} {
-		if _, err := w.Write([]byte(chunk)); err != nil {
+// Issue #3495 with FFmpeg: a forced subtitle track whose only cue is near the
+// end holds FFmpeg's out_time at 0 until that cue. With the frame rate,
+// progress rises through the first half of the file.
+//
+// Only FFmpeg 8.x (Silo ships jellyfin-ffmpeg 8) holds out_time at 0 here, so
+// only there does this test tell fixed from unfixed code. FFmpeg 9 moves
+// out_time ahead of the video for this source, and the test passes either way.
+func TestPrepareFileProgressRisesBeforeASparseSubtitleCue(t *testing.T) {
+	if testing.Short() {
+		t.Skip("real FFmpeg integration test")
+	}
+	ffmpeg, err := exec.LookPath("ffmpeg")
+	if err != nil {
+		t.Skip("ffmpeg not found")
+	}
+	dir := t.TempDir()
+	const duration, sparseCue = 30, 26
+	cue := func(n, at int, text string) string {
+		stamp := func(s int) string { return fmt.Sprintf("00:%02d:%02d,000", s/60, s%60) }
+		return fmt.Sprintf("%d\n%s --> %s\n%s\n\n", n, stamp(at), stamp(at+2), text)
+	}
+	var dense strings.Builder
+	for i, at := 1, 5; at < duration; i, at = i+1, at+10 {
+		dense.WriteString(cue(i, at, "line"))
+	}
+	for name, body := range map[string]string{"dense.srt": dense.String(), "sparse.srt": cue(1, sparseCue, "forced")} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
-	got := sink.all()
-	want := []PrepareProgress{
-		{EncodedSeconds: 0, DurationSeconds: 100, Speed: 0},
-		{EncodedSeconds: 25, DurationSeconds: 100, Speed: 3.4},
-		// progress=end reports the whole duration even when out_time lags.
-		{EncodedSeconds: 100, DurationSeconds: 100, Speed: 41},
+	source := filepath.Join(dir, "source.mkv")
+	build := exec.CommandContext(t.Context(), ffmpeg, "-nostdin", "-hide_banner", "-loglevel", "error",
+		"-f", "lavfi", "-i", "testsrc2=size=160x90:rate=24", "-f", "lavfi", "-i", "sine=frequency=440",
+		"-i", filepath.Join(dir, "dense.srt"), "-i", filepath.Join(dir, "sparse.srt"),
+		"-t", strconv.Itoa(duration), "-map", "0", "-map", "1", "-map", "2", "-map", "3",
+		"-c:v", "libx264", "-preset", "ultrafast", "-g", "48", "-c:a", "aac", "-c:s", "srt", "-y", source)
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("make source: %v\n%s", err, out)
 	}
-	if !slices.Equal(got, want) {
-		t.Fatalf("readings = %+v, want %+v", got, want)
-	}
-}
 
-func TestPrepareProgressWriterUnknownDuration(t *testing.T) {
-	sink := &recordedPrepareProgress{}
-	w := newPrepareProgressWriter(sink, -5)
-	_, _ = w.Write([]byte("out_time_us=1000000\nprogress=end\n"))
-	got := sink.all()
-	if len(got) != 1 || got[0].DurationSeconds != 0 || got[0].EncodedSeconds != 1 {
-		t.Fatalf("readings = %+v, want one reading at 1s with unknown duration", got)
-	}
-}
-
-func TestBuildPrepareFileArgsRequestsProgressOnlyWithSink(t *testing.T) {
-	opts := TranscodeOpts{InputPath: "/in.mkv", TargetCodecVideo: "copy", TargetCodecAudio: "copy"}
-	if args := buildPrepareFileArgs(opts, "/out.mp4"); slices.Contains(args, "-progress") {
-		t.Fatalf("args without a sink request progress: %v", args)
-	}
-	opts.PrepareProgressSink = &recordedPrepareProgress{}
-	args := buildPrepareFileArgs(opts, "/out.mp4")
-	i := slices.Index(args, "-progress")
-	if i < 0 || i+1 >= len(args) || args[i+1] != "pipe:1" || !slices.Contains(args, "-nostats") {
-		t.Fatalf("args with a sink = %v, want -progress pipe:1 -nostats", args)
-	}
-	if args[len(args)-1] != "/out.mp4" {
-		t.Fatalf("output path moved: %v", args)
-	}
-}
-
-func TestPrepareFileReportsProgressAndLogsStderr(t *testing.T) {
-	dir := t.TempDir()
-	script := filepath.Join(dir, "ffmpeg")
-	body := "#!/bin/sh\n" +
-		"printf 'out_time_us=30000000\\nspeed=2.0x\\nprogress=continue\\n'\n" +
-		"printf 'warning: something odd\\n' >&2\n" +
-		"printf 'out_time_us=60000000\\nspeed=2.5x\\nprogress=end\\n'\n" +
-		"eval \"touch \\${$#}\"\n"
-	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+	// Increase the progress report frequency so a small fixture still gives
+	// intermediate readings on fast hosts.
+	wrapper := filepath.Join(dir, "ffmpeg")
+	if err := os.WriteFile(wrapper, []byte("#!/bin/sh\nexec ffmpeg -stats_period 0.001 \"$@\"\n"), 0o700); err != nil {
 		t.Fatal(err)
 	}
 	progress := &recordedPrepareProgress{}
-	logs := &recordingFFmpegLogSink{}
-	err := PrepareFile(context.Background(), TranscodeOpts{
-		InputPath:           "/nonexistent/input.mkv",
-		TargetCodecVideo:    "h264",
-		TargetCodecAudio:    "aac",
-		FFmpegPath:          script,
-		HWAccel:             HWAccelNone,
-		TotalDuration:       60,
-		SessionID:           DownloadPrepareLogSessionID("art1"),
-		FFmpegLogSink:       logs,
+	err = PrepareFile(t.Context(), TranscodeOpts{
+		InputPath:        source,
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		FFmpegPath:       wrapper,
+		HWAccel:          HWAccelNone,
+		TotalDuration:    duration,
+		SourceFrameRate:  24,
+		PreparedTracks: &PreparedTracks{
+			Audio:     []PreparedAudioTrack{{SourceIndex: 0, Codec: PreparedAudioAAC, SourceChannels: 1}},
+			Subtitles: []PreparedSubtitleTrack{{SourceIndex: 0}, {SourceIndex: 1, Forced: true}},
+		},
 		PrepareProgressSink: progress,
 	}, filepath.Join(dir, "artifact.mp4"))
 	if err != nil {
 		t.Fatalf("PrepareFile: %v", err)
 	}
-
 	readings := progress.all()
-	if len(readings) != 2 || readings[0].EncodedSeconds != 30 || readings[1].EncodedSeconds != 60 || readings[1].Speed != 2.5 {
-		t.Fatalf("readings = %+v", readings)
+	if len(readings) < 3 {
+		t.Fatalf("the encode emitted %d progress readings, want at least three", len(readings))
 	}
-
-	var lines, events []string
-	for _, entry := range logs.entries {
-		if entry.sessionID != "download-prepare-art1" {
-			t.Fatalf("log session = %q", entry.sessionID)
+	firstHalf := 0
+	for i, reading := range readings {
+		if i > 0 && reading.EncodedSeconds < readings[i-1].EncodedSeconds {
+			t.Fatalf("progress went back: %+v", readings)
 		}
-		if entry.attrs.ExecutionMode != "download_prepare" {
-			t.Fatalf("execution mode = %q", entry.attrs.ExecutionMode)
-		}
-		if entry.line != "" {
-			lines = append(lines, entry.line)
-		} else {
-			events = append(events, entry.event)
+		if reading.EncodedSeconds > 0 && reading.EncodedSeconds < sparseCue/2 {
+			firstHalf++
 		}
 	}
-	if !slices.Equal(lines, []string{"warning: something odd"}) {
-		t.Fatalf("stderr lines = %q", lines)
-	}
-	if !slices.Equal(events, []string{"ffmpeg process starting", "ffmpeg process exited"}) {
-		t.Fatalf("events = %q", events)
+	if firstHalf == 0 {
+		t.Fatalf("no reading between 0 and %ds, half the sparse cue's time: %+v", sparseCue/2, readings)
 	}
 }

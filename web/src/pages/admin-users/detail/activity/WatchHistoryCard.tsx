@@ -39,6 +39,7 @@ import {
 } from "../format";
 import { DetailCard, ProgressBar } from "../ui";
 import { formatLocale } from "@/lib/appLocale";
+import { TOUCH_HIT_AREA, TOUCH_TARGETS } from "@/lib/touchTargets";
 
 const ALL_PROFILES = "all";
 const PERIODS: readonly { days: number; label: MessageKey }[] = [
@@ -75,7 +76,7 @@ function playRow(t: Translate, play: AdminUserPlay): HistoryRow {
     code: play.series_title ? episode : "",
     profile: play.profile_name || play.profile_id,
     method: play.play_method,
-    watched: watchedFraction(play.watched_seconds, play.duration_seconds, play.completed),
+    watched: watchedFraction(play.end_position_seconds, play.duration_seconds, play.completed),
     endedAt: play.ended_at,
   };
 }
@@ -84,10 +85,12 @@ function liveRow(t: Translate, session: AdminSession): HistoryRow {
   return {
     key: `live:${session.session_id}`,
     live: true,
-    itemId: session.content_id ?? "",
+    itemId: session.media_item_id ?? "",
     title:
-      session.series_name || session.media_title || t("web.admin.users.detail.common.unknownTitle"),
-    code: session.series_name ? episodeCode(session.season_number, session.episode_number) : "",
+      session.series_title ||
+      session.media_title ||
+      t("web.admin.users.detail.common.unknownTitle"),
+    code: session.series_title ? episodeCode(session.season_number, session.episode_number) : "",
     profile: session.profile_name || session.profile_id,
     method: session.effective_play_method || session.play_method,
     watched: watchedFraction(session.position_seconds, session.file_duration, false),
@@ -163,7 +166,7 @@ export function WatchHistoryCard({
             >
               <SelectValue />
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className={TOUCH_TARGETS}>
               <SelectItem value={ALL_PROFILES}>
                 {t("web.admin.users.detail.common.allProfiles")}
               </SelectItem>
@@ -182,7 +185,7 @@ export function WatchHistoryCard({
             >
               <SelectValue>{t(period.label)}</SelectValue>
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className={TOUCH_TARGETS}>
               {PERIODS.map((option) => (
                 <SelectItem key={option.days} value={String(option.days)}>
                   {t(option.label)}
@@ -254,11 +257,14 @@ export function WatchHistoryCard({
             <TableBody>
               {rows.map((row) => (
                 <TableRow key={row.key} data-live={row.live ? "true" : undefined}>
-                  <TableCell className="max-w-[18rem] ps-4 whitespace-normal sm:ps-5">
+                  <TableCell className="max-w-[18rem] ps-4 wrap-anywhere whitespace-normal sm:ps-5">
                     {row.itemId ? (
                       <Link
                         to={`/item/${encodeURIComponent(row.itemId)}`}
-                        className="hover:text-primary font-semibold transition-colors hover:underline"
+                        className={cn(
+                          "hover:text-primary font-semibold transition-colors hover:underline",
+                          TOUCH_HIT_AREA,
+                        )}
                       >
                         {row.title}
                       </Link>

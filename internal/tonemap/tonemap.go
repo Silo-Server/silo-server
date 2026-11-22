@@ -149,9 +149,12 @@ type SourceMetadata struct {
 	DVBLPresent         bool
 	DVRPUPresent        bool
 	ColorRange          string
-	ColorPrimaries      string
-	ColorTransfer       string
-	ColorSpace          string
+	// FrameColorRange is the range on the first decoded frame, as the
+	// scanner recorded it: models.VideoTrack.FrameColorRange.
+	FrameColorRange string
+	ColorPrimaries  string
+	ColorTransfer   string
+	ColorSpace      string
 }
 
 // SourceResolution is the safe execution classification for one HDR source.
@@ -189,6 +192,7 @@ func MetadataForFile(file *models.MediaFile) SourceMetadata {
 		DVBLPresent:         track.DVBLPresent,
 		DVRPUPresent:        track.DVRPUPresent,
 		ColorRange:          track.ColorRange,
+		FrameColorRange:     track.FrameColorRange,
 		ColorPrimaries:      track.ColorPrimaries,
 		ColorTransfer:       track.ColorTransfer,
 		ColorSpace:          track.ColorSpace,
@@ -309,6 +313,15 @@ func ResolveSource(source SourceMetadata) SourceResolution {
 	}
 	if candidate == "" {
 		return SourceResolution{}
+	}
+	// The decoder takes the range from the bitstream before the container's
+	// tag, and the graphs see the decoder's value, so an explicit range on the
+	// first decoded frame overrides a stream tag that contradicts it. A track
+	// whose frame was not read yet keeps its tag until the scanner or the
+	// HDR10+ backfill reads it.
+	frameRange := normalizeColorValue(source.FrameColorRange)
+	if rangeIsFull(frameRange) || rangeIsLimited(frameRange) {
+		source.ColorRange = frameRange
 	}
 	// Full-range PQ graphs preserve the decoded range and therefore require
 	// explicit frame validation before execution.

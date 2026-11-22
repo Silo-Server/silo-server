@@ -553,83 +553,30 @@ func (r *FolderRepository) ListByIDs(ctx context.Context, ids []int) ([]*models.
 	return folders, nil
 }
 
-// Update modifies a folder's fields. Only non-nil fields in the input are updated.
-func (r *FolderRepository) Update(ctx context.Context, id int, input UpdateFolderInput) error {
+// Update modifies a folder's fields. Only non-nil fields in the input are
+// updated. enabledChanged reports whether it changed enabled, read under a
+// row lock so concurrent toggles each compare against the value the one
+// before them committed.
+func (r *FolderRepository) Update(ctx context.Context, id int, input UpdateFolderInput) (enabledChanged bool, err error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("beginning update transaction: %w", err)
+		return false, fmt.Errorf("beginning update transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	setClauses := []string{}
-	args := []any{}
-	argIndex := 1
-
-	if input.Type != nil {
-		setClauses = append(setClauses, fmt.Sprintf("type = $%d", argIndex))
-		args = append(args, *input.Type)
-		argIndex++
-	}
-	if input.Name != nil {
-		setClauses = append(setClauses, fmt.Sprintf("name = $%d", argIndex))
-		args = append(args, *input.Name)
-		argIndex++
-	}
 	if input.Enabled != nil {
-		setClauses = append(setClauses, fmt.Sprintf("enabled = $%d", argIndex))
-		args = append(args, *input.Enabled)
-		argIndex++
+		var wasEnabled bool
+		if err := tx.QueryRow(ctx, "SELECT enabled FROM media_folders WHERE id = $1 FOR UPDATE", id).Scan(&wasEnabled); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return false, ErrFolderNotFound
+			}
+			return false, fmt.Errorf("locking folder: %w", err)
+		}
+		enabledChanged = wasEnabled != *input.Enabled
 	}
-	if input.MetadataLanguage != nil {
-		setClauses = append(setClauses, fmt.Sprintf("metadata_language = $%d", argIndex))
-		args = append(args, *input.MetadataLanguage)
-		argIndex++
-	}
-	if input.AutoTranslateMetadata != nil {
-		setClauses = append(setClauses, fmt.Sprintf("auto_translate_metadata = $%d", argIndex))
-		args = append(args, *input.AutoTranslateMetadata)
-		argIndex++
-	}
-	if input.ChapterThumbnailsEnabled != nil {
-		setClauses = append(setClauses, fmt.Sprintf("chapter_thumbnails_enabled = $%d", argIndex))
-		args = append(args, *input.ChapterThumbnailsEnabled)
-		argIndex++
-	}
-	if input.TrickplayEnabled != nil {
-		setClauses = append(setClauses, fmt.Sprintf("trickplay_enabled = $%d", argIndex))
-		args = append(args, *input.TrickplayEnabled)
-		argIndex++
-	}
-	if input.BoxSetsEnabled != nil {
-		setClauses = append(setClauses, fmt.Sprintf("box_sets_enabled = $%d", argIndex))
-		args = append(args, *input.BoxSetsEnabled)
-		argIndex++
-	}
-	if input.BoxSetMinMovies != nil {
-		setClauses = append(setClauses, fmt.Sprintf("box_set_min_movies = $%d", argIndex))
-		args = append(args, *input.BoxSetMinMovies)
-		argIndex++
-	}
-	if input.BoxSetsInSearch != nil {
-		setClauses = append(setClauses, fmt.Sprintf("box_sets_in_search = $%d", argIndex))
-		args = append(args, *input.BoxSetsInSearch)
-		argIndex++
-	}
-	if input.IntroDetectionEnabled != nil {
-		setClauses = append(setClauses, fmt.Sprintf("intro_detection_enabled = $%d", argIndex))
-		args = append(args, *input.IntroDetectionEnabled)
-		argIndex++
-	}
-	if input.TrailerKinds != nil {
-		setClauses = append(setClauses, fmt.Sprintf("trailer_kinds = $%d", argIndex))
-		args = append(args, normalizeTrailerKindsInput(*input.TrailerKinds))
-		argIndex++
-	}
-	if input.RealtimeMonitoring != nil {
-		setClauses = append(setClauses, fmt.Sprintf("realtime_monitoring = $%d", argIndex))
-		args = append(args, *input.RealtimeMonitoring)
-		argIndex++
-	}
+
+	setClauses, args := folderUpdateAssignments(input)
+	argIndex := len(args) + 1
 	if len(setClauses) > 0 {
 		query := fmt.Sprintf("UPDATE media_folders SET %s WHERE id = $%d",
 			strings.Join(setClauses, ", "), argIndex)
@@ -637,20 +584,20 @@ func (r *FolderRepository) Update(ctx context.Context, id int, input UpdateFolde
 
 		tag, execErr := tx.Exec(ctx, query, args...)
 		if execErr != nil {
-			return fmt.Errorf("updating folder: %w", execErr)
+			return false, fmt.Errorf("updating folder: %w", execErr)
 		}
 		if tag.RowsAffected() == 0 {
-			return ErrFolderNotFound
+			return false, ErrFolderNotFound
 		}
 	} else if input.Paths == nil {
 		// Nothing to update; still verify the folder exists.
 		var exists bool
 		err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM media_folders WHERE id = $1)", id).Scan(&exists)
 		if err != nil {
-			return fmt.Errorf("checking folder existence: %w", err)
+			return false, fmt.Errorf("checking folder existence: %w", err)
 		}
 		if !exists {
-			return ErrFolderNotFound
+			return false, ErrFolderNotFound
 		}
 	}
 
@@ -661,16 +608,16 @@ func (r *FolderRepository) Update(ctx context.Context, id int, input UpdateFolde
 			var exists bool
 			err := tx.QueryRow(ctx, "SELECT EXISTS(SELECT 1 FROM media_folders WHERE id = $1)", id).Scan(&exists)
 			if err != nil {
-				return fmt.Errorf("checking folder existence: %w", err)
+				return false, fmt.Errorf("checking folder existence: %w", err)
 			}
 			if !exists {
-				return ErrFolderNotFound
+				return false, ErrFolderNotFound
 			}
 		}
 
 		_, err := tx.Exec(ctx, "DELETE FROM media_folder_paths WHERE media_folder_id = $1", id)
 		if err != nil {
-			return fmt.Errorf("deleting old paths: %w", err)
+			return false, fmt.Errorf("deleting old paths: %w", err)
 		}
 
 		for _, p := range *input.Paths {
@@ -680,17 +627,66 @@ func (r *FolderRepository) Update(ctx context.Context, id int, input UpdateFolde
 			)
 			if err != nil {
 				if isDuplicateKeyError(err) {
-					return fmt.Errorf("%w: %s", ErrDuplicatePath, extractConstraint(err))
+					return false, fmt.Errorf("%w: %s", ErrDuplicatePath, extractConstraint(err))
 				}
-				return fmt.Errorf("inserting folder path %q: %w", p, err)
+				return false, fmt.Errorf("inserting folder path %q: %w", p, err)
 			}
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("committing update transaction: %w", err)
+		return false, fmt.Errorf("committing update transaction: %w", err)
 	}
-	return nil
+	return enabledChanged, nil
+}
+
+// folderUpdateAssignments returns the SET clauses and their arguments for
+// the non-nil fields of input, numbered from $1.
+func folderUpdateAssignments(input UpdateFolderInput) (clauses []string, args []any) {
+	set := func(column string, value any) {
+		args = append(args, value)
+		clauses = append(clauses, fmt.Sprintf("%s = $%d", column, len(args)))
+	}
+	if input.Type != nil {
+		set("type", *input.Type)
+	}
+	if input.Name != nil {
+		set("name", *input.Name)
+	}
+	if input.Enabled != nil {
+		set("enabled", *input.Enabled)
+	}
+	if input.MetadataLanguage != nil {
+		set("metadata_language", *input.MetadataLanguage)
+	}
+	if input.AutoTranslateMetadata != nil {
+		set("auto_translate_metadata", *input.AutoTranslateMetadata)
+	}
+	if input.ChapterThumbnailsEnabled != nil {
+		set("chapter_thumbnails_enabled", *input.ChapterThumbnailsEnabled)
+	}
+	if input.TrickplayEnabled != nil {
+		set("trickplay_enabled", *input.TrickplayEnabled)
+	}
+	if input.BoxSetsEnabled != nil {
+		set("box_sets_enabled", *input.BoxSetsEnabled)
+	}
+	if input.BoxSetMinMovies != nil {
+		set("box_set_min_movies", *input.BoxSetMinMovies)
+	}
+	if input.BoxSetsInSearch != nil {
+		set("box_sets_in_search", *input.BoxSetsInSearch)
+	}
+	if input.IntroDetectionEnabled != nil {
+		set("intro_detection_enabled", *input.IntroDetectionEnabled)
+	}
+	if input.TrailerKinds != nil {
+		set("trailer_kinds", normalizeTrailerKindsInput(*input.TrailerKinds))
+	}
+	if input.RealtimeMonitoring != nil {
+		set("realtime_monitoring", *input.RealtimeMonitoring)
+	}
+	return clauses, args
 }
 
 // Delete removes a media folder by its ID and cleans up any media items that

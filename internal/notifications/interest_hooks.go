@@ -12,10 +12,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/userstore"
+	"github.com/Silo-Server/silo-server/internal/watchlist"
 )
 
 // WrapUserStoreProvider decorates the shared user-store provider so every
-// favorites, watchlist, watch-progress, and watch-history mutation —
+// watch-progress, watch-history, and Next Up removal mutation —
 // regardless of which path performed it (REST handlers, jellycompat, history
 // imports, playback stop, watch sync) — queues an interest recompute. Hooking
 // the lowest shared layer keeps the seven-plus mutation call sites hook-free
@@ -72,6 +73,15 @@ func (s *interestTrackingStore) ManualCollectionsHolding(ctx context.Context, cr
 		return nil, errors.New("collection membership reads are not supported")
 	}
 	return reader.ManualCollectionsHolding(ctx, creatorProfileID, mediaItemID)
+}
+
+// CollectionsHolding preserves the title page's "Also in" membership read.
+func (s *interestTrackingStore) CollectionsHolding(ctx context.Context, mediaItemID string) ([]string, error) {
+	reader, ok := s.UserStore.(userstore.CollectionMembershipReader)
+	if !ok {
+		return nil, errors.New("collection membership reads are not supported")
+	}
+	return reader.CollectionsHolding(ctx, mediaItemID)
 }
 
 func (p *interestTrackingProvider) ForUser(ctx context.Context, userID int) (userstore.UserStore, error) {
@@ -338,9 +348,9 @@ type progressState struct {
 // progressSessionGap separates watch sessions. A progress write that lands
 // more than this long after the stored row's stamp, by its own stamp or by
 // the clock, queues a recompute even without a state transition: resuming
-// playback, or a late import, lifts a Home removal (an active series drop,
-// or a Continue Watching dismissal held for the old progress stamp), while
-// playback ticks within one session stay free.
+// playback, or a late import, lifts an active series drop and can make an
+// episode partly watched since the Next Up anchor, while playback ticks
+// within one session stay free.
 const progressSessionGap = 10 * time.Minute
 
 func (s *interestTrackingStore) currentProgressState(ctx context.Context, profileID, mediaItemID string) progressState {
@@ -379,67 +389,27 @@ func (s *interestTrackingStore) queueOnTransition(profileID, mediaItemID string,
 	if before != after || resumed {
 		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 	}
-}
-
-// --- Favorites & watchlist: a mutation that changed a row queues.
-
-func (s *interestTrackingStore) AddFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error) {
-	changed, err := s.UserStore.AddFavorite(ctx, profileID, mediaItemID)
-	if err == nil && changed {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
+	if after.completed && !before.completed {
+		s.noteCompletion(profileID)
 	}
-	return changed, err
 }
 
-func (s *interestTrackingStore) AddFavoriteAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
-	inserted, err := s.UserStore.AddFavoriteAt(ctx, profileID, mediaItemID, addedAt)
-	if err == nil && inserted {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return inserted, err
+// noteCompletion marks that the profile finished an episode. A completion
+// moves Home's Next Up anchor, which decides whether an older partly watched
+// episode keeps its series off Next Up (partlyWatchedSinceAnchor). Noting it
+// like a Home change makes the next write to such an episode queue a
+// recompute even inside the session gap, where a position-only write would
+// otherwise queue none.
+func (s *interestTrackingStore) noteCompletion(profileID string) {
+	s.updater.noteHomeChange(s.userID, profileID, time.Now())
 }
 
-func (s *interestTrackingStore) RemoveFavorite(ctx context.Context, profileID, mediaItemID string) (bool, error) {
-	changed, err := s.UserStore.RemoveFavorite(ctx, profileID, mediaItemID)
-	if err == nil && changed {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return changed, err
-}
-
-func (s *interestTrackingStore) AddToWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
-	changed, err := s.UserStore.AddToWatchlist(ctx, profileID, mediaItemID)
-	if err == nil && changed {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return changed, err
-}
-
-// AddToWatchlistAt is the add that keeps an earlier added_at: watch-provider
-// and Plex imports, and promotion of a watchlisted title that has since
-// reached the library, all write through it.
-func (s *interestTrackingStore) AddToWatchlistAt(ctx context.Context, profileID, mediaItemID string, addedAt time.Time) (bool, error) {
-	inserted, err := s.UserStore.AddToWatchlistAt(ctx, profileID, mediaItemID, addedAt)
-	if err == nil && inserted {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return inserted, err
-}
-
-func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
-	changed, err := s.UserStore.RemoveFromWatchlist(ctx, profileID, mediaItemID)
-	if err == nil && changed {
-		s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
-	}
-	return changed, err
-}
-
-// --- Home dismissals: a card removed from Continue Watching or Next Up stops
-// that surface's interest reason (see homeHides).
+// --- Home dismissals: a card removed from Next Up stops the next_up reason
+// (see homeHides). Continue Watching removals change no interest.
 
 func (s *interestTrackingStore) UpsertHomeDismissal(ctx context.Context, dismissal userstore.HomeItemDismissal) error {
 	err := s.UserStore.UpsertHomeDismissal(ctx, dismissal)
-	if err == nil {
+	if err == nil && dismissal.Surface != userstore.HomeSurfaceContinueWatching {
 		s.updater.queueHomeChange(s.userID, dismissal.ProfileID, dismissal.MediaItemID)
 	}
 	return err
@@ -447,10 +417,26 @@ func (s *interestTrackingStore) UpsertHomeDismissal(ctx context.Context, dismiss
 
 func (s *interestTrackingStore) DeleteHomeDismissal(ctx context.Context, profileID, surface, mediaItemID string) error {
 	err := s.UserStore.DeleteHomeDismissal(ctx, profileID, surface, mediaItemID)
-	if err == nil {
+	if err == nil && surface != userstore.HomeSurfaceContinueWatching {
 		s.updater.queueHomeChange(s.userID, profileID, mediaItemID)
 	}
 	return err
+}
+
+// RemoveFromWatchlist also forgets the record of a title entry promoted onto
+// the item, so the watchlist arrival notice does not tell a profile about a
+// title it took off its watchlist, whichever path removed it. A failed
+// cleanup leaves a record that can tell the profile once, inside the fanout
+// staleness horizon; retention then removes it.
+func (s *interestTrackingStore) RemoveFromWatchlist(ctx context.Context, profileID, mediaItemID string) (bool, error) {
+	removed, err := s.UserStore.RemoveFromWatchlist(ctx, profileID, mediaItemID)
+	if err == nil && removed && s.system != nil && s.system.pool != nil {
+		if forgetErr := watchlist.ForgetPromotion(ctx, s.system.pool, s.userID, profileID, mediaItemID); forgetErr != nil {
+			slog.WarnContext(ctx, "forget watchlist promotion failed", "component", "notifications",
+				"user_id", s.userID, "profile_id", profileID, "error", forgetErr)
+		}
+	}
+	return removed, err
 }
 
 // --- Progress: queue on transitions and new watch sessions only.
@@ -500,6 +486,10 @@ func (s *interestTrackingStore) ListJellycompatProgressDates(ctx context.Context
 	return reader.ListJellycompatProgressDates(ctx, profileID, ids)
 }
 
+func (s *interestTrackingStore) ListJellycompatPlayedByDate(ctx context.Context, profileID string, types []string, libraryID *int, ascending bool, limit, offset int) ([]userstore.WatchProgress, error) {
+	return userstore.ListJellycompatPlayedByDate(ctx, s.UserStore, profileID, types, libraryID, ascending, limit, offset)
+}
+
 func (s *interestTrackingStore) SetProgressIfNewer(ctx context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) (bool, error) {
 	before := s.currentProgressState(ctx, profileID, mediaItemID)
 	applied, err := s.UserStore.SetProgressIfNewer(ctx, profileID, mediaItemID, position, duration, completed, updatedAt)
@@ -528,6 +518,7 @@ func (s *interestTrackingStore) MarkProgressBatch(ctx context.Context, profileID
 			}
 			s.updater.QueueItemMutation(s.userID, profileID, mediaItemID)
 		}
+		s.noteCompletion(profileID)
 	}
 	return err
 }
@@ -639,6 +630,7 @@ func (s *interestTrackingStore) queueItemMutations(profileID string, entries []u
 	for _, entry := range entries {
 		s.updater.QueueItemMutation(s.userID, profileID, entry.MediaItemID)
 	}
+	s.noteCompletion(profileID)
 }
 
 // queueTargetMutations queues by requested target rather than written entry,
@@ -647,6 +639,7 @@ func (s *interestTrackingStore) queueTargetMutations(profileID string, targets [
 	for _, target := range targets {
 		s.updater.QueueItemMutation(s.userID, profileID, target.MediaItemID)
 	}
+	s.noteCompletion(profileID)
 }
 
 // AddVisibleHistory forwards the watermark-aware history insert. The generic
@@ -716,12 +709,12 @@ func (s *interestTrackingStore) DeleteHistoryBySource(ctx context.Context, profi
 // profiles may live outside Postgres, so no cascade covers these tables.
 // The purge is best-effort: a failure is logged, never surfaced as a
 // profile-deletion failure (the retention task prunes leftovers).
-func (s *interestTrackingStore) DeleteProfile(ctx context.Context, id string) error {
-	err := s.UserStore.DeleteProfile(ctx, id)
+func (s *interestTrackingStore) DeleteProfile(ctx context.Context, id string) ([]string, error) {
+	collectionIDs, err := s.UserStore.DeleteProfile(ctx, id)
 	if err == nil {
 		s.purgeProfile(ctx, id)
 	}
-	return err
+	return collectionIDs, err
 }
 
 func (s *interestTrackingStore) purgeProfile(ctx context.Context, id string) {
@@ -734,16 +727,16 @@ func (s *interestTrackingStore) purgeProfile(ctx context.Context, id string) {
 
 // DeleteProfileAudited is DeleteProfile through the wrapped store's audited
 // delete. A backend without one deletes the profile without an audit row.
-func (s *interestTrackingStore) DeleteProfileAudited(ctx context.Context, id string, audit func(pgx.Tx, *userstore.Profile) error) error {
+func (s *interestTrackingStore) DeleteProfileAudited(ctx context.Context, id string, audit func(pgx.Tx, *userstore.Profile) error) ([]string, error) {
 	deleter, ok := s.UserStore.(userstore.AuditedProfileDeleter)
 	if !ok {
 		return s.DeleteProfile(ctx, id)
 	}
-	err := deleter.DeleteProfileAudited(ctx, id, audit)
+	collectionIDs, err := deleter.DeleteProfileAudited(ctx, id, audit)
 	if err == nil {
 		s.purgeProfile(ctx, id)
 	}
-	return err
+	return collectionIDs, err
 }
 
 // Preserve the optional device settings capability without claiming support

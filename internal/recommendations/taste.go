@@ -280,11 +280,11 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		}
 
 		s := ensureSignal(ref.CanonicalID)
-		rating := r.Rating
+		rating := r.Stars()
 		s.Rating = &rating
 		ratedSet[ref.CanonicalID] = struct{}{}
 
-		weight, kind := ratingSignal(r.Rating)
+		weight, kind := ratingSignal(rating)
 		s.ExplicitWeight += weight * timeDecay(r.RatedAt, now, halfLife)
 		signalCounts[kind]++
 	}
@@ -616,7 +616,7 @@ func (e *Engine) GetTasteProfileSummary(ctx context.Context, userID int, profile
 
 	rawIDSet := make(map[string]struct{})
 	for _, r := range ratings {
-		if r.Rating >= 4 {
+		if r.Stars() >= 4 {
 			rawIDSet[r.MediaItemID] = struct{}{}
 		}
 	}
@@ -636,7 +636,7 @@ func (e *Engine) GetTasteProfileSummary(ctx context.Context, userID int, profile
 
 	idSet := make(map[string]struct{})
 	for _, r := range ratings {
-		if r.Rating < 4 {
+		if r.Stars() < 4 {
 			continue
 		}
 		ref, ok := refs[r.MediaItemID]

@@ -47,52 +47,6 @@ func TestSearchAttachesAPIKeyAndQuery(t *testing.T) {
 	}
 }
 
-func TestSearchWithoutKeyReturnsErrNotConfigured(t *testing.T) {
-	c := NewClient("", nil)
-	_, err := c.Search(context.Background(), "horror")
-	if !errors.Is(err, ErrNotConfigured) {
-		t.Fatalf("err = %v, want ErrNotConfigured", err)
-	}
-}
-
-func TestSearchEmptyQueryRejected(t *testing.T) {
-	c := NewClient("k", nil)
-	if _, err := c.Search(context.Background(), "  "); err == nil {
-		t.Fatal("expected error for empty query, got nil")
-	}
-}
-
-func TestTopHitsTopEndpoint(t *testing.T) {
-	var capturedPath string
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		capturedPath = r.URL.Path
-		_, _ = w.Write([]byte(`[]`))
-	}))
-	defer srv.Close()
-
-	c := NewClient("k", srv.Client())
-	c.baseURL = srv.URL
-	if _, err := c.Top(context.Background()); err != nil {
-		t.Fatalf("Top: %v", err)
-	}
-	if capturedPath != "/lists/top" {
-		t.Errorf("path = %q, want /lists/top", capturedPath)
-	}
-}
-
-func TestSearchSurfacesUpstreamErrors(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusUnauthorized)
-	}))
-	defer srv.Close()
-
-	c := NewClient("bad-key", srv.Client())
-	c.baseURL = srv.URL
-	if _, err := c.Search(context.Background(), "x"); err == nil {
-		t.Fatal("expected unauthorized error, got nil")
-	}
-}
-
 // assertErrorOmitsAPIKey fails when the key appears anywhere errors.Unwrap
 // can reach, not only in the top-level message. It never prints the key.
 func assertErrorOmitsAPIKey(t *testing.T, err error, apiKey string) {

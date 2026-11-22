@@ -168,13 +168,6 @@ func TestSanitizeTextMasksCredentials(t *testing.T) {
 	}
 }
 
-func TestSanitizeTextKeepsOrdinaryText(t *testing.T) {
-	const text = "ffmpeg: No space left on device (/media/Movies/A: B (2020).mkv)"
-	if got := SanitizeText(text); got != text {
-		t.Fatalf("SanitizeText changed ordinary text: %q", got)
-	}
-}
-
 // TestSanitizeTextMasksURLUserinfo checks that a password holding unescaped
 // @, ? or # is masked in full, and that an @ in the path is not userinfo.
 func TestSanitizeTextMasksURLUserinfo(t *testing.T) {

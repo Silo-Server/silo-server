@@ -3,11 +3,14 @@ package abs
 import (
 	"bufio"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/httpstream"
 )
 
 // accessLog is a minimal chi middleware that emits one structured line
@@ -93,10 +96,24 @@ func (s *statusRecorder) WriteHeader(code int) {
 }
 
 func (s *statusRecorder) Write(b []byte) (int, error) {
+	if s.status == 0 {
+		s.status = http.StatusOK
+	}
 	n, err := s.ResponseWriter.Write(b)
 	s.bytes += n
 	return n, err
 }
+
+func (s *statusRecorder) ReadFrom(src io.Reader) (int64, error) {
+	if s.status == 0 {
+		s.status = http.StatusOK
+	}
+	return httpstream.ForwardReadFrom(s.ResponseWriter, s, src, httpstream.ReadFromChunkDefault, func(n int64, _ error) {
+		s.bytes += int(n)
+	})
+}
+
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 // Hijack passes through to the wrapped ResponseWriter so socket.io
 // WebSocket upgrades can take ownership of the raw connection.

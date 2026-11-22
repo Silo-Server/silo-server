@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 )
@@ -185,7 +186,7 @@ func (n nodeList) Nodes() []*nodepool.Node { return n }
 
 type fakeRemote func(req mediasample.Request) (mediasample.Result, error)
 
-func (f fakeRemote) Run(_ context.Context, _, _ string, req mediasample.Request) (mediasample.Result, error) {
+func (f fakeRemote) Run(_ context.Context, _ string, _ nodeauth.Keyring, req mediasample.Request) (mediasample.Result, error) {
 	return f(req)
 }
 

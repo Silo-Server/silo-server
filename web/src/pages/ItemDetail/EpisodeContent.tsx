@@ -5,7 +5,7 @@ import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/p
 import { useSeasonDetail, useSeasonEpisodes } from "@/hooks/queries/episodes";
 import { useCatalogItemDetail } from "@/hooks/queries/catalogRead";
 import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
-import { usePrePlayAudioSelection } from "./usePrePlayAudioSelection";
+import { usePrePlayAudioSelection } from "./usePrePlayTrackSelection";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { useAuth } from "@/hooks/useAuth";

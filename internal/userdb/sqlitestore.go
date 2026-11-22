@@ -58,8 +58,12 @@ func (s *SQLiteUserStore) VerifyPIN(ctx context.Context, profileID, pin string) 
 	return VerifyPIN(ctx, s.db, profileID, pin)
 }
 
-func (s *SQLiteUserStore) DeleteProfile(ctx context.Context, id string) error {
+func (s *SQLiteUserStore) DeleteProfile(ctx context.Context, id string) ([]string, error) {
 	return DeleteProfile(ctx, s.db, id)
+}
+
+func (s *SQLiteUserStore) ListProgressItemIDs(ctx context.Context, profileID string) ([]string, error) {
+	return ListProgressItemIDs(ctx, s.db, profileID)
 }
 
 // --- Progress ---

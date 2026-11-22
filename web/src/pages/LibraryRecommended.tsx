@@ -9,6 +9,7 @@ import { useLibraryHasItems } from "@/hooks/queries/catalog";
 import { useLibraryCollectionItems } from "@/hooks/queries/libraryCollections";
 import { fetchLibrarySectionItems, useLibraryLayout } from "@/hooks/queries/sections";
 import { useSidebarPins } from "@/hooks/queries/sidebarPins";
+import { usePinLabel } from "@/hooks/queries/pinLabels";
 import MediaCarousel from "@/components/MediaCarousel";
 import ItemCard from "@/components/ItemCard";
 import { useOverlayPrefs } from "@/hooks/useOverlayPrefs";
@@ -62,7 +63,10 @@ export default function LibraryRecommended({
     error,
     refetch,
     isFetching: layoutFetching,
-  } = useLibraryLayout(libraryId);
+    // The library page owns this read and starts it on its own mount (see
+    // LibraryPage). A failure that landed while the page waited for its saved
+    // state is shown as it is, rather than starting a second deadline here.
+  } = useLibraryLayout(libraryId, { retryOnMount: false });
   const { data: sectionRefreshSignal = 0 } = useSectionRefreshSignal();
   const sectionTitle = useSectionTitle();
   const [loadedSections, setLoadedSections] = useState<Map<string, ResolvedSection>>(new Map());
@@ -297,7 +301,14 @@ export default function LibraryRecommended({
           return null;
         }
         if (slot.state === "ready" && slot.section) {
-          return <SectionRow key={slot.layout.id} section={slot.section} libraryId={libraryId} />;
+          return (
+            <SectionRow
+              key={slot.layout.id}
+              section={slot.section}
+              libraryId={libraryId}
+              pinLabel={slot.layout.title}
+            />
+          );
         }
         if (slot.state === "error") {
           return (
@@ -436,9 +447,15 @@ function SectionErrorRow({ title, onRetry }: { title: string; onRetry: () => voi
 
 function PinnedCollections({ libraryId }: { libraryId: number }) {
   const { pins } = useSidebarPins();
-  const pinnedCollections = (pins[String(libraryId)] ?? []).filter(
-    (pin) => pin.type === "collection",
+  const pinnedCollections = useMemo(
+    () =>
+      (pins[String(libraryId)] ?? []).flatMap((pin) =>
+        pin.type === "collection" ? [{ ...pin, libraryId }] : [],
+      ),
+    [libraryId, pins],
   );
+  // Named like the sidebar names the pin: by the collection's current title.
+  const pinLabel = usePinLabel(pinnedCollections);
 
   return (
     <>
@@ -447,7 +464,7 @@ function PinnedCollections({ libraryId }: { libraryId: number }) {
           key={collection.id}
           libraryId={libraryId}
           collectionId={collection.id}
-          name={collection.label}
+          name={pinLabel(collection)}
         />
       ))}
     </>

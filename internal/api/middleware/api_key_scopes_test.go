@@ -53,10 +53,20 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"monitor user detail", monitor, http.MethodGet, "/api/v2/admin/users/42", true},
 		{"monitor user downloads summary", monitor, http.MethodGet, "/api/v2/admin/users/42/downloads/summary", true},
 		{"monitor download entries", monitor, http.MethodGet, "/api/v2/admin/downloads/entries", true},
+		{"monitor download capabilities", monitor, http.MethodGet, "/api/v2/admin/downloads/storage/capabilities", true},
 		{"monitor node summary", monitor, http.MethodGet, "/api/v2/admin/nodes/summary", true},
 		{"monitor events capabilities", monitor, http.MethodGet, "/api/v2/events/capabilities", true},
 		{"monitor catalog listing", monitor, http.MethodGet, "/api/v2/admin/catalog/items", true},
 		{"monitor catalog capabilities", monitor, http.MethodGet, "/api/v2/admin/catalog/capabilities", true},
+		{"monitor request list", monitor, http.MethodGet, "/api/v2/admin/requests?view=failed", true},
+		{"monitor request counts", monitor, http.MethodGet, "/api/v2/admin/requests/counts", true},
+		{"monitor request capabilities", monitor, http.MethodGet, "/api/v2/admin/requests/capabilities", true},
+		{"monitor request events", monitor, http.MethodGet, "/api/v2/admin/requests/1834729/events", true},
+		{"monitor denies request actions", monitor, http.MethodPost, "/api/v2/admin/requests/1834729/approve", false},
+		{"monitor denies request integrations", monitor, http.MethodGet, "/api/v2/admin/request-integrations", false},
+		{"monitor denies request settings", monitor, http.MethodGet, "/api/v2/admin/request-settings", false},
+		{"monitor denies request routes", monitor, http.MethodGet, "/api/v2/admin/request-routes", false},
+		{"monitor denies nested request paths", monitor, http.MethodGet, "/api/v2/admin/requests/a/b/events", false},
 		{"monitor denies item files", monitor, http.MethodGet, "/api/v2/admin/items/movie-1/files", false},
 		{"monitor denies catalog export", monitor, http.MethodPost, "/api/v2/admin/catalog/export", false},
 		{"monitor events ticket", monitor, http.MethodPost, "/api/v2/events/ws-ticket", true},
@@ -319,8 +329,9 @@ func TestAPIKeyMonitorScopeResponsesCarryNoDeploymentDetails(t *testing.T) {
 		t.Fatal(err)
 	}
 	denied := map[string]bool{"path": true, "file_path": true, "dir": true, "url": true, "public_url": true, "origin": true, "hostname": true, "storage_key": true, "error": true, "last_stats": true, "download_artifact_dir_override": true}
-	// Fields a handler withholds from scoped keys.
-	withheld := map[string]bool{"AdminDiskStats.path": true, "AdminDownloadPreparation.error": true}
+	// Fields a handler withholds from scoped keys. The catalog listing refuses
+	// file paths to a key without admin:catalog:paths.
+	withheld := map[string]bool{"AdminDiskStats.path": true, "AdminDownloadPreparation.error": true, "AdminCatalogItemVersion.file_path": true}
 
 	var walk func(owner string, schema json.RawMessage, seen map[string]bool, report func(string))
 	walk = func(owner string, schema json.RawMessage, seen map[string]bool, report func(string)) {
@@ -394,6 +405,47 @@ func TestAPIKeyMonitorScopeResponsesCarryNoDeploymentDetails(t *testing.T) {
 	for _, route := range apiKeyScopeRoutes[auth.ScopeAdminMonitorRead] {
 		if !matched[route.method+" "+route.pattern.String()] {
 			t.Errorf("%s %s matches no operation", route.method, route.pattern)
+		}
+	}
+}
+
+// A profile-bound key always acts as its profile: it is declared for a request
+// that names none, another profile is refused, and the key holds no admin
+// role even on an admin account. A bound key the store should never hold (one
+// without user scopes) is refused rather than treated as an account key.
+func TestRequireAuthBindsAPIKeyToItsProfile(t *testing.T) {
+	owner := &models.User{ID: 7, Role: "admin", Enabled: true}
+	serve := func(key *models.APIKey, path, profile string) (int, string, string) {
+		am := NewAuthMiddleware(nil, nil, &fakeAPIKeyValidator{key: key}, &fakeAPIKeyUserLoader{user: owner})
+		var acted, role string
+		handler := am.RequireAuth(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			acted, role = r.Header.Get("X-Profile-Id"), GetClaims(r.Context()).Role
+		}))
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		req.Header.Set("Authorization", "Bearer sa_test")
+		if profile != "" {
+			req.Header.Set("X-Profile-Id", profile)
+		}
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		return rec.Code, acted, role
+	}
+	bound := &models.APIKey{ID: 1, UserID: 7, Key: "sa_test", ProfileID: "kid", Scopes: []string{auth.ScopeWatchRead}}
+	for _, named := range []string{"", "kid"} {
+		if code, acted, role := serve(bound, "/api/v2/history", named); code != http.StatusOK || acted != "kid" || role != models.RoleUser {
+			t.Fatalf("naming %q: status %d, acted as %q with role %q", named, code, acted, role)
+		}
+	}
+	if code, _, _ := serve(bound, "/api/v2/history", "parent"); code != http.StatusForbidden {
+		t.Fatalf("another profile: status %d, want 403", code)
+	}
+	if code, _, _ := serve(bound, "/api/v2/playback/start", ""); code != http.StatusForbidden {
+		t.Fatalf("playback: status %d, want 403", code)
+	}
+	for _, scopes := range [][]string{nil, {auth.ScopeAdminUsers}} {
+		broken := &models.APIKey{ID: 1, UserID: 7, Key: "sa_test", ProfileID: "kid", Scopes: scopes}
+		if code, _, _ := serve(broken, "/api/v2/admin/users", ""); code != http.StatusForbidden {
+			t.Fatalf("bound key with scopes %v: status %d, want 403", scopes, code)
 		}
 	}
 }

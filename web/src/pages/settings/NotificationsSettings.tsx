@@ -85,33 +85,21 @@ import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { formatRelativeTime } from "@/lib/date";
 import { useT, type MessageKey, type Translate } from "@/i18n";
 import {
+  DESTINATION_NOTIFY_FIELDS as WEBHOOK_NOTIFY_FIELDS,
+  REASON_FIELDS,
+  type DestinationNotifyKey,
+} from "./notificationReasonFields";
+import {
   currentWebPushSubscription,
   disableWebPush,
   enableWebPush,
   webPushSupport,
 } from "@/lib/webPush";
 
-const REASON_FIELDS = [
-  { key: "notify_favorites", labelKey: "web.settings.notifications.reason.favorites" },
-  { key: "notify_watchlist", labelKey: "web.settings.notifications.reason.watchlist" },
-  {
-    key: "notify_continue_watching",
-    labelKey: "web.settings.notifications.reason.continueWatching",
-  },
-  { key: "notify_next_up", labelKey: "web.settings.notifications.reason.nextUp" },
-] as const satisfies readonly { key: string; labelKey: MessageKey }[];
-
-// Webhooks additionally carry the request.fulfilled toggle; it is not an
-// episode reason, so the profile preferences section keeps REASON_FIELDS.
-const WEBHOOK_NOTIFY_FIELDS = [
-  ...REASON_FIELDS,
-  { key: "notify_requests", labelKey: "web.settings.notifications.reason.requests" },
-] as const satisfies readonly { key: string; labelKey: MessageKey }[];
-
 /** Example URL in the create dialog's URL field; a URL, so not translated. */
 const DISCORD_WEBHOOK_URL_EXAMPLE = "https://discord.com/api/webhooks/…";
 
-type WebhookNotifyKey = (typeof WEBHOOK_NOTIFY_FIELDS)[number]["key"];
+type WebhookNotifyKey = DestinationNotifyKey;
 
 function PreferencesSection() {
   const t = useT();
@@ -132,7 +120,7 @@ function PreferencesSection() {
       title={t("web.settings.notifications.episodes.title")}
       description={
         <>
-          {t("web.settings.notifications.episodes.description")}
+          {t("web.settings.notifications.episodes.nextUpDescription")}
           {capability?.series?.available && (
             <>
               {" "}
@@ -310,25 +298,28 @@ function EmailDestinationRow({ prefs }: { prefs: NotificationEmailPreferences })
         )}
       </div>
       {editing && (
-        <div className="flex items-center gap-2">
+        <form
+          className="flex items-center gap-2"
+          // submit() reports a bad address in its own toast.
+          noValidate
+          onSubmit={(event) => {
+            event.preventDefault();
+            submit();
+          }}
+        >
           <Input
             type="email"
             disabled={requestAddress.isPending}
             placeholder={t("web.settings.notifications.email.addressPlaceholder")}
             value={address}
             onChange={(event) => setAddress(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") {
-                submit();
-              }
-            }}
             className="max-w-xs"
           />
-          <Button size="sm" disabled={requestAddress.isPending || !address.trim()} onClick={submit}>
+          <Button type="submit" size="sm" disabled={requestAddress.isPending || !address.trim()}>
             {requestAddress.isPending && <Loader2 className="me-1 h-3 w-3 animate-spin" />}
             {t("web.settings.notifications.email.requestVerification")}
           </Button>
-        </div>
+        </form>
       )}
       {prefs.pending_email !== "" && (
         <div className="text-xs text-amber-500">
@@ -824,9 +815,6 @@ function WebhookFormDialog({
   const [name, setName] = useState(webhook?.name ?? "");
   const [url, setUrl] = useState("");
   const [reasons, setReasons] = useState<Record<WebhookNotifyKey, boolean>>({
-    notify_favorites: webhook?.notify_favorites ?? true,
-    notify_watchlist: webhook?.notify_watchlist ?? true,
-    notify_continue_watching: webhook?.notify_continue_watching ?? true,
     notify_next_up: webhook?.notify_next_up ?? true,
     notify_requests: webhook?.notify_requests ?? true,
   });

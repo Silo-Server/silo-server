@@ -89,9 +89,14 @@ grep -Eq 'FROM node:22(\.[0-9]+){2}-slim AS node-base' Dockerfile \
   && pass "Dockerfile decoupled node-base stage" \
   || reject "Dockerfile missing decoupled node-base stage for BuildKit frontend pruning"
 
-grep -Eq '^FROM golang:1\.26\.[0-9]+ AS build$' Dockerfile \
-  && pass "build stage Go toolchain pinned" \
-  || reject "build stage golang tag not pinned to a patch release"
+# The build stage must use exactly the toolchain go.mod requires: a floating
+# tag (golang:1.27) bumps silently and invalidates the layer and Go build
+# caches, and a lagging one cannot build the module at all because the Go
+# image, like setup-go, runs with GOTOOLCHAIN=local.
+go_directive="$(awk '$1 == "go" { print $2; exit }' go.mod)"
+grep -Eq "^FROM golang:${go_directive//./\\.} AS build$" Dockerfile \
+  && pass "build stage Go toolchain pinned to the go.mod version" \
+  || reject "build stage golang tag is not the patch release go.mod requires (${go_directive:-unreadable go.mod})"
 grep -Eq '^FROM debian:trixie-[0-9]{8}-slim$' Dockerfile \
   && pass "runtime stage Debian image pinned" \
   || reject "runtime stage debian tag not pinned to a dated trixie snapshot"

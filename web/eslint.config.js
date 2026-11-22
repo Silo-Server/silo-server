@@ -426,7 +426,11 @@ const ADMIN_TEXT_PATHS = [
   "src/components/ServerActivity.tsx",
   // Helpers only admin pages import.
   "src/hooks/queries/useAutoscan.ts",
+  // Admin settings forms and the setup wizard's steps.
+  "src/hooks/useSettingsForm.ts",
   "src/lib/accountOwner.ts",
+  "src/lib/accessGroupPolicyChanges.ts",
+  "src/lib/policyDiagnostics.ts",
   "src/lib/aiProviders.ts",
   "src/lib/externalSignInAdmin.ts",
   "src/lib/plugin*.ts",

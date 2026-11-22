@@ -208,7 +208,7 @@ async function listPlexHomeUsers(token: string): Promise<PlexHomeUser[]> {
       .filter((user) => !!user.uuid)
       .map((user) => ({
         uuid: user.uuid as string,
-        title: user.title || user.username || "Plex user",
+        title: user.title || user.username || t("web.settings.plexAuth.homeUserFallbackName"),
         protected: user.protected === true,
         restricted: user.restricted === true,
       }));

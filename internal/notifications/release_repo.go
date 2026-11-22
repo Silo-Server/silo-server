@@ -70,6 +70,14 @@ var availabilityOrdinalGuard = fmt.Sprintf(
 var availabilityKeyExpr = fmt.Sprintf(
 	`e.season_number * %d + e.episode_number`, episodeKeySeasonMultiplier)
 
+// presentEpisodeFileSQL is true when episode e has a file that is not
+// missing: the availability test Home's Next Up lookup uses
+// (catalog.buildListNextUpQuery's next_ep lateral), shared by nextUpEpisode
+// and the fanout rule so both agree on which episodes are available.
+const presentEpisodeFileSQL = `EXISTS (
+			SELECT 1 FROM media_files mf
+			WHERE mf.episode_id = e.content_id AND mf.missing_since IS NULL)`
+
 // RecordAvailabilityForLibrary inserts episode_availability rows for every
 // episode currently present in the library (one-way, idempotent) and, when
 // emitEvents is true, creates release events for the newly inserted rows.
@@ -643,6 +651,28 @@ func (r *ReleaseRepository) RepeatedFromOtherLibraries(ctx context.Context, tx p
 		repeated[id] = struct{}{}
 	}
 	return repeated, nil
+}
+
+// HighestListedEpisodeKeyBelow returns the highest key below episodeKey among
+// the episodes the catalog lists for the series, with or without a file, or
+// nil when there is none. EvaluateRecipient takes it as highestBelow: an
+// event's episode is the one a profile waits for only when the profile's
+// cursor is above it. A listed episode whose file has not arrived therefore
+// holds its place, and a later episode landing first does not notify. It
+// reads every library, as Home's Next Up lookup does. Must run inside the
+// caller's transaction.
+func (r *ReleaseRepository) HighestListedEpisodeKeyBelow(ctx context.Context, tx pgx.Tx, seriesID string, episodeKey int) (*int, error) {
+	var highest *int
+	err := tx.QueryRow(ctx, `
+		SELECT MAX(`+availabilityKeyExpr+`) FROM episodes e
+		WHERE e.series_id = $1
+		  AND `+availabilityOrdinalGuard+`
+		  AND `+availabilityKeyExpr+` < $2`,
+		seriesID, episodeKey).Scan(&highest)
+	if err != nil {
+		return nil, fmt.Errorf("find highest listed episode below %d: %w", episodeKey, err)
+	}
+	return highest, nil
 }
 
 // EarlierEpisodeCopies returns, for each episode event, the other libraries

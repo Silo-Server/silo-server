@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { joinList } from "@/lib/appLocale";
 import type { ItemDetail } from "@/api/types";
 import { useToggleFavorite } from "@/hooks/queries/favorites";
 import { useWatchedStateMutation } from "@/hooks/queries/items";
@@ -14,6 +15,7 @@ import {
   useTitleAllowanceProfiles,
 } from "@/hooks/queries/titleAllowances";
 import { useT } from "@/i18n";
+
 import ActionBar, { type ActionBarProps } from "./ActionBar";
 
 type UserActionProps =
@@ -113,7 +115,7 @@ export default function MediaUserActionBar({ item, ...props }: MediaUserActionBa
         onAllowForProfiles={showAllowFor ? () => setAllowDialogOpen(true) : undefined}
         allowForLabel={
           allowedNames.length > 0
-            ? t("web.detail.actions.allowedFor", { profiles: allowedNames.join(", ") })
+            ? t("web.detail.actions.allowedFor", { profiles: joinList(allowedNames) })
             : t("web.detail.actions.allowFor")
         }
         rating={item.user_rating ?? null}

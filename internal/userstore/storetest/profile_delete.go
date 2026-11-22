@@ -20,8 +20,6 @@ const (
 	deleteScope    = "home"
 	deletePrefsID  = "usersettings"
 	deleteClient   = "emby"
-	recreatedName  = "Recreated"
-	playbackSpeed  = "1.25"
 )
 
 // registeredDevice names the device registry row profileStateLeft reports.
@@ -35,7 +33,8 @@ const profileStateKinds = 9
 // history, hidden-history cutoffs, Home dismissals, audio and subtitle
 // preferences, onboarding state, device settings and registry rows, section
 // overrides and Jellyfin display preferences. Another profile's state
-// stays. A profile recreated under the deleted ID starts clean, so nothing
+// stays. The delete reports the personal collections it removed, so their
+// artwork can be removed after it. A profile recreated under the deleted ID starts clean, so nothing
 // the old profile left behind (a hidden-history cutoff above all) reaches it.
 //
 // devicesPurgedElsewhere marks a store whose device registry another step
@@ -53,11 +52,27 @@ func RunDeleteProfileRemovesProfileState(t *testing.T, newStore func(t *testing.
 	for _, id := range []string{keptProfile, deletedProfile} {
 		seedProfileState(t, ctx, store, id, watchedAt)
 	}
+	ownCollections := map[string]string{}
+	for _, id := range []string{keptProfile, deletedProfile} {
+		c, err := store.CreateCollection(ctx, userstore.CreateCollectionInput{CreatorProfileID: id, Name: id + " collection", CollectionType: userstore.CollectionTypeManual, IsShared: true})
+		if err != nil {
+			t.Fatalf("CreateCollection %s: %v", id, err)
+		}
+		ownCollections[id] = c.ID
+	}
 
-	if err := store.DeleteProfile(ctx, deletedProfile); err != nil {
+	deletedCollections, err := store.DeleteProfile(ctx, deletedProfile)
+	if err != nil {
 		t.Fatalf("DeleteProfile: %v", err)
 	}
-	if err := store.CreateProfile(ctx, userstore.Profile{ID: deletedProfile, Name: recreatedName}); err != nil {
+	if want := []string{ownCollections[deletedProfile]}; !slices.Equal(deletedCollections, want) {
+		t.Fatalf("DeleteProfile reported deleted collections %v, want %v (the profile's own, not the other profile's shared one)", deletedCollections, want)
+	}
+	if c, err := store.GetCollection(ctx, ownCollections[keptProfile]); err != nil || c == nil {
+		t.Fatalf("other profile's collection after delete = %v, %v; want it kept", c, err)
+	}
+	//nolint:goconst // The recreated profile's name, asserted below.
+	if err := store.CreateProfile(ctx, userstore.Profile{ID: deletedProfile, Name: "Recreated"}); err != nil {
 		t.Fatalf("CreateProfile(recreate): %v", err)
 	}
 
@@ -116,7 +131,8 @@ func seedProfileState(t *testing.T, ctx context.Context, store userstore.UserSto
 	if err := store.UpsertOnboardingState(ctx, userstore.OnboardingState{ProfileID: profileID, TourID: deleteTour, LastStep: "subtitles"}); err != nil {
 		t.Fatalf("UpsertOnboardingState %s: %v", profileID, err)
 	}
-	if err := store.SetDeviceSetting(ctx, userstore.DeviceSettingEntry{ProfileID: profileID, DeviceID: deleteDevice, Key: deleteSetting, Value: playbackSpeed}); err != nil {
+	//nolint:goconst // The stored value, asserted below.
+	if err := store.SetDeviceSetting(ctx, userstore.DeviceSettingEntry{ProfileID: profileID, DeviceID: deleteDevice, Key: deleteSetting, Value: "1.25"}); err != nil {
 		t.Fatalf("SetDeviceSetting %s: %v", profileID, err)
 	}
 	registry, ok := store.(userstore.DeviceRegistry)

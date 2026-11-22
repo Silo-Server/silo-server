@@ -109,6 +109,7 @@ func TestExtractFrameKeepsLegacyReasonsAndFallback(t *testing.T) {
 		{name: "hardware killed while logging invalid data stops", accel: "qsv", results: []string{"signal: killed (Invalid data found when processing input)"}, wantReason: reasonDecodeInvalidData, wantCalls: 1},
 		{name: "sdr retry after invalid data", accel: "nvenc", results: []string{"Invalid data found when processing input", ""}, wantCalls: 2},
 		{name: "sdr retry fails twice", accel: "nvenc", results: []string{"Invalid data found when processing input", "signal: killed"}, wantReason: reasonChapterExtractFailed, wantCalls: 2},
+		{name: "frame over the pixel limit stops", accel: "vaapi", results: []string{"Picture size 16000x16000 exceeds specified max pixel count 100000000, see the documentation if you wish to increase it", ""}, wantReason: reasonDecodeInvalidData, wantCalls: 1},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -135,6 +136,25 @@ func TestExtractFrameKeepsLegacyReasonsAndFallback(t *testing.T) {
 				t.Fatalf("ExtractFrame() = %q, %v, want a frame only without a reason", data, err)
 			}
 		})
+	}
+}
+
+// A frame over the byte limit is undecodable data: it is refused, and the
+// software attempt that would produce it again does not run.
+func TestExtractFrameRefusesAnOversizedImage(t *testing.T) {
+	calls := 0
+	data, reason, err := ExtractFrame(context.Background(), FrameExtractOptions{
+		InputPath:      "/media/movie.mkv",
+		HWAccel:        "vaapi",
+		HWDevice:       "/dev/dri/renderD128",
+		resolveHWAccel: func(_ context.Context, accel, _, _ string) string { return accel },
+		RunFunc: func(context.Context, string, []string) ([]byte, error) {
+			calls++
+			return make([]byte, 64<<20+1), nil
+		},
+	})
+	if err == nil || data != nil || reason != reasonDecodeInvalidData || calls != 1 {
+		t.Fatalf("ExtractFrame() = %d bytes, %q, %v after %d calls; want %q after one", len(data), reason, err, calls, reasonDecodeInvalidData)
 	}
 }
 

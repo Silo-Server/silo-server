@@ -30,7 +30,7 @@ const EMPTY: CollectionPageHeader = { status: "ready" };
  * shows it under; else, when it is past a library's teaser cap there, every
  * library whose teaser was cut short. `undefined` while the list is loading.
  */
-export function serverCollectionLibraryIds(
+function serverCollectionLibraryIds(
   id: string,
   libraryId: number | undefined,
   libraries: readonly ServerCollectionsLibrary[] | undefined,

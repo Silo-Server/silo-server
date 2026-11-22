@@ -44,7 +44,7 @@ func TestPostgresDeleteProfileAuditedSeesConcurrentUpdate(t *testing.T) {
 	deletePool, deleteApp := newDeleteSessionPool(t)
 	go func() {
 		var name string
-		err := newStore(deletePool, userID).DeleteProfileAudited(ctx, "kid", func(_ pgx.Tx, deleted *userstore.Profile) error {
+		_, err := newStore(deletePool, userID).DeleteProfileAudited(ctx, "kid", func(_ pgx.Tx, deleted *userstore.Profile) error {
 			name = deleted.Name
 			return nil
 		})
@@ -100,7 +100,8 @@ func TestPostgresDeleteProfileAuditedWaitsForSettingClear(t *testing.T) {
 			t.Fatalf("DeleteSettingValue = %v, %v", removed, err)
 		}
 		go func() {
-			deleteDone <- newStore(deletePool, userID).DeleteProfileAudited(ctx, "kid", func(pgx.Tx, *userstore.Profile) error { return nil })
+			_, err := newStore(deletePool, userID).DeleteProfileAudited(ctx, "kid", func(pgx.Tx, *userstore.Profile) error { return nil })
+			deleteDone <- err
 		}()
 		waitForBlockedDelete(t, pool, deleteApp, func() {
 			select {

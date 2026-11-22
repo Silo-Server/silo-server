@@ -1128,11 +1128,20 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 		put(RecTypeSimilarUsersLiked, "", items)
 	}
 
-	anchors, err := anchorItemIDs(ctx, w.engine.signalReader(), ratingReader(w.engine.ratingsRepo), userID, profileID, BecauseYouWatchedAnchors)
+	// Rows are built for the latest anchors overall and for each library's
+	// latest, so a library's sections keep a row while the profile watches
+	// another library.
+	candidates, err := anchorCandidates(ctx, w.engine.signalReader(), ratingReader(w.engine.ratingsRepo), userID, profileID, anchorCandidateLimit)
 	if err != nil {
 		fail("recent_completed", err)
 		return res
 	}
+	libraries, err := repo.ItemLibraryIDs(ctx, candidates)
+	if err != nil {
+		fail("anchor_libraries", err)
+		return res
+	}
+	anchors := libraryAnchorItemIDs(candidates, libraries, accessFilter.DisabledLibraryIDs, BecauseYouWatchedAnchors)
 	for _, sourceItemID := range anchors {
 		items, err := w.engine.becauseYouWatched(ctx, builder, sourceItemID, CacheCandidateLimit, excluded, accessFilter)
 		if err != nil {

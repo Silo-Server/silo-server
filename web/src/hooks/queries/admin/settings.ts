@@ -210,18 +210,20 @@ export function useAdminRestartKeys() {
   });
 }
 
+/** Reads server status from whichever process answers, bypassing the query cache. */
+export async function fetchAdminServerStatus(): Promise<AdminServerStatus> {
+  const profileContext = captureProfileRequestContext();
+  if (!profileContext) throw new StaleApiRequestContextError();
+  const status = await v2("GET /api/v2/admin/server/status", { profileContext });
+  if (!isCapturedProfileAuthorityActive(profileContext)) throw new StaleApiRequestContextError();
+  return status;
+}
+
 export function useAdminServerStatus(enabled = true) {
   return useQuery({
     queryKey: adminKeys.serverStatus(),
     enabled,
-    queryFn: async (): Promise<AdminServerStatus> => {
-      const profileContext = captureProfileRequestContext();
-      if (!profileContext) throw new StaleApiRequestContextError();
-      const status = await v2("GET /api/v2/admin/server/status", { profileContext });
-      if (!isCapturedProfileAuthorityActive(profileContext))
-        throw new StaleApiRequestContextError();
-      return status;
-    },
+    queryFn: fetchAdminServerStatus,
     staleTime: 15_000,
   });
 }
@@ -468,14 +470,31 @@ export function useAdminSensitiveStatus() {
   return useQuery(ADMIN_SENSITIVE_STATUS_QUERY);
 }
 
+/**
+ * Runs one server-side connection check. The result's `message` is already in
+ * the interface language: the catalog's text for `message_key` when this
+ * language has it, else the server's English.
+ */
 export function useCheckAdminSettingsConnection() {
   return useMutation({
-    mutationFn: ({ kind, body }: { kind: string; body: AdminSettingsConnectionCheckRequest }) =>
-      v2("POST /api/v2/admin/settings/check/{kind}", {
+    mutationFn: async ({
+      kind,
+      body,
+    }: {
+      kind: string;
+      body: AdminSettingsConnectionCheckRequest;
+    }) => {
+      const result = await v2("POST /api/v2/admin/settings/check/{kind}", {
         path: { kind },
         body,
         retryAuthentication: false,
-      }),
+      });
+      return {
+        ...result,
+        // The server sends the check's sentence; there is no keyed copy for it.
+        message: result.message,
+      };
+    },
     retry: false,
   });
 }

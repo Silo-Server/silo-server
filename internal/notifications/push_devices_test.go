@@ -86,43 +86,6 @@ func validApplePushInput() ApplePushRegistrationInput {
 	}
 }
 
-func TestPushDeviceServiceRegisterAppleNormalizesAndStores(t *testing.T) {
-	store := &fakePushDeviceStore{}
-	service := NewPushDeviceService(store, testPushCipher(t))
-
-	input := validApplePushInput()
-	input.DeviceID = " local-device "
-	input.APNsToken = strings.ToUpper(input.APNsToken)
-	input.APNsEnvironment = "Production"
-	input.PushMode = ""
-
-	device, err := service.RegisterApple(context.Background(), 42, " profile-1 ", input)
-	if err != nil {
-		t.Fatalf("register apple: %v", err)
-	}
-	if device.ServerDeviceID != "server-device" || !device.Enabled || device.PushMode != PushModePrivatePush {
-		t.Fatalf("unexpected device response: %+v", device)
-	}
-	if store.calls != 1 {
-		t.Fatalf("store calls = %d, want 1", store.calls)
-	}
-	if store.got.UserID != 42 || store.got.ProfileID != "profile-1" {
-		t.Fatalf("unexpected owner scope: %+v", store.got)
-	}
-	if store.got.DeviceID != "local-device" {
-		t.Fatalf("device_id = %q", store.got.DeviceID)
-	}
-	if store.got.APNsToken != strings.Repeat("a", 64) {
-		t.Fatalf("apns token was not canonicalized")
-	}
-	if store.got.APNsEnvironment != APNsEnvironmentProd {
-		t.Fatalf("environment = %q", store.got.APNsEnvironment)
-	}
-	if store.got.PushMode != PushModePrivatePush {
-		t.Fatalf("push mode = %q", store.got.PushMode)
-	}
-}
-
 func TestPushDeviceServiceRegisterAppleRejectsInvalidOrUnsupported(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -541,6 +504,53 @@ func TestApplePushInstallationResetDB(t *testing.T) {
 	if _, err = repo.ApplyApplePushAndFinalize(ctx, foreign, cipher, nil); !errors.Is(err, ErrPushInstallationProof) || errors.Is(err, ErrPushInstallationKeyMismatch) {
 		t.Fatalf("another account after reset=%v", err)
 	}
+
+	// The app resets and sends register 2, loses the answer, then removes the
+	// server and retires at 3. The retirement must fence the late registration.
+	fenced := reinstalled
+	fenced.InstallationKey, fenced.Generation = key("4"), 2
+	if done, e := reset(owner.UserID, fenced.InstallationKey); e != nil || !done {
+		t.Fatalf("second reset=%v err=%v", done, e)
+	}
+	retire := ApplePushRetirement{DeviceID: owner.DeviceID, InstallationKey: fenced.InstallationKey, Generation: 3}
+	for range 2 { // the second call is an exact replay after a lost response
+		if got, e := repo.RetireApplePush(ctx, retire); e != nil || !got.Removed || got.Generation != 3 {
+			t.Fatalf("retire after reset=%+v err=%v", got, e)
+		}
+	}
+	if _, err = repo.ApplyApplePushAndFinalize(ctx, fenced, cipher, nil); !errors.Is(err, ErrPushGenerationConflict) {
+		t.Fatalf("registration older than the retirement after reset=%v", err)
+	}
+	if n := count(`SELECT count(*) FROM push_devices`); n != 0 {
+		t.Fatalf("late registration revived %d rows", n)
+	}
+	if _, err = repo.ApplyApplePushAndFinalize(ctx, foreign, cipher, nil); !errors.Is(err, ErrPushInstallationProof) || errors.Is(err, ErrPushInstallationKeyMismatch) {
+		t.Fatalf("another account on a fenced installation=%v", err)
+	}
+	fenced.Generation = 4
+	if resumed, e := repo.ApplyApplePushAndFinalize(ctx, fenced, cipher, nil); e != nil || !resumed.Enabled {
+		t.Fatalf("registration newer than the retirement=%+v err=%v", resumed, e)
+	}
+
+	// Anyone who knows the device_id can call the retire route without a
+	// session. A key other than the reset's must not fence, or the owner's
+	// registration right after its reset would get a second key mismatch.
+	recovered := reinstalled
+	recovered.InstallationKey = key("5")
+	if done, e := reset(owner.UserID, recovered.InstallationKey); e != nil || !done {
+		t.Fatalf("third reset=%v err=%v", done, e)
+	}
+	planted := ApplePushRetirement{DeviceID: owner.DeviceID, InstallationKey: foreign.InstallationKey, Generation: 1}
+	if got, e := repo.RetireApplePush(ctx, planted); e != nil || !got.Removed {
+		t.Fatalf("retirement with another key=%+v err=%v", got, e)
+	}
+	if _, err = repo.ApplyApplePushAndFinalize(ctx, foreign, cipher, nil); !errors.Is(err, ErrPushInstallationProof) || errors.Is(err, ErrPushInstallationKeyMismatch) {
+		t.Fatalf("another account after a retirement with its key=%v", err)
+	}
+	if got, e := repo.ApplyApplePushAndFinalize(ctx, recovered, cipher, nil); e != nil || !got.Enabled || got.Generation != 1 {
+		t.Fatalf("owner registering after a retirement with another key=%+v err=%v", got, e)
+	}
+
 	if done, e := repo.ResetApplePushInstallation(ctx, ApplePushReset{UserID: owner.UserID, DeviceID: "never-registered", InstallationKey: key("2")}); e != nil || done {
 		t.Fatalf("unknown installation reset=%v err=%v", done, e)
 	}

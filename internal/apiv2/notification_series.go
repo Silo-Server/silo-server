@@ -52,14 +52,11 @@ type NotificationSeriesInput struct {
 // NotificationSeriesReasons are the reasons a profile can hear about a
 // series, keyed like an episode notification's reason_flags.
 type NotificationSeriesReasons struct {
-	Favorite         bool `json:"favorite" doc:"The series is one of the profile's favorites"`
-	Watchlist        bool `json:"watchlist" doc:"The series is on the profile's watchlist"`
-	ContinueWatching bool `json:"continue_watching" doc:"The profile is partway through the series"`
-	NextUp           bool `json:"next_up" doc:"The profile finished an episode and waits for the next"`
+	NextUp bool `json:"next_up" doc:"The profile finished an episode and waits for the next"`
 }
 
 func notificationSeriesReasonsOf(f notifications.ReasonFlags) NotificationSeriesReasons {
-	return NotificationSeriesReasons{Favorite: f.Favorite, Watchlist: f.Watchlist, ContinueWatching: f.ContinueWatching, NextUp: f.NextUp}
+	return NotificationSeriesReasons{NextUp: f.NextUp}
 }
 
 // NotificationEpisodeRef names an episode by its season and episode number.
@@ -155,7 +152,7 @@ func notificationSeriesMatch(in *NotificationSeriesInput, query string) func(not
 		case in.Status == notificationSeriesActive && !s.Notifies(),
 			in.Status == notificationSeriesInactive && s.Notifies():
 			return false
-		case in.Reason != "" && !s.Reasons.Has(in.Reason):
+		case in.Reason != "" && (in.Reason != "next_up" || !s.Reasons.NextUp):
 			return false
 		}
 		return query == "" || strings.Contains(strings.ToLower(s.Title), query) || strings.Contains(s.SortKey, query)

@@ -5,7 +5,7 @@ name: Contribution gate
 
 on:
   pull_request_target:
-    types: [opened, reopened]
+    types: [opened, reopened, converted_to_draft]
 
 permissions: {}
 

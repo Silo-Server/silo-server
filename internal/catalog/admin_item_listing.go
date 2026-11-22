@@ -37,6 +37,9 @@ type AdminCatalogItemFilter struct {
 	// People loads the cast and crew of movies and series. It changes no
 	// row, only what each row carries.
 	People bool `json:",omitempty"`
+	// FilePaths fills each version's FilePath. Like People, it changes only
+	// what each row carries.
+	FilePaths bool `json:",omitempty"`
 }
 
 // AdminCatalogItem is one movie, series or episode present in an enabled
@@ -75,6 +78,10 @@ type AdminCatalogItem struct {
 	// Cast and Crew of a movie or series, loaded only with filter.People.
 	Cast []CastCredit
 	Crew []CrewCredit
+	// PosterPath is the stored poster of a movie or series, or of an
+	// episode's series; PosterOwnerID is the content ID it belongs to.
+	PosterPath    string
+	PosterOwnerID string
 }
 
 // AdminCatalogVersion is one present file of an item. Video facts come from
@@ -93,6 +100,8 @@ type AdminCatalogVersion struct {
 	BitrateKbps   int
 	FileSize      int64
 	Edition       string
+	// FilePath is the stored on-disk path, set only with filter.FilePaths.
+	FilePath string
 }
 
 // AdminCatalogItemPage is one content_id-ordered page.
@@ -135,7 +144,7 @@ func (r *ItemRepository) ListAdminCatalogItems(ctx context.Context, filter Admin
 			&item.SeasonNumber, &item.EpisodeNumber, &item.Genres, &item.ContentRating, &item.Studios, &item.Networks,
 			&item.RatingIMDB, &item.RatingTMDB, &item.RatingRTCritic, &item.RatingRTAudience,
 			&item.ReleaseDate, &item.FirstAirDate, &item.LastAirDate, &item.AirDate,
-			&item.AddedAt, &item.LibraryIDs); err != nil {
+			&item.PosterPath, &item.PosterOwnerID, &item.AddedAt, &item.LibraryIDs); err != nil {
 			rows.Close()
 			return page, fmt.Errorf("scanning admin catalog item: %w", err)
 		}
@@ -148,7 +157,7 @@ func (r *ItemRepository) ListAdminCatalogItems(ctx context.Context, filter Admin
 	if len(page.Items) > limit {
 		page.Items, page.HasMore = page.Items[:limit], true
 	}
-	if err := attachAdminCatalogVersions(ctx, tx, page.Items); err != nil {
+	if err := attachAdminCatalogVersions(ctx, tx, page.Items, filter.FilePaths); err != nil {
 		return page, err
 	}
 	if filter.People {
@@ -183,8 +192,9 @@ func adminCatalogPageQuery(filter AdminCatalogItemFilter, after string, limit in
 		idsParam = bind(filter.ContentIDs)
 	}
 	// branch fills in the walk for one table pair: the parent row (alias p),
-	// its membership table and that table's id column.
-	branch := func(columns, parent, membership, idColumn string, conditions ...string) string {
+	// its membership table and that table's id column. join adds a join on
+	// p's own columns, which keeps the walk's order.
+	branch := func(columns, parent, membership, idColumn, join string, conditions ...string) string {
 		from, key := parent+" p", "p.content_id"
 		if libraryParam != "" {
 			from = membership + " sel JOIN " + parent + " p ON p.content_id = sel." + idColumn
@@ -192,6 +202,7 @@ func adminCatalogPageQuery(filter AdminCatalogItemFilter, after string, limit in
 			// Repeating the bound on p lets a merge join start mid-table.
 			conditions = append(conditions, "sel.media_folder_id = "+libraryParam, "p.content_id > $1")
 		}
+		from += join
 		conditions = append(conditions, key+" > $1", "m.added_at IS NOT NULL")
 		switch {
 		case addedParam != "" && libraryParam != "":
@@ -231,20 +242,23 @@ func adminCatalogPageQuery(filter AdminCatalogItemFilter, after string, limit in
 				NULL::int AS season_number, NULL::int AS episode_number,
 				p.genres, coalesce(p.content_rating, ''), p.studios, p.networks,
 				p.rating_imdb, p.rating_tmdb, p.rating_rt_critic, p.rating_rt_audience,
-				to_char(p.release_date, 'YYYY-MM-DD'), p.first_air_date, p.last_air_date, NULL::text`,
-			"media_items", "media_item_libraries", "content_id", "p.type = ANY("+bind(itemTypes)+"::text[])"))
+				to_char(p.release_date, 'YYYY-MM-DD'), p.first_air_date, p.last_air_date, NULL::text,
+				coalesce(p.poster_path, '') AS poster_path, p.content_id::text AS poster_owner_id`,
+			"media_items", "media_item_libraries", "content_id", "", "p.type = ANY("+bind(itemTypes)+"::text[])"))
 	}
 	if filter.Type == "" || filter.Type == AdminCatalogTypeEpisode {
 		branches = append(branches, branch(`p.content_id, 'episode'::text, coalesce(p.title, ''),
 				coalesce(extract(year FROM p.air_date)::int, 0), ''::text,
-				p.imdb_id, p.tmdb_id, p.tvdb_id, p.series_id::text,
-				(SELECT s.title FROM media_items s WHERE s.content_id = p.series_id),
+				p.imdb_id, p.tmdb_id, p.tvdb_id, p.series_id::text, s.title,
 				p.season_number, p.episode_number,
 				NULL::text[], ''::text, NULL::text[], NULL::text[],
 				NULL::double precision, NULL::double precision, NULL::int, NULL::int,
-				NULL::text, NULL::text, NULL::text, to_char(p.air_date, 'YYYY-MM-DD')`,
+				NULL::text, NULL::text, NULL::text, to_char(p.air_date, 'YYYY-MM-DD'),
+				coalesce(s.poster_path, '') AS poster_path, p.series_id::text AS poster_owner_id`,
+			// One probe of the series row gives the title, the poster and the
+			// check that the parent is a series.
 			"episodes", "episode_libraries", "episode_id",
-			"EXISTS (SELECT 1 FROM media_items s WHERE s.content_id = p.series_id AND s.type = 'series')"))
+			" JOIN media_items s ON s.content_id = p.series_id AND s.type = 'series'"))
 	}
 	return `SELECT * FROM (` + strings.Join(branches, "\nUNION ALL\n") + `) page
 		ORDER BY content_id COLLATE "C"
@@ -253,8 +267,9 @@ func adminCatalogPageQuery(filter AdminCatalogItemFilter, after string, limit in
 
 // attachAdminCatalogVersions loads every present, non-extra file in an enabled
 // library for the page's movies and episodes. A multi-episode file belongs to
-// its first episode; a series has no files of its own.
-func attachAdminCatalogVersions(ctx context.Context, tx pgx.Tx, items []AdminCatalogItem) error {
+// its first episode; a series has no files of its own. filePaths also reads
+// each file's stored path.
+func attachAdminCatalogVersions(ctx context.Context, tx pgx.Tx, items []AdminCatalogItem, filePaths bool) error {
 	var movieIDs, episodeIDs []string
 	byID := make(map[string]*AdminCatalogItem, len(items))
 	for i := range items {
@@ -275,12 +290,13 @@ func attachAdminCatalogVersions(ctx context.Context, tx pgx.Tx, items []AdminCat
 		SELECT mf.id, coalesce(mf.episode_id, mf.content_id), mf.media_folder_id,
 			coalesce(mf.resolution, ''), coalesce(mf.codec_video, ''), coalesce(mf.codec_audio, ''),
 			coalesce(mf.audio_channels, 0), coalesce(mf.hdr, false), coalesce(mf.container, ''),
-			coalesce(mf.bitrate, 0), coalesce(mf.file_size, 0), mf.edition_key, mf.video_tracks, mf.audio_tracks
+			coalesce(mf.bitrate, 0), coalesce(mf.file_size, 0), mf.edition_key, mf.video_tracks, mf.audio_tracks,
+			CASE WHEN $3 THEN mf.file_path ELSE '' END
 		FROM media_files mf
 		JOIN media_folders f ON f.id = mf.media_folder_id AND f.enabled
 		WHERE mf.missing_since IS NULL AND mf.extra_id IS NULL
 			AND (mf.episode_id = ANY($1::text[]) OR (mf.content_id = ANY($2::text[]) AND mf.episode_id IS NULL))
-		ORDER BY mf.id`, episodeIDs, movieIDs)
+		ORDER BY mf.id`, episodeIDs, movieIDs, filePaths)
 	if err != nil {
 		return fmt.Errorf("listing admin catalog versions: %w", err)
 	}
@@ -290,7 +306,8 @@ func attachAdminCatalogVersions(ctx context.Context, tx pgx.Tx, items []AdminCat
 		var videoJSON, audioJSON []byte
 		var file models.MediaFile
 		if err := rows.Scan(&file.ID, &owner, &file.MediaFolderID, &file.Resolution, &file.CodecVideo, &file.CodecAudio,
-			&file.AudioChannels, &file.HDR, &file.Container, &file.Bitrate, &file.FileSize, &file.EditionKey, &videoJSON, &audioJSON); err != nil {
+			&file.AudioChannels, &file.HDR, &file.Container, &file.Bitrate, &file.FileSize, &file.EditionKey, &videoJSON, &audioJSON,
+			&file.FilePath); err != nil {
 			return fmt.Errorf("scanning admin catalog version: %w", err)
 		}
 		if len(videoJSON) > 0 {
@@ -360,7 +377,7 @@ func adminCatalogVersion(file *models.MediaFile) AdminCatalogVersion {
 		FileID: file.ID, LibraryID: file.MediaFolderID, Resolution: file.Resolution,
 		CodecVideo: file.CodecVideo, CodecAudio: file.CodecAudio, AudioChannels: file.AudioChannels,
 		Container: file.Container, BitrateKbps: file.Bitrate, FileSize: file.FileSize,
-		Edition: naming.EditionDisplayLabel(file.EditionKey),
+		Edition: naming.EditionDisplayLabel(file.EditionKey), FilePath: file.FilePath,
 	}
 	if len(file.VideoTracks) > 0 {
 		primary := file.VideoTracks[0]

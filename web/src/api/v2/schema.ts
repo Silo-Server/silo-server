@@ -18490,10 +18490,11 @@ export interface components {
     };
     AdminItemMetadataRefreshInputBody: {
       /**
+       * @description quick rescans the item's folder and refreshes its metadata; complete rebuilds the item from its files first; reset is a quick refresh that also clears the item's field locks and every value its providers lack (Reset to Provider in Edit Metadata)
        * @default quick
        * @enum {string}
        */
-      mode: "quick" | "complete";
+      mode: "quick" | "complete" | "reset";
     };
     AdminItemMetadataUpdate: {
       /** @description Season or episode air date; null clears it */
@@ -19342,6 +19343,11 @@ export interface components {
       name?: string;
       /** Format: uri-reference */
       public_url?: string | null;
+      /**
+       * @description How a transcode node reaches its source media. A proxy is always local.
+       * @enum {string}
+       */
+      source_access?: "local" | "core";
       /** Format: uri-reference */
       url?: string;
     };
@@ -23305,6 +23311,8 @@ export interface components {
       removed: boolean;
     };
     APIKeyScope: {
+      /** @enum {string} */
+      audience: "admin" | "user";
       description: string;
       name: string;
     };
@@ -30228,10 +30236,7 @@ export interface components {
     };
     NotificationPreferences: {
       enabled: boolean;
-      notify_continue_watching: boolean;
-      notify_favorites: boolean;
       notify_next_up: boolean;
-      notify_watchlist: boolean;
       /**
        * @description Opaque identifier
        * @example 1
@@ -30316,14 +30321,8 @@ export interface components {
       page?: components["schemas"]["PageInfo"];
     };
     NotificationSeriesReasons: {
-      /** @description The profile is partway through the series */
-      continue_watching: boolean;
-      /** @description The series is one of the profile's favorites */
-      favorite: boolean;
       /** @description The profile finished an episode and waits for the next */
       next_up: boolean;
-      /** @description The series is on the profile's watchlist */
-      watchlist: boolean;
     };
     NotificationServerChannel: {
       /** Format: int64 */
@@ -30414,12 +30413,9 @@ export interface components {
     };
     NotificationWebhookCreateInputBody: {
       name: string;
-      notify_continue_watching?: boolean;
-      notify_favorites?: boolean;
       notify_next_up?: boolean;
       notify_ratings?: boolean;
       notify_requests?: boolean;
-      notify_watchlist?: boolean;
       /** @enum {string} */
       type?: "discord" | "generic";
       /** Format: uri */
@@ -30451,12 +30447,9 @@ export interface components {
        */
       last_success_at: string | null;
       name: string;
-      notify_continue_watching: boolean;
-      notify_favorites: boolean;
       notify_next_up: boolean;
       notify_ratings: boolean;
       notify_requests: boolean;
-      notify_watchlist: boolean;
       /** @enum {string} */
       type: "discord" | "generic";
       url_host: string;
@@ -30467,12 +30460,9 @@ export interface components {
     NotificationWebhookUpdateInputBody: {
       enabled?: boolean;
       name?: string;
-      notify_continue_watching?: boolean;
-      notify_favorites?: boolean;
       notify_next_up?: boolean;
       notify_ratings?: boolean;
       notify_requests?: boolean;
-      notify_watchlist?: boolean;
       /** Format: uri */
       url?: string;
     };
@@ -36097,6 +36087,8 @@ export interface components {
       /** Format: int64 */
       dv_profile?: number;
       dv_rpu_present?: boolean;
+      /** @description Color range FFmpeg reported on the first decoded frame of a PQ track (tv, pc, or unknown when the frame carried none); absent when the frame was not read. Can differ from color_range, the container's tag */
+      frame_color_range?: string;
       frame_rate?: string;
       hdr10_plus?: boolean;
       /** Format: int64 */

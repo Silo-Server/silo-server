@@ -283,7 +283,7 @@ func (s *Service) send(ctx context.Context, input SendInput, sourceID *int64) (*
 		return nil, err
 	}
 
-	claimURL := linkBase + "/invite/" + token
+	claimURL := mail.AccountLink(linkBase, "/invite", token)
 	result := &SendResult{Invitation: inv, ClaimURL: claimURL, Delivery: input.Delivery}
 	if inv.Delivery != models.InvitationDeliveryEmailUnconfirmed {
 		return result, nil

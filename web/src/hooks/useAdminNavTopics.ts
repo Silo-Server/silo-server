@@ -1,62 +1,65 @@
-import { useCallback, useState } from "react";
+import {
+  createContext,
+  createElement,
+  useCallback,
+  useContext,
+  useEffect,
+  useState,
+  type Dispatch,
+  type ReactNode,
+  type SetStateAction,
+} from "react";
 
-const OPEN_TOPICS_KEY = "silo.admin-nav.open-topics";
-
-type TopicChoices = Record<string, boolean>;
-
-function readChoices(): TopicChoices {
-  try {
-    const parsed: unknown = JSON.parse(localStorage.getItem(OPEN_TOPICS_KEY) ?? "{}");
-    return parsed && typeof parsed === "object" ? (parsed as TopicChoices) : {};
-  } catch {
-    return {};
-  }
+/** Topics the admin opened or closed by hand while at `place`. */
+interface TopicChoices {
+  place: string | null;
+  choices: Record<string, boolean>;
 }
 
-function writeChoices(choices: TopicChoices) {
-  try {
-    localStorage.setItem(OPEN_TOPICS_KEY, JSON.stringify(choices));
-  } catch {
-    // Storage full or unavailable: the choice lasts for this page load.
-  }
-}
+type TopicStore = [TopicChoices, Dispatch<SetStateAction<TopicChoices>>];
 
-/** The choices with `topicId` open again, if the admin had closed it. */
-function withTopicOpen(choices: TopicChoices, topicId: string | null): TopicChoices {
-  return topicId && choices[topicId] === false ? { ...choices, [topicId]: true } : choices;
+const NO_CHOICES: TopicChoices = { place: null, choices: {} };
+
+const AdminNavTopicsContext = createContext<TopicStore | null>(null);
+
+/**
+ * Holds the topic choices for the admin shell, so the desktop sidebar and the
+ * phone drawer share them and closing the drawer does not drop them. It lives
+ * only as long as the admin shell, so a new visit starts fresh.
+ */
+export function AdminNavTopicsProvider({ children }: { children: ReactNode }) {
+  const store = useState(NO_CHOICES);
+  return createElement(AdminNavTopicsContext.Provider, { value: store }, children);
 }
 
 /**
- * Which admin sidebar topics are open. The topic holding the current page opens
- * by itself, including after the admin closed it on an earlier visit; every
- * other topic stays as the admin last left it, across navigations and reloads.
+ * Which admin sidebar topics are open. The topic holding the current page is
+ * open; the admin can open or close any other topic beside it. Arriving in a
+ * different topic, or onto another page outside every topic, folds the rest
+ * away again, and nothing is kept across reloads or visits.
+ *
+ * `place` names where the admin is for that reset: the active topic's id, or
+ * the page path when the page belongs to no topic.
  */
-export function useAdminNavTopics(activeTopicId: string | null) {
-  const [choices, setChoices] = useState(() => withTopicOpen(readChoices(), activeTopicId));
-  // Adjusted during render rather than in an effect, so arriving in a topic
-  // never paints one frame with it closed.
-  const [arrivedIn, setArrivedIn] = useState(activeTopicId);
-  if (arrivedIn !== activeTopicId) {
-    setArrivedIn(activeTopicId);
-    const reopened = withTopicOpen(choices, activeTopicId);
-    if (reopened !== choices) setChoices(reopened);
-  }
+export function useAdminNavTopics(activeTopicId: string | null, place: string) {
+  const local = useState(NO_CHOICES);
+  const [stored, setStored] = useContext(AdminNavTopicsContext) ?? local;
+  // Choices made elsewhere are ignored while rendering, so arriving never
+  // paints one frame with the old topics still open; the effect then drops
+  // them so coming back later starts fresh too.
+  const choices = stored.place === place ? stored.choices : NO_CHOICES.choices;
+  useEffect(() => {
+    setStored((current) => (current.place === place ? current : { place, choices: {} }));
+  }, [place, setStored]);
 
   const isOpen = useCallback(
     (topicId: string) => choices[topicId] ?? topicId === activeTopicId,
     [activeTopicId, choices],
   );
 
-  // The desktop sidebar and the phone drawer each run this hook, so a toggle
-  // merges into what is stored instead of writing back this instance's whole
-  // snapshot, which would undo a choice the other instance made since.
   const toggle = useCallback(
-    (topicId: string) => {
-      const open = !isOpen(topicId);
-      writeChoices({ ...readChoices(), [topicId]: open });
-      setChoices((current) => ({ ...current, [topicId]: open }));
-    },
-    [isOpen],
+    (topicId: string) => setStored({ place, choices: { ...choices, [topicId]: !isOpen(topicId) } }),
+    [choices, isOpen, place, setStored],
   );
 
   return { isOpen, toggle };

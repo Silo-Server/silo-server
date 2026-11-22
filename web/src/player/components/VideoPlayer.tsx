@@ -20,6 +20,7 @@ import { matchSubtitleTrackAcrossVersions, resolveSubtitleAutoSelect } from "../
 import type HlsType from "hls.js";
 import { Play } from "lucide-react";
 import { PlayerControls } from "./PlayerControls";
+import { PlayerLoadingCover } from "./PlayerLoadingCover";
 import { PlaybackInfoOverlay } from "./PlaybackInfoOverlay";
 import { PlaybackNoticeOverlay, PlaybackNoticeStack } from "./PlaybackNoticeOverlay";
 import { IntroSkipButton } from "./IntroSkipButton";
@@ -111,6 +112,7 @@ import type {
   PlayerAudioTrack,
   PlayerChapter,
   PlayerFileVersion,
+  PlayerBackdrop,
   PlayerIndexerRelease,
   PlayerSubtitleInfo,
   PlayerVirtualRanking,
@@ -257,6 +259,8 @@ const MARKER_SKIP_LABELS: Record<MarkerKind, string> = {
 interface VideoPlayerProps {
   title: string;
   year?: number;
+  /** Shown dimmed behind the loading cover. */
+  backdrop?: PlayerBackdrop;
   streamUrl: string;
   /**
    * The server's plan for this session. Everything about *how* the media plays —
@@ -693,6 +697,7 @@ export function VideoPlayer({
   contentId,
   title,
   year,
+  backdrop,
   streamUrl,
   plan,
   planRevision,
@@ -4122,8 +4127,8 @@ export function VideoPlayer({
               video,
               surface,
               source: route.source,
-              onMediaData: (request, bytes, first, last) => {
-                if (!destroyed) meter.received((reads[request] ??= {}), bytes, first, last);
+              onMediaData: (request, bytes, first, last, spans) => {
+                if (!destroyed) meter.received((reads[request] ??= {}), bytes, first, last, spans);
               },
               onFailure: (failure) => {
                 if (destroyed) return;
@@ -7173,14 +7178,13 @@ export function VideoPlayer({
 
       {/* Loading overlay — stays up until the session's first frame renders */}
       {!isDetached && startupCover && !error && (
-        <div
-          role="status"
-          aria-label="Loading video"
-          className="absolute inset-0 z-40 flex items-center justify-center bg-black"
+        <PlayerLoadingCover
+          backdrop={backdrop}
+          label="Loading video"
+          className="absolute inset-0 z-40"
         >
-          <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <span className="sr-only">Loading video</span>
-        </div>
+        </PlayerLoadingCover>
       )}
 
       {/* Autoplay blocked: the browser will only start this stream on a

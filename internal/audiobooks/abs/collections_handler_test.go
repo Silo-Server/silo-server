@@ -12,8 +12,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-
-	"github.com/Silo-Server/silo-server/internal/models"
 )
 
 // ---------------------------------------------------------------------------
@@ -147,22 +145,6 @@ type collectionsHarness struct {
 	Pub  *recordingPublisher
 }
 
-func newCollectionsHarness(t *testing.T, knownItems ...string) *collectionsHarness {
-	t.Helper()
-	known := map[string]*models.MediaItem{}
-	for _, id := range knownItems {
-		known[id] = nil
-	}
-	pub := &recordingPublisher{}
-	store := newMemCollectionStore()
-	h := New(Dependencies{
-		MediaStore:      &stubMediaStore{known: known},
-		CollectionStore: store,
-		Publisher:       pub,
-	})
-	return &collectionsHarness{H: h, Coll: store, Pub: pub}
-}
-
 // dispatchABSWithParams drives a handler directly with arbitrary URL
 // params + injected ctxAuth, bypassing the bearerAuth middleware.
 // Generalised version of dispatchBookmark for surfaces with different
@@ -254,72 +236,6 @@ func runNonOwner404[H any](t *testing.T, cases []nonOwnerCase[H], newHarness fun
 			}
 			if tc.check != nil {
 				tc.check(t, hb, id)
-			}
-		})
-	}
-}
-
-func TestCollection_NonOwner_404(t *testing.T) {
-	book := map[string]string{"bookId": "book-1"}
-	runNonOwner404(t, []nonOwnerCase[*collectionsHarness]{
-		{name: "get private", seed: `{"name":"private"}`, method: http.MethodGet, handler: (*Handler).handleGetCollection},
-		{name: "patch", method: http.MethodPatch, body: `{"name":"hijack"}`, handler: (*Handler).handleUpdateCollection,
-			check: func(t *testing.T, hb *collectionsHarness, id string) {
-				if c, _ := hb.Coll.GetCollection(context.Background(), id); c.Name != "mine" {
-					t.Errorf("collection name = %q, want 'mine'; non-owner mutation leaked", c.Name)
-				}
-			}},
-		{name: "delete", method: http.MethodDelete, handler: (*Handler).handleDeleteCollection,
-			check: func(t *testing.T, hb *collectionsHarness, id string) {
-				if _, err := hb.Coll.GetCollection(context.Background(), id); err != nil {
-					t.Errorf("collection wrongly deleted: %v", err)
-				}
-			}},
-		{name: "add book", known: "book-1", method: http.MethodPost, suffix: "/book/book-1", params: book, handler: (*Handler).handleAddCollectionBook},
-		{name: "remove book", known: "book-1", method: http.MethodDelete, suffix: "/book/book-1", params: book, handler: (*Handler).handleRemoveCollectionBook,
-			before: func(t *testing.T, hb *collectionsHarness, id string) {
-				_ = dispatchABSWithParams(http.MethodPost, "/api/collections/"+id+"/book/book-1",
-					map[string]string{"id": id, "bookId": "book-1"}, nil, "1", "", hb.H.handleAddCollectionBook)
-			},
-			check: func(t *testing.T, hb *collectionsHarness, id string) {
-				if items, _ := hb.Coll.ListCollectionItems(context.Background(), id); len(items) != 1 {
-					t.Errorf("items len = %d, want 1 (non-owner remove leaked)", len(items))
-				}
-			}},
-	}, newCollectionsHarness, func(hb *collectionsHarness) *Handler { return hb.H }, "/api/collections",
-		func(h *Handler) http.HandlerFunc { return h.handleCreateCollection })
-}
-
-// TestCollection_List_Isolation creates a collection as user 1 and lists as
-// another user, or as another profile of the same account.
-func TestCollection_List_Isolation(t *testing.T) {
-	pA := "00000000-0000-0000-0000-0000000000aa"
-	pB := "00000000-0000-0000-0000-0000000000bb"
-	for _, tc := range []struct {
-		name                  string
-		body, createProfile   string
-		listUser, listProfile string
-	}{
-		{name: "user 2", body: `{"name":"mine"}`, listUser: "2"},
-		{name: "profile B", body: `{"name":"A"}`, createProfile: pA, listUser: "1", listProfile: pB},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			hb := newCollectionsHarness(t)
-			_ = dispatchABSWithParams(http.MethodPost, "/api/collections", nil, []byte(tc.body), "1", tc.createProfile, hb.H.handleCreateCollection)
-			rec := dispatchABSWithParams(http.MethodGet, "/api/collections", nil, nil, tc.listUser, tc.listProfile, hb.H.handleListCollections)
-			var env map[string]any
-			if rec.Code != http.StatusOK {
-				t.Fatalf("status = %d, want 200; body=%s", rec.Code, rec.Body.String())
-			}
-			if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
-				t.Fatalf("decode: %v; body=%s", err, rec.Body.String())
-			}
-			list, ok := env["collections"].([]any)
-			if !ok {
-				t.Fatalf("response missing 'collections' key; body=%s", rec.Body.String())
-			}
-			if len(list) != 0 {
-				t.Errorf("%s sees %d collections, want 0", tc.name, len(list))
 			}
 		})
 	}

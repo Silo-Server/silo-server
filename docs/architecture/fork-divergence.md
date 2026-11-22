@@ -43,6 +43,34 @@ that before it ships.
   session does not yet end the Jellyfin play attached to it.
 - Upstream-added tests whose subject the fork does not implement were dropped;
   tests for surfaces upstream retired with `/api/v1` were removed with them.
+- Signed node source grants and the core loopback relay (#4337/#4338) are not
+  adopted. The fork keeps `CatalogPathAuthorizer`
+  (`internal/transcodenode/path_authorizer.go`) and its direct `virtual://`
+  dispatch: a transcode node approves its input against the catalog, and
+  virtual sources arrive as pre-resolved relay URLs. Upstream's
+  `internal/nodesource` grant minting, grant-open endpoint, and loopback relay
+  are not wired into the fork's node runtime. Adopting them (per-node keys,
+  thin nodes, core-authoritative source access) is a separate project, not a
+  merge-time change.
+- The copy-group rework (#1770/#4400/#4434/#2515) is deferred. The fork keeps
+  its copy planner — `copySegmentPlan.seekTarget`/`segmentSeekPosition`,
+  `StartSegmentNumber`, `StreamOriginSeconds`, and `CopySeekAnchorResolved` —
+  and the files that only make sense with upstream's `copyGroupAssembler`
+  (`copy_fmp4.go`, `copy_group_assembler.go`, `copy_keyframe_resume_test.go`)
+  are not carried. The deferral preserves the fork's segment numbering and
+  seek-anchor behavior; porting the assembler is a separate project.
+- The per-node worker key handshake is not adopted either; the fork keeps the
+  shared `auth.jwt_secret` for worker calls. `nodeauth.Sign` and `SignWith`
+  therefore send an unsigned request when no key is configured instead of
+  refusing it, and `nodepool.TranscodePool.HasKey` treats every node as
+  signable while no key check is wired. Do not reintroduce a hard failure
+  there: it would leave every transcode node filtered out of route planning on
+  a deployment without node keys. Node result headers keep the fork's
+  `X-Vio-*` names (see `internal/downloadprepare`).
+- The fork's start-ready pipeline (`transcode_startup.go`, `prepare_file.go`,
+  `prepare_progress.go`) and its tests are the ones to keep on a merge:
+  upstream's rework there changes when a transcode is declared ready and how a
+  hardware start falls back, and the fork's tests pin the older contract.
 
 ## Merge procedure
 
@@ -76,10 +104,13 @@ that before it ships.
      `make install-hooks`), while `Dockerfile`, `docker-compose.yml`, and `.env.example` hunks must be reviewed to keep
      the decoupled `node-base` stage, unshadowed module layer caching, the
      pinned base image versions, and the `:dev` image tags. Floating base image tags (`node:22-slim`,
-      `golang:1.26`, `debian:trixie-slim`) bump silently and invalidate the
-      layer cache and the Go build cache, so the fork pins them to patch/dated
-      tags and bumps them as a deliberate change. CI and
-      `make verify-fork-invariants` enforce both.
+     `golang:1.27`, `debian:trixie-slim`) bump silently and invalidate the
+     layer cache and the Go build cache, so the fork pins them to patch/dated
+     tags and bumps them as a deliberate change. The build stage's `golang`
+     tag must equal the `go` directive in `go.mod`: the Go images and
+     `setup-go` both run with `GOTOOLCHAIN=local`, so a lagging tag cannot
+     build the module at all. CI and `make verify-fork-invariants` enforce
+     both.
 3. Merge with a merge commit so fork history stays readable. Never rebase
    pushed history.
 4. Verify before pushing: `scripts/check-fork-invariants.sh` (includes gofmt

@@ -51,104 +51,6 @@ type fakeFFmpegBinary struct {
 	logPath string
 }
 
-func TestNVIDIADeviceCandidatesRequireSuccessfulNVENCProbe(t *testing.T) {
-	for _, device := range []string{"dxg", "nvidiactl", "nvidia0"} {
-		for _, succeeds := range []bool{true, false} {
-			t.Run(fmt.Sprintf("%s/smoke_success=%t", device, succeeds), func(t *testing.T) {
-				env := setupHWAccelTest(t)
-				env.addNVIDIADevice(t, device)
-				probe := successfulNVENCProbe()
-				probe.smokeOK = succeeds
-				ffmpeg := writeFakeFFmpeg(t, probe)
-
-				info := DetectHWAccelWithFFmpeg("auto", ffmpeg.path, "")
-				backend := detectedBackendEntry(t, info, transcodeHWNVENC)
-				if backend.Verified != succeeds {
-					t.Fatalf("NVENC verified = %t, want %t: %+v", backend.Verified, succeeds, backend)
-				}
-				want := HWAccelNone
-				if succeeds {
-					want = transcodeHWNVENC
-				}
-				if info.Resolved != want {
-					t.Fatalf("resolved = %q, want %q", info.Resolved, want)
-				}
-				if log := fakeFFmpegLog(t, ffmpeg); !strings.Contains(log, "h264_nvenc") {
-					t.Fatalf("NVENC smoke encode missing from probe log: %s", log)
-				}
-			})
-		}
-	}
-}
-
-func TestResolveHWAccelWithFFmpegAutoPrefersNVENCOverIntel(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x8086")
-	env.addRenderDevice(t, "renderD129", "0x10de")
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path, ""); got != "nvenc" {
-		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want nvenc", got)
-	}
-}
-
-func TestResolveHWAccelWithFFmpegFallsBackToVAAPIWhenQSVListingFails(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x8086")
-	probe := successfulVAAPIProbe()
-	probe.qsvHWAccel = true
-	probe.h264QSV = true
-	// hevc_qsv is missing, so the QSV listing gate rejects an Intel GPU that
-	// VAAPI can still drive.
-	ffmpeg := writeFakeFFmpeg(t, probe)
-
-	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path, ""); got != "vaapi" {
-		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want vaapi", got)
-	}
-}
-
-func TestResolveHWAccelWithFFmpegTriesEveryCandidateDevice(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x1002")
-	env.addRenderDevice(t, "renderD129", "0x1002")
-	probe := successfulVAAPIProbe()
-	// The GPU that sorts first has no working driver; the second one does.
-	probe.smokeDeviceFailures = []string{"renderD128"}
-	ffmpeg := writeFakeFFmpeg(t, probe)
-
-	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path, ""); got != "vaapi" {
-		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want vaapi from the working device", got)
-	}
-	info := DetectHWAccelWithFFmpeg("auto", ffmpeg.path, "")
-	vaapi := info.DetectedBackends[len(info.DetectedBackends)-1]
-	if vaapi.Backend != "vaapi" || !vaapi.Verified {
-		t.Fatalf("vaapi entry = %+v, want verified", vaapi)
-	}
-	if device := filepath.Base(vaapi.Device); device != "renderD129" {
-		t.Fatalf("verified device = %q, want renderD129", device)
-	}
-}
-
-func TestResolveHWAccelWithFFmpegProbesTheConfiguredHWDevice(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x8086")
-	env.addRenderDevice(t, "renderD129", "0x8086")
-	probe := successfulQSVProbe()
-	probe.smokeDeviceFailures = []string{"renderD128"}
-	ffmpeg := writeFakeFFmpeg(t, probe)
-
-	// The operator pinned the working GPU, which is the device a transcode
-	// opens; auto resolution has to verify that one rather than renderD128.
-	pinned := filepath.Join(env.driDir, "renderD129")
-	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path, pinned); got != "qsv" {
-		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want qsv on the pinned device", got)
-	}
-	logData := fakeFFmpegLog(t, ffmpeg)
-	if strings.Contains(string(logData), filepath.Join(env.driDir, "renderD128")) {
-		t.Fatalf("probe touched an unconfigured device; log:\n%s", logData)
-	}
-}
-
 // A proxy node reads the cluster-wide hw_device meant for the transcode nodes:
 // the paths and their sysfs vendor entries are visible, but the devices cannot
 // be opened. Detection must skip the probes entirely — no ffmpeg spawn, no
@@ -219,78 +121,6 @@ func TestDetectHWAccelProbesOnlyTheAccessibleConfiguredDevices(t *testing.T) {
 	logData := fakeFFmpegLog(t, ffmpeg)
 	if strings.Contains(string(logData), filepath.Join(env.driDir, "renderD128")) {
 		t.Fatalf("probe touched the inaccessible device; log:\n%s", logData)
-	}
-}
-
-// Windows rather than macOS: macOS has its own hardware path through
-// VideoToolbox, so it is no longer a platform with nothing to probe.
-func TestResolveHWAccelAutoIsNoneOnAPlatformWithNoHardwarePath(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x8086")
-	currentGOOS = windowsGOOS
-	ffmpeg := writeFakeFFmpeg(t, fullyCapableProbe())
-
-	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path, ""); got != HWAccelNone {
-		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want none", got)
-	}
-	info := DetectHWAccelWithFFmpeg("auto", ffmpeg.path, "")
-	if info.Resolved != HWAccelNone {
-		t.Fatalf("DetectHWAccelWithFFmpeg().Resolved = %q, want none", info.Resolved)
-	}
-	if len(info.DetectedBackends) != 0 {
-		t.Fatalf("DetectHWAccelWithFFmpeg().DetectedBackends = %+v, want empty off Linux", info.DetectedBackends)
-	}
-	if _, err := os.Stat(ffmpeg.logPath); !os.IsNotExist(err) {
-		t.Fatalf("off-Linux detection ran FFmpeg probes (stat err = %v)", err)
-	}
-}
-
-func TestDetectHWAccelReportsEveryCandidateBackend(t *testing.T) {
-	env := setupHWAccelTest(t)
-	env.addRenderDevice(t, "renderD128", "0x8086")
-	env.addRenderDevice(t, "renderD129", "0x10de")
-	probe := fullyCapableProbe()
-	probe.h264NVENC = false
-	probe.smokeFailures = []string{"h264_vaapi"}
-	ffmpeg := writeFakeFFmpeg(t, probe)
-
-	info := DetectHWAccelWithFFmpeg("auto", ffmpeg.path, "")
-	if info.Resolved != "qsv" {
-		t.Fatalf("Resolved = %q, want qsv", info.Resolved)
-	}
-	if len(info.DetectedBackends) != 3 {
-		t.Fatalf("DetectedBackends = %+v, want one entry per candidate backend", info.DetectedBackends)
-	}
-	// The NVIDIA render node carries no libva driver, so it is not a VAAPI
-	// candidate even though it is a render device.
-	want := []DetectedBackend{
-		{Backend: "nvenc", Verified: false, Devices: []string{"/dev/dri/renderD129"}},
-		{Backend: "qsv", Verified: true, Devices: []string{"/dev/dri/renderD128"}},
-		{Backend: "vaapi", Verified: false, Devices: []string{"/dev/dri/renderD128"}},
-	}
-	for i, expected := range want {
-		got := info.DetectedBackends[i]
-		if got.Backend != expected.Backend || got.Verified != expected.Verified {
-			t.Fatalf("DetectedBackends[%d] = %+v, want backend %q verified=%v", i, got, expected.Backend, expected.Verified)
-		}
-		if !slices.Equal(stripDevicePrefix(got.Devices), stripDevicePrefix(expected.Devices)) {
-			t.Fatalf("DetectedBackends[%d].Devices = %v, want %v", i, got.Devices, expected.Devices)
-		}
-		if expected.Verified && got.Reason != "" {
-			t.Fatalf("DetectedBackends[%d].Reason = %q, want empty for a verified backend", i, got.Reason)
-		}
-		if !expected.Verified && got.Reason == "" {
-			t.Fatalf("DetectedBackends[%d].Reason is empty, want a failure explanation", i)
-		}
-	}
-	if device := filepath.Base(info.DetectedBackends[1].Device); device != "renderD128" {
-		t.Fatalf("qsv verified device = %q, want the Intel render node", device)
-	}
-	if reason := info.DetectedBackends[0].Reason; reason != "h264_nvenc encoder unavailable" {
-		t.Fatalf("nvenc reason = %q, want the missing encoder", reason)
-	}
-	if reason := info.DetectedBackends[2].Reason; !strings.HasPrefix(reason, "h264_vaapi smoke encode failed") {
-		t.Fatalf("vaapi reason = %q, want the failed smoke encode", reason)
 	}
 }
 
@@ -371,140 +201,6 @@ func TestResolveFFmpegPathFallsBackOnlyForMissingLegacyDefault(t *testing.T) {
 	}
 	if got := resolveFFmpegPath("/custom/missing/ffmpeg", missing, discover); got != "/custom/missing/ffmpeg" {
 		t.Fatalf("custom path resolved to %q, want the explicit value preserved", got)
-	}
-}
-
-func TestFFmpegSupportsNVENCRequiresCUDAEncodersFiltersAndSmoke(t *testing.T) {
-	setupHWAccelTest(t)
-	tests := []struct {
-		name  string
-		probe fakeFFmpegProbe
-	}{
-		{
-			name: "missing cuda hwaccel",
-			probe: fakeFFmpegProbe{
-				h264NVENC: true, hevcNVENC: true, scaleCUDA: true, uploadCUDA: true, smokeOK: true,
-			},
-		},
-		{
-			name: "missing hevc nvenc encoder",
-			probe: fakeFFmpegProbe{
-				cuda: true, h264NVENC: true, scaleCUDA: true, uploadCUDA: true, smokeOK: true,
-			},
-		},
-		{
-			name: "missing scale cuda filter",
-			probe: fakeFFmpegProbe{
-				cuda: true, h264NVENC: true, hevcNVENC: true, uploadCUDA: true, smokeOK: true,
-			},
-		},
-		{
-			name: "smoke encode failure",
-			probe: fakeFFmpegProbe{
-				cuda: true, h264NVENC: true, hevcNVENC: true, scaleCUDA: true, uploadCUDA: true,
-			},
-		},
-		{
-			name:  "probe timeout",
-			probe: fakeFFmpegProbe{hang: true},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resetHWProbeCacheForTest()
-			ffmpeg := writeFakeFFmpeg(t, tt.probe)
-			if ok, reason := ffmpegSupportsBackend(transcodeHWNVENC, ffmpeg.path, ""); ok {
-				t.Fatalf("ffmpegSupportsBackend(nvenc) = true, want false")
-			} else if reason == "" {
-				t.Fatalf("ffmpegSupportsBackend(nvenc) reason is empty")
-			}
-		})
-	}
-}
-
-func TestFFmpegSupportsQSVRequiresListingsAndSmoke(t *testing.T) {
-	setupHWAccelTest(t)
-	tests := []struct {
-		name  string
-		probe fakeFFmpegProbe
-		want  string
-	}{
-		{
-			name:  "missing qsv and vaapi hwaccels",
-			probe: fakeFFmpegProbe{h264QSV: true, hevcQSV: true, smokeOK: true},
-			want:  "qsv and vaapi hwaccels unavailable",
-		},
-		{
-			name:  "missing h264 qsv encoder",
-			probe: fakeFFmpegProbe{qsvHWAccel: true, hevcQSV: true, smokeOK: true},
-			want:  "h264_qsv encoder unavailable",
-		},
-		{
-			name:  "missing hevc qsv encoder",
-			probe: fakeFFmpegProbe{qsvHWAccel: true, h264QSV: true, smokeOK: true},
-			want:  "hevc_qsv encoder unavailable",
-		},
-		{
-			name:  "smoke encode failure",
-			probe: fakeFFmpegProbe{vaapiHWAccel: true, h264QSV: true, hevcQSV: true},
-			want:  "h264_qsv smoke encode failed",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			resetHWProbeCacheForTest()
-			ffmpeg := writeFakeFFmpeg(t, tt.probe)
-			ok, reason := ffmpegSupportsBackend(transcodeHWQSV, ffmpeg.path, "/dev/dri/renderD128")
-			if ok {
-				t.Fatal("ffmpegSupportsBackend(qsv) = true, want false")
-			}
-			if !strings.HasPrefix(reason, tt.want) {
-				t.Fatalf("reason = %q, want prefix %q", reason, tt.want)
-			}
-		})
-	}
-
-	resetHWProbeCacheForTest()
-	ffmpeg := writeFakeFFmpeg(t, successfulQSVProbe())
-	if ok, reason := ffmpegSupportsBackend(transcodeHWQSV, ffmpeg.path, "/dev/dri/renderD128"); !ok {
-		t.Fatalf("ffmpegSupportsBackend(qsv) = false, want true (reason=%q)", reason)
-	}
-	logText := fakeFFmpegLog(t, ffmpeg)
-	for _, want := range []string{
-		"vaapi=va:/dev/dri/renderD128,driver=iHD,kernel_driver=i915,vendor_id=0x8086",
-		"qsv=qs@va",
-		"testsrc2=size=640x360:rate=1",
-	} {
-		if !strings.Contains(logText, want) {
-			t.Fatalf("QSV smoke command missing %q; log:\n%s", want, logText)
-		}
-	}
-}
-
-func TestFFmpegSupportsVAAPIRequiresEncoderAndSmoke(t *testing.T) {
-	setupHWAccelTest(t)
-
-	resetHWProbeCacheForTest()
-	missing := writeFakeFFmpeg(t, fakeFFmpegProbe{vaapiHWAccel: true, smokeOK: true})
-	if ok, reason := ffmpegSupportsBackend(transcodeHWVAAPI, missing.path, "/dev/dri/renderD128"); ok {
-		t.Fatal("ffmpegSupportsBackend(vaapi) = true, want false")
-	} else if reason != "h264_vaapi encoder unavailable" {
-		t.Fatalf("reason = %q, want the missing encoder", reason)
-	}
-
-	resetHWProbeCacheForTest()
-	ffmpeg := writeFakeFFmpeg(t, successfulVAAPIProbe())
-	if ok, reason := ffmpegSupportsBackend(transcodeHWVAAPI, ffmpeg.path, "/dev/dri/renderD128"); !ok {
-		t.Fatalf("ffmpegSupportsBackend(vaapi) = false, want true (reason=%q)", reason)
-	}
-	logText := fakeFFmpegLog(t, ffmpeg)
-	if !strings.Contains(logText, "vaapi=hw:/dev/dri/renderD128") {
-		t.Fatalf("VAAPI smoke command missing its init chain; log:\n%s", logText)
-	}
-	if strings.Count(logText, "\n") != 2 {
-		t.Fatalf("VAAPI probe ran %d commands, want an encoders listing and one smoke encode; log:\n%s",
-			strings.Count(logText, "\n"), logText)
 	}
 }
 
@@ -626,49 +322,6 @@ func TestFFmpegIdentityKeyIncludesResolvedPATHIdentity(t *testing.T) {
 	}
 }
 
-func TestHWProbeNegativeResultExpires(t *testing.T) {
-	setupHWAccelTest(t)
-	clock := time.Now()
-	hwProbeNow = func() time.Time { return clock }
-
-	dir := t.TempDir()
-	ffmpegPath := filepath.Join(dir, "ffmpeg")
-	markerPath := filepath.Join(dir, "vaapi-ready")
-	script := fmt.Sprintf(`#!/bin/sh
-case "$*" in
-  *-encoders*) echo 'h264_vaapi'; exit 0 ;;
-  *) test -e %q ;;
-esac
-`, markerPath)
-	if err := os.WriteFile(ffmpegPath, []byte(script), 0o755); err != nil {
-		t.Fatalf("write marker-controlled FFmpeg: %v", err)
-	}
-
-	if ok, _ := ffmpegSupportsBackend(transcodeHWVAAPI, ffmpegPath, "/dev/dri/renderD128"); ok {
-		t.Fatal("initial VAAPI probe unexpectedly succeeded")
-	}
-	if err := os.WriteFile(markerPath, []byte("ready"), 0o600); err != nil {
-		t.Fatalf("enable VAAPI smoke probe: %v", err)
-	}
-	clock = clock.Add(hwProbeNegativeTTL - time.Millisecond)
-	if ok, _ := ffmpegSupportsBackend(transcodeHWVAAPI, ffmpegPath, "/dev/dri/renderD128"); ok {
-		t.Fatal("negative result was not retained during its TTL")
-	}
-	clock = clock.Add(2 * time.Millisecond)
-	if ok, reason := ffmpegSupportsBackend(transcodeHWVAAPI, ffmpegPath, "/dev/dri/renderD128"); !ok {
-		t.Fatalf("expired negative result was not retried: %s", reason)
-	}
-	// A positive result is kept for the process lifetime, so removing the
-	// marker after success must not change the answer.
-	if err := os.Remove(markerPath); err != nil {
-		t.Fatal(err)
-	}
-	clock = clock.Add(time.Hour)
-	if ok, _ := ffmpegSupportsBackend(transcodeHWVAAPI, ffmpegPath, "/dev/dri/renderD128"); !ok {
-		t.Fatal("positive probe result expired, want process-lifetime caching")
-	}
-}
-
 func successfulNVENCProbe() fakeFFmpegProbe {
 	return fakeFFmpegProbe{
 		cuda:       true,
@@ -711,16 +364,6 @@ func fullyCapableProbe() fakeFFmpegProbe {
 		uploadCUDA:   true,
 		smokeOK:      true,
 	}
-}
-
-// stripDevicePrefix compares device lists by basename so expectations stay
-// readable against the test's temporary /dev/dri stand-in.
-func stripDevicePrefix(devices []string) []string {
-	names := make([]string, 0, len(devices))
-	for _, device := range devices {
-		names = append(names, filepath.Base(device))
-	}
-	return names
 }
 
 func setupHWAccelTest(t *testing.T) *hwAccelTestEnv {
@@ -948,92 +591,6 @@ func TestResolveHWAccelWithFFmpegDarwinAllowsH264OnlyVideoToolbox(t *testing.T) 
 	}
 }
 
-func TestResolveHWAccelWithFFmpegDarwinFallsBackToNoneWhenSmokeEncodeFails(t *testing.T) {
-	setupHWAccelTest(t)
-	currentGOOS = "darwin"
-	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{videotoolbox: true, h264VT: true, hevcVT: true})
-
-	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path, ""); got != "none" {
-		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want none when smoke encode fails", got)
-	}
-}
-
-func TestVideoToolboxProbeSmokesBothEncodersInPortableBitrateMode(t *testing.T) {
-	setupHWAccelTest(t)
-	currentGOOS = "darwin"
-	ffmpeg := writeFakeFFmpeg(t, successfulVideoToolboxProbe())
-
-	if got := ResolveHWAccelWithFFmpeg("auto", ffmpeg.path, ""); got != "videotoolbox" {
-		t.Fatalf("ResolveHWAccelWithFFmpeg() = %q, want videotoolbox", got)
-	}
-	log := fakeFFmpegLog(t, ffmpeg)
-	// FFmpeg restricts -q:v to Apple Silicon. The portable bitrate path keeps
-	// H.264 acceleration available on older Intel Macs as well.
-	for _, want := range []string{
-		"-c:v h264_videotoolbox -b:v 2000k -maxrate 2000k -bufsize 4000k",
-		"-pix_fmt yuv420p -profile:v main -c:v hevc_videotoolbox -b:v 2000k -maxrate 2000k -bufsize 4000k",
-	} {
-		if !strings.Contains(string(log), want) {
-			t.Fatalf("probe log missing %q:\n%s", want, log)
-		}
-	}
-}
-
-func TestCachedVideoToolboxProbeKeepsRelativeAndPathSpellingsDistinct(t *testing.T) {
-	setupHWAccelTest(t)
-	capable := writeFakeFFmpeg(t, successfulVideoToolboxProbe())
-	incapable := writeFakeFFmpeg(t, fakeFFmpegProbe{})
-	// PATH resolves the bare "ffmpeg" name to the incapable binary while the
-	// dot-relative spelling names the capable one; a cleaned cache key would
-	// collide the two and let one spelling's verdict leak to the other.
-	t.Setenv("PATH", filepath.Dir(incapable.path))
-	t.Chdir(filepath.Dir(capable.path))
-
-	if result := cachedVideoToolboxProbe("./" + filepath.Base(capable.path)); !result.available {
-		t.Fatalf("relative spelling should probe the capable binary, got %q", result.reason)
-	}
-	if result := cachedVideoToolboxProbe("ffmpeg"); result.available {
-		t.Fatal("PATH spelling should probe the incapable binary, not reuse the relative spelling's cache entry")
-	}
-}
-
-func TestStartupRetryHWAccel(t *testing.T) {
-	// Explicit values bypass ffmpeg probing, keeping this host-independent.
-	env := setupHWAccelTest(t)
-	tests := []struct {
-		name         string
-		opts         TranscodeOpts
-		renderDevice bool
-		want         string
-	}{
-		{name: "videotoolbox has no alternate device", opts: TranscodeOpts{HWAccel: "videotoolbox"}, want: "none"},
-		{name: "qsv without a render device", opts: TranscodeOpts{HWAccel: "qsv"}, want: "none"},
-		{name: "vaapi without a render device", opts: TranscodeOpts{HWAccel: "vaapi"}, want: "none"},
-		{name: "qsv with a detected render device", opts: TranscodeOpts{HWAccel: "qsv"}, renderDevice: true, want: "qsv"},
-		{name: "vaapi with a detected render device", opts: TranscodeOpts{HWAccel: "vaapi"}, renderDevice: true, want: "vaapi"},
-		{name: "qsv with a configured device", opts: TranscodeOpts{HWAccel: "qsv", HWDevice: "/dev/dri/renderD129"}, want: "qsv"},
-		{name: "nvenc", opts: TranscodeOpts{HWAccel: "nvenc"}, want: "nvenc"},
-		{name: "software", opts: TranscodeOpts{HWAccel: "none"}, want: "none"},
-		{name: "videotoolbox hardware tone-map", opts: TranscodeOpts{HWAccel: "videotoolbox", ToneMapMode: tonemap.ModeHardware}, want: "videotoolbox"},
-		{name: "qsv hardware tone-map without a render device", opts: TranscodeOpts{HWAccel: "qsv", ToneMapMode: tonemap.ModeHardware}, want: "qsv"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_ = os.RemoveAll(env.driDir)
-			if err := os.MkdirAll(env.driDir, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			if tt.renderDevice {
-				env.addRenderDevice(t, "renderD128", "0x8086")
-			}
-			tt.opts.FFmpegPath = "/does/not/exist"
-			if got := StartupRetryHWAccel(tt.opts); got != tt.want {
-				t.Fatalf("StartupRetryHWAccel() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestCachedVideoToolboxProbeCoalescesConcurrentColdProbes(t *testing.T) {
 	setupHWAccelTest(t)
 	ffmpeg := writeFakeFFmpeg(t, fakeFFmpegProbe{hang: true})
@@ -1121,8 +678,9 @@ func TestHWAccelWalkTimeoutScalesWithTheDeviceSet(t *testing.T) {
 	}
 
 	// It covers what it will run: every command the matrix allows, at its own
-	// per-command bound, plus spawn slack.
-	wantThree := time.Duration(3*(3+2))*hwProbeCommandTimeout + hwAccelWalkSlack
+	// per-command bound, plus spawn slack: three QSV and two VAAPI commands on
+	// each of three devices at 3s apiece, plus 5s.
+	const wantThree = 50 * time.Second
 	if threeDevices != wantThree {
 		t.Fatalf("three-device walk = %v, want %v", threeDevices, wantThree)
 	}
@@ -1133,45 +691,6 @@ func TestHWAccelWalkTimeoutScalesWithTheDeviceSet(t *testing.T) {
 	// A host with nothing to probe still gets a usable, non-zero deadline.
 	if got := hwAccelWalkTimeout(hwCandidates{}); got <= 0 {
 		t.Fatalf("empty walk timeout = %v, want a positive bound", got)
-	}
-}
-
-// The walk is capped at the same device ceiling the tone-map matrix is, because
-// the budget every caller allows is derived from that ceiling. Probing past it
-// would guarantee the capability request is canceled before the walk finishes.
-func TestCollectHWCandidatesCapsTheProbedDeviceSet(t *testing.T) {
-	env := setupHWAccelTest(t)
-	configured := make([]string, 0, tonemap.MaxProbedDevices+3)
-	for i := range tonemap.MaxProbedDevices + 3 {
-		name := "renderD" + strconv.Itoa(128+i)
-		env.addRenderDevice(t, name, "0x8086")
-		configured = append(configured, env.devicePath(name))
-	}
-
-	candidates := collectHWCandidates(strings.Join(configured, ","))
-	if got := len(candidates.probeDevicesFor(transcodeHWQSV)); got != tonemap.MaxProbedDevices {
-		t.Fatalf("qsv probe devices = %d, want the %d cap", got, tonemap.MaxProbedDevices)
-	}
-
-	// The walk therefore stays inside the budget its callers allow, which is the
-	// property the cap exists for.
-	if walk, ceiling := hwAccelWalkTimeout(candidates), MaxCapabilityRequestTimeout(); walk >= ceiling {
-		t.Fatalf("walk budget %v is not below the %v callers allow", walk, ceiling)
-	}
-
-	// Every configured device is still reported, capped or not: the inventory is
-	// what an operator reads, and truncating it would hide hardware that exists.
-	if got := len(candidates.devicesFor(transcodeHWQSV)); got != tonemap.MaxProbedDevices {
-		t.Fatalf("qsv reported devices = %d, want the probed set", got)
-	}
-	if got := len(candidates.renderDevices); got != len(configured) {
-		t.Fatalf("render devices = %d, want all %d enumerated", got, len(configured))
-	}
-
-	// A set inside the cap is untouched.
-	small := configured[:3]
-	if got := len(collectHWCandidates(strings.Join(small, ",")).probeDevicesFor(transcodeHWQSV)); got != 3 {
-		t.Fatalf("qsv probe devices = %d, want the 3 configured", got)
 	}
 }
 

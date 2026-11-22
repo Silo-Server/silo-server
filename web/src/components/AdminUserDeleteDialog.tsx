@@ -4,6 +4,8 @@ import { getAdminUser, type AdminUserEditor } from "@/api/v2/adminUsers";
 import { V2ProblemError } from "@/api/v2/request";
 import { useDeleteUser, useUpdateUser } from "@/hooks/queries/admin/users";
 import { useT } from "@/i18n";
+import { TOUCH_TARGETS } from "@/lib/touchTargets";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -98,7 +100,13 @@ export function AdminUserDeleteDialog({
         if (!open && !busy.current) onClose();
       }}
     >
-      <AlertDialogContent>
+      {/* On a phone a long name wraps, and the dialog scrolls above the keyboard. */}
+      <AlertDialogContent
+        className={cn(
+          "max-lg:max-h-[calc(100dvh-2rem)] max-lg:overflow-y-auto max-lg:wrap-anywhere",
+          TOUCH_TARGETS,
+        )}
+      >
         <AlertDialogHeader>
           <AlertDialogTitle>
             {t("web.admin.users.deleteDialog.title", { username })}

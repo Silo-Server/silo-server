@@ -80,6 +80,27 @@ type EmbeddedSubtitleSource interface {
 	KeepDemuxed(ctx context.Context, path string, ref EmbeddedSubtitleRef, demuxCopy DemuxCopy, srcSize int64, srcModTime time.Time) error
 }
 
+// The node admits at most subtitleDemuxSlots whole-track demuxes at once,
+// beside the streams reading beside them. A run past the bound is refused
+// with ErrSubtitleReadsBusy, not queued, even when the response has already
+// started (a fill's viewer finishing on its own, a WebVTT header sent ahead):
+// that response ends as a failed demux would. Warms run in their warm slots
+// instead, and AI translation in its job slots.
+const subtitleDemuxSlots = 4
+
+var subtitleDemuxes = make(chan struct{}, subtitleDemuxSlots)
+
+// admitDemux takes one of the process's demux slots, or refuses with
+// ErrSubtitleReadsBusy when none is free. release gives it back.
+func admitDemux() (release func(), err error) {
+	select {
+	case subtitleDemuxes <- struct{}{}:
+		return func() { <-subtitleDemuxes }, nil
+	default:
+		return nil, ErrSubtitleReadsBusy
+	}
+}
+
 // ErrSubtitleReadsBusy means the node already admits as many whole-track
 // subtitle reads as it allows. A request can retry after
 // SubtitleReadsRetryAfter seconds.

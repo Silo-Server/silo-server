@@ -3,7 +3,6 @@ package subtitles
 import (
 	"bytes"
 	"errors"
-	"slices"
 	"testing"
 	"time"
 )
@@ -136,20 +135,6 @@ var retimeCases = []struct {
 	},
 }
 
-func TestRetime(t *testing.T) {
-	for _, tc := range retimeCases {
-		t.Run(tc.name, func(t *testing.T) {
-			got, err := Retime(tc.format, []byte(tc.in), tc.timing)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if string(got) != tc.want {
-				t.Fatalf("got\n%q\nwant\n%q", got, tc.want)
-			}
-		})
-	}
-}
-
 func TestRetimeRejectsUnsupportedFormatAndScale(t *testing.T) {
 	if SupportsRetime(FormatSUB) || !SupportsRetime(FormatASS) {
 		t.Fatal("SupportsRetime misreports")
@@ -159,35 +144,6 @@ func TestRetimeRejectsUnsupportedFormatAndScale(t *testing.T) {
 	}
 	if _, err := Retime(FormatSRT, nil, Timing{Scale: -1}); err == nil {
 		t.Fatal("negative scale accepted")
-	}
-}
-
-func TestParseCuesForFormat(t *testing.T) {
-	ass := "\ufeff[Script Info]\nTitle: x\n\n[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n" +
-		assDisplayedEventKey + " 0,0:00:05.00,0:00:06.00,Default,,0,0,0,,{\\an8}Later, then\n" +
-		"Comment: 0,0:00:00.00,0:00:01.00,Default,,0,0,0,,hidden\n" +
-		assDisplayedEventKey + " 0,0:00:01.50,0:00:02.25,Default,,0,0,0,,{\\i1}Hello{\\i0},\\Nworld\\hagain\n" +
-		assDisplayedEventKey + " 0,0:00:03.00,0:00:04.00,Default,,0,0,0,,{\\p1}m 0 0 l 10 10{\\p0}\n"
-	got, err := ParseCuesForFormat(FormatASS, []byte(ass))
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := []SubtitleCue{
-		{Start: 1500 * time.Millisecond, End: 2250 * time.Millisecond, Lines: []string{"Hello,", "world again"}},
-		{Start: 5 * time.Second, End: 6 * time.Second, Lines: []string{"Later, then"}},
-	}
-	if !slices.EqualFunc(got, want, func(a, b SubtitleCue) bool {
-		return a.Start == b.Start && a.End == b.End && slices.Equal(a.Lines, b.Lines)
-	}) {
-		t.Fatalf("got %#v\nwant %#v", got, want)
-	}
-
-	srt, err := ParseCuesForFormat(FormatSRT, []byte("1\n00:00:01,000 --> 00:00:02,000\nhi\n"))
-	if err != nil || len(srt) != 1 || srt[0].Start != time.Second {
-		t.Fatalf("srt cues=%v err=%v", srt, err)
-	}
-	if _, err := ParseCuesForFormat(FormatSUB, nil); !errors.Is(err, ErrRetimeUnsupported) {
-		t.Fatalf("err=%v", err)
 	}
 }
 

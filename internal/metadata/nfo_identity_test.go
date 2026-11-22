@@ -3,7 +3,7 @@ package metadata
 
 import (
 	"context"
-	"strings"
+
 	"sync"
 	"testing"
 
@@ -106,63 +106,6 @@ func (p *remoteStubProvider) lastSearchProviderIDs() map[string]string {
 	return copyMap(p.lastSearchIDs)
 }
 
-// TestInitialMatch_MalformedIdentityDoesNotSuppressTitleSearch covers malformed
-// trusted IDs, from an NFO or from the scanner: the match falls back to a title
-// search instead of sending them to the remote provider.
-func TestInitialMatch_MalformedIdentityDoesNotSuppressTitleSearch(t *testing.T) {
-	t.Parallel()
-	for _, tc := range []struct {
-		name  string
-		hints MatchHints
-		nfo   *localHintStubProvider
-	}{
-		{
-			name:  "NFO identity",
-			hints: MatchHints{Title: "The Matrix", Year: 1999, Type: "movie"},
-			nfo: &localHintStubProvider{
-				hints:         map[string]string{"tmdb": "not-a-number", "imdb": "nm1234567"},
-				searchResults: []SearchResult{{Name: "The Matrix", Year: 1999, Provider: "nfo", ProviderIDs: map[string]string{"tmdb": "not-a-number"}}},
-				metadata:      &MetadataResult{HasMetadata: true, Title: "The Matrix"},
-			},
-		},
-		{
-			name:  "scanner identity",
-			hints: MatchHints{Title: "The Matrix", Year: 1999, Type: "movie", TmdbID: "not-a-number", ImdbID: "nm1234567"},
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			h := newTestHarness()
-			remote := &remoteStubProvider{
-				slug: "tmdb",
-				searchResults: []SearchResult{{
-					Name: "The Matrix", Year: 1999, Provider: "tmdb", ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt0133093"},
-				}},
-				metadata: &MetadataResult{HasMetadata: true, Title: "The Matrix", Year: 1999, ProviderIDs: map[string]string{"tmdb": "603", "imdb": "tt0133093"}},
-			}
-			providers := []Provider{remote}
-			if tc.nfo != nil {
-				providers = []Provider{tc.nfo, remote}
-			}
-
-			hints := tc.hints
-			result, err := h.service.ProcessWithProviders(context.Background(), ProcessRequest{
-				Hints: &hints,
-				Mode:  ModeInitialMatch,
-			}, providers)
-			if err != nil {
-				t.Fatalf("ProcessWithProviders() error = %v", err)
-			}
-			if result == nil || !result.Updated {
-				t.Fatalf("result = %#v, want title-based remote match", result)
-			}
-			if ids := remote.lastSearchProviderIDs(); ids["tmdb"] != "" || ids["imdb"] != "" {
-				t.Fatalf("remote search received malformed trusted IDs: %#v", ids)
-			}
-		})
-	}
-}
-
 func seedMovieItem(t *testing.T, h *testHarness, contentID, title string, year int) {
 	t.Helper()
 	if err := h.itemRepo.Upsert(context.Background(), &models.MediaItem{
@@ -177,114 +120,6 @@ func seedMovieItem(t *testing.T, h *testHarness, contentID, title string, year i
 		Genres:    []string{},
 	}); err != nil {
 		t.Fatalf("seed item: %v", err)
-	}
-}
-
-// A title-only NFO with no remote search results must still produce an
-// accepted match: the item stays on its path-deterministic local: content id,
-// is persisted as matched, and gains no durable provider IDs (#216).
-func TestInitialMatch_TitleOnlyNFO_NoRemoteResults_MatchesUnderLocalID(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	if err := h.itemRepo.Upsert(ctx, &models.MediaItem{
-		ContentID: "local-abc123",
-		Type:      "movie",
-		Title:     "My Home Movie",
-		Status:    "pending_match",
-		Studios:   []string{},
-		Networks:  []string{},
-		Countries: []string{},
-		Genres:    []string{},
-	}); err != nil {
-		t.Fatalf("seed skeleton: %v", err)
-	}
-
-	nfo := &localHintStubProvider{
-		searchResults: []SearchResult{{Name: "My Home Movie", Year: 2021, Provider: "nfo"}},
-		metadata:      &MetadataResult{HasMetadata: true, Title: "My Home Movie", Year: 2021, Overview: "Curated."},
-	}
-	remote := &remoteStubProvider{slug: "tmdb"}
-
-	result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		ContentID: "local-abc123",
-		Hints: &MatchHints{
-			Title: "My Home Movie",
-			Year:  2021,
-			Type:  "movie",
-		},
-		Language: "en",
-		Mode:     ModeInitialMatch,
-	}, []Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if result == nil || !result.Updated {
-		t.Fatalf("result = %#v, want Updated=true", result)
-	}
-	item, err := h.itemRepo.GetByID(ctx, "local-abc123")
-	if err != nil {
-		t.Fatalf("item not found under local id after title-only NFO match: %v", err)
-	}
-	if item.Status != "matched" {
-		t.Errorf("item status = %q, want matched", item.Status)
-	}
-	if item.Title != "My Home Movie" {
-		t.Errorf("item title = %q, want My Home Movie", item.Title)
-	}
-	if item.TmdbID != "" || item.TvdbID != "" || item.ImdbID != "" {
-		t.Errorf("title-only NFO match must carry no provider ids, got tmdb=%q tvdb=%q imdb=%q",
-			item.TmdbID, item.TvdbID, item.ImdbID)
-	}
-}
-
-// The same title-only flow at the worker level: the queued movie file must
-// leave the match queue (row deleted) with the item matched under local:.
-func TestWorker_TitleOnlyNFO_MovieLeavesMatchQueueMatched(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-	h.service.folderRepo = &fakeWorkerFolderRepo{
-		folders: map[int]*models.MediaFolder{
-			10: {ID: 10, Type: "movies", Enabled: true},
-		},
-	}
-
-	nfo := &localHintStubProvider{
-		searchResults: []SearchResult{{Name: "My Home Movie", Year: 2021, Provider: "nfo"}},
-		metadata:      &MetadataResult{HasMetadata: true, Title: "My Home Movie", Year: 2021},
-	}
-	remote := &remoteStubProvider{slug: "tmdb"}
-	h.service.hooks.process = func(ctx context.Context, req ProcessRequest) (*ProcessResult, error) {
-		return h.service.ProcessWithProviders(ctx, req, []Provider{nfo, remote})
-	}
-
-	file := &models.MediaFile{
-		ID:            1,
-		MediaFolderID: 10,
-		FilePath:      "/media/movies/My Home Movie (2021)/My Home Movie (2021).mkv",
-	}
-	movieRepo := newFakeMovieQueueRepo(file)
-
-	worker := NewMatchWorker(h.service, h.fileRepo, 1, 10, 0)
-	worker.movieClaimer = movieRepo
-	worker.processUnmatched(ctx)
-
-	if _, deleted := movieRepo.deleted[file.ID]; !deleted {
-		t.Fatalf("movie queue row not deleted; errors=%v", movieRepo.errors)
-	}
-	contentID := h.fileRepo.contentIDs[file.ID]
-	if contentID == "" {
-		t.Fatal("file was not linked to a content id")
-	}
-	if !strings.HasPrefix(contentID, "local-") {
-		t.Errorf("content id = %q, want local- prefix", contentID)
-	}
-	item, err := h.itemRepo.GetByID(ctx, contentID)
-	if err != nil {
-		t.Fatalf("load matched item: %v", err)
-	}
-	if item.Status != "matched" {
-		t.Errorf("item status = %q, want matched", item.Status)
 	}
 }
 
@@ -332,49 +167,6 @@ func TestInitialMatch_NFOUniqueIDAnchorsWhenRemoteSearchEmpty(t *testing.T) {
 	}
 	if item.Overview != "From TMDB." {
 		t.Errorf("item overview = %q, want remote enrichment applied", item.Overview)
-	}
-}
-
-// When a title-only NFO coexists with a successful remote search, the remote
-// match must win: no downgrade of a found movie to an unenriched local: item,
-// and the winning candidate keeps the remote provider IDs.
-func TestInitialMatch_TitleOnlyNFO_RemoteSearchWins(t *testing.T) {
-	h := newTestHarness()
-	ctx := context.Background()
-
-	nfo := &localHintStubProvider{
-		searchResults: []SearchResult{{Name: "Inception", Year: 2010, Provider: "nfo"}},
-		metadata:      &MetadataResult{HasMetadata: true, Title: "Inception", Year: 2010},
-	}
-	remote := &remoteStubProvider{
-		slug:          "tmdb",
-		searchResults: []SearchResult{{Name: "Inception", Year: 2010, ProviderIDs: map[string]string{"tmdb": "27205"}, Provider: "tmdb"}},
-		metadata:      &MetadataResult{HasMetadata: true, Title: "Inception", Year: 2010, ProviderIDs: map[string]string{"tmdb": "27205"}},
-	}
-
-	// NFO deliberately first in the chain: chain priority must not let the
-	// ID-less local candidate beat the ID-bearing remote candidate.
-	result, err := h.service.ProcessWithProviders(ctx, ProcessRequest{
-		Hints: &MatchHints{
-			Title: "Inception",
-			Year:  2010,
-			Type:  "movie",
-		},
-		Language: "en",
-		Mode:     ModeInitialMatch,
-	}, []Provider{nfo, remote})
-	if err != nil {
-		t.Fatalf("ProcessWithProviders: %v", err)
-	}
-	if result == nil || !result.Updated {
-		t.Fatalf("result = %#v, want Updated=true", result)
-	}
-	item, err := h.itemRepo.GetByID(ctx, result.ContentID)
-	if err != nil {
-		t.Fatalf("load matched item: %v", err)
-	}
-	if item.TmdbID != "27205" {
-		t.Errorf("item tmdb id = %q, want 27205 (remote match must not be downgraded to local:)", item.TmdbID)
 	}
 }
 

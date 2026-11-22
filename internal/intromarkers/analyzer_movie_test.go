@@ -139,96 +139,6 @@ func TestRunPlacesMovieCreditsFromVideo(t *testing.T) {
 	}
 }
 
-// A sampled tail is stored only once the movie's credits are settled. A
-// movie canceled while its credits are refined, or whose credits write
-// fails, keeps no complete tail, so the scheduled run, which skips movies
-// with one, takes it up again.
-func TestAnalyzeMovieStoresTheTailOnlyOnceCreditsAreSettled(t *testing.T) {
-	movie := movieCandidate(10, 7200)
-	repo := &fakeIntroRepository{movieCandidates: []Candidate{movie}}
-	ctx, cancel := context.WithCancel(context.Background())
-	sampler := &fakeMovieSampler{onSilences: cancel}
-	analyzer := movieAnalyzer(repo, sampler)
-
-	if _, err := analyzer.AnalyzeMovie(ctx, "movie"); !errors.Is(err, context.Canceled) {
-		t.Fatalf("AnalyzeMovie: %v, want canceled", err)
-	}
-	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != "" || len(creditsPatches(repo)) != 0 {
-		t.Fatalf("canceled during refinement: artifact status %q, patches %+v; want neither", artifact.Status, creditsPatches(repo))
-	}
-
-	sampler.onSilences = nil
-	repo.patchErr = func(MarkerPatch) error { return errors.New("database went away") }
-	summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
-	if err != nil {
-		t.Fatalf("AnalyzeMovie: %v", err)
-	}
-	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != "" || len(summary.Errors) != 1 {
-		t.Fatalf("failed write: artifact status %q, summary %+v; want no artifact and the error", artifact.Status, summary)
-	}
-
-	repo.patchErr = nil
-	summary, err = analyzer.AnalyzeMovie(context.Background(), "movie")
-	if err != nil {
-		t.Fatalf("AnalyzeMovie: %v", err)
-	}
-	if artifact := repo.artifact(10, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusComplete ||
-		summary.MovieCreditsMarkersWritten != 1 || sampler.tailCount() != 3 {
-		t.Fatalf("artifact status %q, summary %+v, %d tail passes; want the third pass stored with its credits", artifact.Status, summary, sampler.tailCount())
-	}
-}
-
-// A movie whose markers were invalidated after its tail was stored gets its
-// credits placed again from that tail, which is stored again with the
-// file's invalidation time so the scheduled run settles it. Once stored
-// with that time, the tail is not stored again.
-func TestAnalyzeMovieResettlesATailStoredBeforeAnInvalidation(t *testing.T) {
-	ctx := context.Background()
-	repo := &fakeIntroRepository{movieCandidates: []Candidate{movieCandidate(10, 7200)}}
-	sampler := &fakeMovieSampler{}
-	analyzer := movieAnalyzer(repo, sampler)
-	if _, err := analyzer.AnalyzeMovie(ctx, "movie"); err != nil {
-		t.Fatalf("AnalyzeMovie: %v", err)
-	}
-	slot := artifactSlot{10, ArtifactKindCreditsTail}
-	if stamp := repo.artifacts[slot].MarkersInvalidatedAt; stamp != nil {
-		t.Fatalf("first tail stored with invalidation time %v, want none", stamp)
-	}
-	tails := sampler.tailCount()
-	invalidated := time.Date(2026, 10, 25, 21, 0, 0, 0, time.UTC)
-	repo.movieCandidates[0].MarkersInvalidatedAt = &invalidated
-	for _, tc := range []struct {
-		name       string
-		wantStored bool
-	}{
-		{name: "tail stored before the invalidation", wantStored: true},
-		{name: "tail stored with the invalidation", wantStored: false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			before := repo.artifacts[slot]
-			before.UpdatedAt = time.Time{}
-			repo.artifacts[slot] = before
-			repo.patches = nil
-			repo.movieCandidates[0].CreditsStart, repo.movieCandidates[0].CreditsEnd = nil, nil
-
-			summary, err := analyzer.AnalyzeMovie(ctx, "movie")
-			if err != nil {
-				t.Fatalf("AnalyzeMovie: %v", err)
-			}
-			if summary.MovieCreditsMarkersWritten != 1 || sampler.tailCount() != tails {
-				t.Fatalf("summary %+v, %d new tail passes; want credits placed from the stored tail", summary, sampler.tailCount()-tails)
-			}
-			after := repo.artifacts[slot]
-			if stored := !after.UpdatedAt.IsZero(); stored != tc.wantStored {
-				t.Fatalf("tail stored again = %v, want %v", stored, tc.wantStored)
-			}
-			if after.MarkersInvalidatedAt == nil || !after.MarkersInvalidatedAt.Equal(invalidated) {
-				t.Fatalf("tail invalidation time %v, want %v", after.MarkersInvalidatedAt, invalidated)
-			}
-		})
-	}
-}
-
 // A silence pass killed at its deadline keeps the video start but leaves
 // the movie unsettled: its tail is recorded as failed with a backoff, not
 // stored complete, so the scheduled run takes it up again. A silence pass
@@ -286,165 +196,90 @@ func TestAnalyzeMovieSilenceTimeoutLeavesTheMovieUnsettled(t *testing.T) {
 	}
 }
 
-// RunEpisodes, the pass a server without Chromaprint runs outside the
-// cluster lock, leaves movies to RunMovies under the lock.
-func TestRunEpisodesLeavesMovies(t *testing.T) {
-	repo := &fakeIntroRepository{enabledLibraries: 1, movieCandidates: []Candidate{movieCandidate(10, 7200)}}
-	sampler := &fakeMovieSampler{}
-	summary, err := movieAnalyzer(repo, sampler).RunEpisodes(context.Background(), allMarkerKinds, nil)
-	if err != nil {
-		t.Fatalf("RunEpisodes: %v", err)
-	}
-	if summary.MoviesConsidered != 0 || sampler.tailCount() != 0 || len(creditsPatches(repo)) != 0 {
-		t.Fatalf("summary %+v, %d tail passes, patches %+v; want movies untouched", summary, sampler.tailCount(), creditsPatches(repo))
-	}
+// stallingEpisodes is a repository whose episode count, the episode pass's
+// first read, waits for its context to end, like an episode pass on a library
+// too large to finish. It then calls afterStall, if set, and returns err, or
+// the context's error when err is nil.
+type stallingEpisodes struct {
+	*fakeIntroRepository
+	err        error
+	afterStall func()
 }
 
-// RunMovies, the pass a server without Chromaprint runs under the cluster
-// lock after its episodes, analyzes movies and leaves episodes alone.
-func TestRunMoviesLeavesEpisodes(t *testing.T) {
-	repo := &fakeIntroRepository{
-		enabledLibraries:   1,
-		eligibleCandidates: []Candidate{{FileID: 1, EpisodeID: "episode", SeasonID: "season", DurationSeconds: 1800}},
-		movieCandidates:    []Candidate{movieCandidate(10, 7200)},
+func (s stallingEpisodes) CountEligibleCandidates(ctx context.Context) (int, error) {
+	<-ctx.Done()
+	if s.afterStall != nil {
+		s.afterStall()
 	}
-	sampler := &fakeMovieSampler{}
-	summary, err := movieAnalyzer(repo, sampler).RunMovies(context.Background(), allMarkerKinds, nil)
-	if err != nil {
-		t.Fatalf("RunMovies: %v", err)
+	if s.err != nil {
+		return 0, s.err
 	}
-	if summary.FilesConsidered != 0 || summary.MoviesConsidered != 1 || summary.MovieCreditsMarkersWritten != 1 {
-		t.Fatalf("summary %+v; want the movie analyzed and no episodes", summary)
-	}
-
-	// The task merges both passes' summaries; they count the same libraries.
-	episodes := RunSummary{LibrariesScanned: 1, FilesConsidered: 4}
-	episodes.Merge(summary)
-	if episodes.LibrariesScanned != 1 || episodes.FilesConsidered != 4 || episodes.MovieCreditsMarkersWritten != 1 {
-		t.Fatalf("merged summary %+v; want both passes' counts over one library", episodes)
-	}
+	return 0, ctx.Err()
 }
 
-func TestAnalyzeMoviePrefersChapters(t *testing.T) {
-	movie := movieCandidate(10, 7200)
-	movie.Chapters = []models.MediaChapter{
-		{Title: "Chapter 1", StartSeconds: 0, EndSeconds: 6700},
-		{Title: "End Credits", StartSeconds: 6700, EndSeconds: 7200},
+// Issue #3421: a run with a deadline stops its episodes early enough for the
+// movies to get their budget, and so does the episode pass a server without
+// Chromaprint runs before its separate movie pass. A cancel, or an error
+// other than the deadline, during the episodes still stops the run.
+func TestRunLeavesMoviesTheirShareOfTheDeadline(t *testing.T) {
+	errDatabase := errors.New("database unavailable")
+	run := func(a *Analyzer, ctx context.Context) (RunSummary, error) { return a.Run(ctx, allMarkerKinds, nil) }
+	runEpisodes := func(a *Analyzer, ctx context.Context) (RunSummary, error) {
+		return a.RunEpisodes(ctx, allMarkerKinds, nil)
 	}
-	repo := &fakeIntroRepository{movieCandidates: []Candidate{movie}}
-	sampler := &fakeMovieSampler{}
-	summary, err := movieAnalyzer(repo, sampler).AnalyzeMovie(context.Background(), "movie")
-	if err != nil {
-		t.Fatalf("AnalyzeMovie: %v", err)
-	}
-	credits := creditsPatches(repo)
-	if len(credits) != 1 || credits[0].Start != 6700 || credits[0].Algorithm != CreditsChapterAlgorithm ||
-		summary.MovieCreditsMarkersWritten != 1 || sampler.tailCount() != 0 {
-		t.Fatalf("credits %+v, summary %+v, %d tail passes; want the chapter without a pass", credits, summary, sampler.tailCount())
-	}
-}
+	for _, tc := range []struct {
+		name     string
+		run      func(*Analyzer, context.Context) (RunSummary, error)
+		cancelAt time.Duration
+		// cancelAsShareEnds cancels the run as the episodes' share ends.
+		cancelAsShareEnds bool
+		// noMovies leaves the movie pass nothing to analyze.
+		noMovies    bool
+		episodesErr error
+		wantErr     error
+		wantMovies  int
+		wantSpent   bool
+	}{
+		{name: "episode share spent", run: run, wantMovies: 1, wantSpent: true},
+		{name: "episode pass alone leaves the movie share", run: runEpisodes, wantSpent: true},
+		{name: "repository error at the end of the share", run: run, episodesErr: errDatabase, wantErr: errDatabase},
+		{name: "canceled during episodes", run: run, cancelAt: 50 * time.Millisecond, wantErr: context.Canceled},
+		{name: "episode pass alone canceled as its share ends", run: runEpisodes, cancelAsShareEnds: true, wantErr: context.Canceled, wantSpent: true},
+		{name: "no movies to analyze leaves the episodes the whole run", run: run, noMovies: true, wantErr: context.DeadlineExceeded},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			repo := &fakeIntroRepository{enabledLibraries: 1, movieCandidates: []Candidate{movieCandidate(10, 7200)}}
+			if tc.noMovies {
+				repo.movieCandidates = nil
+			}
+			sampler := &fakeMovieSampler{}
+			analyzer := movieAnalyzer(repo, sampler)
+			analyzer.repo = stallingEpisodes{fakeIntroRepository: repo, err: tc.episodesErr}
+			// The episodes' share ends a second before the deadline, which
+			// leaves the movie pass a wide margin on a loaded runner.
+			analyzer.movieBudget = time.Second
+			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if tc.cancelAt > 0 {
+				stop := time.AfterFunc(tc.cancelAt, cancel)
+				defer stop.Stop()
+			}
+			if tc.cancelAsShareEnds {
+				analyzer.repo = stallingEpisodes{fakeIntroRepository: repo, err: tc.episodesErr, afterStall: cancel}
+			}
 
-// A movie's chapter credits that its chapters no longer produce are withdrawn,
-// and the tail pass places its credits instead.
-func TestAnalyzeMovieWithdrawsStaleChapterCredits(t *testing.T) {
-	movie := movieCandidate(10, 7200)
-	start, end, scanner := 6700.0, 7200.0, models.MarkerSourceScanner
-	movie.CreditsStart, movie.CreditsEnd, movie.CreditsMarkersSource = &start, &end, &scanner
-	movie.CreditsMarkersAlgorithm = strPtr(CreditsChapterAlgorithm)
-	repo := &fakeIntroRepository{movieCandidates: []Candidate{movie}}
-	sampler := &fakeMovieSampler{}
-	summary, err := movieAnalyzer(repo, sampler).AnalyzeMovie(context.Background(), "movie")
-	if err != nil {
-		t.Fatalf("AnalyzeMovie: %v", err)
-	}
-	if len(repo.withdrawals) != 1 || repo.withdrawals[0].FileID != 10 || summary.CreditsChapterMarkersWithdrawn != 1 {
-		t.Fatalf("withdrawals %+v, summary %+v; want the stale chapter credits withdrawn", repo.withdrawals, summary)
-	}
-	if sampler.tailCount() != 1 {
-		t.Fatalf("%d tail passes, want the tail pass to run in the chapter's place", sampler.tailCount())
-	}
-}
-
-func TestAnalyzeMovieLeavesHigherPriorityCredits(t *testing.T) {
-	movie := movieCandidate(10, 7200)
-	start, end, online := 6500.0, 7200.0, models.MarkerSourceOnline
-	movie.CreditsStart, movie.CreditsEnd, movie.CreditsMarkersSource = &start, &end, &online
-	repo := &fakeIntroRepository{movieCandidates: []Candidate{movie}}
-	sampler := &fakeMovieSampler{}
-	if _, err := movieAnalyzer(repo, sampler).AnalyzeMovie(context.Background(), "movie"); err != nil {
-		t.Fatal(err)
-	}
-	if len(creditsPatches(repo)) != 0 || sampler.tailCount() != 0 {
-		t.Fatalf("patches %+v, %d tail passes; want the online credits left alone", repo.patches, sampler.tailCount())
-	}
-}
-
-func TestAnalyzeMovieStatuses(t *testing.T) {
-	noVideo := movieCandidate(11, 7200)
-	noVideo.CodecVideo = ""
-	failing := movieCandidate(12, 7200)
-	repo := &fakeIntroRepository{movieCandidates: []Candidate{noVideo, failing}}
-	sampler := &fakeMovieSampler{errs: map[int]error{12: errors.New("network share went away")}}
-	analyzer := movieAnalyzer(repo, sampler)
-
-	summary, err := analyzer.AnalyzeMovie(context.Background(), "movie")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if summary.CreditsTailUnusable != 1 || summary.CreditsTailScanErrors != 1 || len(creditsPatches(repo)) != 0 {
-		t.Fatalf("summary %+v", summary)
-	}
-	// A tail ruled out by probe metadata is decided on every analysis, not
-	// stored.
-	if artifact := repo.artifact(11, ArtifactKindCreditsTail); artifact.Status != "" {
-		t.Fatalf("no-video artifact status %q, want none stored", artifact.Status)
-	}
-	if artifact := repo.artifact(12, ArtifactKindCreditsTail); artifact.Status != mediaartifact.StatusFailed || artifact.RecordedBy != "node-a" {
-		t.Fatalf("failed artifact %+v", artifact)
-	}
-
-	// The next analysis samples neither: one has no video, the other backs
-	// off.
-	summary, err = analyzer.AnalyzeMovie(context.Background(), "movie")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sampler.tailCount() != 1 || summary.CreditsTailUnusable != 1 || summary.CreditsTailScanErrors != 0 {
-		t.Fatalf("%d tail passes, summary %+v; want no new pass", sampler.tailCount(), summary)
-	}
-}
-
-func TestAnalyzeMovieWithoutVisualsUsesChaptersOnly(t *testing.T) {
-	chapterCandidate := movieCandidate(11, 7200)
-	chapterCandidate.Chapters = []models.MediaChapter{{Title: "End Credits", StartSeconds: 6900, EndSeconds: 7200}}
-	repo := &fakeIntroRepository{movieCandidates: []Candidate{movieCandidate(10, 7200), chapterCandidate}}
-	sampler := &fakeMovieSampler{preflight: errors.New("ffmpeg lacks signalstats")}
-	summary, err := movieAnalyzer(repo, sampler).AnalyzeMovie(context.Background(), "movie")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sampler.tailCount() != 0 || summary.MovieCreditsMarkersWritten != 1 || len(repo.patches) != 1 {
-		t.Fatalf("%d tail passes, summary %+v, patches %+v", sampler.tailCount(), summary, repo.patches)
-	}
-	if patch := repo.patches[0]; patch.FileID != 11 || patch.Start != 6900 || patch.End != 7200 || patch.Algorithm != CreditsChapterAlgorithm {
-		t.Fatalf("chapter credits patch = %+v, want file 11 at 6900–7200", patch)
-	}
-}
-
-// The scheduled run lists movies a page at a time until none are left.
-func TestRunPagesMovies(t *testing.T) {
-	repo := &fakeIntroRepository{enabledLibraries: 1, movieCandidates: []Candidate{
-		movieCandidate(10, 7200), movieCandidate(11, 7200), movieCandidate(12, 7200), movieCandidate(13, 7200), movieCandidate(14, 7200),
-	}}
-	sampler := &fakeMovieSampler{}
-	analyzer := movieAnalyzer(repo, sampler)
-	analyzer.moviePageSize = 2
-	summary, err := analyzer.RunMovies(context.Background(), allMarkerKinds, nil)
-	if err != nil {
-		t.Fatalf("RunMovies: %v", err)
-	}
-	if repo.movieListCalls != 3 || sampler.tailCount() != 5 || summary.MoviesConsidered != 5 || summary.MovieCreditsMarkersWritten != 5 {
-		t.Fatalf("%d listings, %d tail passes, summary %+v; want three pages covering five movies", repo.movieListCalls, sampler.tailCount(), summary)
+			summary, err := tc.run(analyzer, ctx)
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("error = %v, want %v", err, tc.wantErr)
+			}
+			if summary.EpisodeBudgetExhausted != tc.wantSpent || sampler.tailCount() != tc.wantMovies || summary.MovieCreditsMarkersWritten != tc.wantMovies {
+				t.Fatalf("summary %+v, %d tail passes; want episode_budget_exhausted %v and %d movies", summary, sampler.tailCount(), tc.wantSpent, tc.wantMovies)
+			}
+			if tc.wantErr == nil && ctx.Err() != nil {
+				t.Fatalf("ctx %v; want the run finished before its deadline", ctx.Err())
+			}
+		})
 	}
 }
 

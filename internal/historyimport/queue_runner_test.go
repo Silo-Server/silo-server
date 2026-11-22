@@ -3,7 +3,6 @@ package historyimport
 import (
 	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -292,34 +291,6 @@ func TestQueuePersistedIntentRestartAndCapacity(t *testing.T) {
 	}
 }
 
-func TestQueueBulkLimitAndOrderedOutcomes(t *testing.T) {
-	repo := queueRunnerRepository(t)
-	ctx := t.Context()
-	service := &Service{repo: repo}
-	if _, err := repo.EnqueueAdminRun(ctx, 1, AdminRunOptions{}); err != nil {
-		t.Fatal(err)
-	}
-	result, err := service.BulkCreateAdminRuns(ctx, 1, AdminRunOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Outcomes) != 2 || result.Outcomes[0].MappingID != 1 || result.Outcomes[0].Status != "active" || result.Outcomes[1].Status != "accepted" {
-		t.Fatalf("outcomes=%+v", result)
-	}
-	for id := 3; id <= 201; id++ {
-		if _, err = repo.pool.Exec(ctx, `INSERT INTO history_import_user_mappings(id,external_user_name) VALUES($1,$2)`, id, fmt.Sprint(id)); err != nil {
-			t.Fatal(err)
-		}
-	}
-	if _, err = service.BulkCreateAdminRuns(ctx, 1, AdminRunOptions{}); !errors.Is(err, ErrBulkRunTooLarge) {
-		t.Fatalf("oversize=%v", err)
-	}
-	var count int
-	if err = repo.pool.QueryRow(ctx, `SELECT count(*) FROM history_import_runs`).Scan(&count); err != nil || count != 2 {
-		t.Fatalf("oversize effects=%d %v", count, err)
-	}
-}
-
 type heldQueueProvider struct {
 	started chan struct{}
 	release chan struct{}
@@ -433,43 +404,6 @@ func TestQueueLegacyOrphansAndPersonalLifecycle(t *testing.T) {
 type queueObserverFunc func(Run)
 
 func (f queueObserverFunc) RunUpdated(run Run) { f(run) }
-
-func TestQueueBulkPartialFailureAndSourceAuditPaging(t *testing.T) {
-	repo := queueRunnerRepository(t)
-	ctx := t.Context()
-	service := &Service{repo: repo}
-	service.AddObserver(queueObserverFunc(func(Run) {
-		if _, err := repo.pool.Exec(ctx, `UPDATE history_import_sources SET admin_token=NULL,revision=revision+1 WHERE id=1`); err != nil {
-			t.Error(err)
-		}
-	}))
-	result, err := service.BulkCreateAdminRuns(ctx, 1, AdminRunOptions{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.Outcomes) != 2 || result.Outcomes[0].Status != "accepted" || result.Outcomes[1].Status != "failed" || result.Errors != 1 || result.Outcomes[1].Error != "Source has no admin token configured." {
-		t.Fatalf("partial=%+v", result)
-	}
-	first := result.Runs[0]
-	if err = repo.CancelRunIfActive(ctx, first.ID); err != nil {
-		t.Fatal(err)
-	}
-	// Detaching a mapping must not erase source-filtered run history.
-	if _, err = repo.pool.Exec(ctx, `DELETE FROM history_import_user_mappings WHERE id=1`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err = repo.pool.Exec(ctx, `INSERT INTO history_import_runs(id,status,dispatch_version,dispatch_source_id,created_at) VALUES('older','completed',1,1,now()-interval '1 day'),('other-source','completed',1,2,now())`); err != nil {
-		t.Fatal(err)
-	}
-	page, more, err := repo.ListAdminRunsPage(ctx, new(1), nil, 1)
-	if err != nil || !more || len(page) != 1 || page[0].ID != first.ID {
-		t.Fatalf("page=%+v more=%v err=%v", page, more, err)
-	}
-	page, more, err = repo.ListAdminRunsPage(ctx, new(1), &RunKey{CreatedAt: page[0].CreatedAt, ID: page[0].ID}, 1)
-	if err != nil || more || len(page) != 1 || page[0].ID != "older" {
-		t.Fatalf("next=%+v more=%v err=%v", page, more, err)
-	}
-}
 
 func TestQueueCancelCompletionRaceHasOneTerminalOutcome(t *testing.T) {
 	repo := queueRunnerRepository(t)

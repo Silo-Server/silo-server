@@ -2,9 +2,34 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { setAccessToken, setProfileId, setProfileToken } from "@/api/client";
 import { DirectDownloadError, isStaleFileError, prepareDirectDownload } from "./directDownloads";
 
-const URL_PATH = "/api/v2/direct-download?file_id=42&token=original-account-token";
+const LINK_URL = "/api/v2/direct-download?file_id=42&dl=link-token";
+const LINK_PATH = "/api/v2/direct-download/links";
 
 let createObjectURL: ReturnType<typeof vi.spyOn>;
+
+/** The minted link the server hands back for the preflight. */
+function mintResponse(): Response {
+  return new Response(
+    JSON.stringify({
+      url: LINK_URL,
+      proxy_url: "/api/v2/direct-download-proxy?file_id=42&dl=link-token",
+      expires_at: "2026-01-01T00:30:00Z",
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } },
+  );
+}
+
+/**
+ * Stubs fetch for the two-step preparation: the link mint answers first, and
+ * every other request is the caller's probe.
+ */
+function stubFetch(probe: (init?: RequestInit) => Response | Promise<Response>) {
+  const fetch = vi.fn((input: RequestInfo | URL, init?: RequestInit) =>
+    String(input).includes(LINK_PATH) ? Promise.resolve(mintResponse()) : probe(init),
+  );
+  vi.stubGlobal("fetch", fetch);
+  return fetch;
+}
 
 beforeEach(() => {
   setAccessToken("original-account-token");
@@ -26,33 +51,34 @@ afterEach(() => {
 });
 
 describe("direct download preflight", () => {
-  it("ranged-probes the captured URL and returns the authenticated save link", async () => {
-    const fetch = vi.fn().mockResolvedValue(
-      new Response(null, {
-        status: 206,
-        headers: { "Content-Disposition": `attachment; filename="Movie.mp4"` },
-      }),
+  it("mints a link, ranged-probes it, and returns the save link", async () => {
+    const fetch = stubFetch(
+      () =>
+        new Response(null, {
+          status: 206,
+          headers: { "Content-Disposition": `attachment; filename="Movie.mp4"` },
+        }),
     );
-    vi.stubGlobal("fetch", fetch);
 
     const download = await prepareDirectDownload(42, () => true, new AbortController().signal);
 
-    // One request only: a ranged preflight. The transfer is the link's own
-    // navigation, not an awaited fetch.
-    expect(fetch).toHaveBeenCalledTimes(1);
-    expect(fetch.mock.calls[0]?.[0]).toBe(URL_PATH);
-    expect(fetch.mock.calls[0]?.[1]).toMatchObject({
+    // Two requests: the profile-bound link, then a ranged preflight. The
+    // transfer is the link's own navigation, not an awaited fetch.
+    expect(fetch).toHaveBeenCalledTimes(2);
+    expect(fetch.mock.calls[0]?.[0]).toBe(LINK_PATH);
+    expect(fetch.mock.calls[1]?.[0]).toBe(LINK_URL);
+    expect(fetch.mock.calls[1]?.[1]).toMatchObject({
       method: "GET",
       cache: "no-store",
       headers: { Range: "bytes=0-0" },
     });
-    expect(download.url).toBe(URL_PATH);
+    expect(download.url).toBe(LINK_URL);
     expect(download.filename).toBe("Movie.mp4");
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
   it("falls back to the caller filename when the server sends no disposition", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 200 })));
+    stubFetch(() => new Response(null, { status: 200 }));
 
     const download = await prepareDirectDownload(
       42,
@@ -68,17 +94,15 @@ describe("direct download preflight", () => {
     "refuses a late probe after %s authority changes",
     async (kind) => {
       let resolve!: (r: Response) => void;
-      vi.stubGlobal(
-        "fetch",
-        vi.fn(
-          () =>
-            new Promise<Response>((r) => {
-              resolve = r;
-            }),
-        ),
+      stubFetch(
+        () =>
+          new Promise<Response>((r) => {
+            resolve = r;
+          }),
       );
       let current = true;
       const pending = prepareDirectDownload(42, () => current, new AbortController().signal);
+      await vi.waitFor(() => expect(resolve).toBeTypeOf("function"));
       if (kind === "account") setAccessToken("replacement");
       if (kind === "profile") setProfileId("profile-two");
       if (kind === "pin") setProfileToken("pin-two");
@@ -90,16 +114,13 @@ describe("direct download preflight", () => {
   );
 
   it("aborts an in-flight probe when its controller fires", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(
-        (_url: string, init?: RequestInit) =>
-          new Promise<Response>((_resolve, reject) => {
-            init?.signal?.addEventListener("abort", () =>
-              reject(new DOMException("aborted", "AbortError")),
-            );
-          }),
-      ),
+    stubFetch(
+      (init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          );
+        }),
     );
     const controller = new AbortController();
     const pending = prepareDirectDownload(42, () => true, controller.signal);
@@ -119,7 +140,7 @@ describe("direct download preflight", () => {
   });
 
   it("reports a refused probe with a concrete, status-specific reason", async () => {
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(null, { status: 403 })));
+    stubFetch(() => new Response(null, { status: 403 }));
     const pending = prepareDirectDownload(42, () => true, new AbortController().signal);
     await expect(pending).rejects.toBeInstanceOf(DirectDownloadError);
     await expect(pending).rejects.toMatchObject({
@@ -130,19 +151,17 @@ describe("direct download preflight", () => {
   });
 
   it("does not attempt a transfer after a failed probe", async () => {
-    const fetch = vi.fn().mockRejectedValue(new TypeError("network"));
-    vi.stubGlobal("fetch", fetch);
+    const fetch = stubFetch(() => Promise.reject(new TypeError("network")));
     await expect(
       prepareDirectDownload(42, () => true, new AbortController().signal),
     ).rejects.toThrow();
-    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(fetch).toHaveBeenCalledTimes(2);
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 
   it("carries the problem code and a refresh prompt for a stale file_id", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
+    stubFetch(
+      () =>
         new Response(
           JSON.stringify({
             type: "https://siloserver.org/docs/api/v2/problems/file_unavailable",
@@ -152,7 +171,6 @@ describe("direct download preflight", () => {
           }),
           { status: 404, headers: { "Content-Type": "application/problem+json" } },
         ),
-      ),
     );
     const pending = prepareDirectDownload(42, () => true, new AbortController().signal);
     await expect(pending).rejects.toMatchObject({
@@ -163,9 +181,8 @@ describe("direct download preflight", () => {
   });
 
   it("keeps the denial text for a file-level access refusal", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
+    stubFetch(
+      () =>
         new Response(
           JSON.stringify({
             type: "https://siloserver.org/docs/api/v2/problems/file_access_denied",
@@ -174,7 +191,6 @@ describe("direct download preflight", () => {
           }),
           { status: 403, headers: { "Content-Type": "application/problem+json" } },
         ),
-      ),
     );
     await expect(
       prepareDirectDownload(42, () => true, new AbortController().signal),

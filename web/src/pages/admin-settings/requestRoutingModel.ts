@@ -1,4 +1,5 @@
 import type { PluginAdminForm, PluginAdminFormField, RequestIntegration } from "@/api/types";
+import { joinList } from "@/lib/appLocale";
 import type {
   RequestRoute,
   RequestRouteBody,
@@ -293,6 +294,8 @@ type Text = (id: MessageKey, values?: TextValues) => string;
 function orList(values: readonly string[], tx: Text = t): string {
   if (values.length <= 1) return values[0] ?? "";
   return tx("web.admin.settings.requests.model.orList", {
+    // Not joinList: a language's list format can add its own "and" (German
+    // "A, B und C"), which would contradict the "or" this message adds.
     items: values.slice(0, -1).join(", "),
     last: values.at(-1)!,
   });
@@ -729,7 +732,7 @@ export interface OverrideNames {
 }
 
 function overrideValueLabel(key: string, value: unknown, names: OverrideNames): string {
-  if (Array.isArray(value)) return value.map((v) => overrideValueLabel(key, v, names)).join(", ");
+  if (Array.isArray(value)) return joinList(value.map((v) => overrideValueLabel(key, v, names)));
   if (typeof value === "boolean") {
     return t(
       value
@@ -978,7 +981,7 @@ export function factsSentence(facts: RequestRouteFacts, mediaType: RequestRouteM
     facts.anime ? t("web.admin.settings.requests.model.facts.anime") : null,
     facts.original_language ? routingLanguageName(facts.original_language) : null,
     facts.origin_countries.length > 0
-      ? facts.origin_countries.map((code) => routingCountryName(code)).join(", ")
+      ? joinList(facts.origin_countries.map((code) => routingCountryName(code)))
       : null,
     facts.year ? String(facts.year) : null,
     mediaType === "series"
@@ -991,7 +994,7 @@ export function factsSentence(facts: RequestRouteFacts, mediaType: RequestRouteM
           rating: ratingLabel(facts.content_rating),
         })
       : t("web.admin.settings.requests.model.facts.noRating"),
-    facts.genre_ids.length > 0 ? genreNames(facts.genre_ids, mediaType).join(", ") : null,
+    facts.genre_ids.length > 0 ? joinList(genreNames(facts.genre_ids, mediaType)) : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -1007,7 +1010,7 @@ export interface TraceContext {
 
 /** A title's fact as a trace reads it: "genre is Animation, Family", or "no genres". */
 function has(values: readonly string[], none: MessageKey, label: MessageKey): string {
-  return values.length > 0 ? t(label, { values: values.join(", ") }) : t(none);
+  return values.length > 0 ? t(label, { values: joinList([...values]) }) : t(none);
 }
 
 /** "<fact> (wants <wanted>)", or (`except`) "<fact> (wants anything but <wanted>)". */

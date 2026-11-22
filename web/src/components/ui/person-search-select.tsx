@@ -7,6 +7,7 @@ import { useDebounce } from "@/hooks/useDebounce";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { PortalContainerContext } from "./portal-container-context";
+import { isImeComposing } from "@/lib/imeComposition";
 
 interface PersonSearchSelectProps {
   value: string;
@@ -53,6 +54,7 @@ export function PersonSearchSelect({
   }, [open]);
 
   function handleSearchKeyDown(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (isImeComposing(event)) return;
     if (event.key === "ArrowDown") {
       event.preventDefault();
       setFocusedIndex((prev) => (prev < allItems.length - 1 ? prev + 1 : prev));

@@ -11,6 +11,7 @@ import type {
   RequestUserState,
 } from "@/api/types";
 import { numberText, t } from "@/i18n";
+import { joinList } from "@/lib/appLocale";
 import { formatDate } from "@/lib/datetime";
 
 export function formatMediaType(mediaType: RequestMediaType): string {
@@ -144,15 +145,19 @@ export function formatRequestDisplayState(state: RequestDisplayState): string {
 /**
  * Mirrors the server's rule for withdrawing a request, which decline and
  * cancel share: a request can be withdrawn until something has been sent for
- * it, so while it is pending, or approved with no target yet. (The server also
- * refuses the moment a send is in flight.)
+ * it, so while it is pending, or approved with no target yet other than failed
+ * ones a retry has yet to resend. (The server also refuses the moment a send
+ * is in flight.)
  */
 export function canWithdrawRequest(
   request: Pick<MediaRequest, "status" | "outcome" | "targets">,
 ): boolean {
   if (request.outcome !== "active") return false;
   if (request.status === "pending") return true;
-  return request.status === "approved" && (request.targets?.length ?? 0) === 0;
+  return (
+    request.status === "approved" &&
+    (request.targets ?? []).every((target) => target.status === "failed")
+  );
 }
 
 /**
@@ -311,7 +316,7 @@ export function formatSeasonList(seasons: number[]): string {
     );
     i = j + 1;
   }
-  return t("web.requests.status.seasonList", { count: sorted.length, list: runs.join(", ") });
+  return t("web.requests.status.seasonList", { count: sorted.length, list: joinList(runs) });
 }
 
 /**

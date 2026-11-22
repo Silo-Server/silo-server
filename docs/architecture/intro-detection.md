@@ -42,6 +42,30 @@ for a single item does not take the lock.
    extension is capped at five seconds because longer ones mostly overshot into
    the episode. Other files of the same episode with a matching duration copy
    the result (`episode-version-copy:v1`).
+
+   Many anime releases title the cold open `Intro` and the opening song `OP`.
+   So when any file of the season group (below), the file itself included,
+   has an opening song chapter (`OP`, `OP2`, `OP: …`, `Opening`, `Opening 2`,
+   or `Opening: …`, but not `Opening Credits`), an `Intro` or `Introduction`
+   chapter there is read as a cold open and is not the intro. A release that
+   never names an opening song keeps `Intro` as its intro. Two adjacent
+   intro-like chapters, such as `Intro` then `OP`, are still ambiguous and go
+   to Chromaprint. Every pass that reads chapters, including playback, admin
+   re-detection, and the silence backfill, reads them against the whole season
+   group, so a file's result does not depend on how its analysis started.
+
+   When a file's chapters no longer produce the chapter intro stored for it,
+   because they give no intro or one that doesn't overlap it, as after a change
+   to these rules or a remux, local analysis withdraws it (`chapter:v1`,
+   `chapter:silence:v1`, `chapter:silence:v2`) and places the new one if there
+   is one. It withdraws a version copy (`episode-version-copy:v1`) once no
+   version of the episode it could be copied from (a duration within three
+   seconds) produces an intro that overlaps it. These results
+   outrank every Chromaprint result, so left in place they would keep their
+   stale range for good. The file's season group is then compared again even
+   when its stored analysis still stands. The silence backfill withdraws
+   nothing, since it does not compare season groups; it runs right after the
+   nightly episode pass, which has already withdrawn what it would.
 2. **Chromaprint.** Remaining files are grouped by library, season, and
    presentation (edition and audio language). Each file's opening audio
    (25 percent of the runtime, at most ten minutes) is fingerprinted once and
@@ -61,6 +85,20 @@ agreed with TheIntroDB less often than the unrefined start, so
 `chromaprint:v4` no longer uses subtitles, and re-analysis replaces
 `chromaprint:dialogue:v4` markers under the same-version rule in
 `markers.CanWriteMarkerUpdate`.
+
+A season comparison that no longer finds an intro for a file withdraws the
+Chromaprint intro an earlier comparison stored for it (any `chromaprint:`
+identifier), as after a stricter matching rule or a change to the season's
+files. `WithdrawMarker` clears it only while the file still holds that
+scanner result, so manual and online intros stay, and so do chapter and
+version-copy intros, which step 1 withdraws on its own terms.
+Only a comparison over the whole season group withdraws: a group with a
+failed or deferred fingerprint, or with a file left out because a manual or
+online marker holds its intro, withdraws nothing, since the missing file
+could be the partner that confirms an intro. A group with a held-out file
+stores a distinct input signature, so it is compared again in full once no
+file is held out, as after the held-out file is deleted. A failed marker
+write leaves the group `failed`, so the next run analyzes it again.
 
 Chromaprint points summarize a window that starts at the point's timestamp,
 so raw matches start and end early. Fixed leads measured against authored
@@ -86,12 +124,20 @@ at least 80 percent of the authored intro chapter in replay:
 |---|---|
 | At least 20 seconds, confirmed by two or more pairs, and within 1.5 seconds of the season's usual intro duration, which at least half the season's episodes share | 0.90 |
 | Other markers of at least 20 seconds | 0.65 |
-| Shorter than 20 seconds | 0.30 |
+| Shorter than 20 seconds, confirmed by two or more pairs | 0.30 |
 
-Recurring music cues mistaken for intros are short and rarely shared by most
-of a season, so they fall in the lower rows. Chapter-based markers keep 0.95,
-and silence-extended chapters 0.98. Contribution to online providers compares
-these values with each provider's minimum confidence.
+A match shorter than 20 seconds that only one partner episode confirms is not
+written: a recurring music cue is often shared by a single pair of episodes,
+while a title card recurs across the season. Such a file first gets the wider
+search, as a file with no match does, so a title card shared with episodes
+outside its neighbor window still finds its partners. That search records
+results for the file alone, so it changes no other file's match. Music cues
+that several episodes share are still written, and they fall in the lower
+rows because few of them match most of a season.
+
+Chapter-based markers keep 0.95, and silence-extended chapters 0.98.
+Contribution to online providers compares these values with each provider's
+minimum confidence.
 
 ### Chapters and online markers
 
@@ -329,6 +375,10 @@ start or end a run, and a start never moves back over them.
    lie within 20 seconds. If the first such run starts up to 60 seconds after
    the match and only story or mostly black keyframes lie between, the
    credits start there: the match often begins on music over the last shot.
+   True-black keyframes directly before the run's first text count as its
+   start when they all lie within 10 seconds of that text, since credits
+   usually cut to black before the first name; a longer stretch of black
+   keeps the match's start.
    Credits that video moved rate 0.05 higher, up to 0.95
    (`credits-audio:video:v1`); otherwise the match keeps its rating
    (`credits-audio:v1`: 0.90 when the season agrees on its duration, 0.65
@@ -378,9 +428,11 @@ Credits versions and caches:
   state. It covers the fingerprint key and, when the analysis ran tail
   passes, the tail key, so a group settled while ffmpeg could not run tail
   passes is analyzed again once it can. A run without tail passes also skips
-  a group a tail-capable run settled, so it cannot replace that run's audio
-  and video credits with audio-only ones. Bump `CreditsBehaviorVersion` to
-  re-run every credits comparison over cached fingerprints and tails.
+  a group a tail-capable run settled, under this or any earlier
+  `CreditsBehaviorVersion`, so it cannot replace that run's audio and video
+  credits with audio-only ones. Bump `CreditsBehaviorVersion` to re-run every
+  credits comparison over cached fingerprints and tails; runs without tail
+  passes keep off groups a tail-capable run settled before the bump.
 - Credits algorithms rank in `markers.scannerAlgorithmPriority` as
   `credits-chapter:v1` (30), `credits-version-copy:v1` (24),
   `credits-audio:video:v1` (22), `credits-audio:v1` (21), and
@@ -456,7 +508,16 @@ last movie of the one before in that order, so a movie analyzed in this run
 that is still eligible is not listed again in it. The run starts no new
 movie, and lists no further page, once 60 minutes have passed since it
 started listing movies, and then reports `movie_budget_exhausted`; the
-remaining movies wait for the next run. Run summaries count
+remaining movies wait for the next run. When the run has a deadline, such as
+a scheduled run with a max runtime, the episode pass stops early enough to
+leave the movies that 60 minutes, or half the time left when the run starts if
+that is shorter. It stops where a cancel stops it, keeping the season groups
+it finished, reports `episode_budget_exhausted`, and the movie pass runs. A
+server without Chromaprint, which runs its episodes and then a separate movie
+pass under the cluster lock, leaves the same share when credits are on, even
+if another server then holds the lock and runs the movies. A run without a
+deadline, or one whose movie pass would list no movie, gives the episodes as
+long as they take. Run summaries count
 `movies_considered` (the movies the run listed) and
 `movie_credits_markers_written`; the credits tail counters include movies.
 

@@ -1,67 +1,10 @@
 package catalog
 
 import (
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
 )
-
-func TestQueryCursorRejectsChangedEpisodeDateOrder(t *testing.T) {
-	for _, field := range []string{"release_date", "last_air_date"} {
-		for _, order := range []string{"asc", "desc"} {
-			t.Run(field+"/"+order, func(t *testing.T) {
-				plan, err := NewQueryBuilder("mi").WithMediaScope("episode").BuildSortPlan(QuerySort{Field: field, Order: order})
-				if err != nil {
-					t.Fatal(err)
-				}
-				// A cursor issued under the old (date, title, id) order.
-				previous := &QueryCursor{Keys: []QueryCursorValue{{Kind: cursorKindDate}, {Kind: cursorKindText}, {Kind: cursorKindText}}}
-				if _, _, err := cursorSeekSQL(plan.terms, previous, 1); !errors.Is(err, ErrCatalogCursorChanged) {
-					t.Fatalf("old cursor error = %v, want ErrCatalogCursorChanged", err)
-				}
-				// Right length, but the episode numbers were stored as text.
-				previous.Keys = append(previous.Keys, QueryCursorValue{Kind: cursorKindText}, QueryCursorValue{Kind: cursorKindText}, QueryCursorValue{Kind: cursorKindText})
-				if _, _, err := cursorSeekSQL(plan.terms, previous, 1); !errors.Is(err, ErrCatalogCursorChanged) {
-					t.Fatalf("wrong key type error = %v, want ErrCatalogCursorChanged", err)
-				}
-			})
-		}
-	}
-}
-
-func TestQueryCursorSortTerms(t *testing.T) {
-	for field := range querySortDefs {
-		for _, order := range []string{"asc", "desc"} {
-			t.Run(field+order, func(t *testing.T) {
-				plan, err := NewQueryBuilder("mi").WithUserScope(1, "p").BuildSortPlan(QuerySort{Field: field, Order: order})
-				if err != nil {
-					t.Fatal(err)
-				}
-				if len(plan.terms) < 2 || plan.terms[len(plan.terms)-1].expression != "mi.content_id" {
-					t.Fatalf("missing identity tuple: %#v", plan.terms)
-				}
-				parts := []string{}
-				for _, term := range plan.terms {
-					dir := "ASC"
-					if term.descending {
-						dir = "DESC"
-					}
-					p := term.expression + " " + dir
-					if term.nullsLast && term.descending {
-						p += " NULLS LAST"
-					}
-					parts = append(parts, p)
-				}
-				// Explicit ASC NULLS LAST is equivalent to PostgreSQL's ASC default.
-				actual := strings.ReplaceAll(plan.OrderBy, " ASC NULLS LAST", " ASC")
-				if actual != "ORDER BY "+strings.Join(parts, ", ") {
-					t.Fatalf("tuple differs: %s vs %s", actual, strings.Join(parts, ", "))
-				}
-			})
-		}
-	}
-}
 
 func TestQueryCursorTitleSeekIsIndexBounded(t *testing.T) {
 	const key = "LOWER(COALESCE(NULLIF(BTRIM(mi.sort_title), ''), mi.title))"

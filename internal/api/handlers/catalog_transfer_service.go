@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -61,7 +62,12 @@ func (h *CatalogSeedHandler) ImportCatalog(ctx context.Context, source CatalogIm
 	case source.LocalPath != "":
 		data, err = readLocalImportFile(source.LocalPath)
 	case source.RemoteURL != "":
-		data, err = catalogseed.DownloadRemoteBundle(ctx, source.RemoteURL)
+		var bundle io.ReadCloser
+		bundle, err = catalogseed.DownloadRemoteBundle(ctx, source.RemoteURL)
+		if err == nil {
+			defer func() { _ = bundle.Close() }()
+			data, err = io.ReadAll(bundle)
+		}
 	case source.ArtifactKey != "":
 		data, err = h.readImportDataFromArtifactKey(ctx, source.ArtifactKey)
 	default:
