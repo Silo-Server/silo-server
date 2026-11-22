@@ -1823,12 +1823,13 @@ progress report, and the final position the stop carries. A position advance bet
 samples counts as watched when it fits playback at up to twice normal speed plus a short
 allowance for report jitter, and anything larger is a seek. Time after the last sample is
 not counted, so a stop without a final position ends the measurement at the last sample.
-An administrator stop the player confirms is the one exception: the confirmation carries
-no position, so the server adds the time from when the session last saw the player
-playing (a progress report, a confirmed resume, or a seek) to when the stop was sent, and
-moves `end_position_seconds` with it. Nothing is added for a paused player, for one last
-seen more than 12 seconds before the stop, or while a pause or resume the player
-confirmed is still being applied.
+An administrator stop the player confirms, once the play has a progress report, is the
+one exception: the confirmation carries no position, so the server adds the time from
+when the session last saw the player playing (a progress report, a confirmed resume, or
+a seek) to when the stop was sent, and moves `end_position_seconds` with it. Nothing is
+added for a paused player, for one last seen more than 12 seconds before the stop, while
+a pause or resume the player confirmed is still being applied, or when another server
+accepted a report whose order against what the session saw since is unknown.
 
 The measurement survives the session's live copy. The server holding the session saves
 it with the session's lifecycle state when the session starts and on every live-session

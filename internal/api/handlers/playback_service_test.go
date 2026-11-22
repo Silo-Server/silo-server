@@ -1695,6 +1695,43 @@ func TestRealtimeConfirmedStopCreditsPlayAfterTheLastReport(t *testing.T) {
 			sinceReport: 9 * time.Second, played: 8, end: 903,
 		},
 		{
+			// The player's retry of the report it sent before the seek moves
+			// the session's position back, but not its measurement: the play
+			// is still measured on from the seek.
+			name: "report retried after a seek replan",
+			between: func(t *testing.T, f *playbackServiceFixture) {
+				time.Sleep(time.Second) //nolint:forbidigo // advances the synctest clock to the seek
+				target := 895.0
+				if _, err := f.manager.ApplyReplacement(f.session.ID, playback.SessionReplacement{EffectiveMediaFileID: 100, PositionSeconds: &target, PositionSequence: 1}); err != nil {
+					t.Fatal(err)
+				}
+				if _, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 900}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			sinceReport: 9 * time.Second, played: 8, end: 903,
+		},
+		{
+			// Another replica accepted a report this session's copy never
+			// saw, then the copy measured a replan planned before it. Their
+			// order is unknown, so nothing is added and the play ends at that
+			// report.
+			name: "unseen report older than the copy's own observation",
+			between: func(t *testing.T, f *playbackServiceFixture) {
+				time.Sleep(2 * time.Second) //nolint:forbidigo // advances the synctest clock to the other replica's report
+				store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+				if _, err := store.ApplyProgress(f.ctx, f.session.ID, playback.ProgressSampleV3{Sequence: 2, Position: 30}); err != nil {
+					t.Fatal(err)
+				}
+				time.Sleep(2 * time.Second) //nolint:forbidigo // advances the synctest clock to the replan
+				target := 905.0
+				if _, err := f.manager.ApplyReplacement(f.session.ID, playback.SessionReplacement{EffectiveMediaFileID: 100, PositionSeconds: &target, PositionSequence: 1}); err != nil {
+					t.Fatal(err)
+				}
+			},
+			sinceReport: 7 * time.Second, played: 5, end: 30,
+		},
+		{
 			// Another replica accepted the next report, after a seek this
 			// session's copy never saw. It is measured as that report, so the
 			// seek is not played time and the play after it still is.
@@ -1774,6 +1811,42 @@ func TestRealtimeConfirmedStopAfterAPendingPauseAddsNothing(t *testing.T) {
 		}
 		if row := admin.history[0]; row.Watch.PlayedSeconds != 0 || row.EndPositionSeconds != 900 {
 			t.Fatalf("played %v s ending at %v, want 0 s ending at 900", row.Watch.PlayedSeconds, row.EndPositionSeconds)
+		}
+	})
+}
+
+// TestRealtimeConfirmedStopKeepsANewerSavedMeasurement covers a confirmed
+// stop on a live copy that measured nothing, such as one rebuilt after a
+// restart whose saved measurement it couldn't restore, while another replica
+// accepted the play's report: the play is measured on from the save, not
+// started over at that report.
+func TestRealtimeConfirmedStopKeepsANewerSavedMeasurement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newPlaybackServiceFixture(t)
+		start := time.Now()
+		var saved playback.WatchTime
+		saved.Observe(0, false, start)
+		saved.Observe(880, false, start.Add(880*time.Second))
+		admin := &savedWatchAdminStore{watch: saved}
+		f.handler.AdminStore = admin
+		f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+		time.Sleep(890 * time.Second) //nolint:forbidigo // advances the synctest clock to the other replica's report
+		store := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+		if _, err := store.ApplyProgress(f.ctx, f.session.ID, playback.ProgressSampleV3{Sequence: 1, Position: 900}); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(7 * time.Second) //nolint:forbidigo // advances the synctest clock to the stop
+		f.handler.rememberRealtimeCommand("cmd-stop", f.session.ID, playback.CommandStop)
+		time.Sleep(200 * time.Millisecond) //nolint:forbidigo // advances the synctest clock to the confirmation
+		if err := f.handler.handleRealtimeClientMessage(f.session.ID, realtimeResultMessage(t, f.session.ID, "cmd-stop", playback.RealtimeResultStatusCompleted)); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if len(admin.history) != 1 {
+			t.Fatalf("admin history = %+v, want one row", admin.history)
+		}
+		if row := admin.history[0]; row.Watch.PlayedSeconds != 907 || row.EndPositionSeconds != 907 {
+			t.Fatalf("played %v s ending at %v, want 907 s ending at 907: measured on from the save", row.Watch.PlayedSeconds, row.EndPositionSeconds)
 		}
 	})
 }
