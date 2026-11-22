@@ -80,7 +80,7 @@ const baseSession: AdminPlaybackHistoryItem = {
 };
 
 describe("SessionDetailSheet", () => {
-  it("renders source vs delivered specs, adaptation reasons, route, and handles arrow navigation", () => {
+  it("handles arrow navigation outside the scroll body without hijacking inner focus", () => {
     const onNext = vi.fn();
     const onPrevious = vi.fn();
     render(
@@ -88,7 +88,14 @@ describe("SessionDetailSheet", () => {
         <SessionDetailSheet
           open
           onOpenChange={() => {}}
-          session={baseSession}
+          session={{
+            ...baseSession,
+            end_reason: "terminated",
+            subtitle: {
+              ...baseSession.subtitle!,
+              delivery: "hls_rendition",
+            },
+          }}
           hasPrevious
           hasNext
           onPrevious={onPrevious}
@@ -97,19 +104,62 @@ describe("SessionDetailSheet", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("Dune")).toBeTruthy();
-    expect(screen.getByText("HDR10")).toBeTruthy();
-    expect(screen.getByText("Burned in")).toBeTruthy();
-    expect(screen.getByText("JF")).toBeTruthy();
-    expect(screen.getByText("Video codec not supported")).toBeTruthy();
-    expect(screen.getByText("Subtitles burned in")).toBeTruthy();
-    expect(screen.getByText("Movies")).toBeTruthy();
-    expect(screen.getByText("203.0.113.42")).toBeTruthy();
+    // Non-burn-in subtitle delivery and end reason render localized labels rather than raw enums.
+    expect(screen.getByText("HLS rendition")).toBeTruthy();
+    expect(screen.getByText("Terminated by admin")).toBeTruthy();
 
     fireEvent.keyDown(window, { key: "ArrowDown" });
     expect(onNext).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(window, { key: "ArrowUp" });
     expect(onPrevious).toHaveBeenCalledTimes(1);
+
+    // Arrow keys dispatched from a focused element inside the scroll body must not step sessions.
+    const accountLink = screen.getByRole("link", { name: "alice" });
+    fireEvent.keyDown(accountLink, { key: "ArrowDown" });
+    fireEvent.keyDown(accountLink, { key: "ArrowUp" });
+    expect(onNext).toHaveBeenCalledTimes(1);
+    expect(onPrevious).toHaveBeenCalledTimes(1);
+  });
+
+  it("distinguishes retryable load errors from 404 not-found states", () => {
+    const onRetry = vi.fn();
+    const { rerender } = render(
+      <MemoryRouter>
+        <SessionDetailSheet
+          open
+          onOpenChange={() => {}}
+          session={null}
+          loadError={new Error("upstream timeout")}
+          onRetry={onRetry}
+          hasPrevious={false}
+          hasNext={false}
+          onPrevious={() => {}}
+          onNext={() => {}}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("Failed to load session details.")).toBeTruthy();
+    expect(screen.getByText("upstream timeout")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+
+    rerender(
+      <MemoryRouter>
+        <SessionDetailSheet
+          open
+          onOpenChange={() => {}}
+          session={null}
+          notFound
+          hasPrevious={false}
+          hasNext={false}
+          onPrevious={() => {}}
+          onNext={() => {}}
+        />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByText("This playback session could not be found.")).toBeTruthy();
   });
 
   it("shows the pre-upgrade notice for legacy rows without route facts", () => {

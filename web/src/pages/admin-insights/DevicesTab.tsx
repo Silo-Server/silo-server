@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router";
 
 import { BarList, type BarListItem } from "@/components/admin/dashboard/charts";
@@ -57,6 +57,15 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
   );
   const query = useAdminInsightsDevices(queryParams);
   const data = query.data;
+
+  const formatPlayCount = useCallback(
+    (plays: number) =>
+      t("web.admin.insights.playCount", {
+        count: plays,
+        count_text: plays.toLocaleString(formatLocale()),
+      }),
+    [t],
+  );
 
   const reasonItems = useMemo<BarListItem[]>(() => {
     if (!data) return [];
@@ -121,15 +130,8 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
       id: entry.key,
       label: formatCodecLabel(entry.key) || entry.key.toUpperCase(),
       value: entry.plays,
-      to: buildHistoryDrilldownHref({
-        subtitleBurnIn: true,
-        libraryId: filters.libraryId,
-        userId: filters.userId,
-        startedAfter: data.from,
-        startedBefore: data.to,
-      }),
     }));
-  }, [data, filters.libraryId, filters.userId]);
+  }, [data]);
 
   if (query.isLoading) {
     return (
@@ -163,6 +165,13 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
   const knownEncoderPlays = summary.hw_transcode_plays + summary.sw_transcode_plays;
   const burnInTranscodeRate =
     summary.transcode_plays > 0 ? summary.subtitle_burn_in_plays / summary.transcode_plays : 0;
+  const burnInHistoryHref = buildHistoryDrilldownHref({
+    subtitleBurnIn: true,
+    libraryId: filters.libraryId,
+    userId: filters.userId,
+    startedAfter: data.from,
+    startedBefore: data.to,
+  });
 
   return (
     <div className="space-y-5">
@@ -198,7 +207,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
               ? t("web.admin.insights.percent", {
                   value: formatRatePercentNumber(summary.hw_transcode_plays / knownEncoderPlays),
                 })
-              : "—"
+              : EM_DASH
           }
           subtext={
             knownEncoderPlays > 0
@@ -317,20 +326,16 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
                           }
                           const codecLabel = formatCodecLabel(codec) || codec.toUpperCase();
                           const rateStr = formatRatePercentNumber(cell.direct_rate);
-                          const playsText = t("web.admin.insights.playCount", {
-                            count: cell.plays,
-                            count_text: cell.plays.toLocaleString(formatLocale()),
-                          });
                           const tooltip = t("web.admin.insights.devices.matrix.cellTooltip", {
                             client: clientLabel,
                             codec: codecLabel,
                             direct_rate: rateStr,
-                            plays: playsText,
+                            plays: formatPlayCount(cell.plays),
                             transcodes: cell.transcode_plays.toLocaleString(formatLocale()),
                           });
                           const drillHref = buildHistoryDrilldownHref({
-                            clientName: row.client_name,
-                            devicePlatform: row.device_platform,
+                            clientName: row.client_name || "unknown",
+                            devicePlatform: row.device_platform || "unknown",
                             sourceVideoCodec: codec,
                             libraryId: filters.libraryId,
                             userId: filters.userId,
@@ -393,12 +398,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
             <BarList
               items={reasonItems}
               seriesIndex={2}
-              formatValue={(plays) =>
-                t("web.admin.insights.playCount", {
-                  count: plays,
-                  count_text: plays.toLocaleString(formatLocale()),
-                })
-              }
+              formatValue={formatPlayCount}
               emptyLabel={t("web.admin.insights.devices.reasons.empty")}
             />
           </CardContent>
@@ -414,12 +414,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
             <BarList
               items={topTranscoderItems}
               seriesIndex={0}
-              formatValue={(plays) =>
-                t("web.admin.insights.playCount", {
-                  count: plays,
-                  count_text: plays.toLocaleString(formatLocale()),
-                })
-              }
+              formatValue={formatPlayCount}
               emptyLabel={t("web.admin.insights.devices.topTranscoders.empty")}
             />
           </CardContent>
@@ -438,33 +433,31 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
             <BarList
               items={hwAccelItems}
               seriesIndex={1}
-              formatValue={(plays) =>
-                t("web.admin.insights.playCount", {
-                  count: plays,
-                  count_text: plays.toLocaleString(formatLocale()),
-                })
-              }
+              formatValue={formatPlayCount}
               emptyLabel={t("web.admin.insights.devices.hwAccel.empty")}
             />
           </CardContent>
         </Card>
 
         <Card className="surface-panel rounded-2xl border-0">
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0">
             <CardTitle className="text-sm font-bold">
               {t("web.admin.insights.devices.burnInCodecs.title")}
             </CardTitle>
+            {burnInItems.length > 0 ? (
+              <Link
+                to={burnInHistoryHref}
+                className="text-primary text-xs font-medium hover:underline"
+              >
+                {t("web.admin.insights.openHistory")}
+              </Link>
+            ) : null}
           </CardHeader>
           <CardContent>
             <BarList
               items={burnInItems}
               seriesIndex={3}
-              formatValue={(plays) =>
-                t("web.admin.insights.playCount", {
-                  count: plays,
-                  count_text: plays.toLocaleString(formatLocale()),
-                })
-              }
+              formatValue={formatPlayCount}
               emptyLabel={t("web.admin.insights.devices.burnInCodecs.empty")}
             />
           </CardContent>

@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Flame, History, RefreshCw, Search, X } from "lucide-react";
 
-import type { AdminPlaybackHistoryItem } from "@/api/types";
 import { PageHeader } from "@/components/page/PageHeader";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -39,8 +38,15 @@ import { formatCodecLabel } from "@/lib/mediaFormat";
 import { cn } from "@/lib/utils";
 import type { MessageKey } from "@/locales/keys";
 
+import {
+  formatHistoryDuration,
+  historyRowLabel,
+  historyRowTitle,
+  normalizeMethodKey,
+  watchTimeSummary,
+} from "./admin-history/historyFormat";
 import { SessionDetailSheet } from "./admin-history/SessionDetailSheet";
-import { episodeCode } from "./admin-users/detail/format";
+import { InsightKpiCard } from "./admin-insights/insightsShared";
 import { activityMethodMeta, formatDecisionLabel } from "./adminActivityPresentation";
 import { getAdaptationReasonByCode } from "./adminActivityReasons";
 
@@ -68,9 +74,9 @@ export default function AdminPlaybackHistory() {
   const { data: libraries = [] } = useAdminLibraries();
 
   const [pageSize, setPageSize] = useState(25);
-  const [cursorStack, setCursorStack] = useState<string[]>([]);
   const manualRefreshStartedAtRef = useRef<number | null>(null);
   const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
+  const detailTriggerRef = useRef<HTMLButtonElement | null>(null);
 
   const selectedUser = searchParams.get("user_id") ?? ALL_VALUE;
   const selectedProfile = searchParams.get("profile_id") ?? ALL_VALUE;
@@ -89,6 +95,36 @@ export default function AdminPlaybackHistory() {
   const urlSearch = searchParams.get("search")?.trim() ?? "";
   const selectedSessionId = searchParams.get("session")?.trim() || null;
 
+  // Bind the cursor stack to the effective filter fingerprint so any URL
+  // navigation (profile link clicks, Back/Forward, filter edits, page size)
+  // immediately starts from page 1 rather than sending a mismatched cursor.
+  const filterKey = JSON.stringify([
+    selectedUser,
+    selectedProfile,
+    selectedLibrary,
+    selectedMethod,
+    selectedCompleted,
+    selectedLocation,
+    selectedBurnIn,
+    selectedMediaItemId,
+    selectedClientName,
+    selectedPlatform,
+    selectedCodec,
+    selectedReason,
+    selectedStartedAfter,
+    selectedStartedBefore,
+    urlSearch,
+    pageSize,
+  ]);
+  const [cursorState, setCursorState] = useState<{ key: string; stack: string[] }>({
+    key: filterKey,
+    stack: [],
+  });
+  const cursorStack = useMemo(
+    () => (cursorState.key === filterKey ? cursorState.stack : []),
+    [cursorState, filterKey],
+  );
+
   const [searchDraft, setSearchDraft] = useState(urlSearch);
   const [syncedUrlSearch, setSyncedUrlSearch] = useState(urlSearch);
   if (syncedUrlSearch !== urlSearch) {
@@ -106,7 +142,6 @@ export default function AdminPlaybackHistory() {
       } else {
         next.delete("search");
       }
-      setCursorStack([]);
       setSearchParams(next, { replace: true });
     }, 250);
     return () => window.clearTimeout(timer);
@@ -159,25 +194,16 @@ export default function AdminPlaybackHistory() {
     }
   }, [refetchHistory]);
 
+  // Only clear an orphan profile_id when no account is selected. When an
+  // account IS selected, preserve historical/deleted profile_id filters from
+  // Insights drill-downs instead of silently widening to the whole account.
   useEffect(() => {
     if (selectedUser === ALL_VALUE && selectedProfile !== ALL_VALUE) {
       const next = new URLSearchParams(searchParams);
       next.delete("profile_id");
       setSearchParams(next, { replace: true });
-      return;
     }
-    if (
-      selectedUser !== ALL_VALUE &&
-      selectedProfile !== ALL_VALUE &&
-      profiles.data &&
-      profiles.data.length > 0 &&
-      !profiles.data.some((profile) => profile.id === selectedProfile)
-    ) {
-      const next = new URLSearchParams(searchParams);
-      next.delete("profile_id");
-      setSearchParams(next, { replace: true });
-    }
-  }, [profiles.data, searchParams, selectedProfile, selectedUser, setSearchParams]);
+  }, [searchParams, selectedProfile, selectedUser, setSearchParams]);
 
   const updateFilter = useCallback(
     (key: string, value: string) => {
@@ -190,7 +216,6 @@ export default function AdminPlaybackHistory() {
       if (key === "user_id") {
         next.delete("profile_id");
       }
-      setCursorStack([]);
       setSearchParams(next, { replace: true });
     },
     [searchParams, setSearchParams],
@@ -200,7 +225,6 @@ export default function AdminPlaybackHistory() {
     (keys: string[]) => {
       const next = new URLSearchParams(searchParams);
       for (const k of keys) next.delete(k);
-      setCursorStack([]);
       setSearchParams(next, { replace: true });
     },
     [searchParams, setSearchParams],
@@ -208,12 +232,14 @@ export default function AdminPlaybackHistory() {
 
   const resetFilters = useCallback(() => {
     setSearchDraft("");
-    setCursorStack([]);
     setSearchParams(new URLSearchParams(), { replace: true });
   }, [setSearchParams]);
 
   const selectSession = useCallback(
-    (sessionId: string | null) => {
+    (sessionId: string | null, trigger?: HTMLButtonElement | null) => {
+      if (trigger) {
+        detailTriggerRef.current = trigger;
+      }
       const next = new URLSearchParams(searchParams);
       if (sessionId) {
         next.set("session", sessionId);
@@ -221,6 +247,11 @@ export default function AdminPlaybackHistory() {
         next.delete("session");
       }
       setSearchParams(next, { replace: true });
+      if (!sessionId && detailTriggerRef.current) {
+        const el = detailTriggerRef.current;
+        detailTriggerRef.current = null;
+        window.requestAnimationFrame(() => el.focus());
+      }
     },
     [searchParams, setSearchParams],
   );
@@ -228,6 +259,13 @@ export default function AdminPlaybackHistory() {
   const rows = useMemo(() => history.data?.items ?? [], [history.data?.items]);
   const hasMore = history.data?.hasMore ?? false;
   const nextCursor = history.data?.nextCursor ?? null;
+
+  const missingProfileFallbackLabel = useMemo(() => {
+    if (selectedUser === ALL_VALUE || selectedProfile === ALL_VALUE) return null;
+    if ((profiles.data ?? []).some((p) => p.id === selectedProfile)) return null;
+    const fromRow = rows.find((r) => r.profile_id === selectedProfile)?.profile_name;
+    return fromRow || selectedProfile;
+  }, [profiles.data, rows, selectedProfile, selectedUser]);
 
   const selectedRowIndex = useMemo(
     () => (selectedSessionId ? rows.findIndex((r) => r.session_id === selectedSessionId) : -1),
@@ -384,6 +422,9 @@ export default function AdminPlaybackHistory() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL_VALUE}>{t("web.admin.history.filter.allProfiles")}</SelectItem>
+              {missingProfileFallbackLabel ? (
+                <SelectItem value={selectedProfile}>{missingProfileFallbackLabel}</SelectItem>
+              ) : null}
               {(profiles.data ?? []).map((profile) => (
                 <SelectItem key={profile.id} value={profile.id}>
                   {profile.name}
@@ -517,15 +558,15 @@ export default function AdminPlaybackHistory() {
       </div>
 
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <InfoCard
+        <InsightKpiCard
           label={t("web.admin.history.stats.visibleRows")}
           value={rows.length.toLocaleString(formatLocale())}
         />
-        <InfoCard
+        <InsightKpiCard
           label={t("web.admin.history.stats.completed")}
           value={rows.filter((row) => row.completed).length.toLocaleString(formatLocale())}
         />
-        <InfoCard
+        <InsightKpiCard
           label={t("web.admin.history.stats.partial")}
           value={rows.filter((row) => !row.completed).length.toLocaleString(formatLocale())}
         />
@@ -587,7 +628,7 @@ export default function AdminPlaybackHistory() {
                   </TableHeader>
                   <TableBody>
                     {rows.map((row) => {
-                      const watch = watchTime(row);
+                      const watch = watchTimeSummary(row);
                       const { title, detail } = historyRowTitle(row, t);
                       const isSelected = row.session_id === selectedSessionId;
                       const methodMeta = activityMethodMeta(normalizeMethodKey(row.play_method));
@@ -611,7 +652,6 @@ export default function AdminPlaybackHistory() {
                             "cursor-pointer transition-colors",
                             isSelected && "bg-primary/8 hover:bg-primary/10",
                           )}
-                          aria-label={t("web.admin.history.row.inspect")}
                         >
                           <TableCell>
                             <div className="max-w-[18rem] min-w-[11rem] space-y-1 break-words whitespace-normal">
@@ -695,13 +735,13 @@ export default function AdminPlaybackHistory() {
                               >
                                 {watch.estimated
                                   ? t("web.admin.history.row.estimatedDuration", {
-                                      duration: formatDuration(watch.seconds, t),
+                                      duration: formatHistoryDuration(watch.seconds, t),
                                     })
-                                  : formatDuration(watch.seconds, t)}
+                                  : formatHistoryDuration(watch.seconds, t)}
                               </div>
                               <div className="text-muted-foreground text-xs">
                                 {t("web.admin.history.row.ofDuration", {
-                                  duration: formatDuration(row.duration_seconds, t),
+                                  duration: formatHistoryDuration(row.duration_seconds, t),
                                 })}
                               </div>
                             </div>
@@ -724,7 +764,14 @@ export default function AdminPlaybackHistory() {
                             </div>
                           </TableCell>
                           <TableCell className="text-end">
-                            <div className="flex justify-end gap-3">
+                            <div className="flex items-center justify-end gap-3">
+                              <button
+                                type="button"
+                                onClick={(e) => selectSession(row.session_id, e.currentTarget)}
+                                className="text-primary cursor-pointer text-sm font-medium hover:underline"
+                              >
+                                {t("web.admin.activity.row.details")}
+                              </button>
                               <Link
                                 to={`/admin/logs?playback_session_id=${encodeURIComponent(row.session_id)}&focus=playback`}
                                 className="text-primary text-sm font-medium"
@@ -758,7 +805,6 @@ export default function AdminPlaybackHistory() {
                     value={String(pageSize)}
                     onValueChange={(v) => {
                       setPageSize(Number(v));
-                      setCursorStack([]);
                     }}
                   >
                     <SelectTrigger className="h-8 min-w-[100px]">
@@ -775,14 +821,23 @@ export default function AdminPlaybackHistory() {
                 </div>
                 <div className="flex gap-2">
                   {cursorStack.length > 1 ? (
-                    <Button variant="outline" size="sm" onClick={() => setCursorStack([])}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setCursorState({ key: filterKey, stack: [] })}
+                    >
                       {t("web.admin.history.pagination.firstPage")}
                     </Button>
                   ) : null}
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={() => setCursorStack((stack) => stack.slice(0, -1))}
+                    onClick={() =>
+                      setCursorState({
+                        key: filterKey,
+                        stack: cursorStack.slice(0, -1),
+                      })
+                    }
                     disabled={cursorStack.length === 0}
                   >
                     {t("web.admin.history.pagination.previous")}
@@ -792,7 +847,10 @@ export default function AdminPlaybackHistory() {
                     size="sm"
                     onClick={() => {
                       if (nextCursor) {
-                        setCursorStack((stack) => [...stack, nextCursor]);
+                        setCursorState({
+                          key: filterKey,
+                          stack: [...cursorStack, nextCursor],
+                        });
                       }
                     }}
                     disabled={!hasMore || !nextCursor}
@@ -813,10 +871,15 @@ export default function AdminPlaybackHistory() {
         }}
         session={activeSession}
         isLoading={Boolean(selectedSessionId) && !inPageSession && detailQuery.isLoading}
+        loadError={Boolean(selectedSessionId) && !inPageSession ? detailQuery.error : undefined}
+        onRetry={() => {
+          void detailQuery.refetch();
+        }}
         notFound={
           Boolean(selectedSessionId) &&
           !inPageSession &&
           !detailQuery.isLoading &&
+          !detailQuery.isError &&
           activeSession === null
         }
         hasPrevious={selectedRowIndex > 0}
@@ -838,21 +901,6 @@ export default function AdminPlaybackHistory() {
   );
 }
 
-function normalizeMethodKey(playMethod: string): string {
-  switch (playMethod) {
-    case "direct":
-    case "direct_play":
-      return "direct";
-    case "remux":
-    case "direct_stream":
-      return "remux";
-    case "transcode":
-      return "transcode";
-    default:
-      return "unknown";
-  }
-}
-
 function formatChipDate(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;
@@ -863,75 +911,10 @@ function formatChipDate(iso: string): string {
   });
 }
 
-function historyRowTitle(
-  row: AdminPlaybackHistoryItem,
-  t: Translate,
-): { title: string; detail: string } {
-  if (row.series_title) {
-    const episodeTitle = row.media_title === row.series_title ? "" : row.media_title;
-    const detail = [episodeCode(row.season_number, row.episode_number), episodeTitle]
-      .filter(Boolean)
-      .join(" · ");
-    return { title: row.series_title, detail };
-  }
-  return {
-    title:
-      row.media_title ||
-      row.media_item_id ||
-      t("web.common.activity.title.file", { id: row.media_file_id }),
-    detail: "",
-  };
-}
-
-function historyRowLabel(row: AdminPlaybackHistoryItem, t: Translate): string {
-  const { title, detail } = historyRowTitle(row, t);
-  return detail ? `${title} · ${detail}` : title;
-}
-
-function InfoCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="surface-panel rounded-2xl border-0 p-4">
-      <div className="text-muted-foreground text-[11px] font-medium">{label}</div>
-      <div className="mt-1 text-2xl font-extrabold tracking-tight tabular-nums">{value}</div>
-    </div>
-  );
-}
-
-function watchTime(row: AdminPlaybackHistoryItem) {
-  if (row.played_seconds !== null) return { seconds: row.played_seconds, estimated: false };
-  const elapsed = (Date.parse(row.ended_at) - Date.parse(row.started_at)) / 1000;
-  const capped = Number.isFinite(elapsed)
-    ? Math.min(row.end_position_seconds, Math.max(elapsed, 0))
-    : row.end_position_seconds;
-  return { seconds: Math.max(capped, 0), estimated: true };
-}
-
 function mediaTypeLabel(mediaType: string, t: Translate): string {
   if (!mediaType) return t("web.admin.history.mediaType.unknown");
   const key = MEDIA_TYPE_LABELS[mediaType];
   return key ? t(key) : mediaType;
-}
-
-function formatDuration(seconds: number | null, t: Translate) {
-  if (!seconds || Number.isNaN(seconds)) return t("web.admin.history.duration.none");
-  const rounded = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(rounded / 3600);
-  const minutes = Math.floor((rounded % 3600) / 60);
-  const secs = rounded % 60;
-
-  if (hours > 0) {
-    return t("web.admin.history.duration.hoursMinutes", {
-      hours: String(hours),
-      minutes: String(minutes),
-    });
-  }
-  if (minutes > 0) {
-    return t("web.admin.history.duration.minutesSeconds", {
-      minutes: String(minutes),
-      seconds: String(secs),
-    });
-  }
-  return t("web.admin.history.duration.seconds", { seconds: String(secs) });
 }
 
 function formatDateTime(value: string) {

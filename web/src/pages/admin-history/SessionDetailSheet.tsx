@@ -1,6 +1,13 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Link } from "react-router";
-import { ChevronDown, ChevronUp, ExternalLink, Info, ScrollText, Terminal } from "lucide-react";
+import {
+  AlertCircle,
+  ChevronDown,
+  ChevronUp,
+  ExternalLink,
+  ScrollText,
+  Terminal,
+} from "lucide-react";
 
 import type { AdminPlaybackHistoryItem, AdminSession } from "@/api/types";
 import { Badge } from "@/components/ui/badge";
@@ -14,12 +21,13 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useT, type Translate } from "@/i18n";
+import { useT } from "@/i18n";
 import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { formatCodecLabel } from "@/lib/mediaFormat";
 import { cn } from "@/lib/utils";
+import type { MessageKey } from "@/locales/keys";
 
-import { episodeCode } from "../admin-users/detail/format";
+import { InsightNoticeBanner } from "../admin-insights/insightsShared";
 import {
   activityMethodMeta,
   formatAudioSummary,
@@ -35,18 +43,42 @@ import {
   getSessionRouteNodes,
 } from "../adminActivityPresentation";
 import { getAdaptationReasonsFromCodes } from "../adminActivityReasons";
+import {
+  formatHistoryDuration,
+  historyRowTitle,
+  normalizeMethodKey,
+  watchTimeSummary,
+} from "./historyFormat";
 
 export interface SessionDetailSheetProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   session: AdminPlaybackHistoryItem | null;
   isLoading?: boolean;
+  loadError?: unknown;
+  onRetry?: () => void;
   notFound?: boolean;
   hasPrevious: boolean;
   hasNext: boolean;
   onPrevious: () => void;
   onNext: () => void;
 }
+
+const EM_DASH = "—";
+
+const END_REASON_KEYS: Record<string, MessageKey> = {
+  stopped: "web.admin.history.endReason.stopped",
+  terminated: "web.admin.history.endReason.terminated",
+  expired: "web.admin.history.endReason.expired",
+  aborted: "web.admin.history.endReason.aborted",
+  replaced: "web.admin.history.endReason.replaced",
+};
+
+const SUBTITLE_DELIVERY_KEYS: Record<string, MessageKey> = {
+  embedded: "web.admin.history.detail.subtitlesEmbedded",
+  hls_rendition: "web.admin.history.detail.subtitlesHls",
+  sidecar: "web.admin.history.detail.subtitlesSidecar",
+};
 
 function historyItemAsAdminSession(item: AdminPlaybackHistoryItem): AdminSession {
   const audioTranscode =
@@ -110,78 +142,10 @@ function historyItemAsAdminSession(item: AdminPlaybackHistoryItem): AdminSession
   };
 }
 
-function normalizeMethodKey(playMethod: string): string {
-  switch (playMethod) {
-    case "direct":
-    case "direct_play":
-      return "direct";
-    case "remux":
-    case "direct_stream":
-      return "remux";
-    case "transcode":
-      return "transcode";
-    default:
-      return "unknown";
-  }
-}
-
-function formatDuration(seconds: number | null | undefined, t: Translate): string {
-  if (seconds == null || !Number.isFinite(seconds) || seconds <= 0) {
-    return t("web.admin.history.duration.none");
-  }
-  const rounded = Math.max(0, Math.floor(seconds));
-  const hours = Math.floor(rounded / 3600);
-  const minutes = Math.floor((rounded % 3600) / 60);
-  const secs = rounded % 60;
-  if (hours > 0) {
-    return t("web.admin.history.duration.hoursMinutes", {
-      hours: String(hours),
-      minutes: String(minutes),
-    });
-  }
-  if (minutes > 0) {
-    return t("web.admin.history.duration.minutesSeconds", {
-      minutes: String(minutes),
-      seconds: String(secs),
-    });
-  }
-  return t("web.admin.history.duration.seconds", { seconds: String(secs) });
-}
-
-const EM_DASH = "—";
-
 function formatTimestamp(iso: string | null | undefined): string {
   if (!iso) return EM_DASH;
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : formatPreferredDateTime(d);
-}
-
-function resolveTitle(item: AdminPlaybackHistoryItem, t: Translate) {
-  if (item.series_title) {
-    const epTitle = item.media_title === item.series_title ? "" : item.media_title;
-    const subtitle = [episodeCode(item.season_number, item.episode_number), epTitle]
-      .filter(Boolean)
-      .join(" · ");
-    return { title: item.series_title, subtitle };
-  }
-  return {
-    title:
-      item.media_title ||
-      item.media_item_id ||
-      t("web.common.activity.title.file", { id: item.media_file_id }),
-    subtitle: "",
-  };
-}
-
-function watchTimeSummary(item: AdminPlaybackHistoryItem) {
-  if (item.played_seconds != null) {
-    return { seconds: item.played_seconds, estimated: false };
-  }
-  const elapsed = (Date.parse(item.ended_at) - Date.parse(item.started_at)) / 1000;
-  const capped = Number.isFinite(elapsed)
-    ? Math.min(item.end_position_seconds, Math.max(elapsed, 0))
-    : item.end_position_seconds;
-  return { seconds: Math.max(capped, 0), estimated: true };
 }
 
 export function SessionDetailSheet({
@@ -189,6 +153,8 @@ export function SessionDetailSheet({
   onOpenChange,
   session,
   isLoading = false,
+  loadError,
+  onRetry,
   notFound = false,
   hasPrevious,
   hasNext,
@@ -196,18 +162,22 @@ export function SessionDetailSheet({
   onNext,
 }: SessionDetailSheetProps) {
   const t = useT();
+  const scrollBodyRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
     function handleKeyDown(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
+      const target = event.target;
       if (
-        target &&
+        target instanceof HTMLElement &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
           target.tagName === "SELECT" ||
           target.isContentEditable)
       ) {
+        return;
+      }
+      if (target instanceof Node && scrollBodyRef.current?.contains(target)) {
         return;
       }
       if (event.key === "ArrowUp" && hasPrevious) {
@@ -228,8 +198,8 @@ export function SessionDetailSheet({
   );
 
   const heading = session
-    ? resolveTitle(session, t)
-    : { title: t("web.admin.history.detail.title"), subtitle: "" };
+    ? historyRowTitle(session, t)
+    : { title: t("web.admin.history.detail.title"), detail: "" };
   const methodMeta = session ? activityMethodMeta(normalizeMethodKey(session.play_method)) : null;
   const reasons = useMemo(
     () => getAdaptationReasonsFromCodes(session?.adaptation_reasons),
@@ -256,6 +226,20 @@ export function SessionDetailSheet({
         .join(" · ")
     : null;
 
+  const endReasonLabel = session?.end_reason
+    ? END_REASON_KEYS[session.end_reason]
+      ? t(END_REASON_KEYS[session.end_reason]!)
+      : session.end_reason
+    : EM_DASH;
+
+  const subtitleDeliveryLabel = !session?.subtitle
+    ? t("web.admin.history.detail.subtitlesNone")
+    : session.subtitle.delivery === "burn_in"
+      ? null
+      : SUBTITLE_DELIVERY_KEYS[session.subtitle.delivery]
+        ? t(SUBTITLE_DELIVERY_KEYS[session.subtitle.delivery]!)
+        : EM_DASH;
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
@@ -267,7 +251,7 @@ export function SessionDetailSheet({
             <div className="min-w-0 space-y-1">
               <SheetTitle className="truncate text-base font-bold">{heading.title}</SheetTitle>
               <SheetDescription className="truncate text-xs">
-                {heading.subtitle || (session ? session.session_id : "")}
+                {heading.detail || (session ? session.session_id : "")}
               </SheetDescription>
             </div>
             {(hasPrevious || hasNext) && (
@@ -338,12 +322,27 @@ export function SessionDetailSheet({
           ) : null}
         </SheetHeader>
 
-        <div className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
+        <div ref={scrollBodyRef} className="flex-1 space-y-5 overflow-y-auto px-5 py-4">
           {isLoading ? (
             <div className="space-y-3" aria-label={t("web.admin.history.detail.loading")}>
               <Skeleton className="h-24 w-full rounded-xl" />
               <Skeleton className="h-32 w-full rounded-xl" />
               <Skeleton className="h-28 w-full rounded-xl" />
+            </div>
+          ) : loadError ? (
+            <div className="flex flex-col items-center justify-center gap-3 py-12 text-center">
+              <AlertCircle className="text-destructive h-7 w-7" />
+              <div className="space-y-1">
+                <p className="text-sm font-semibold">{t("web.admin.history.detail.loadFailed")}</p>
+                {loadError instanceof Error ? (
+                  <p className="text-muted-foreground max-w-sm text-xs">{loadError.message}</p>
+                ) : null}
+              </div>
+              {onRetry ? (
+                <Button variant="outline" size="sm" onClick={onRetry}>
+                  {t("web.admin.insights.retry")}
+                </Button>
+              ) : null}
             </div>
           ) : notFound || !session || !adminSession ? (
             <div className="text-muted-foreground py-12 text-center text-sm">
@@ -352,10 +351,7 @@ export function SessionDetailSheet({
           ) : (
             <>
               {session.route_facts_recorded === false ? (
-                <div className="border-border/70 bg-muted/35 text-muted-foreground flex items-start gap-2.5 rounded-xl border px-3.5 py-2.5 text-xs leading-relaxed">
-                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                  <span>{t("web.admin.history.detail.preUpgradeNotice")}</span>
-                </div>
+                <InsightNoticeBanner message={t("web.admin.history.detail.preUpgradeNotice")} />
               ) : null}
 
               {/* Source vs Delivered */}
@@ -426,9 +422,7 @@ export function SessionDetailSheet({
                           {subtitleDisplay ?? t("web.admin.history.detail.subtitlesNone")}
                         </td>
                         <td className="px-3 py-2">
-                          {!session.subtitle ? (
-                            t("web.admin.history.detail.subtitlesNone")
-                          ) : session.subtitle.delivery === "burn_in" ? (
+                          {session.subtitle?.delivery === "burn_in" ? (
                             <Badge
                               variant="outline"
                               className="border-warning/30 bg-warning/10 text-warning-label text-[10px]"
@@ -436,7 +430,7 @@ export function SessionDetailSheet({
                               {t("web.admin.history.detail.subtitlesBurnIn")}
                             </Badge>
                           ) : (
-                            t("web.admin.history.detail.subtitlesDirect")
+                            subtitleDeliveryLabel
                           )}
                         </td>
                       </tr>
@@ -501,9 +495,9 @@ export function SessionDetailSheet({
                     >
                       {watch?.estimated
                         ? t("web.admin.history.row.estimatedDuration", {
-                            duration: formatDuration(watch.seconds, t),
+                            duration: formatHistoryDuration(watch.seconds, t),
                           })
-                        : formatDuration(watch?.seconds, t)}
+                        : formatHistoryDuration(watch?.seconds, t)}
                     </dd>
                   </div>
                   <div>
@@ -511,11 +505,11 @@ export function SessionDetailSheet({
                       {t("web.admin.history.detail.field.endPosition")}
                     </dt>
                     <dd className="mt-0.5 font-medium tabular-nums">
-                      {formatDuration(session.end_position_seconds, t)}
+                      {formatHistoryDuration(session.end_position_seconds, t)}
                       {session.duration_seconds ? (
                         <span className="text-muted-foreground ms-1">
                           {t("web.admin.history.row.ofDuration", {
-                            duration: formatDuration(session.duration_seconds, t),
+                            duration: formatHistoryDuration(session.duration_seconds, t),
                           })}
                         </span>
                       ) : null}
@@ -527,7 +521,7 @@ export function SessionDetailSheet({
                     </dt>
                     <dd className="mt-0.5 font-medium tabular-nums">
                       {session.paused_seconds != null
-                        ? formatDuration(session.paused_seconds, t)
+                        ? formatHistoryDuration(session.paused_seconds, t)
                         : EM_DASH}
                     </dd>
                   </div>
@@ -535,7 +529,7 @@ export function SessionDetailSheet({
                     <dt className="text-muted-foreground">
                       {t("web.admin.history.detail.field.endReason")}
                     </dt>
-                    <dd className="mt-0.5 font-medium">{session.end_reason ?? EM_DASH}</dd>
+                    <dd className="mt-0.5 font-medium">{endReasonLabel}</dd>
                   </div>
                 </dl>
               </section>

@@ -46430,6 +46430,12 @@
       "value": "\u200F\u202EUse ↑ and ↓ to step through rows\u202C"
     }
   ],
+  "web.admin.history.detail.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFailed to load session details.\u202C"
+    }
+  ],
   "web.admin.history.detail.loading": [
     {
       "type": 0,
@@ -46520,16 +46526,28 @@
       "value": "\u200F\u202EBurned in\u202C"
     }
   ],
-  "web.admin.history.detail.subtitlesDirect": [
+  "web.admin.history.detail.subtitlesEmbedded": [
     {
       "type": 0,
-      "value": "\u200F\u202EExternal / Sidecar\u202C"
+      "value": "\u200F\u202EEmbedded\u202C"
+    }
+  ],
+  "web.admin.history.detail.subtitlesHls": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHLS rendition\u202C"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
     {
       "type": 0,
       "value": "\u200F\u202ENone\u202C"
+    }
+  ],
+  "web.admin.history.detail.subtitlesSidecar": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESidecar\u202C"
     }
   ],
   "web.admin.history.detail.title": [
@@ -46612,6 +46630,36 @@
     {
       "type": 0,
       "value": "\u200F\u202ENo playback history\u202C"
+    }
+  ],
+  "web.admin.history.endReason.aborted": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAborted\u202C"
+    }
+  ],
+  "web.admin.history.endReason.expired": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EExpired\u202C"
+    }
+  ],
+  "web.admin.history.endReason.replaced": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReplaced\u202C"
+    }
+  ],
+  "web.admin.history.endReason.stopped": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStopped\u202C"
+    }
+  ],
+  "web.admin.history.endReason.terminated": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETerminated by admin\u202C"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -46984,12 +47032,6 @@
     {
       "type": 0,
       "value": "\u200F\u202EEstimated: recorded before watch time was measured\u202C"
-    }
-  ],
-  "web.admin.history.row.inspect": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EInspect session details\u202C"
     }
   ],
   "web.admin.history.row.meta": [
@@ -50550,6 +50592,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.people.scopeNotice": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe leaderboard lists every account; the account filter applies on Activity and Devices & Quality.\u202C"
     }
   ],
   "web.admin.insights.people.searchPlaceholder": [

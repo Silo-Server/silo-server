@@ -210,7 +210,7 @@ func buildAdminPlaybackHistoryWhere(filter AdminPlaybackHistoryFilter, after *Ad
 			return
 		}
 		args = append(args, val)
-		conditions = append(conditions, fmt.Sprintf("LOWER(COALESCE(%s, '')) = LOWER($%d)", col, len(args)))
+		conditions = append(conditions, fmt.Sprintf("LOWER(BTRIM(COALESCE(%s, ''))) = LOWER(BTRIM($%d))", col, len(args)))
 	}
 	appendOptionalTextFilter(filter.DevicePlatform, "h.device_platform")
 	appendOptionalTextFilter(filter.ClientName, "h.client_name")

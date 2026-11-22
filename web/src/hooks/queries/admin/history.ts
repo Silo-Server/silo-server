@@ -5,7 +5,7 @@ import {
   StaleApiRequestContextError,
 } from "@/api/client";
 import { v2 } from "@/api/v2/request";
-import type { AdminPlaybackHistoryItem, AdminUserProfile } from "@/api/types";
+import type { AdminUserProfile } from "@/api/types";
 import {
   ADMIN_PLAYBACK_HISTORY_MAX_LIMIT,
   adminPlaybackHistoryScope,
@@ -91,33 +91,13 @@ export function useAdminPlaybackHistoryPage(params: AdminPlaybackHistoryParams) 
   const scope = adminPlaybackHistoryScope();
   const query = buildAdminPlaybackHistoryQuery(params);
   return useQuery({
-    queryKey: [...adminKeys.playbackHistory(params as Record<string, unknown>), "page", scope],
+    queryKey: [...adminKeys.playbackHistory(params as Record<string, unknown>), scope],
     queryFn: ({ signal }): Promise<AdminPlaybackHistoryPage> =>
       listAdminPlaybackHistory(query, scope, signal),
     retry: false,
     staleTime: ADMIN_HISTORY_STALE_TIME,
     refetchInterval: params.cursor ? false : ADMIN_HISTORY_STALE_TIME,
     refetchIntervalInBackground: false,
-  });
-}
-
-/**
- * The first page of finalized playback attempts matching the filters, read
- * under the authority captured when the query was created. Polled while
- * mounted, as before; the cache key carries the authority generation so a
- * profile or account switch never serves another authority's page.
- */
-export function useAdminPlaybackHistory(params: AdminPlaybackHistoryParams) {
-  const scope = adminPlaybackHistoryScope();
-  const query = buildAdminPlaybackHistoryQuery(params);
-  return useQuery({
-    queryKey: [...adminKeys.playbackHistory(params as Record<string, unknown>), scope],
-    queryFn: ({ signal }): Promise<AdminPlaybackHistoryItem[]> =>
-      listAdminPlaybackHistory(query, scope, signal).then((page) => page.items),
-    retry: false,
-    staleTime: ADMIN_HISTORY_STALE_TIME,
-    refetchInterval: ADMIN_HISTORY_STALE_TIME,
-    refetchIntervalInBackground: true,
   });
 }
 

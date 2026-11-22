@@ -809,8 +809,8 @@ func queryInsightsDevicesSummary(ctx context.Context, tx pgx.Tx, whereSQL string
 func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL string, whereArgs []any, minPlays int, out *AdminInsightsDevices) error {
 	rows, err := tx.Query(ctx, `
 		SELECT
-			COALESCE(NULLIF(BTRIM(h.client_name), ''), 'Unknown') AS client_name,
-			COALESCE(NULLIF(BTRIM(h.device_platform), ''), 'Unknown') AS device_platform,
+			COALESCE(MIN(NULLIF(BTRIM(h.client_name), '')), 'Unknown') AS client_name,
+			COALESCE(MIN(NULLIF(BTRIM(h.device_platform), '')), 'Unknown') AS device_platform,
 			LOWER(COALESCE(NULLIF(BTRIM(mf.codec_video), ''), 'unknown')) AS source_codec,
 			BOOL_OR(COALESCE(h.compat_origin, FALSE)) AS compat_origin,
 			COUNT(*)::bigint AS plays,
@@ -821,7 +821,10 @@ func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL str
 		LEFT JOIN media_files mf ON mf.id = h.media_file_id
 		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
 		WHERE `+whereSQL+`
-		GROUP BY 1, 2, 3
+		GROUP BY
+			LOWER(COALESCE(NULLIF(BTRIM(h.client_name), ''), 'unknown')),
+			LOWER(COALESCE(NULLIF(BTRIM(h.device_platform), ''), 'unknown')),
+			LOWER(COALESCE(NULLIF(BTRIM(mf.codec_video), ''), 'unknown'))
 	`, whereArgs...)
 	if err != nil {
 		return fmt.Errorf("querying insights client codec matrix: %w", err)

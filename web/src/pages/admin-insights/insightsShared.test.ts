@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { buildAdminPlaybackHistoryQuery } from "@/hooks/queries/admin/history";
 import {
+  buildActivityBucketGrid,
   buildHistoryDrilldownHref,
   buildInsightsWindowQueryParams,
+  formatActivityBucketLabel,
   formatRatePercentNumber,
   parseInsightsUrlState,
 } from "./insightsHelpers";
@@ -108,5 +110,56 @@ describe("buildHistoryDrilldownHref & buildAdminPlaybackHistoryQuery", () => {
     expect(formatRatePercentNumber(0.042)).toBe("4.2");
     expect(formatRatePercentNumber(0.876)).toBe("88");
     expect(formatRatePercentNumber(1.2)).toBe("100");
+  });
+});
+
+describe("buildInsightsWindowQueryParams scope omission", () => {
+  it("omits library_id and user_id when callers scope out those filters", () => {
+    const state = parseInsightsUrlState(
+      new URLSearchParams("range=30d&tz=UTC&library_id=4&user_id=12"),
+      "UTC",
+    );
+    expect(buildInsightsWindowQueryParams(state, { omitUser: true })).toEqual({
+      range: "30d",
+      tz: "UTC",
+      library_id: "4",
+    });
+    expect(buildInsightsWindowQueryParams(state, { omitLibrary: true, omitUser: true })).toEqual({
+      range: "30d",
+      tz: "UTC",
+    });
+  });
+});
+
+describe("buildActivityBucketGrid & formatActivityBucketLabel", () => {
+  it("zero-fills daily buckets in a non-UTC timezone across DST without skipping or duplicating days", () => {
+    // 2026-11-01 00:00 EDT (04:00Z) through 2026-11-04 00:00 EST (05:00Z) spans the Nov 1 DST fallback.
+    expect(
+      buildActivityBucketGrid(
+        "2026-11-01T04:00:00Z",
+        "2026-11-04T05:00:00Z",
+        "America/New_York",
+        "day",
+      ),
+    ).toEqual(["2026-11-01", "2026-11-02", "2026-11-03"]);
+  });
+
+  it("aligns weekly buckets to Monday and enumerates months cleanly", () => {
+    // 2026-11-04 is a Wednesday -> Postgres date_trunc('week', ...) starts on Monday 2026-11-02.
+    expect(
+      buildActivityBucketGrid("2026-11-04T00:00:00Z", "2026-11-18T00:00:00Z", "UTC", "week"),
+    ).toEqual(["2026-11-02", "2026-11-09", "2026-11-16"]);
+
+    expect(
+      buildActivityBucketGrid("2026-10-15T00:00:00Z", "2027-01-10T00:00:00Z", "UTC", "month"),
+    ).toEqual(["2026-10-01", "2026-11-01", "2026-12-01", "2027-01-01"]);
+  });
+
+  it("formats UTC calendar bucket timestamps without shifting a day behind in western timezones", () => {
+    const label = formatActivityBucketLabel(Date.parse("2026-11-01T00:00:00Z"), "day");
+    expect(label).toContain("1");
+    expect(label).not.toContain("31");
+    const monthLabel = formatActivityBucketLabel(Date.parse("2026-11-01T00:00:00Z"), "month");
+    expect(monthLabel).toContain("2026");
   });
 });

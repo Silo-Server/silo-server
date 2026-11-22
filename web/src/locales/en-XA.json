@@ -47966,6 +47966,12 @@
       "value": "⟦Ûšé ↑ åñđ ↓ ţö šţéþ ţĥŕöûĝĥ ŕöŵš~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.history.detail.loadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ƒåîļéđ ţö ļöåđ šéššîöñ đéţåîļš.~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.history.detail.loading": [
     {
       "type": 0,
@@ -48056,16 +48062,28 @@
       "value": "⟦Ɓûŕñéđ îñ~~~~⟧"
     }
   ],
-  "web.admin.history.detail.subtitlesDirect": [
+  "web.admin.history.detail.subtitlesEmbedded": [
     {
       "type": 0,
-      "value": "⟦Éẋţéŕñåļ / Šîđéçåŕ~~~~~~~~⟧"
+      "value": "⟦Éɱƀéđđéđ~~~~⟧"
+    }
+  ],
+  "web.admin.history.detail.subtitlesHls": [
+    {
+      "type": 0,
+      "value": "⟦ĤĻŠ ŕéñđîţîöñ~~~~~~⟧"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
     {
       "type": 0,
       "value": "⟦Ñöñé~~⟧"
+    }
+  ],
+  "web.admin.history.detail.subtitlesSidecar": [
+    {
+      "type": 0,
+      "value": "⟦Šîđéçåŕ~~~⟧"
     }
   ],
   "web.admin.history.detail.title": [
@@ -48148,6 +48166,36 @@
     {
       "type": 0,
       "value": "⟦Ñö þļåýƀåçķ ĥîšţöŕý~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.history.endReason.aborted": [
+    {
+      "type": 0,
+      "value": "⟦Åƀöŕţéđ~~~⟧"
+    }
+  ],
+  "web.admin.history.endReason.expired": [
+    {
+      "type": 0,
+      "value": "⟦Éẋþîŕéđ~~~⟧"
+    }
+  ],
+  "web.admin.history.endReason.replaced": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéþļåçéđ~~~~⟧"
+    }
+  ],
+  "web.admin.history.endReason.stopped": [
+    {
+      "type": 0,
+      "value": "⟦Šţöþþéđ~~~⟧"
+    }
+  ],
+  "web.admin.history.endReason.terminated": [
+    {
+      "type": 0,
+      "value": "⟦Ţéŕɱîñåţéđ ƀý åđɱîñ~~~~~~~~⟧"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -48556,12 +48604,6 @@
     {
       "type": 0,
       "value": "⟦Éšţîɱåţéđ: ŕéçöŕđéđ ƀéƒöŕé ŵåţçĥ ţîɱé ŵåš ɱéåšûŕéđ~~~~~~~~~~~~~~~~~~~~⟧"
-    }
-  ],
-  "web.admin.history.row.inspect": [
-    {
-      "type": 0,
-      "value": "⟦Îñšþéçţ šéššîöñ đéţåîļš~~~~~~~~~~⟧"
     }
   ],
   "web.admin.history.row.meta": [
@@ -52218,6 +52260,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.people.scopeNotice": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ļéåđéŕƀöåŕđ ļîšţš éṽéŕý åççöûñţ; ţĥé åççöûñţ ƒîļţéŕ åþþļîéš öñ Åçţîṽîţý åñđ Đéṽîçéš & Ǫûåļîţý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.people.searchPlaceholder": [

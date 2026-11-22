@@ -16,14 +16,15 @@ import { NEUTRAL_SERIES_COLOR } from "@/components/admin/dashboard/widgets/concu
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAdminInsightsActivity } from "@/hooks/queries/admin/insights";
-import { useT } from "@/i18n";
+import { useAppLanguage, useT } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
-import { preferredDateLocale } from "@/lib/datetime";
 import { cn } from "@/lib/utils";
 
 import {
+  buildActivityBucketGrid,
   buildDailyUtcGrid,
   buildInsightsWindowQueryParams,
+  formatActivityBucketLabel,
   formatRatePercentNumber,
   formatShortCalendarDate,
   formatShortTimestamp,
@@ -64,6 +65,7 @@ function heatmapLevel(plays: number, maxPlays: number): number {
 
 export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
   const t = useT();
+  const language = useAppLanguage();
   const [volumeMetric, setVolumeMetric] = useState<VolumeMetric>("plays");
   const [volumeSplit, setVolumeSplit] = useState<VolumeSplit>("method");
   const [peakView, setPeakView] = useState<PeakView>("lines");
@@ -72,17 +74,30 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
   const query = useAdminInsightsActivity(queryParams);
   const data = query.data;
 
+  // Fill every quiet day/week/month bucket across [data.from, data.to) using
+  // the API's local calendar label_date anchored at UTC midnight so columns
+  // stay evenly spaced by time and never shift days in another browser TZ.
   const volumeBuckets = useMemo<StackedColumnBucket[]>(() => {
-    if (!data) return [];
-    return data.buckets.map((bucket) => {
-      const ts = Date.parse(bucket.bucket_start);
+    if (!data || data.buckets.length === 0) return [];
+    const byDate = new Map(data.buckets.map((b) => [b.label_date, b]));
+    const grid = buildActivityBucketGrid(data.from, data.to, data.tz, data.bucket_unit);
+    const dates = grid.length > 0 ? grid : data.buckets.map((b) => b.label_date);
+    return dates.map((labelDate) => {
+      const ts = Date.parse(`${labelDate}T00:00:00Z`);
+      const bucket = byDate.get(labelDate);
       if (volumeMetric === "watch_time") {
-        return { t: ts, segments: [bucket.watch_seconds] };
+        return { t: ts, segments: [bucket?.watch_seconds ?? 0] };
       }
       if (volumeSplit === "media") {
-        return { t: ts, segments: [bucket.movies, bucket.episodes, bucket.other_media] };
+        return {
+          t: ts,
+          segments: [bucket?.movies ?? 0, bucket?.episodes ?? 0, bucket?.other_media ?? 0],
+        };
       }
-      return { t: ts, segments: [bucket.direct, bucket.remux, bucket.transcode] };
+      return {
+        t: ts,
+        segments: [bucket?.direct ?? 0, bucket?.remux ?? 0, bucket?.transcode ?? 0],
+      };
     });
   }, [data, volumeMetric, volumeSplit]);
 
@@ -195,14 +210,16 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
   const weekdayLabels = useMemo(() => {
     const fmt = new Intl.DateTimeFormat(formatLocale(), { weekday: "short", timeZone: "UTC" });
     return HEATMAP_DAY_ANCHORS_UTC.map((iso) => fmt.format(new Date(iso)));
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- language re-runs localized weekday names
+  }, [language]);
 
   const hourLabels = useMemo(() => {
     const fmt = new Intl.DateTimeFormat(formatLocale(), { hour: "numeric", timeZone: "UTC" });
     return Array.from({ length: 24 }, (_, hour) =>
       fmt.format(new Date(Date.UTC(2024, 0, 1, hour, 0, 0))),
     );
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- language re-runs localized hour labels
+  }, [language]);
 
   if (query.isLoading) {
     return (
@@ -236,14 +253,6 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
   const showMeasuredBanner =
     coverage.total_plays > 0 && coverage.measured_plays < coverage.total_plays;
   const hasScopeFilter = filters.libraryId !== undefined || filters.userId !== undefined;
-
-  const formatBucketLabel = (timeMs: number) => {
-    const d = new Date(timeMs);
-    if (data.bucket_unit === "month") {
-      return d.toLocaleDateString(preferredDateLocale(), { month: "short", year: "numeric" });
-    }
-    return d.toLocaleDateString(preferredDateLocale(), { month: "short", day: "numeric" });
-  };
 
   return (
     <div className="space-y-5">
@@ -349,7 +358,7 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
               height={210}
               buckets={volumeBuckets}
               seriesLabels={volumeSeriesLabels}
-              formatBucket={formatBucketLabel}
+              formatBucket={(timeMs) => formatActivityBucketLabel(timeMs, data.bucket_unit)}
               formatValue={
                 volumeMetric === "watch_time"
                   ? (seconds) => formatWatchTime(seconds)

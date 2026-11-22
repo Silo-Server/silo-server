@@ -36,10 +36,7 @@ export function markAdminInsightsRefresh(): void {
 }
 
 function withRefreshFlag<T extends { refresh?: boolean }>(query: T): T {
-  if (Date.now() <= refreshWindowUntil) {
-    return { ...query, refresh: true };
-  }
-  return query;
+  return Date.now() <= refreshWindowUntil ? { ...query, refresh: true } : query;
 }
 
 function insightsScope(): string {
@@ -71,88 +68,80 @@ async function readInsight<T>(
   return result;
 }
 
-export function useAdminInsightsCapabilities(enabled = true) {
+function useAdminInsightQuery<T>(
+  key: readonly unknown[],
+  read: (profileContext: ProfileRequestContextSnapshot, signal: AbortSignal) => Promise<T>,
+  enabled: boolean,
+  staleTime = INSIGHTS_STALE_TIME,
+) {
   const scope = insightsScope();
   return useQuery({
-    queryKey: [...adminKeys.insightsCapabilities(), scope],
-    queryFn: ({ signal }): Promise<AdminInsightsCapabilities> =>
-      readInsight(scope, (profileContext) =>
-        v2("GET /api/v2/admin/insights/capabilities", { profileContext, signal }),
-      ),
+    queryKey: [...key, scope],
+    queryFn: ({ signal }) => readInsight(scope, (profileContext) => read(profileContext, signal)),
     enabled,
-    staleTime: 5 * 60_000,
+    staleTime,
     retry: false,
   });
+}
+
+export function useAdminInsightsCapabilities(enabled = true) {
+  return useAdminInsightQuery(
+    adminKeys.insightsCapabilities(),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/capabilities", { profileContext, signal }),
+    enabled,
+    5 * 60_000,
+  );
 }
 
 export function useAdminInsightsActivity(query: AdminInsightsActivityQuery, enabled = true) {
-  const scope = insightsScope();
-  return useQuery({
-    queryKey: [...adminKeys.insightsActivity(query as Record<string, unknown>), scope],
-    queryFn: ({ signal }): Promise<AdminInsightsActivity> =>
-      readInsight(scope, (profileContext) =>
-        v2("GET /api/v2/admin/insights/activity", {
-          query: withRefreshFlag(query),
-          profileContext,
-          signal,
-        }),
-      ),
+  return useAdminInsightQuery(
+    adminKeys.insightsActivity(query as Record<string, unknown>),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/activity", {
+        query: withRefreshFlag(query),
+        profileContext,
+        signal,
+      }),
     enabled,
-    staleTime: INSIGHTS_STALE_TIME,
-    retry: false,
-  });
+  );
 }
 
 export function useAdminInsightsPeople(query: AdminInsightsPeopleQuery, enabled = true) {
-  const scope = insightsScope();
-  return useQuery({
-    queryKey: [...adminKeys.insightsPeople(query as Record<string, unknown>), scope],
-    queryFn: ({ signal }): Promise<AdminInsightsPeople> =>
-      readInsight(scope, (profileContext) =>
-        v2("GET /api/v2/admin/insights/people", {
-          query: withRefreshFlag(query),
-          profileContext,
-          signal,
-        }),
-      ),
+  return useAdminInsightQuery(
+    adminKeys.insightsPeople(query as Record<string, unknown>),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/people", {
+        query: withRefreshFlag(query),
+        profileContext,
+        signal,
+      }),
     enabled,
-    staleTime: INSIGHTS_STALE_TIME,
-    retry: false,
-  });
+  );
 }
 
 export function useAdminInsightsDevices(query: AdminInsightsDevicesQuery, enabled = true) {
-  const scope = insightsScope();
-  return useQuery({
-    queryKey: [...adminKeys.insightsDevices(query as Record<string, unknown>), scope],
-    queryFn: ({ signal }): Promise<AdminInsightsDevices> =>
-      readInsight(scope, (profileContext) =>
-        v2("GET /api/v2/admin/insights/devices", {
-          query: withRefreshFlag(query),
-          profileContext,
-          signal,
-        }),
-      ),
+  return useAdminInsightQuery(
+    adminKeys.insightsDevices(query as Record<string, unknown>),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/devices", {
+        query: withRefreshFlag(query),
+        profileContext,
+        signal,
+      }),
     enabled,
-    staleTime: INSIGHTS_STALE_TIME,
-    retry: false,
-  });
+  );
 }
 
 export function useAdminInsightsBandwidth(query: AdminInsightsBandwidthQuery, enabled = true) {
-  const scope = insightsScope();
-  return useQuery({
-    queryKey: [...adminKeys.insightsBandwidth(query as Record<string, unknown>), scope],
-    queryFn: ({ signal }): Promise<AdminInsightsBandwidth> =>
-      readInsight(scope, (profileContext) =>
-        v2("GET /api/v2/admin/insights/bandwidth", {
-          query: withRefreshFlag(query),
-          profileContext,
-          signal,
-        }),
-      ),
+  return useAdminInsightQuery(
+    adminKeys.insightsBandwidth(query as Record<string, unknown>),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/bandwidth", {
+        query: withRefreshFlag(query),
+        profileContext,
+        signal,
+      }),
     enabled,
-    staleTime: INSIGHTS_STALE_TIME,
-    retry: false,
-  });
+  );
 }

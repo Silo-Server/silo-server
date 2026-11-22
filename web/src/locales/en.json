@@ -43862,6 +43862,12 @@
       "value": "Use ↑ and ↓ to step through rows"
     }
   ],
+  "web.admin.history.detail.loadFailed": [
+    {
+      "type": 0,
+      "value": "Failed to load session details."
+    }
+  ],
   "web.admin.history.detail.loading": [
     {
       "type": 0,
@@ -43952,16 +43958,28 @@
       "value": "Burned in"
     }
   ],
-  "web.admin.history.detail.subtitlesDirect": [
+  "web.admin.history.detail.subtitlesEmbedded": [
     {
       "type": 0,
-      "value": "External / Sidecar"
+      "value": "Embedded"
+    }
+  ],
+  "web.admin.history.detail.subtitlesHls": [
+    {
+      "type": 0,
+      "value": "HLS rendition"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
     {
       "type": 0,
       "value": "None"
+    }
+  ],
+  "web.admin.history.detail.subtitlesSidecar": [
+    {
+      "type": 0,
+      "value": "Sidecar"
     }
   ],
   "web.admin.history.detail.title": [
@@ -44032,6 +44050,36 @@
     {
       "type": 0,
       "value": "No playback history"
+    }
+  ],
+  "web.admin.history.endReason.aborted": [
+    {
+      "type": 0,
+      "value": "Aborted"
+    }
+  ],
+  "web.admin.history.endReason.expired": [
+    {
+      "type": 0,
+      "value": "Expired"
+    }
+  ],
+  "web.admin.history.endReason.replaced": [
+    {
+      "type": 0,
+      "value": "Replaced"
+    }
+  ],
+  "web.admin.history.endReason.stopped": [
+    {
+      "type": 0,
+      "value": "Stopped"
+    }
+  ],
+  "web.admin.history.endReason.terminated": [
+    {
+      "type": 0,
+      "value": "Terminated by admin"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -44396,12 +44444,6 @@
     {
       "type": 0,
       "value": "Estimated: recorded before watch time was measured"
-    }
-  ],
-  "web.admin.history.row.inspect": [
-    {
-      "type": 0,
-      "value": "Inspect session details"
     }
   ],
   "web.admin.history.row.meta": [
@@ -47770,6 +47812,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.insights.people.scopeNotice": [
+    {
+      "type": 0,
+      "value": "The leaderboard lists every account; the account filter applies on Activity and Devices & Quality."
     }
   ],
   "web.admin.insights.people.searchPlaceholder": [

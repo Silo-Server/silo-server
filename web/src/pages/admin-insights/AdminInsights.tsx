@@ -285,34 +285,32 @@ export default function AdminInsights() {
               </SelectContent>
             </Select>
 
-            {activeTab !== "people" ? (
-              <Select
-                value={filters.userId ? String(filters.userId) : ALL_VALUE}
-                onValueChange={(value) => {
-                  updateParams((next) => {
-                    if (value === ALL_VALUE) {
-                      next.delete("user_id");
-                    } else {
-                      next.set("user_id", value);
-                    }
-                  });
-                }}
-              >
-                <SelectTrigger className="h-8 w-[165px] text-xs">
-                  <SelectValue placeholder={t("web.admin.insights.filter.allAccounts")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_VALUE}>
-                    {t("web.admin.insights.filter.allAccounts")}
+            <Select
+              value={filters.userId ? String(filters.userId) : ALL_VALUE}
+              onValueChange={(value) => {
+                updateParams((next) => {
+                  if (value === ALL_VALUE) {
+                    next.delete("user_id");
+                  } else {
+                    next.set("user_id", value);
+                  }
+                });
+              }}
+            >
+              <SelectTrigger className="h-8 w-[165px] text-xs">
+                <SelectValue placeholder={t("web.admin.insights.filter.allAccounts")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_VALUE}>
+                  {t("web.admin.insights.filter.allAccounts")}
+                </SelectItem>
+                {users.map((u) => (
+                  <SelectItem key={u.id} value={String(u.id)}>
+                    {u.username}
                   </SelectItem>
-                  {users.map((u) => (
-                    <SelectItem key={u.id} value={String(u.id)}>
-                      {u.username}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : null}
+                ))}
+              </SelectContent>
+            </Select>
 
             <Select
               value={filters.tz}

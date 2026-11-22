@@ -10,6 +10,14 @@ import {
 } from "@/components/admin/dashboard/charts";
 import { formatDataTotal, formatMbps, formatMbpsValue } from "@/components/admin/dashboard/format";
 import { WidgetViewToggle } from "@/components/admin/dashboard/WidgetViewToggle";
+import { NEUTRAL_SERIES_COLOR } from "@/components/admin/dashboard/widgets/concurrentStreamsSeries";
+import {
+  MAX_NAMED_BANDS,
+  OTHER_COLOR,
+  assignEgressSourceColors,
+  assignEgressSourceSlots,
+  dedupeEgressSourceLabels,
+} from "@/components/admin/dashboard/widgets/egressBands";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -27,6 +35,7 @@ import { formatLocale } from "@/lib/appLocale";
 
 import {
   buildDailyUtcGrid,
+  buildInsightsWindowQueryParams,
   formatRatePercentNumber,
   formatShortCalendarDate,
   formatShortTimestamp,
@@ -37,26 +46,14 @@ import { InsightKpiCard, InsightNoticeBanner, InsightSectionError } from "./insi
 type BandwidthMetric = "volume" | "peak";
 type BandwidthScope = "total" | "nodes";
 
-// Matches Silo's egressBands.ts color palette, skipping --chart-2 (slot 1)
-// which is reserved for Downloads in Total view.
-const BAND_COLOR_SLOTS = [0, 2, 3, 4] as const;
-const MAX_NAMED_BANDS = 4;
-const OTHER_COLOR = "var(--muted-foreground)";
-
 export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
   const t = useT();
   const [metric, setMetric] = useState<BandwidthMetric>("volume");
   const [scopeView, setScopeView] = useState<BandwidthScope>("total");
 
   const queryParams = useMemo(
-    () => ({
-      range: filters.range,
-      tz: filters.tz,
-      ...(filters.range === "custom"
-        ? { from_date: filters.fromDate, to_date: filters.toDate }
-        : {}),
-    }),
-    [filters.range, filters.tz, filters.fromDate, filters.toDate],
+    () => buildInsightsWindowQueryParams(filters, { omitLibrary: true, omitUser: true }),
+    [filters],
   );
   const query = useAdminInsightsBandwidth(queryParams);
   const data = query.data;
@@ -69,6 +66,7 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
     if (raw.length === 0 || !data) {
       return {
         points: [] as LineChartPoint[],
+        color: undefined as string | undefined,
         overlays: undefined as LineChartOverlay[] | undefined,
         stacks: undefined as LineChartStack[] | undefined,
         edgeLabels: undefined as { start: string; end: string } | undefined,
@@ -102,26 +100,36 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
         .sort((a, b) => b.egress_bytes - a.egress_bytes || a.key.localeCompare(b.key))
         .slice(0, MAX_NAMED_BANDS);
       const keptKeys = new Set(topSources.map((s) => s.key));
+      const apiLabel = t("web.admin.insights.bandwidth.chart.apiServer");
+      const labels = dedupeEgressSourceLabels(topSources, apiLabel);
+      const colors = assignEgressSourceColors(topSources);
+      const slots = assignEgressSourceSlots(topSources);
 
-      const namedStacks: LineChartStack[] = topSources.map((src, idx) => ({
+      // Per-node daily peak rates come from independent minutes, so stacking
+      // them could overshoot the cluster total peak. Draw them as separate
+      // overlay lines under the neutral total line; reserve stacked bands for
+      // additive daily byte volumes.
+      if (metric === "peak") {
+        const overlays: LineChartOverlay[] = topSources.map((src) => ({
+          label: labels.get(src.key) ?? src.name,
+          seriesIndex: slots.get(src.key) ?? 0,
+          points: makePoints((pt) => (pt.peak_kbps_by_source[src.key] ?? 0) / 1_000),
+        }));
+        return { points, color: NEUTRAL_SERIES_COLOR, overlays, stacks: undefined, edgeLabels };
+      }
+
+      const namedStacks: LineChartStack[] = topSources.map((src) => ({
         key: src.key,
-        label: src.kind === "api" ? t("web.admin.insights.bandwidth.chart.apiServer") : src.name,
-        color: chartSeriesColor(BAND_COLOR_SLOTS[idx % BAND_COLOR_SLOTS.length] ?? 0),
-        points: makePoints((pt) =>
-          metric === "volume"
-            ? (pt.bytes_by_source[src.key] ?? 0)
-            : (pt.peak_kbps_by_source[src.key] ?? 0) / 1_000,
-        ),
+        label: labels.get(src.key) ?? src.name,
+        color: colors.get(src.key) ?? chartSeriesColor(0),
+        points: makePoints((pt) => pt.bytes_by_source[src.key] ?? 0),
       }));
 
       const otherPoints = makePoints((pt) => {
-        const sourceMap = metric === "volume" ? pt.bytes_by_source : pt.peak_kbps_by_source;
-        const keptSum = Object.entries(sourceMap)
+        const keptSum = Object.entries(pt.bytes_by_source)
           .filter(([k]) => keptKeys.has(k))
           .reduce((sum, [, val]) => sum + val, 0);
-        const total = metric === "volume" ? pt.egress_bytes : pt.peak_egress_kbps;
-        const diff = Math.max(total - keptSum, 0);
-        return metric === "volume" ? diff : diff / 1_000;
+        return Math.max(pt.egress_bytes - keptSum, 0);
       });
       const hasOther = otherPoints.some((p) => (p.value ?? 0) > 0);
       const stacks = hasOther
@@ -135,7 +143,7 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
             ...namedStacks,
           ]
         : namedStacks;
-      return { points, overlays: undefined, stacks, edgeLabels };
+      return { points, color: undefined, overlays: undefined, stacks, edgeLabels };
     }
 
     const hasDownloads = raw.some((pt) =>
@@ -153,7 +161,7 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
         ]
       : undefined;
 
-    return { points, overlays, stacks: undefined, edgeLabels };
+    return { points, color: undefined, overlays, stacks: undefined, edgeLabels };
   }, [data, effectiveScope, metric, t]);
 
   if (query.isLoading) {
@@ -298,7 +306,12 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
             <LineChart
               height={220}
               points={chartSeries.points}
-              seriesLabel={t("web.admin.dashboard.widgets.egress.seriesLabel")}
+              color={chartSeries.color}
+              seriesLabel={
+                effectiveScope === "nodes" && metric === "peak"
+                  ? t("web.admin.dashboard.chart.total")
+                  : t("web.admin.dashboard.widgets.egress.seriesLabel")
+              }
               overlays={chartSeries.overlays}
               stacks={chartSeries.stacks}
               edgeLabels={chartSeries.edgeLabels}

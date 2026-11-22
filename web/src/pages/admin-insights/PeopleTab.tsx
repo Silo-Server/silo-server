@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 
 import {
   buildHistoryDrilldownHref,
+  buildInsightsWindowQueryParams,
   formatRatePercentNumber,
   formatShortTimestamp,
   type InsightsFilterState,
@@ -53,28 +54,13 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
 
   const queryParams = useMemo(
     () => ({
-      range: filters.range,
-      tz: filters.tz,
-      ...(filters.range === "custom"
-        ? { from_date: filters.fromDate, to_date: filters.toDate }
-        : {}),
-      ...(filters.libraryId ? { library_id: String(filters.libraryId) } : {}),
+      ...buildInsightsWindowQueryParams(filters, { omitUser: true }),
       ...(debouncedSearch ? { search: debouncedSearch } : {}),
       sort,
       dir,
       limit,
     }),
-    [
-      filters.range,
-      filters.tz,
-      filters.fromDate,
-      filters.toDate,
-      filters.libraryId,
-      debouncedSearch,
-      sort,
-      dir,
-      limit,
-    ],
+    [filters, debouncedSearch, sort, dir, limit],
   );
 
   const query = useAdminInsightsPeople(queryParams);
@@ -104,37 +90,17 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
     );
   }
 
-  if (query.isLoading) {
-    return (
-      <div className="space-y-5">
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-24 rounded-2xl" />
-          ))}
-        </div>
-        <Skeleton className="h-96 rounded-2xl" />
-      </div>
-    );
-  }
-
-  if (query.error || !data) {
-    return (
-      <InsightSectionError
-        error={query.error}
-        onRetry={() => {
-          void query.refetch();
-        }}
-      />
-    );
-  }
-
-  const { coverage } = data;
-  const showMeasuredBanner =
-    coverage.total_plays > 0 && coverage.measured_plays < coverage.total_plays;
+  const coverage = data?.coverage;
+  const showMeasuredBanner = Boolean(
+    coverage && coverage.total_plays > 0 && coverage.measured_plays < coverage.total_plays,
+  );
 
   return (
     <div className="space-y-5">
-      {showMeasuredBanner ? (
+      {filters.userId !== undefined ? (
+        <InsightNoticeBanner message={t("web.admin.insights.people.scopeNotice")} />
+      ) : null}
+      {showMeasuredBanner && coverage ? (
         <InsightNoticeBanner
           message={t("web.admin.insights.coverage.watchTimePartial", {
             measured: coverage.measured_plays.toLocaleString(formatLocale()),
@@ -143,22 +109,31 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
         />
       ) : null}
 
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <InsightKpiCard
-          label={t("web.admin.insights.people.kpi.activeAccounts")}
-          value={data.active_accounts.toLocaleString(formatLocale())}
-        />
-        <InsightKpiCard
-          label={t("web.admin.insights.people.kpi.activeProfiles")}
-          value={data.active_profiles.toLocaleString(formatLocale())}
-        />
-        <InsightKpiCard
-          label={t("web.admin.insights.people.kpi.liveNow")}
-          value={data.live_accounts.toLocaleString(formatLocale())}
-          accent={data.live_accounts > 0 ? "success" : "default"}
-        />
-      </div>
+      {data ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <InsightKpiCard
+            label={t("web.admin.insights.people.kpi.activeAccounts")}
+            value={data.active_accounts.toLocaleString(formatLocale())}
+          />
+          <InsightKpiCard
+            label={t("web.admin.insights.people.kpi.activeProfiles")}
+            value={data.active_profiles.toLocaleString(formatLocale())}
+          />
+          <InsightKpiCard
+            label={t("web.admin.insights.people.kpi.liveNow")}
+            value={data.live_accounts.toLocaleString(formatLocale())}
+            accent={data.live_accounts > 0 ? "success" : "default"}
+          />
+        </div>
+      ) : query.isLoading ? (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <Skeleton key={i} className="h-24 rounded-2xl" />
+          ))}
+        </div>
+      ) : null}
 
+      {/* Keep the search input card mounted across refetches so typing never loses focus. */}
       <Card className="surface-panel rounded-2xl border-0">
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-3 space-y-0">
           <div className="relative w-full max-w-xs">
@@ -172,7 +147,21 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
           </div>
         </CardHeader>
         <CardContent>
-          {data.accounts.length === 0 ? (
+          {query.isLoading ? (
+            <div className="space-y-3">
+              <Skeleton className="h-9 w-full rounded-lg" />
+              {Array.from({ length: 5 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full rounded-lg" />
+              ))}
+            </div>
+          ) : query.error || !data ? (
+            <InsightSectionError
+              error={query.error}
+              onRetry={() => {
+                void query.refetch();
+              }}
+            />
+          ) : data.accounts.length === 0 ? (
             <div className="text-muted-foreground py-12 text-center text-sm">
               {t("web.admin.insights.people.empty")}
             </div>

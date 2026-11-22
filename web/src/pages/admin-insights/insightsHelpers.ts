@@ -78,13 +78,16 @@ export function parseInsightsUrlState(
   };
 }
 
-export function buildInsightsWindowQueryParams(filters: InsightsFilterState) {
+export function buildInsightsWindowQueryParams(
+  filters: InsightsFilterState,
+  options: { omitLibrary?: boolean; omitUser?: boolean } = {},
+) {
   return {
     range: filters.range,
     tz: filters.tz,
     ...(filters.range === "custom" ? { from_date: filters.fromDate, to_date: filters.toDate } : {}),
-    ...(filters.libraryId ? { library_id: String(filters.libraryId) } : {}),
-    ...(filters.userId ? { user_id: String(filters.userId) } : {}),
+    ...(!options.omitLibrary && filters.libraryId ? { library_id: String(filters.libraryId) } : {}),
+    ...(!options.omitUser && filters.userId ? { user_id: String(filters.userId) } : {}),
   };
 }
 
@@ -166,6 +169,91 @@ export function buildDailyUtcGrid(firstDate: string, lastDate: string): string[]
     days.push(new Date(t).toISOString().slice(0, 10));
   }
   return days;
+}
+
+function isoCalendarDateInTz(iso: string, tz: string): string | null {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const y = parts.find((p) => p.type === "year")?.value;
+    const m = parts.find((p) => p.type === "month")?.value;
+    const d = parts.find((p) => p.type === "day")?.value;
+    return y && m && d ? `${y}-${m}-${d}` : null;
+  } catch {
+    return date.toISOString().slice(0, 10);
+  }
+}
+
+/**
+ * Enumerates every `label_date` (`YYYY-MM-DD`) bucket in `[fromIso, toIso)` in
+ * `tz` at Postgres `date_trunc` granularity (`day`, ISO Monday `week`, or
+ * `month`), so quiet periods render as zero-height columns instead of
+ * compressing distant plays together.
+ */
+export function buildActivityBucketGrid(
+  fromIso: string,
+  toIso: string,
+  tz: string,
+  unit: "day" | "week" | "month",
+): string[] {
+  const fromDateStr = isoCalendarDateInTz(fromIso, tz);
+  const endMs = Date.parse(toIso);
+  const inclusiveToIso = Number.isFinite(endMs) ? new Date(endMs - 1).toISOString() : toIso;
+  const toDateStr = isoCalendarDateInTz(inclusiveToIso, tz);
+  if (!fromDateStr || !toDateStr) return [];
+
+  const start = new Date(`${fromDateStr}T00:00:00Z`);
+  const end = new Date(`${toDateStr}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
+
+  if (unit === "week") {
+    // Postgres date_trunc('week', ...) starts on Monday.
+    const dow = (start.getUTCDay() + 6) % 7;
+    start.setUTCDate(start.getUTCDate() - dow);
+  } else if (unit === "month") {
+    start.setUTCDate(1);
+  }
+
+  const out: string[] = [];
+  const cursor = new Date(start.getTime());
+  for (let i = 0; i < 4000 && cursor <= end; i++) {
+    out.push(cursor.toISOString().slice(0, 10));
+    if (unit === "day") {
+      cursor.setUTCDate(cursor.getUTCDate() + 1);
+    } else if (unit === "week") {
+      cursor.setUTCDate(cursor.getUTCDate() + 7);
+    } else {
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1, 1);
+    }
+  }
+  return out;
+}
+
+/** Formats a UTC calendar timestamp (`YYYY-MM-DD` midnight UTC) cleanly without browser-TZ shift. */
+export function formatActivityBucketLabel(
+  utcCalendarMs: number,
+  unit: "day" | "week" | "month",
+): string {
+  const d = new Date(utcCalendarMs);
+  if (Number.isNaN(d.getTime())) return "—";
+  if (unit === "month") {
+    return d.toLocaleDateString(preferredDateLocale(), {
+      month: "short",
+      year: "numeric",
+      timeZone: "UTC",
+    });
+  }
+  return d.toLocaleDateString(preferredDateLocale(), {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
 export function formatHwAccelLabel(
