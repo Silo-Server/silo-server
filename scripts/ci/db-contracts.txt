@@ -158,7 +158,7 @@
 ./internal/catalog TestFoldSearchDiacriticsMigrationPostgres
 
 # name_prefix narrows the matches of every text search, relevance and sorted,
-# without changing which matches the search finds, and skips Meilisearch.
+# without changing which matches the search finds, Meilisearch's included.
 ./internal/catalog TestSearchNamePrefixNarrowsTextSearchDB
 
 # Sorting by latest episode added works when episodes can appear: mixed search

@@ -2,6 +2,7 @@ package catalog
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/rand/v2"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -18,9 +20,12 @@ import (
 // namePrefixSearchFixture is one isolated set of titles sharing a random token.
 type namePrefixSearchFixture struct {
 	token, movie, series, episode string
-	echoes                        []string
-	folder                        int
-	kinds                         map[string]string
+	// overview matches only by overview, which title hits suppress on
+	// PostgreSQL; the fake Meilisearch index returns it.
+	overview string
+	echoes   []string
+	folder   int
+	kinds    map[string]string
 	// byPrefix maps each name_prefix to the IDs a q=<token> search returns.
 	byPrefix map[string][]string
 }
@@ -60,11 +65,12 @@ func seedNamePrefixSearchFixture(t *testing.T, pool *pgxpool.Pool) namePrefixSea
 	// Matches only by overview, which title hits suppress, so no prefix may
 	// surface it either.
 	overviewOnly := token + "-overview"
+	f.overview = overviewOnly
 	exec(`INSERT INTO media_items(content_id,type,title,overview,status,genres,year) VALUES($1,'movie','Quiet Harbor',$2,'matched','{Drama}',2001)`, overviewOnly, strings.Repeat(token+" ", 3))
 	exec(`INSERT INTO media_item_libraries(content_id,media_folder_id) VALUES($1,$4),($2,$4),($3,$4)`, f.movie, f.series, overviewOnly, f.folder)
 	// Five or more title hits keep the search on its FTS path; fewer switch it
 	// to the combined FTS-plus-fuzzy path.
-	f.kinds = map[string]string{f.movie: "movie", f.series: "series", f.episode: "episode"}
+	f.kinds = map[string]string{f.movie: "movie", f.series: "series", f.episode: "episode", overviewOnly: "movie"}
 	for i := range 4 {
 		id := fmt.Sprintf("%s-echo-%d", token, i)
 		f.echoes = append(f.echoes, id)
@@ -87,17 +93,38 @@ func seedNamePrefixSearchFixture(t *testing.T, pool *pgxpool.Pool) namePrefixSea
 }
 
 // namePrefixSearchResolvers returns a PostgreSQL resolver and a Meilisearch
-// one whose index fails the test if contacted: Meilisearch cannot apply the
-// prefix before its capped ranking window, so a prefixed search must reach
-// PostgreSQL instead.
-func namePrefixSearchResolvers(t *testing.T, pool *pgxpool.Pool) map[string]*CatalogResolver {
+// one. The fake index ranks every fixture title, the overview-only one
+// included, so a prefix must narrow Meilisearch's own matches rather than hand
+// the search to PostgreSQL. searches counts the index's search requests.
+func namePrefixSearchResolvers(t *testing.T, pool *pgxpool.Pool, f namePrefixSearchFixture, searches *atomic.Int32) map[string]*CatalogResolver {
 	t.Helper()
+	var ranked []meilisearchSearchHit
+	for _, id := range append([]string{f.overview, f.movie, f.series, f.episode}, f.echoes...) {
+		ranked = append(ranked, meilisearchSearchHit{ContentID: id})
+	}
+	body, err := json.Marshal(meilisearchSearchResponse{Hits: ranked})
+	if err != nil {
+		t.Fatal(err)
+	}
+	hits := string(body)
 	meili := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("Meilisearch contacted for a prefixed search: %s %s", r.Method, r.URL.Path)
-		w.WriteHeader(http.StatusInternalServerError)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/settings"):
+			_, _ = w.Write([]byte(`{"pagination":{"maxTotalHits":1000}}`))
+		case strings.HasSuffix(r.URL.Path, "/search"):
+			searches.Add(1)
+			_, _ = w.Write([]byte(hits))
+		case r.URL.Path == "/multi-search":
+			searches.Add(1)
+			_, _ = w.Write([]byte(`{"results":[` + hits + `,` + hits + `]}`))
+		default:
+			t.Errorf("unexpected Meilisearch request: %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusNotFound)
+		}
 	}))
 	t.Cleanup(meili.Close)
-	meiliProvider, err := NewMeilisearchSearchProvider(NewItemRepository(pool), nil, nil, MeilisearchProviderConfig{URL: meili.URL, IndexTypes: []string{"movie", "series", "episode"}})
+	meiliProvider, err := NewMeilisearchSearchProvider(NewItemRepository(pool), nil, nil, MeilisearchProviderConfig{URL: meili.URL})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +179,10 @@ func resolveNamePrefixSearch(t *testing.T, resolver *CatalogResolver, values url
 }
 
 // name_prefix narrows every text search the way it narrows browse: relevance
-// and sorted, with and without a single-kind type, on the PostgreSQL provider.
+// and sorted, with and without a single-kind type, on PostgreSQL and within
+// Meilisearch's ranked window. It takes several seconds: each search family,
+// sort, type, rule, and provider builds its prefix into different SQL, so the
+// matrix resolves a few hundred searches against one fixture.
 func TestSearchNamePrefixNarrowsTextSearchDB(t *testing.T) {
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
@@ -168,7 +198,8 @@ func TestSearchNamePrefixNarrowsTextSearchDB(t *testing.T) {
 
 	// A library restriction moves episode admission inside a planning fence.
 	accesses := map[string]AccessFilter{"unrestricted": {}, "library": {AllowedLibraryIDs: []int{f.folder}}}
-	for providerName, resolver := range namePrefixSearchResolvers(t, pool) {
+	var meiliSearches atomic.Int32
+	for providerName, resolver := range namePrefixSearchResolvers(t, pool, f, &meiliSearches) {
 		for accessName, access := range accesses {
 			for _, base := range namePrefixSearchRequests(f.token) {
 				for prefix, matches := range f.byPrefix {
@@ -179,7 +210,11 @@ func TestSearchNamePrefixNarrowsTextSearchDB(t *testing.T) {
 					name := providerName + " " + accessName + " " + values.Encode()
 					got, hasMore := resolveNamePrefixSearch(t, resolver, values, access)
 					kind := values.Get("type")
-					want := slices.DeleteFunc(slices.Clone(matches), func(id string) bool { return kind != "" && f.kinds[id] != kind })
+					want := slices.Clone(matches)
+					if providerName == "meilisearch" && prefix == "quiet" {
+						want = append(want, f.overview)
+					}
+					want = slices.DeleteFunc(want, func(id string) bool { return kind != "" && f.kinds[id] != kind })
 					slices.Sort(got)
 					slices.Sort(want)
 					if !slices.Equal(got, want) {
@@ -191,6 +226,10 @@ func TestSearchNamePrefixNarrowsTextSearchDB(t *testing.T) {
 				}
 			}
 		}
+	}
+
+	if meiliSearches.Load() == 0 {
+		t.Error("prefixed searches never reached the Meilisearch index")
 	}
 
 	// A single title hit takes the combined FTS-plus-fuzzy path.
