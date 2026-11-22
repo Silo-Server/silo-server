@@ -603,10 +603,14 @@ export function usePlaybackSession(
   // The adoptions already summarized, so a second report of one is dropped.
   const summarizedAdoptionsRef = useRef(new Set<string>());
   // The estimate, bandwidth cap, and network tier on the start or replan in
-  // flight; requests are serialized, so the next adoption answers them.
+  // flight; requests are serialized, so the next adoption answers them. Only
+  // start and quality_change replans apply quality policy (including version
+  // reselection); frozen seeks and track changes keep the prior adopted cap
+  // and tier so a waiting tier transition still issues its quality_change.
   const requestedEstimateRef = useRef<number | null | undefined>(undefined);
   const requestedCapRef = useRef<number | null>(maxBitrateKbps ?? null);
   const requestedTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
+  const requestedAppliesQualityPolicyRef = useRef(true);
   const activeBandwidthCapRef = useRef<number | null>(maxBitrateKbps ?? null);
   const activePlanTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
   const activeNetworkTierRef = useRef<PlaybackNetworkTier | undefined>(networkTier);
@@ -930,8 +934,10 @@ export function usePlaybackSession(
         if (oldest) summaryIdentitiesRef.current.delete(oldest);
       }
       hasAdoptedPlanRef.current = true;
-      activeBandwidthCapRef.current = requestedCapRef.current;
-      activePlanTierRef.current = requestedTierRef.current;
+      if (requestedAppliesQualityPolicyRef.current) {
+        activeBandwidthCapRef.current = requestedCapRef.current;
+        activePlanTierRef.current = requestedTierRef.current;
+      }
       if (
         Number.isFinite(plan.timeline.source_start_seconds) &&
         plan.timeline.source_start_seconds >= 0
@@ -984,6 +990,7 @@ export function usePlaybackSession(
       requestedEstimateRef.current = bandwidthEstimateKbps;
       requestedCapRef.current = maxBitrateKbps ?? null;
       requestedTierRef.current = latestNetworkTierRef.current;
+      requestedAppliesQualityPolicyRef.current = true;
       // An owed Restore's `clear` goes out once, on this start.
       const clearOwed = clearOwedRef.current;
       clearOwedRef.current = false;
@@ -1526,10 +1533,14 @@ export function usePlaybackSession(
       const attemptCount = isFailureRecovery ? attemptCountRef.current : 1;
 
       // Leaving a metered link invalidates any step-down estimate recorded on
-      // the previous network; clear it before building the first unmetered
-      // replan (including a queued track_change) so Wi-Fi does not stay pinned
-      // to a cellular estimate.
+      // the previous network; clear it before building the first non-seek
+      // unmetered replan (including a queued track_change) so Wi-Fi does not
+      // stay pinned to a cellular estimate. Frozen seeks keep the prior recipe,
+      // so the follow-up tier-change quality_change clears it instead.
+      const isFrozenSeek =
+        options.operation === "seek_reanchor" || options.operation === "seek_failure_recovery";
       if (
+        !isFrozenSeek &&
         activePlanTierRef.current !== undefined &&
         activePlanTierRef.current !== "unmetered" &&
         latestNetworkTierRef.current === "unmetered"
@@ -1553,6 +1564,7 @@ export function usePlaybackSession(
       requestedEstimateRef.current = bandwidthEstimateKbps;
       requestedCapRef.current = maxBitrateKbps ?? null;
       requestedTierRef.current = latestNetworkTierRef.current;
+      requestedAppliesQualityPolicyRef.current = options.operation === "quality_change";
       // A Restore that could not go at once rides its `clear` on the request
       // that replaced it.
       const learnedLimit =
@@ -1860,8 +1872,13 @@ export function usePlaybackSession(
         activePlanTierRef.current !== undefined &&
         activePlanTierRef.current !== "unmetered" &&
         activeNetworkTierRef.current === "unmetered";
+      const reselectSiblingOnUnmetered =
+        leavingMetered &&
+        planRef.current.effective_media_file_id !== planRef.current.requested_media_file_id;
       const clearMeteredEstimate = leavingMetered && keptEstimateRef.current !== undefined;
-      if (!qualityChanged && !capChanged && !clearMeteredEstimate) return;
+      if (!qualityChanged && !capChanged && !clearMeteredEstimate && !reselectSiblingOnUnmetered) {
+        return;
+      }
 
       const previousPreference = qualityRef.current;
       if (qualityChanged) {

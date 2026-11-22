@@ -776,19 +776,30 @@ describe("usePlaybackSession quality changes", () => {
         ),
       ),
     );
-    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(2));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(3));
     expect(bodiesTo("/playback/session-1/replan")[1]).toMatchObject({
       operation: "track_change",
       bandwidth_cap_kbps: 2_000,
       selected_tracks: { subtitle: { id: "", index: 2 } },
     });
+    expect(bodiesTo("/playback/session-1/replan")[2]).toMatchObject({
+      operation: "quality_change",
+      bandwidth_cap_kbps: 2_000,
+    });
 
     unmount();
   });
 
-  it("clears a cellular step-down estimate on a queued track replan after switching to Wi-Fi", async () => {
+  it("clears a cellular step-down estimate on a queued track replan and still reselects source on Wi-Fi", async () => {
     let resolveFirstReplan!: (response: Response) => void;
     let replanCount = 0;
+    const siblingPlan = (planId: string) =>
+      fixturePlanV3({
+        plan_id: planId,
+        plan_attempt_key: `v3:${planId}`,
+        requested_media_file_id: 7,
+        effective_media_file_id: 8,
+      });
     const fetchMock = sessionFetch(() => {
       replanCount += 1;
       if (replanCount === 1) {
@@ -796,16 +807,8 @@ describe("usePlaybackSession quality changes", () => {
           resolveFirstReplan = resolve;
         });
       }
-      return jsonResponse(
-        playable(
-          "session-1",
-          fixturePlanV3({
-            plan_id: `plan:wifi-clear-${replanCount}`,
-            plan_attempt_key: `v3:wifi-clear-${replanCount}`,
-          }),
-        ),
-      );
-    }, fixturePlanV3());
+      return jsonResponse(playable("session-1", siblingPlan(`wifi-clear-${replanCount}`)));
+    }, siblingPlan("wifi-clear-start"));
     vi.stubGlobal("fetch", fetchMock);
     const bodiesTo = (suffix: string) =>
       fetchMock.mock.calls
@@ -853,28 +856,119 @@ describe("usePlaybackSession quality changes", () => {
     // Switch from cellular to Wi-Fi while the first replan is in flight.
     rerender({ cap: null, tier: "unmetered" });
 
-    // Resolving the first replan dispatches the queued subtitle switch on Wi-Fi;
-    // it must clear the cellular estimate and omit the cellular cap.
-    act(() =>
-      resolveFirstReplan(
-        jsonResponse(
-          playable(
-            "session-1",
-            fixturePlanV3({
-              plan_id: "plan:wifi-clear-1",
-              plan_attempt_key: "v3:wifi-clear-1",
-            }),
-          ),
-        ),
-      ),
-    );
-    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(2));
+    // Resolving the first replan dispatches the queued subtitle switch on Wi-Fi
+    // (clearing the cellular estimate), followed by a quality_change replan so
+    // the server can reconsider the requested 4K version instead of staying
+    // pinned to the cellular sibling.
+    act(() => resolveFirstReplan(jsonResponse(playable("session-1", siblingPlan("wifi-clear-1")))));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(3));
     expect(bodiesTo("/playback/session-1/replan")[1]).toMatchObject({
       operation: "track_change",
       selected_tracks: { subtitle: { id: "", index: 2 } },
     });
     expect(bodiesTo("/playback/session-1/replan")[1]).not.toHaveProperty("bandwidth_cap_kbps");
     expect(bodiesTo("/playback/session-1/replan")[1]).not.toHaveProperty("bandwidth_estimate_kbps");
+    expect(bodiesTo("/playback/session-1/replan")[2]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "auto",
+    });
+    expect(bodiesTo("/playback/session-1/replan")[2]).not.toHaveProperty("bandwidth_cap_kbps");
+    expect(bodiesTo("/playback/session-1/replan")[2]).not.toHaveProperty("bandwidth_estimate_kbps");
+
+    unmount();
+  });
+
+  it("still issues a quality_change replan after a queued frozen seek when Data Saver turns on", async () => {
+    let resolveFirstReplan!: (response: Response) => void;
+    let replanCount = 0;
+    const fetchMock = sessionFetch(() => {
+      replanCount += 1;
+      if (replanCount === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirstReplan = resolve;
+        });
+      }
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: `plan:seek-tier-${replanCount}`,
+            plan_attempt_key: `v3:seek-tier-${replanCount}`,
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Start an audio switch, then queue a frozen seek reanchor behind it.
+    act(() => result.current.switchAudioTrack(1, 30));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+    act(() => {
+      void result.current.reanchorSeek(240);
+    });
+
+    // Enable Data Saver before the queue drains.
+    rerender({ cap: 2_000, tier: "low_data" });
+
+    // The queued seek runs with the frozen recipe; once it settles, the session
+    // must still issue a quality_change replan so the 2 Mbps cap actually takes effect.
+    act(() =>
+      resolveFirstReplan(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:seek-tier-1",
+              plan_attempt_key: "v3:seek-tier-1",
+            }),
+          ),
+        ),
+      ),
+    );
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(3));
+    expect(bodiesTo("/playback/session-1/replan")[1]).toMatchObject({
+      operation: "seek_reanchor",
+      position_seconds: 240,
+    });
+    expect(bodiesTo("/playback/session-1/replan")[2]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "auto",
+      bandwidth_cap_kbps: 2_000,
+    });
 
     unmount();
   });
