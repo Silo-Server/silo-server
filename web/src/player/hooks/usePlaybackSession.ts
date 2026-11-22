@@ -1683,8 +1683,14 @@ export function usePlaybackSession(
           }));
           return false;
         }
-        if (retireSessionOnRefusal) {
+        if (retireSessionOnRefusal === true) {
           console.error("Failed to refresh playback output", err);
+          return false;
+        }
+        if (typeof retireSessionOnRefusal === "function" && !retireSessionOnRefusal()) {
+          // A tightening request failed after the viewer already relaxed the
+          // cap; leave the permitted stream running without surfacing a stale
+          // error.
           return false;
         }
         if (
@@ -1710,6 +1716,9 @@ export function usePlaybackSession(
           errorReason: null,
           error: nextError.message,
         }));
+        if (typeof retireSessionOnRefusal === "function") {
+          retireActiveSession(sessionId);
+        }
         return false;
       } finally {
         replanInFlightRef.current = false;

@@ -1169,6 +1169,55 @@ describe("usePlaybackSession quality changes", () => {
 
     unmount();
   });
+
+  it("retires the over-cap session when a Data Saver tightening request fails with an HTTP error", async () => {
+    const fetchMock = sessionFetch(
+      () =>
+        new Response(JSON.stringify({ error: "temporary failure" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        }),
+      fixturePlanV3(),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    rerender({ cap: 2_000, tier: "low_data" });
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.plan).toBeNull();
+    expect(result.current.streamUrl).toBeNull();
+
+    unmount();
+  });
 });
 
 describe("usePlaybackSession initial bitmap subtitles", () => {
