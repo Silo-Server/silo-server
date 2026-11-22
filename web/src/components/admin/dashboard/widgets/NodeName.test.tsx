@@ -24,13 +24,14 @@ describe("NodeName", () => {
   });
 
   it("doesn't cut a name where its pieces would read in a different order", () => {
-    // Brackets pair across the whole name (a stray closing one changes nothing),
-    // a mark or an override sets the direction of the text after it, and a Syriac
-    // first letter makes the name right to left.
+    // Brackets pair across the whole name (a stray closing one or a quotation
+    // mark changes nothing), a mark or an override sets the direction of the
+    // text after it, and a Syriac first letter makes the name right to left.
     for (const name of [
       "ܬܪܢܣܟܘܕ-worker-east-01",
       "gpu אבג(דהו abc12345678)",
       "gpu אבג(דהו] abc12345678)",
+      "gpu \u301dאבג(דהו\u301e abc12345678)",
       "gpu-\u202eabc\u202c transcode-worker-07",
       "\u200fgpu-transcode-frankfurt-east-rack-07",
     ]) {
@@ -47,10 +48,10 @@ describe("NodeName", () => {
       dir: "rtl",
       texts: ["سرور\u200cهای\u200c", "پخش\u200cفرانکفورت"],
     });
-    // A right-to-left mark doesn't stop two Arabic letters joining.
-    expect(pieces("خادم البث ب\u200fفرانكفورت ال")).toEqual({
+    // A mark and a right-to-left mark don't stop two Arabic letters joining.
+    expect(pieces("خادم البث ب\u0300\u200fفرانكفورت ال")).toEqual({
       dir: "rtl",
-      texts: ["خادم البث ", "ب\u200fفرانكفورت ال"],
+      texts: ["خادم البث ", "ب\u0300\u200fفرانكفورت ال"],
     });
   });
 

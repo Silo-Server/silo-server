@@ -23,14 +23,21 @@ const BIDI_CONTROL = /[\u202a-\u202e\u2066-\u2069]/u;
 // What sets a name's direction for dir="auto": its first letter or directional mark.
 const FIRST_STRONG = /[\p{L}\u200e\u200f\u061c]/u;
 
-const OPENS = /^\p{Ps}$/u;
-const CLOSES = /^\p{Pe}$/u;
+// Opening and closing punctuation, without the quotation marks and vertical
+// forms that the bidi algorithm doesn't pair.
+const NOT_BRACKET = "(?![\u201a\u201e\u2e42\u301d-\u301f\ufd3e\ufd3f\ufe17\ufe18\ufe35-\ufe48])";
+const OPENS = new RegExp(`^${NOT_BRACKET}\\p{Ps}$`, "u");
+const CLOSES = new RegExp(`^${NOT_BRACKET}\\p{Pe}$`, "u");
+// The two pairs that aren't one or two code points apart, by closing bracket.
+const CROSSED: Record<string, string> = { "\u298e": "\u298f", "\u2990": "\u298d" };
 // Marks and format characters, such as a directional mark, which letters join
-// across; not the zero-width space or non-joiner, which break joining.
-const ENDS_TRANSPARENT = /(?:(?![\u200b\u200c])[\p{M}\p{Cf}])+$/u;
+// across. Not the zero-width non-joiner and joiner, which set the joining.
+const ENDS_TRANSPARENT = /(?:(?![\u200c\u200d])[\p{M}\p{Cf}])+$/u;
 
 /** Whether `closing` pairs with `opening`: "()" and "（）" are one code point apart, "[]" two. */
 function closes(closing: string, opening: string) {
+  const crossed = CROSSED[closing];
+  if (crossed !== undefined) return opening === crossed;
   const gap = closing.codePointAt(0)! - opening.codePointAt(0)!;
   return gap === 1 || gap === 2;
 }
@@ -85,12 +92,14 @@ function nodeNameCut(name: string, rightToLeft: boolean) {
   for (const n of lengths) {
     const head = name.slice(0, -n);
     const tail = name.slice(-n);
-    if (STARTS_ATTACHED.test(tail) || ENDS_JOINING.test(head)) continue;
+    // The head without what letters join across, to check what it joins to.
+    const bare = head.replace(ENDS_TRANSPARENT, "");
+    if (STARTS_ATTACHED.test(tail) || ENDS_JOINING.test(head) || ENDS_JOINING.test(bare)) continue;
     if (
       leftToRightOnly ||
       (STARTS_WITH_LETTER.test(tail) &&
         STARTS_RIGHT_TO_LEFT.test(tail) === rightToLeft &&
-        !ENDS_RIGHT_TO_LEFT.test(head.replace(ENDS_TRANSPARENT, "")) &&
+        !ENDS_RIGHT_TO_LEFT.test(bare) &&
         !leavesBracketOpen(head))
     ) {
       return { head, tail };
