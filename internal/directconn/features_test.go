@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/darthShadow/shunpike/engine"
+	"github.com/Silo-Server/shunpike/engine"
 )
 
 func TestFeatureStates(t *testing.T) {

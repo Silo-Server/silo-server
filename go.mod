@@ -6,6 +6,7 @@ require (
 	filippo.io/age v1.3.2
 	github.com/DataDog/go-sqllexer v0.2.5
 	github.com/SherClockHolmes/webpush-go v1.4.0
+	github.com/Silo-Server/shunpike v0.1.2
 	github.com/Silo-Server/silo-plugin-sdk v0.35.0
 	github.com/abadojack/whatlanggo v1.0.1
 	github.com/alicebob/miniredis/v2 v2.40.0
@@ -16,7 +17,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.112.0
 	github.com/aws/smithy-go v1.28.1
 	github.com/danielgtaylor/huma/v2 v2.38.0
-	github.com/darthShadow/shunpike v0.1.1
 	github.com/getkin/kin-openapi v0.149.0
 	github.com/go-chi/chi/v5 v5.4.0
 	github.com/go-chi/cors v1.2.2
@@ -244,6 +244,6 @@ require (
 
 replace github.com/zishang520/webtransport-go => ./internal/compat/zishang520-webtransport-go
 
-replace github.com/quic-go/quic-go => github.com/darthShadow/quic-go v0.64.1-shunpike.2
+replace github.com/quic-go/quic-go => github.com/Silo-Server/quic-go v0.64.1-shunpike.2
 
-replace tailscale.com => github.com/darthShadow/tailscale v1.104.2-shunpike.2
+replace tailscale.com => github.com/Silo-Server/tailscale v1.104.2-shunpike.2

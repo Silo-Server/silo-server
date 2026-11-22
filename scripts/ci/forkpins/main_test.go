@@ -9,7 +9,7 @@ const pinnedModules = `module example.org/server
 
 go 1.27.3
 
-require github.com/darthShadow/shunpike v0.1.0
+require github.com/Silo-Server/shunpike v0.1.0
 
 replace github.com/quic-go/quic-go => github.com/Silo-Server/quic-go v0.64.1-patch.1
 replace tailscale.com => github.com/Silo-Server/tailscale v1.104.2-patch.1
@@ -34,7 +34,7 @@ var forkPinCases = []struct {
 	},
 	{
 		name: "shunpike need not require itself", server: pinnedModules,
-		upstream: strings.ReplaceAll(pinnedModules, "require github.com/darthShadow/shunpike v0.1.0\n", ""),
+		upstream: strings.ReplaceAll(pinnedModules, "require github.com/Silo-Server/shunpike v0.1.0\n", ""),
 	},
 	{
 		name: "quic missing in silo", server: strings.ReplaceAll(pinnedModules, quic, ""),
@@ -88,8 +88,8 @@ var forkPinCases = []struct {
 		wantErr:  "local directory",
 	},
 	{
-		name: "shunpike not required", server: strings.ReplaceAll(pinnedModules, "require github.com/darthShadow/shunpike v0.1.0\n", ""),
-		upstream: pinnedModules, wantErr: "require github.com/darthShadow/shunpike",
+		name: "shunpike not required", server: strings.ReplaceAll(pinnedModules, "require github.com/Silo-Server/shunpike v0.1.0\n", ""),
+		upstream: pinnedModules, wantErr: "require github.com/Silo-Server/shunpike",
 	},
 	{
 		name: "ambiguous fork replacement", server: pinnedModules + "replace tailscale.com v1.104.2 => github.com/Silo-Server/tailscale v1.104.2-patch.1\n",
