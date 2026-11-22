@@ -215,7 +215,9 @@ export function SourceListRow({
   ) : (
     targets.libraries.map((library) => (
       <Badge key={library.id} variant="secondary" className="max-w-full font-normal">
-        <span className="truncate">{library.name}</span>
+        <span dir="auto" className="truncate">
+          {library.name}
+        </span>
       </Badge>
     ))
   );
@@ -244,7 +246,9 @@ export function SourceListRow({
           {isWebhook ? <Webhook className="size-4" /> : <RefreshCw className="size-4" />}
         </span>
         <div className="min-w-0">
-          <p className="line-clamp-2 text-sm font-medium break-words">{title}</p>
+          <p dir="auto" className="align-with-page line-clamp-2 text-sm font-medium break-words">
+            {title}
+          </p>
           <p className="text-muted-foreground text-xs break-words" title={source.plugin_id}>
             {display.subtitle}
           </p>

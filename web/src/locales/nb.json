@@ -287,6 +287,12 @@
       "value": "Den e-postadressen er allerede i bruk."
     }
   ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "Dette er allerede i bruk."
+    }
+  ],
   "error.field.invalid": [
     {
       "type": 0,
@@ -327,6 +333,12 @@
     {
       "type": 0,
       "value": "Forespørselen kunne ikke leses."
+    }
+  ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "Angitt av miljøet. Endre det der og start den berørte tjenesten på nytt."
     }
   ],
   "error.field.out_of_range": [
@@ -435,6 +447,12 @@
     {
       "type": 0,
       "value": "Logg på via nettverkets pålogging for å fortsette."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Denne noden er angitt av serverens distribusjonskonfigurasjon. Fjern den der og start API-serverne på nytt for å administrere den her."
     }
   ],
   "error.not_acceptable": [
@@ -1261,6 +1279,18 @@
       "value": "Populære serier"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "Anbefalte filmer for deg"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "Anbefalte serier for deg"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -2001,6 +2031,88 @@
     {
       "type": 0,
       "value": "Appspråk"
+    }
+  ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "På slutten"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutt før slutt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " minutter før slutt"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekund før slutt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " sekunder før slutt"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "Vis Neste episoder"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "Av"
     }
   ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
@@ -13246,7 +13358,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – samlingen de viser, finnes ikke her eller i sikkerhetskopien"
+              "value": " kan ikke gjenopprettes – samlingen den viser, finnes ikke her eller i sikkerhetskopien"
             }
           ]
         },
@@ -13280,7 +13392,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – innstillingene deres er kryptert med en annen SECRET_KEY"
+              "value": " kan ikke gjenopprettes – innstillingene er kryptert med en annen SECRET_KEY"
             }
           ]
         },
@@ -13314,7 +13426,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – denne serveren kan ikke ta imot dem"
+              "value": " kan ikke gjenopprettes – denne serveren kan ikke ta imot den"
             }
           ]
         },
@@ -13382,7 +13494,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – filene deres mangler på denne serveren"
+              "value": " kan ikke gjenopprettes – filene mangler på denne serveren"
             }
           ]
         },
@@ -13416,7 +13528,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – mappene deres finnes ikke på denne serveren"
+              "value": " kan ikke gjenopprettes – mappene finnes ikke på denne serveren"
             }
           ]
         },
@@ -13450,7 +13562,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – tilgangsgruppen deres finnes ikke på denne serveren"
+              "value": " kan ikke gjenopprettes – tilgangsgruppen finnes ikke på denne serveren"
             }
           ]
         },
@@ -13484,7 +13596,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – tittelen deres finnes ikke i denne serverens katalog"
+              "value": " kan ikke gjenopprettes – tittelen finnes ikke i denne serverens katalog"
             }
           ]
         },
@@ -13518,7 +13630,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de ville utvidet tilgangen, så denne serveren beholder sine strengere verdier"
+              "value": " kan ikke gjenopprettes – den ville utvidet tilgangen, så denne serveren beholder sine egne strengere verdier"
             }
           ]
         },
@@ -13552,7 +13664,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – biblioteket deres finnes ikke på denne serveren"
+              "value": " kan ikke gjenopprettes – biblioteket finnes ikke på denne serveren"
             }
           ]
         },
@@ -13586,7 +13698,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – biblioteket deres kan ikke gjenopprettes her"
+              "value": " kan ikke gjenopprettes – biblioteket kan ikke gjenopprettes her"
             }
           ]
         },
@@ -13641,6 +13753,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan ikke gjenopprettes – denne serverens miljø angir innstillingene som er forskjellige, eller en del av tilkoblingen deres"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kan ikke gjenopprettes – denne serverens miljø angir innstillingene som er forskjellige, eller en del av tilkoblingen deres"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13654,7 +13800,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de er kryptert med en annen SECRET_KEY"
+              "value": " kan ikke gjenopprettes – den er kryptert med en annen SECRET_KEY"
             }
           ]
         },
@@ -13688,7 +13834,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de må først installeres fra en programtilleggskatalog"
+              "value": " kan ikke gjenopprettes – den må først installeres fra en programtilleggskatalog"
             }
           ]
         },
@@ -13722,7 +13868,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – hovedprofilen deres må gjenopprettes sammen med dem"
+              "value": " kan ikke gjenopprettes – hovedprofilen må gjenopprettes sammen med den"
             }
           ]
         },
@@ -13756,7 +13902,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – sikkerhetskopien inneholder dem ikke"
+              "value": " kan ikke gjenopprettes – sikkerhetskopien inneholder den ikke"
             }
           ]
         },
@@ -13892,7 +14038,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – denne serveren ville gitt dem mer tilgang enn sikkerhetskopien gjorde"
+              "value": " kan ikke gjenopprettes – denne serveren ville gitt den mer tilgang enn sikkerhetskopien gjorde"
             }
           ]
         },
@@ -13960,7 +14106,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de er allerede like her"
+              "value": " kan ikke gjenopprettes – den er allerede lik her"
             }
           ]
         },
@@ -14028,7 +14174,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – sikkerhetskopiens kopi av dem kan ikke leses"
+              "value": " kan ikke gjenopprettes – sikkerhetskopiens kopi av den kan ikke leses"
             }
           ]
         },
@@ -14062,7 +14208,7 @@
             },
             {
               "type": 0,
-              "value": " kan ikke gjenopprettes – de kobler til eksterne tjenester, og denne serveren kan ikke bekrefte sikkerhetskopien"
+              "value": " kan ikke gjenopprettes – den kobler til eksterne tjenester, og denne serveren kan ikke bekrefte sikkerhetskopien"
             }
           ]
         },
@@ -14163,6 +14309,40 @@
     {
       "type": 0,
       "value": "Adressen til en tjeneste endres uten at påloggingsinformasjonen er med i sikkerhetskopien, så gjenopprettingen fjerner den her og slår av tjenesten til den legges inn på nytt."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " innstilling beholder gjeldende verdi fordi denne serverens miljø angir den, eller en del av tilkoblingen den hører til."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " innstillinger beholder gjeldende verdier fordi denne serverens miljø angir dem, eller en del av tilkoblingen de hører til."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14609,8 +14789,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skjul dem"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul den"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul dem"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul dem"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14759,8 +14965,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Vis dem"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis den"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis dem"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis dem"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15469,10 +15701,26 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Valgte også "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", som trengs av det du valgte."
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -15504,17 +15752,31 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Valgte også bort "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", som trenger det du valgte bort."
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -15546,9 +15808,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -16991,6 +17251,12 @@
       "value": "En annen konto her logger på med samme brukernavn eller e-postadresse."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Denne serverens miljø angir innstillingene som er forskjellige, eller en del av tilkoblingen deres, så denne serveren beholder gjeldende verdier."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -17533,6 +17799,154 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Bakgrunnsbilde"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samlingselement"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samlingselementer"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Samlingen erstattes"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Konfigurasjon"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Beskrivelse"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Aktivert"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Fremhevet"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Elementgrense"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Sortering av elementer"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Biblioteker"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Plassering"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Plakat"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Sorteringsrekkefølge"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Kilde"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Tidsplan for synkronisering"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Tittel"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Titteloversettelse"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Type"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Synlighet"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Bare nett"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -18065,6 +18479,16 @@
     {
       "type": 0,
       "value": " (beholdt: strengere)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (beholdt: miljø)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -19137,6 +19561,20 @@
       "value": "I serverens tidssone."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "I serverens tidssone. Det tilsvarer kl. "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " i din tidssone."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -20025,10 +20463,10 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -20036,17 +20474,23 @@
             }
           ]
         },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "dataene deres kunne ikke leses"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
               "type": 0,
-              "value": "dataene kunne ikke leses"
+              "value": "dataene deres kunne ikke leses"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -20093,20 +20537,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Skjul kontoene"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul kontoen"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul kontoene"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul kontoene"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Skjul filene"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul filen"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul filene"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul filene"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Skjul filer"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul fil"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul filer"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skjul filer"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20169,6 +20691,346 @@
     {
       "type": 0,
       "value": "De er referert til i databasen, men ble ikke funnet i lagringen; gjenopprettinger utelater dem."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " merkevareelement"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " merkevareelementer"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " bakgrunnsbilde for samling"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " bakgrunnsbilder for samlinger"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samlingsplakat"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " samlingsplakater"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nedlastet undertekst"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nedlastede undertekster"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " bibliotekplakat"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " bibliotekplakater"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " overleggsbilde"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " overleggsbilder"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakat for personlig samling"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakater for personlige samlinger"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profilavatar"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profilavatarer"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " opplastet bildefil"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " opplastede bildefiler"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " opplastet undertekst"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " opplastede undertekster"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -20419,10 +21281,22 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " kunne ikke leses"
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 1,
@@ -20446,9 +21320,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -20463,8 +21335,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Vis kontoene"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis kontoen"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis kontoene"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis kontoene"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20503,26 +21401,22 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Vis filene"
-    }
-  ],
-  "web.admin.backups.warnings.showGroupFiles": [
-    {
-      "type": 0,
-      "value": "Vis filer"
-    }
-  ],
-  "web.admin.backups.warnings.tooLarge": [
-    {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "dataene er for store for gjenopprettingssettet"
+              "value": "Vis filen"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis filene"
             }
           ]
         },
@@ -20530,13 +21424,75 @@
           "value": [
             {
               "type": 0,
-              "value": "dataene er for store for gjenopprettingssettet"
+              "value": "Vis filene"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    }
+  ],
+  "web.admin.backups.warnings.showGroupFiles": [
+    {
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis fil"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis filer"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vis filer"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.admin.backups.warnings.tooLarge": [
+    {
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "dataene er for store for gjenopprettingssettet"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "dataene deres er for store for gjenopprettingssettet"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "dataene deres er for store for gjenopprettingssettet"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -28377,6 +29333,12 @@
       "value": "mislyktes"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Oppgaven mislyktes. Se administratordiagnostikken for detaljer."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -30396,7 +31358,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Liste over nylig startede avspillingsøkter"
+      "value": "Siste avspillinger på tvers av alle kontoer"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32025,6 +32987,72 @@
     {
       "type": 0,
       "value": "Kunne ikke laste inn aktivitet."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " spilte av "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " spilte av "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -45168,6 +46196,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Skanninger og metadataoppdateringer vises her mens de kjører."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Ingen aktive skanninger eller oppdateringer"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Alle ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Skjul kø"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotek til"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " biblioteker til"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Metadataoppdateringer"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Oppdaterer metadata"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Vis kø"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Høy"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Lav"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Middels"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -45606,6 +46742,30 @@
       "value": "Bekreft opprydding av tomme rotmapper"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Undersøk"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Ingen elementer venter i køen for metadatamatching."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Ingen hoppet over rotmapper er registrert."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Ingen utdaterte eksterne ID-er er registrert."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -45642,6 +46802,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Rediger"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Ingen biblioteker er konfigurert ennå."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -45694,6 +46866,12 @@
       "value": "Skjul stier"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Inaktiv"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -45728,6 +46906,12 @@
       "value": "Delvis skanning"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Fyll inn manglende eller erstatt all metadata"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -45740,6 +46924,12 @@
       "value": "Rotmappe utilgjengelig"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Skann"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -45750,6 +46940,12 @@
     {
       "type": 0,
       "value": "Vis stier"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Stopp"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -45768,6 +46964,22 @@
     {
       "type": 0,
       "value": "Kontroller monteringer"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Kontroller at alle bibliotekmappene kan nås"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Vis aktive skanninger for "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -45871,7 +47083,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Administrer rotmapper og skanninger for biblioteker. Import og eksport av katalogen ligger nå under Vedlikehold."
+      "value": "Administrer mediemapper, følg med på skanninger og løs matchingsproblemer."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -46358,6 +47570,56 @@
       "value": "Utdaterte eksterne ID-er"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktiv"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktive"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Skanneaktivitet"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Katalogtilstand"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Biblioteker"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -46800,6 +48062,24 @@
     {
       "type": 0,
       "value": "Søk i ignorerte elementer etter tittel, bibliotek eller type …"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Tvetydig"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Venter"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Ikke matchet"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -48630,6 +49910,12 @@
       "value": ", så enhetsvelgeren gjelder ikke for den. Lar du feltet stå tomt, arves enhetsinnstillingen for hele klyngen, og den må selv være en CUDA-identitet for at NVENC skal kunne bruke den – angi en her når klyngen er konfigurert med renderbaner."
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "Angitt av miljøet til denne noden. Endre det der og start noden på nytt."
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -49406,6 +50692,12 @@
     {
       "type": 0,
       "value": "Skriv inn serveradressen for å fullføre innstillingene."
+    }
+  ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nøkkel angitt av serverens distribusjonskonfigurasjon"
     }
   ],
   "web.admin.nodes.key.dialogTitle": [
@@ -50316,6 +51608,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Angitt av serverens distribusjonskonfigurasjon. Fjern den der og start API-serverne på nytt for å slette den her."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52091,6 +53389,68 @@
       "value": "Programtillegg"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Tatt i bruk"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Holdt tilbake"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Kunne ikke laste inn klargjøringsstatus for programtillegg."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Administreres av miljøet"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Venter"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Avvist"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Utrullingen styrer pakkekilden og fjerning."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Klargjøringsstatus"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Utrullingen låser dette programtillegget til "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -52390,7 +53750,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "Oppgaver registreres når serveren starter, så det å slå en oppgave på eller av trer i kraft etter en omstart. Når oppgaven finnes, endrer du tidsplanen på siden for oppgaven."
+      "value": "Når du slår en oppgave på eller av, trer endringen i kraft uten omstart, men andre servere kan bruke litt tid på å fange den opp. Når en oppgave er slått på, endrer du tidsplanen på siden for oppgaven."
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -52807,6 +54167,260 @@
       "value": "Modell"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "Nådde grensen for én kjøring. Neste kjøring fortsetter."
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "Titler slått opp: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · Embeddinger lagret: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB-forespørsler: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "Av. Kjøringer fjerner bare gamle titler."
+    }
+  ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "Genereringen er stoppet. Lagrede anbefalinger vises fortsatt i Utforsk til serveren startes på nytt."
+    }
+  ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Rangerer profiler ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Henter TMDB-lister ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Slår opp titler og lager embeddinger ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Fjernet "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " utløpt tittel"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Fjernet "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " utløpte titler"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rad bygget"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " rader bygget"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Løs embeddinglåskonflikten nedenfor før Utforsk-anbefalinger bygges."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Kjør Embeddinger-jobben først, slik at Silo har bibliotekvektorer å sammenligne med."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Koble til en embeddingleverandør under AI-tjenester før Utforsk-anbefalinger bygges."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Ingen profiler har smaksprofiler ennå. Kjør Smaksprofiler når noen har sett eller vurdert titler."
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tittel å anbefale fra"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titler å anbefale fra"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "Ingen embeddinger lagret: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -52861,6 +54475,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "Utforsk-anbefalinger"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -53117,6 +54737,12 @@
       "value": "Kunne ikke starte embeddinger"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke starte Utforsk-anbefalinger"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -53235,6 +54861,44 @@
       "value": "."
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "Embeddinger tilbakestilt: slettet "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " og "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": ", og tømte "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -53261,6 +54925,74 @@
             {
               "type": 0,
               "value": " embeddinger"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Utforsk-embedding"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Utforsk-embeddinger"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Utforsk-rad"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " Utforsk-rader"
             }
           ]
         }
@@ -54095,6 +55827,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Anbefalte serier for hver seer"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Anbefalte filmer for hver seer"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -54143,6 +55899,18 @@
     {
       "type": 0,
       "value": "Kanalkort som hver åpner kanalens serier."
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "Anbefalinger"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "Titler som ikke er i biblioteket ennå, valgt for hver seer ut fra hva de ser på."
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54441,6 +56209,38 @@
     {
       "type": 0,
       "value": "Velg regionen strømmetjenestene er i."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "Forblir tom til Utforsk-anbefalinger slås på under Admin → Anbefalinger."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Anbefalte rader forblir tomme til Utforsk-anbefalinger slås på under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Admin → Anbefalinger"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Av under Anbefalinger"
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -55853,6 +57653,12 @@
       "value": "Direkte forhåndsvisning av listen"
     }
   ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "Forhåndsvisning av dine egne anbefalinger"
+    }
+  ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
     {
       "type": 0,
@@ -55915,6 +57721,12 @@
       "value": "Nye rader legges nederst i Utforsk"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Åpne innstillinger for Anbefalinger"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -55927,6 +57739,12 @@
       "value": "MDBList-feeden tar ikke med sorteringen som er lagret på listens side. Velg den som vises der."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profilen din har ingen Utforsk-anbefalinger ennå. Kjør Utforsk-anbefalinger, eller se og vurder noen titler for å forhåndsvise denne raden."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -55937,6 +57755,12 @@
     {
       "type": 0,
       "value": "Velg en liste eller lim inn lenken for å se titlene."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Slå på Utforsk-anbefalinger under Admin → Anbefalinger for å forhåndsvise denne raden."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -56719,6 +58543,12 @@
     {
       "type": 0,
       "value": "Meldingen er sendt"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Avspilleren bekreftet ikke meldingen. Den kan bli vist senere eller ikke i det hele tatt."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -59589,6 +61419,12 @@
       "value": "Tilkoblingssjekken mislyktes."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Kunne ikke sjekke om serverens miljø angir denne innstillingen. Last inn siden på nytt for å redigere den."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -59599,6 +61435,20 @@
     {
       "type": 0,
       "value": "Laster inn innstillinger"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "Angitt av "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " i serverens miljø."
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [
@@ -59735,12 +61585,6 @@
     {
       "type": 0,
       "value": "Klarerte proxyer"
-    }
-  ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "Styres av SILO_TRUSTED_PROXIES."
     }
   ],
   "web.admin.settings.general.title": [
@@ -60135,6 +61979,30 @@
     {
       "type": 0,
       "value": "Kunne ikke oppdatere kanalen"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Last inn på nytt for å se de gjeldende verdiene. Hvis noe på denne siden er endret, eller du har endret et lagret passord eller en lagret nøkkel, blir alle endringene dine angret. Ellers beholdes de."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Last inn på nytt"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke laste inn innstillingene på nytt. Prøv igjen."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Innstillingene er endret et annet sted"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -63209,136 +65077,10 @@
       "value": "Kunne ikke laste inn varslingsinnstillingene"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "Nytt innhold registreres ikke, så ingenting kan sendes. Slå det på igjen under Behandling."
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "Sending er satt på pause; nytt innhold venter i køen. Slå det på igjen under Behandling."
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "Av sender dem det daglige sammendraget i stedet."
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Hvordan Silo oppdager nytt innhold, grupperer det i meldinger og hvor lenge meldingene beholdes."
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "Finn ut hvem som vil ha det"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "Sammenlign hvert element med alles preferanser."
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "Gruppering og flombegrensning"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "Behandling"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "Maks alder på innhold"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "Eldre elementer forkastes i stedet for å komme frem som gamle nyheter."
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "Maks meldinger per serie"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "Alt utover dette hoppes over for den runden."
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "Oppdag nytt innhold"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "Registrer nye elementer under biblioteksskanninger."
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "Pipeline"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "Leste varsler"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "Oppbevaring"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "Sendehistorikk"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Oversikt over hva Silo allerede har varslet om."
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "Ventevindu"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "Elementer som blir ferdig skannet samtidig, kommer som ett varsel."
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Uleste varsler"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -64243,18 +65985,6 @@
     {
       "type": 0,
       "value": "Varsler"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "dager"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "timer"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -65739,6 +67469,92 @@
       "value": "Bytte til en annen modell krever at embeddingene tilbakestilles, noe som sletter alle sammen. En annen leverandør som tilbyr samme modell, tas i bruk etter en omstart."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Legg til i Utforsk"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke legge til anbefalte rader på Utforsk-siden."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "La til anbefalte rader på Utforsk-siden."
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "Aktiver Utforsk-anbefalinger"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "Legger til personlige rader i Utforsk under Forespørsler, med titler som ikke er i biblioteket ennå. Bruker embedding-leverandøren og TMDB."
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "Maks antall titler å anbefale fra"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "Hvor mange titler utenfor biblioteket serveren skal ha å anbefale fra. Hver av dem slås opp på TMDB og får en embedding. Embedding er vanligvis billig, men et høyere tall kan koste mer eller ta lengre tid, avhengig av embedding-leverandøren din, og bruker mer lagringsplass."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Utforsk-siden din viser ingen Anbefalinger-rader ennå."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Slå på Aktiver anbefalinger ovenfor og start serveren på nytt før Utforsk-anbefalinger kan kjøre."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Forespørsler er slått av nå. Slå dem på i "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "innstillingene for forespørsler"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", slik at seerne kan se Utforsk-siden."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Åpne Utforsk-siden"
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "Utforsk-anbefalinger"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -65767,6 +67583,12 @@
     {
       "type": 0,
       "value": "Cron for embeddinger"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "Cron for Utforsk-anbefalinger"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -65811,12 +67633,6 @@
       "value": "Bruk Redis"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "Angitt av REDIS_URL"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -65833,12 +67649,6 @@
     {
       "type": 0,
       "value": "Tilkoblings-URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "Verdien angis av REDIS_URL"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70699,20 +72509,6 @@
       "value": "Serverlogg"
     }
   ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 0,
-      "value": "Administreres av "
-    },
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
   "web.admin.settings.search.meili.apiKey.hint": [
     {
       "type": 0,
@@ -70830,7 +72626,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "Leveringskanaler, serverkanaler og hvordan nytt innhold blir til varsler."
+      "value": "Leveringskanaler og serverkanaler."
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -70929,12 +72725,6 @@
       "value": "E-post"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "Gruppering og flombegrensning"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -70953,28 +72743,10 @@
       "value": "La folk velge en e-post per episode"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "Maks alder på innhold"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "Maks antall meldinger per serie"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Nevn den som ba om det, på Discord"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "Oppdag nytt innhold"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -70983,46 +72755,16 @@
       "value": "Personlige webhooks"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "Behandling"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "Leste varsler"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "Relé-URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "Oppbevaring"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "Sendehistorikk"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "Serverkanaler"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "Stabiliseringsvindu"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -71037,12 +72779,6 @@
       "value": "Silo Push Relay"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "Uleste varsler"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -71053,12 +72789,6 @@
     {
       "type": 0,
       "value": "Webhooks per person"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "Finn ut hvem som vil ha det"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -72469,6 +74199,12 @@
     {
       "type": 0,
       "value": "TV-pålogging: start"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "Plakatforespørsler"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -74929,6 +76665,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Lagringen kan ikke flyttes her mens miljøet angir lagringsinnstillinger ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Fjern først disse variablene, og start alle API-servere på nytt."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76065,6 +77815,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Denne tidsplanen kommer fra innstillingene for sikkerhetskopier. Endre den under "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Sikkerhetskopier"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -76375,10 +78145,66 @@
       "value": "Nylige feil"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Oppdateringen mislyktes. Se administratordiagnostikken for detaljer."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Se gjennom gjeldende tidsplan"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -76823,6 +78649,18 @@
     {
       "type": 0,
       "value": "Nytt forsøk for Autoscan-webhooker"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Leser filhodet på nytt i MKV-filer med ASS-undertekster som ble skannet før Silo holdt innebygde skrifter utenfor bithastigheten, slik at de ikke omkodes for en bithastighet de ikke strømmer."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Korriger bithastighet for filer med innebygde skrifter"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -86318,25 +88156,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Kunne ikke logge på TV-en. Prøv igjen."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Kontroller at appen din viser"
+      "value": "Kunne ikke godkjenne påloggingen. Prøv igjen."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Kontroller at TV-en din viser"
+      "value": "Sjekk at denne koden stemmer"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Skriv inn koden på TV-en eller i appen"
+      "value": "Skriv inn koden som vises på enheten din"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -86348,13 +88180,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Logg på en TV eller en annen enhet med kontoen din."
+      "value": "Logg på en TV, en app eller en annen enhet."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Logg på en TV"
+      "value": "Godkjenn pålogging"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86374,13 +88206,13 @@
     },
     {
       "type": 0,
-      "value": " for å godkjenne en TV. Bare kontoen selv kan logge på en TV."
+      "value": " for å godkjenne denne påloggingen. Bare kontoen selv kan godkjenne enheter."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Slutt å se som denne brukeren for å godkjenne en TV. Bare kontoen selv kan logge på en TV."
+      "value": "Slutt å se som denne brukeren for å godkjenne denne påloggingen. Bare kontoen selv kan godkjenne enheter."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86398,39 +88230,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Vi fant ikke den koden. Kontroller koden på TV-en."
+      "value": "Vi fant ikke den koden. Sjekk koden, og prøv igjen."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ikke nå"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Eldre TV-apper viser "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " i stedet."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Godkjenn bare en enhet som står foran deg akkurat nå."
+      "value": "Avvis"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Godkjenn bare en TV som står foran deg akkurat nå."
+      "value": "Godkjenn bare hvis du startet påloggingen selv."
     }
   ],
   "web.auth.activate.playOn": [
@@ -86456,7 +88268,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Alle som bruker denne TV-en, kan velge blant profilene dine. Profiler med PIN forblir låst."
+      "value": "Dette gir den tilgang til profilene dine. Profiler med PIN forblir låst."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86503,6 +88315,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Forespurt "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -86516,7 +88338,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Denne TV-en sluttet å vente. Start på nytt på TV-en."
+      "value": "Denne enheten sluttet å vente. Start påloggingen på nytt på enheten."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86525,10 +88347,34 @@
       "value": "Denne påloggingen ble avslått."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Ferdig. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " logger på."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " er logget på."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Denne koden er utløpt. TV-en din viser en ny. Bruk den koden i stedet."
+      "value": "Denne koden er utløpt. Hent en ny kode på enheten, og prøv igjen."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86612,25 +88458,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Den TV-en er allerede logget på."
+      "value": "Denne enheten er allerede logget på."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Denne TV-en ble godkjent og fullfører påloggingen."
+      "value": "Denne enheten ble godkjent og fullfører påloggingen."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Ferdig. TV-en din logger på."
+      "value": "Ferdig. Enheten din logger på."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV-en din er logget på."
+      "value": "Enheten din er logget på."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86674,7 +88520,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Logge på "
+      "value": "Vil du la "
     },
     {
       "type": 1,
@@ -86682,13 +88528,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " logge på?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Logge på denne enheten?"
+      "value": "Vil du la denne enheten logge på?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86708,13 +88554,13 @@
     },
     {
       "type": 0,
-      "value": " for å godkjenne denne TV-en."
+      "value": " for å godkjenne denne påloggingen."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Logg på TV-en"
+      "value": "Godkjenn pålogging"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87760,7 +89606,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Kunne ikke logge på enheten. Prøv igjen."
+      "value": "Kunne ikke godkjenne påloggingen. Prøv igjen."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -95090,6 +96936,12 @@
       "value": "bibliotekene dine"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "Antall utilgjengelig"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -97078,6 +98930,24 @@
       "value": "Legg til"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke sjekke om titler kan legges til."
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "Prøv å laste inn igjen"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "Sjekker om titler kan legges til …"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 0,
@@ -97096,6 +98966,18 @@
       "value": "detail"
     }
   ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "Denne serveren kan ikke trygt legge til titler mens bare en del av samlingen er lastet inn. Du kan fortsatt fjerne titler og redigere samlingen."
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "Last inn titlene på nytt før du legger til flere."
+    }
+  ],
   "web.collections.manual.addTitle": [
     {
       "type": 0,
@@ -97110,6 +98992,12 @@
     {
       "type": 1,
       "value": "libraries"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "Laster inn titler før du kan legge til flere …"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -105840,6 +107728,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "Også i"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,
@@ -108782,6 +110676,12 @@
       "value": "Viser"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Administreres av denne serveren. Hva den viser, kan ikke endres her; legg til en egen rad for å velge hva den viser."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -109088,6 +110988,12 @@
       "value": "Oversetter …"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skjul serverrader som er lagt til siden denne eksporten:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109106,6 +111012,12 @@
     {
       "type": 0,
       "value": ", og erstatter seksjoner du har lagt til her tidligere. Endringene dine i denne serverens seksjoner beholdes."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Radene på denne serveren er endret siden filen ble eksportert, så velg eventuelle rader du vil skjule nedenfor."
     }
   ],
   "web.home.layout.checking": [
@@ -109156,6 +111068,26 @@
     {
       "type": 0,
       "value": "Slår på Skjul sette elementer."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Skjuler valgte rader på: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " uten å endre de andre radene dine der."
     }
   ],
   "web.home.layout.import": [
@@ -109260,6 +111192,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -109468,6 +111418,12 @@
     {
       "type": 0,
       "value": "Seksjon uten navn"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skjul serverrader som ikke er i denne filen:"
     }
   ],
   "web.home.page.customize": [
@@ -111864,13 +113820,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "Samlinger og regler"
+      "value": "Samlinger og smarte rader"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "Samlingene dine, eller rader bygd fra regler"
+      "value": "Samlingene dine, eller smarte rader bygd fra regler"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -111984,7 +113940,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "Bygg en rad fra regler, som sjanger og tiår."
+      "value": "Som en smart samling, men bare en rad. Velg titler med regler som sjanger og tiår."
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -112194,7 +114150,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "Titler som samsvarer med regler"
+      "value": "Smart rad"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -112403,6 +114359,12 @@
     {
       "type": 0,
       "value": "Hovedbanner · Bare nett"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Server"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -117849,6 +119811,12 @@
       "value": " d siden"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "En varslingsmottaker sluttet å fungere"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -117991,6 +119959,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "Åpne varslingsinnstillingene for å rette det."
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -118281,6 +120255,12 @@
     {
       "type": 0,
       "value": "En tittel på huskelisten din er nå tilgjengelig"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "En webhook sluttet å fungere"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -125141,6 +127121,34 @@
       "value": "title"
     }
   ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 0,
+      "value": "Ligner på "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 0,
+      "value": "Ligner på "
+    },
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " og "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    }
+  ],
   "web.requests.discoverSection.empty": [
     {
       "type": 0,
@@ -125961,6 +127969,16 @@
       "value": "Tilbake til side 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Gå til side "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -126051,6 +128069,20 @@
     {
       "type": 0,
       "value": "Sider for «Be om å legge til»"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Side "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " er etter slutten av disse resultatene."
     }
   ],
   "web.requests.toAdd.series": [
@@ -127603,6 +129635,12 @@
     {
       "type": 0,
       "value": "Les profilens varsler etter hvert som de kommer, og merk dem som lest."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Se hva som spilles av akkurat nå på profilen, eller på alle profilene på kontoen når nøkkelen ikke angir noen profil: tittel, posisjon, om avspillingen er satt på pause, enhet og avspillingsmetode. Ingen avspillingskontroll eller nettverksdetaljer."
     }
   ],
   "web.settings.apiKeys.scope.requests": [
@@ -131483,6 +133521,298 @@
       "value": "Ikke interessert"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "Legg til mottaker"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "Legg til"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "Legg til en varslingsmottaker"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "«"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "» er lagt til"
+    }
+  ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "Tøm lagret hemmelighet"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "Mottakeren blir allerede opprettet."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "Varsler blir ikke lenger sendt til denne mottakeren. Dette kan ikke angres."
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke slette mottakeren"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "Mottakeren er slettet"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "Send varslene for denne profilen til tjenester som programtilleggene på serveren din støtter."
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "Velg hvor varslene for denne profilen skal sendes."
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "Ingen mottakere ennå."
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "Behold lagret hemmelighet"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "Type"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "Siste feil: "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "Siste feil "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "Siste feil "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": programtillegget kunne ikke sende"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "Siste feil: programtillegget kunne ikke sende"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Grensen på "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " mottaker er nådd"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Grensen på "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " mottakere er nådd"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "Last inn mottakerlisten på nytt før du sletter denne mottakeren."
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "Last inn mottakerlisten på nytt før du redigerer denne mottakeren."
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke lagre mottakeren"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "Hemmelige felt du lar stå tomme, beholder de lagrede verdiene."
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "En testmelding blir allerede sendt."
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Test sendt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Testen mislyktes"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Test sendt: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Testen mislyktes: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "Andre mottakere"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "Utilgjengelig"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "Programtillegget som leverer denne mottakeren, er slått av eller fjernet, så ingenting blir sendt."
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "Kunne ikke oppdatere"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -132431,6 +134761,12 @@
     {
       "type": 0,
       "value": "En webhook-URL er påkrevd"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "Du er frakoblet, så endringen ble ikke lagret"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -139441,12 +141777,6 @@
       "value": "Klarerte proxyer"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "Angitt av SILO_TRUSTED_PROXIES i miljøet."
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -139697,12 +142027,6 @@
     {
       "type": 0,
       "value": "Databasenummer"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "Angitt av REDIS_URL"
     }
   ],
   "web.setup.storage.redisDescription": [

@@ -51,6 +51,14 @@ function formatNotificationTime(t: Translate, value: string): string {
   return date.toLocaleDateString(preferredDateLocale(), { month: "short", day: "numeric" });
 }
 
+/** A webhook or plugin destination was turned off after repeated failed deliveries. */
+function isDestinationDisabledNotice(notification: AppNotification): boolean {
+  return (
+    notification.type === "webhook.auto_disabled" ||
+    notification.type === "plugin_destination.auto_disabled"
+  );
+}
+
 function notificationTitle(t: Translate, notification: AppNotification): string {
   if (notification.type === "episode.available") {
     return notification.series_title || t("web.notifications.inbox.newEpisode");
@@ -63,6 +71,12 @@ function notificationTitle(t: Translate, notification: AppNotification): string 
   }
   if (notification.type === "request.approved" || notification.type === "request.declined") {
     return notification.reason_flags?.title || t("web.notifications.inbox.mediaRequest");
+  }
+  if (notification.type === "webhook.auto_disabled") {
+    return t("web.notifications.inbox.webhookStopped");
+  }
+  if (notification.type === "plugin_destination.auto_disabled") {
+    return t("web.notifications.inbox.destinationStopped");
   }
   // Unknown types render with a generic fallback by design — the type
   // registry is extensible.
@@ -108,6 +122,9 @@ function notificationDescription(t: Translate, notification: AppNotification): s
       ? t("web.notifications.inbox.requestDeclinedReason", { reason })
       : t("web.notifications.inbox.requestDeclined");
   }
+  if (isDestinationDisabledNotice(notification)) {
+    return t("web.notifications.inbox.fixInSettings");
+  }
   return notification.type;
 }
 
@@ -136,9 +153,11 @@ function episodeRange(t: Translate, notifications: AppNotification[]): string {
 /**
  * Where a row leads. Episode and fulfilled-request rows open the catalog item;
  * approved and declined requests have no catalog item yet, so they open the
- * title's page from the TMDB id their payload carries.
+ * title's page from the TMDB id their payload carries. A webhook or
+ * destination that stopped working opens notification settings, where it is fixed.
  */
 function notificationHref(notification: AppNotification): string | null {
+  if (isDestinationDisabledNotice(notification)) return "/settings/notifications";
   if (notification.episode_id) return `/item/${notification.episode_id}`;
   if (notification.series_id) return `/item/${notification.series_id}`;
   if (notification.type === "request.approved" || notification.type === "request.declined") {

@@ -66,6 +66,7 @@ type AdminCatalogItem struct {
 	AirDate          *string                   `json:"air_date,omitempty" format:"date" doc:"Air date of an episode, YYYY-MM-DD; absent when unknown and for a movie or series"`
 	Cast             []catalogpkg.CastCredit   `json:"cast,omitempty" doc:"Actors and guest stars of a movie or series in credit order, only with include_people; absent when there are none. No photos"`
 	Crew             []catalogpkg.CrewCredit   `json:"crew,omitempty" doc:"Other credits of a movie or series, only with include_people; absent when there are none. No photos"`
+	PosterURL        string                    `json:"poster_url,omitempty" format:"uri-reference" doc:"Card-size poster of a movie or series, or of an episode's series, as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent when there is no poster, and on a server that cannot issue poster links (the capabilities then report item_posters false). The URL expires; read it again from a later page or session row"`
 }
 
 // AdminCatalogItemVersion is one present file. Video facts come from the
@@ -106,6 +107,7 @@ type AdminCatalogCapabilities struct {
 	ItemMetadata          bool `json:"item_metadata" doc:"listAdminCatalogItems returns genres, content_rating, studios, networks, ratings and dates on movies and series and air_date on episodes, and accepts include_people"`
 	ItemMetadataReset     bool `json:"item_metadata_reset" doc:"refreshAdminItemMetadata accepts mode reset, which resets an item, season or episode to its providers"`
 	ItemFilePaths         bool `json:"item_file_paths" doc:"listAdminCatalogItems accepts include_file_paths from this caller: a login session, an unscoped key, or a key holding admin:catalog:paths"`
+	ItemPosters           bool `json:"item_posters" doc:"listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always URLs this server issued"`
 }
 type AdminCatalogCapabilitiesOutput struct {
 	Status       int
@@ -128,6 +130,7 @@ func registerAdminCatalogItems(reg *Registry) {
 			ItemMetadata:          served,
 			ItemMetadataReset:     reg.deps.AdminItemMetadata != nil,
 			ItemFilePaths:         served && adminCatalogFilePathsAllowed(ctx),
+			ItemPosters:           served && reg.deps.ItemPosters != nil,
 		}}, nil
 	})
 
@@ -197,6 +200,7 @@ func registerAdminCatalogItems(reg *Registry) {
 				ReleaseDate: calendarDatePtr(row.ReleaseDate), FirstAirDate: calendarDatePtr(row.FirstAirDate),
 				LastAirDate: calendarDatePtr(row.LastAirDate), AirDate: calendarDatePtr(row.AirDate),
 				Cast: row.Cast, Crew: row.Crew,
+				PosterURL: reg.deps.ItemPosters.URL(ctx, row.PosterOwnerID, row.PosterPath),
 			}
 			for _, id := range row.LibraryIDs {
 				item.LibraryIDs = append(item.LibraryIDs, IDFromInt(int64(id)))

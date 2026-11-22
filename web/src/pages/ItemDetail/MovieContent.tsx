@@ -1,19 +1,19 @@
 import { useCallback, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { leafUserData, type FileVersion, type ItemDetail } from "@/api/types";
-import type { PlayerSubtitleTrackSignature, PrePlaySubtitleSelection } from "@/player/types";
+import type { PlayerSubtitleTrackSignature } from "@/player/types";
 import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
 import { useLibraryCapabilities } from "@/hooks/queries/admin/libraries";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
-import { useDeleteSubtitlePreference, useSetSubtitlePreference } from "@/hooks/queries/subtitles";
-import { usePrePlayAudioSelection } from "./usePrePlayAudioSelection";
+import { usePrePlayAudioSelection, usePrePlaySubtitleSelection } from "./usePrePlayTrackSelection";
 import { useAuth } from "@/hooks/useAuth";
 import { useIsActingAdmin } from "@/hooks/useIsActingAdmin";
 import { useAmbientColor } from "@/hooks/useAmbientColor";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import CastCarousel from "@/components/CastCarousel";
 import MovieBoxSetRow from "@/components/boxsets/MovieBoxSetRow";
+import ItemCollectionsRow from "@/components/collections/ItemCollectionsRow";
 import { buildCrewGroups } from "@/components/castCrewGroups";
 import DownloadVersionPicker from "@/components/DownloadVersionPicker";
 import EditMetadataDialog from "@/components/EditMetadataDialog";
@@ -95,8 +95,6 @@ export default function MovieContent({
   const canRedetectMovieCredits =
     markerCapabilities.data?.redetect_markers === true &&
     markerCapabilities.data?.movie_credits === true;
-  const deleteSubtitlePreference = useDeleteSubtitlePreference();
-  const setSubtitlePreference = useSetSubtitlePreference();
   const scopedItem = useMemo(
     () => (libraryId === undefined ? item : { ...item, library_id: libraryId }),
     [item, libraryId],
@@ -151,28 +149,21 @@ export default function MovieContent({
     selectedVersion,
   );
   const clearAudioSelection = audioSelection.clear;
-  const [subtitleSelectionMode, setSubtitleSelectionMode] = useState<"auto" | "off" | "explicit">(
-    "auto",
+  const subtitleSelection = usePrePlaySubtitleSelection(
+    item.content_id,
+    item.content_id,
+    selectedVersion?.file_id,
   );
-  const [explicitSubtitleSelection, setExplicitSubtitleSelection] =
-    useState<PrePlaySubtitleSelection | null>(null);
+  const clearSubtitleSelection = subtitleSelection.clear;
 
   // Reset selection when navigating to a different movie (adjust state during render).
   const [prevContentId, setPrevContentId] = useState(item.content_id);
-  const [prevSelectedFileId, setPrevSelectedFileId] = useState(selectedVersion?.file_id);
   if (prevContentId !== item.content_id) {
     setPrevContentId(item.content_id);
     setManualSelectedFileId(null);
     setSelectedEditionKey(undefined);
-    setSubtitleSelectionMode("auto");
-    setExplicitSubtitleSelection(null);
   } else if (selectedEditionKey === undefined && qualitySettled && defaultSelectedVersion) {
     setSelectedEditionKey(defaultSelectedVersion.edition_key ?? "");
-  }
-  if (prevSelectedFileId !== selectedVersion?.file_id) {
-    setPrevSelectedFileId(selectedVersion?.file_id);
-    setSubtitleSelectionMode("auto");
-    setExplicitSubtitleSelection(null);
   }
   const handleSelectVersion = useCallback(
     (version: FileVersion | null) => {
@@ -180,10 +171,9 @@ export default function MovieContent({
       if (version) setSelectedEditionKey(version.edition_key ?? "");
       // Track indexes belong to a file, so another version starts from Auto.
       clearAudioSelection();
-      setSubtitleSelectionMode("auto");
-      setExplicitSubtitleSelection(null);
+      clearSubtitleSelection();
     },
-    [clearAudioSelection],
+    [clearAudioSelection, clearSubtitleSelection],
   );
 
   const handleSelectEdition = useCallback(
@@ -201,34 +191,6 @@ export default function MovieContent({
     () => selectedStartVersion(selectedVersion, item.playback_variants, qualityPreference),
     [selectedVersion, item.playback_variants, qualityPreference],
   );
-
-  const handleSelectSubtitle = (selection: PrePlaySubtitleSelection) => {
-    setSubtitleSelectionMode("explicit");
-    setExplicitSubtitleSelection(selection);
-    // Persist as this movie's override so the choice sticks across visits,
-    // exactly like a manual in-player selection.
-    setSubtitlePreference.mutate({
-      prefId: item.content_id,
-      selection,
-    });
-  };
-
-  const handleSelectSubtitleOff = () => {
-    setSubtitleSelectionMode("off");
-    setExplicitSubtitleSelection(null);
-    setSubtitlePreference.mutate({
-      prefId: item.content_id,
-      selection: null,
-    });
-  };
-
-  const handleResetSubtitleSelection = () => {
-    setSubtitleSelectionMode("auto");
-    setExplicitSubtitleSelection(null);
-    // "Auto" also clears the persisted override saved by a manual in-player
-    // selection, so profile-level auto selection applies to this movie again.
-    deleteSubtitlePreference.mutate(item.content_id);
-  };
 
   const primaryAction = resolveLeafPrimaryAction(item, t("web.detail.actions.play"));
   const watchTogether = useDetailWatchTogether({
@@ -384,11 +346,11 @@ export default function MovieContent({
               explicitAudioTrackIndex={audioSelection.explicitIndex}
               onSelectAudioTrack={audioSelection.select}
               onResetAudioSelection={audioSelection.reset}
-              prePlaySubtitleMode={subtitleSelectionMode}
-              explicitSubtitleSelection={explicitSubtitleSelection}
-              onSelectSubtitle={handleSelectSubtitle}
-              onSelectSubtitleOff={handleSelectSubtitleOff}
-              onResetSubtitleSelection={handleResetSubtitleSelection}
+              prePlaySubtitleMode={subtitleSelection.mode}
+              explicitSubtitleSelection={subtitleSelection.explicitSelection}
+              onSelectSubtitle={subtitleSelection.select}
+              onSelectSubtitleOff={subtitleSelection.selectOff}
+              onResetSubtitleSelection={subtitleSelection.reset}
               preferredSubtitleLanguage={item.effective_subtitle_language}
               preferredSubtitleTrackSignature={preferredSubtitleTrackSignature}
               subtitleMode={item.effective_subtitle_mode as "off" | "auto" | "always" | undefined}
@@ -455,6 +417,8 @@ export default function MovieContent({
       {item.videos && item.videos.length > 0 && <TrailersSection videos={item.videos} />}
 
       <MovieBoxSetRow contentId={item.content_id} libraryId={libraryId} />
+
+      <ItemCollectionsRow contentId={item.content_id} libraryId={libraryId} />
 
       {/* More Like This */}
       {similarLoading ? (

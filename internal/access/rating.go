@@ -3,6 +3,10 @@ package access
 import (
 	"strconv"
 	"strings"
+	"unicode"
+	"unicode/utf8"
+
+	"golang.org/x/text/language"
 )
 
 // Content ratings reach Silo as free text: providers, Kodi/Radarr NFOs and
@@ -143,7 +147,8 @@ var unratedTokens = map[string]struct{}{
 }
 
 // countrySystems maps the country prefix Kodi/Radarr write ("DE:16",
-// "US:PG-13", "gb:15") to the systems to consult first for the remainder.
+// "US:PG-13", "gb:15"), or Jellyfin writes with a dash ("DE-16"), to the
+// systems to consult first for the remainder.
 var countrySystems = map[string][]string{
 	"US":  {systemMPAA, systemUSTV},
 	"USA": {systemMPAA, systemUSTV},
@@ -264,12 +269,31 @@ func init() {
 //   - ok is true, age is non-nil: a real rating, comparable across systems.
 //
 // Matching is case-insensitive and tolerant of separators and surrounding
-// whitespace, and understands the country-prefixed form ("DE:16", "gb:15"), the
-// "Rated R" prefix, and bare ages ("15", "16+").
+// whitespace, and understands the country-prefixed forms ("DE:16", "gb:15",
+// "SE-7"), the "Rated R" prefix, and bare ages ("15", "16+").
 func Normalize(raw string) (system string, age *int, ok bool) {
 	rest, systems := splitCountryPrefix(raw)
+	if system, age, ok := resolveRating(rest, systems, true); ok {
+		return system, age, ok
+	}
+	// The dashed country form is tried only once the whole string has failed,
+	// so a rung that is written with a dash keeps its own meaning. Its
+	// remainder is read only in that country's own ladder or as a bare age:
+	// the same letters mean different ages in different countries ("NZ-M" is
+	// 16, Australia's M is 15), and a value that used to be unrecognized must
+	// not start resolving to a younger age than it stands for.
+	if rest, systems, cut := cutDashedCountryPrefix(raw); cut {
+		return resolveRating(rest, systems, false)
+	}
+	return "", nil, false
+}
+
+// resolveRating resolves a rating string with its country prefix already
+// removed, trying each candidate token in turn. crossSystem allows the index
+// of every ladder after the country's own systems.
+func resolveRating(rest string, systems []string, crossSystem bool) (string, *int, bool) {
 	for _, token := range ratingTokens(rest) {
-		if system, age, ok := resolveRatingToken(token, systems); ok {
+		if system, age, ok := resolveRatingToken(token, systems, crossSystem); ok {
 			return system, age, ok
 		}
 	}
@@ -302,8 +326,9 @@ func ratingTokens(rest string) []string {
 }
 
 // resolveRatingToken looks one canonical token up, consulting the systems a
-// country prefix named before the cross-system index.
-func resolveRatingToken(token string, systems []string) (string, *int, bool) {
+// country prefix named before the cross-system index, which crossSystem
+// turns on.
+func resolveRatingToken(token string, systems []string, crossSystem bool) (string, *int, bool) {
 	if _, unrated := unratedTokens[token]; unrated {
 		return systemUnrated, nil, true
 	}
@@ -314,7 +339,7 @@ func resolveRatingToken(token string, systems []string) (string, *int, bool) {
 			return candidate, ageValue(value), true
 		}
 	}
-	if entry, found := ratingIndex[token]; found {
+	if entry, found := ratingIndex[token]; crossSystem && found {
 		return entry.system, ageValue(entry.age), true
 	}
 	if value, found := bareAge(token); found {
@@ -350,16 +375,62 @@ func AgeForCeiling(ceiling string) (*int, bool) {
 // remainder plus the systems that country uses. An unknown or malformed prefix
 // yields no systems, leaving the remainder to the global lookup.
 func splitCountryPrefix(raw string) (string, []string) {
+	code, rest, ok := cutCountryCode(raw, ":")
+	if !ok {
+		return strings.TrimSpace(raw), nil
+	}
+	return rest, countrySystems[code]
+}
+
+// dashedRatingPrefixes are two-letter codes that open a US rung written with
+// a dash (TV-MA, PG-13, NC-17). They are also country codes (Tuvalu, Papua New
+// Guinea, New Caledonia), but a dashed string starting with one is a rating,
+// so an unrecognized one such as "PG-15" stays unrecognized rather than
+// resolving to the age after the dash. MA and UA also open dashed rungs
+// (MA-15+, UA-13+), but those resolve as whole strings first, and the age
+// after them is the age they stand for, so Morocco and Ukraine keep the form.
+var dashedRatingPrefixes = map[string]struct{}{
+	"TV": {}, "PG": {}, "NC": {},
+}
+
+// cutDashedCountryPrefix strips a leading country code written with a dash,
+// the form Jellyfin stores ("SE-7", "DE-16"), and returns the remainder plus
+// the systems that country uses. Unlike the colon form, the code must name a
+// country: one golang.org/x/text/language treats as a country (ISO 3166 plus
+// a few reserved CLDR codes), or one of the aliases countrySystems lists.
+// A remainder holding letters or digits canonicalRatingToken would drop
+// ("第3級", "Från 7 år") is refused, since dropping them can leave a bare age
+// the label never meant.
+func cutDashedCountryPrefix(raw string) (string, []string, bool) {
+	code, rest, ok := cutCountryCode(raw, "-")
+	if !ok || hasDroppedAlphanumeric(rest) {
+		return "", nil, false
+	}
+	if _, rung := dashedRatingPrefixes[code]; rung {
+		return "", nil, false
+	}
+	if systems, known := countrySystems[code]; known {
+		return rest, systems, true
+	}
+	if region, err := language.ParseRegion(code); err != nil || !region.IsCountry() {
+		return "", nil, false
+	}
+	return rest, nil, true
+}
+
+// cutCountryCode splits raw at the first sep when what precedes it is a two
+// or three letter code, returning the code uppercased and the trimmed rest.
+func cutCountryCode(raw, sep string) (code, rest string, ok bool) {
 	trimmed := strings.TrimSpace(raw)
-	idx := strings.Index(trimmed, ":")
+	idx := strings.Index(trimmed, sep)
 	if idx <= 0 {
-		return trimmed, nil
+		return "", "", false
 	}
-	code := strings.ToUpper(strings.TrimSpace(trimmed[:idx]))
+	code = strings.ToUpper(strings.TrimSpace(trimmed[:idx]))
 	if len(code) < 2 || len(code) > 3 || !isAlpha(code) {
-		return trimmed, nil
+		return "", "", false
 	}
-	return strings.TrimSpace(trimmed[idx+1:]), countrySystems[code]
+	return code, strings.TrimSpace(trimmed[idx+1:]), true
 }
 
 // canonicalRatingToken folds a rating string to its lookup key: uppercase, with
@@ -412,6 +483,18 @@ func bareAge(token string) (int, bool) {
 		return 0, false
 	}
 	return age, true
+}
+
+// hasDroppedAlphanumeric reports whether value holds a letter or digit
+// canonicalRatingToken would drop ("Från", "第3級", a full-width "６").
+// Non-ASCII punctuation ("FR-–16") is dropped harmlessly.
+func hasDroppedAlphanumeric(value string) bool {
+	for _, r := range value {
+		if r >= utf8.RuneSelf && (unicode.IsLetter(r) || unicode.IsNumber(r)) {
+			return true
+		}
+	}
+	return false
 }
 
 func isAlpha(value string) bool {
@@ -535,7 +618,10 @@ func RatingRank(rating string) (int, bool) {
 const UnrecognizedRatingAge = 99
 
 // StoredRating resolves a raw content rating to the value stored beside it in
-// media_items.content_rating_age, which the backfill migration mirrors:
+// media_items.content_rating_age, which the backfill migration mirrors (the
+// frozen backfill predates the dashed country form; the Go migration in
+// internal/database/content_rating_age_rederive.go re-derives the rows it left
+// at UnrecognizedRatingAge):
 //
 //   - a recognized rating stores its minimum age;
 //   - no rating at all (empty, or an explicit marker such as NR or Unrated)

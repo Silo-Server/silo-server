@@ -3,11 +3,39 @@ package plugins
 import (
 	"context"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
+
+func TestNetworkAccessProviderHonorsDeadlineWhileProcessIsLocked(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service := &Service{host: newSeqFakeHost()}
+		service.resident = newResidentSupervisor(service, ResidentOptions{})
+		service.resident.entries[5] = &residentEntry{id: 5, state: ResidentRunning}
+		lock := service.runtimeLock(5)
+		lock.Lock()
+		defer lock.Unlock()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+
+		reported := make(chan netaccess.Status, 1)
+		go func() {
+			reported <- service.applyNetworkAccess(ctx, NetworkAccessProvider{InstallationID: 5, Provider: "stub"}, networkAccessRead.command())
+		}()
+		select {
+		case status := <-reported:
+			if status.State != netaccess.StateUnavailable || status.Error != context.DeadlineExceeded.Error() {
+				t.Fatalf("status while the process lock is held = %+v", status)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("network access status did not return before the lock was released")
+		}
+	})
+}
 
 func TestNetworkAccessLateRPCDoesNotRestoreRevokedOrReplacedStatus(t *testing.T) {
 	f := newResidentFixture(t, ResidentOptions{})

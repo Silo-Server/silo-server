@@ -11,6 +11,12 @@ outputs:
   web:
     description: Whether the Web jobs are required.
     value: ${{ steps.tools.outputs.web }}
+  web_settings_binding:
+    description: Whether the generated web settings binding check is required.
+    value: ${{ steps.tools.outputs.web_settings_binding }}
+  web_apiv2_types:
+    description: Whether the generated web API v2 types check is required.
+    value: ${{ steps.tools.outputs.web_apiv2_types }}
 runs:
   using: composite
   steps:

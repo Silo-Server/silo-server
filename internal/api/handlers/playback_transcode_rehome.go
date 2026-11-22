@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"syscall"
 
+	"github.com/google/uuid"
+
 	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
@@ -533,6 +535,8 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 		}
 	}
 	req := rehomeStartRequestV3(card, transportID, hwAccel, requestedSegment)
+	// The start's own id lets its rollback release this start alone.
+	req.StartID = uuid.NewString()
 	grant, err := h.rehomeSourceGrantV3(ctx, node.ID, card)
 	if err != nil {
 		return err
@@ -566,7 +570,7 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 	if err != nil {
 		// A start that timed out may still have begun; stopping is harmless when
 		// it did not.
-		h.rollBackMovedStartV3(ctx, transportID, node.URL)
+		h.rollBackMovedStartV3(ctx, transportID, node.URL, req.StartID)
 		return err
 	}
 
@@ -593,7 +597,7 @@ func (h *PlaybackHandler) moveTranscodeToNodeV3(
 		// The route changed under the move: give back the planner reservation
 		// Resolve made on this node along with the job.
 		h.releaseMoveReservationV3(session.ID, reservation)
-		h.releaseMovedTransportV3(ctx, transportID, node.URL)
+		h.releaseMovedTransportV3(ctx, transportID, node.URL, req.StartID)
 		return err
 	}
 	// The stored card names the transport's executor, whether or not the
@@ -742,15 +746,17 @@ func rehomeStartRequestV3(card playback.RecipeCard, transportID, hwAccel string,
 // release leaves the stored recipe alone, so a tokenless session keeps the card
 // its move read. transportID is the resolved transport id (remoteTransportID),
 // which a legacy session's empty route field does not name.
-func (h *PlaybackHandler) rollBackMovedStartV3(ctx context.Context, transportID, nodeURL string) {
-	go h.releaseMovedTransportV3(context.WithoutCancel(ctx), transportID, nodeURL)
+func (h *PlaybackHandler) rollBackMovedStartV3(ctx context.Context, transportID, nodeURL, startID string) {
+	go h.releaseMovedTransportV3(context.WithoutCancel(ctx), transportID, nodeURL, startID)
 }
 
 // releaseMovedTransportV3 stops a move's job on nodeURL without fencing the
 // transport id there: the session keeps the id on whichever node runs it, and
-// a replica whose copy still names nodeURL must be able to rebuild it.
-func (h *PlaybackHandler) releaseMovedTransportV3(ctx context.Context, transportID, nodeURL string) {
-	if err := h.tm.ReleaseRemoteTranscode(ctx, transportID, nodeURL); err != nil {
+// a replica whose copy still names nodeURL must be able to rebuild it. The
+// release names the move's start, so when another API server's move has
+// started the transport on nodeURL by the time it lands, that job runs on.
+func (h *PlaybackHandler) releaseMovedTransportV3(ctx context.Context, transportID, nodeURL, startID string) {
+	if err := h.tm.ReleaseRemoteTranscode(ctx, transportID, nodeURL, startID); err != nil {
 		slog.WarnContext(ctx, "could not release a moved transcode on its node",
 			"component", "api", "node", logredact.SanitizeURL(nodeURL), "transport", transportID, "error", logredact.SanitizeText(err.Error()))
 	}
@@ -829,11 +835,13 @@ func (h *PlaybackHandler) releaseMoveReservationV3(sessionID string, held nodepo
 
 // retireUnreachableTransportV3 asks the node the transport left to drop it, in
 // case the node is only unreachable from here and still running FFmpeg. A dead
-// node refuses the connection at once; the answer is not waited on.
+// node refuses the connection at once; the answer is not waited on. This
+// server does not know which start made the job there, so the release names
+// none and the node ends only the job it holds when the release arrives.
 func (h *PlaybackHandler) retireUnreachableTransportV3(ctx context.Context, nodeURL, transportID string) {
 	detached := context.WithoutCancel(ctx)
 	go func() {
-		if err := h.tm.ReleaseRemoteTranscode(detached, transportID, nodeURL); err != nil {
+		if err := h.tm.ReleaseRemoteTranscode(detached, transportID, nodeURL, ""); err != nil {
 			// Expected when the node is down. When it is only unreachable from
 			// here, its FFmpeg keeps running until the node's idle reaper ends it.
 			slog.WarnContext(detached, "could not stop the transcode on the node it moved off; the node's idle reaper will end it if it still runs",

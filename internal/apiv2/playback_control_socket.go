@@ -133,6 +133,9 @@ func playbackControlSocketProblem(err error) *Problem {
 	case errors.Is(err, evt.ErrSocketTicket):
 		return NewProblem(TypePermissionDenied, "Realtime authority could not be delegated.")
 	}
+	if p := socketAuthorityUnavailable(err); p != nil {
+		return p
+	}
 	return serviceProblem(err)
 }
 

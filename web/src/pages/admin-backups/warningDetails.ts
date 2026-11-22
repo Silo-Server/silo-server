@@ -1,5 +1,5 @@
 import type { AdminBackup, AdminBackupOmitted } from "@/api/v2/adminBackups";
-import { englishText, t, type MessageKey, type TextValues } from "@/i18n";
+import { englishText, exactAmount, t, type MessageKey, type TextValues } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
 
 type MissingBlob = AdminBackup["missing_blobs"][number];
@@ -42,11 +42,12 @@ function plainSummary(
   count: number,
   text: Text = t,
 ): string {
-  if (reason === "too_large") return text("web.admin.backups.warnings.tooLarge", { count });
+  const amount = exactAmount(count);
+  if (reason === "too_large") return text("web.admin.backups.warnings.tooLarge", { amount });
   const reading = /(?:^|: )reading ([^:]+?)(?::|$)/.exec(cause);
   return reading?.[1]
-    ? text("web.admin.backups.warnings.partUnreadable", { count, part: reading[1].trim() })
-    : text("web.admin.backups.warnings.dataUnreadable", { count });
+    ? text("web.admin.backups.warnings.partUnreadable", { amount, part: reading[1].trim() })
+    : text("web.admin.backups.warnings.dataUnreadable", { amount });
 }
 
 export interface OmissionGroup {

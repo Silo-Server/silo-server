@@ -305,8 +305,14 @@ func (r *CatalogResolver) WithSearchProvider(provider CatalogSearchProvider) *Ca
 }
 
 func (r *CatalogResolver) queryExecutorForScope(scope string, snapshot *time.Time) *QueryExecutor {
+	return newScopeQueryExecutor(r.itemRepo.pool, scope, snapshot)
+}
+
+// newScopeQueryExecutor returns an executor over scope's base relation:
+// media_items, or the episode catalog for the episode scope.
+func newScopeQueryExecutor(pool *pgxpool.Pool, scope string, snapshot *time.Time) *QueryExecutor {
 	return &QueryExecutor{
-		Pool:            r.itemRepo.pool,
+		Pool:            pool,
 		Scope:           scope,
 		BaseRelationSQL: catalogBaseRelationForScope(scope),
 		SnapshotAt:      snapshot,
@@ -540,9 +546,9 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 		// Personal list sections may carry optional type/library filters and a
 		// sort; apply them as an overlay query so the "see all" page matches
 		// the rail. Without a configured sort the stored list order is kept.
-		sectionFilters := parseCatalogSectionFilters(section.Config)
+		sectionFilters := ParseSectionConfigScope(section.Config)
 		query := QueryDefinition{
-			MediaScope: sectionFilters.FilterType,
+			MediaScope: sectionFilters.MediaScope,
 			LibraryIDs: append([]int(nil), sectionFilters.LibraryIDs...),
 		}.Normalize()
 		if section.Scope == "library" && section.LibraryID != nil {
@@ -576,7 +582,7 @@ func (r *CatalogResolver) resolveSectionSource(ctx context.Context, req CatalogR
 	case "random":
 		return r.resolveSectionBrowseSource(ctx, req, access, section, "random", "desc")
 	case "genre", "custom_filter":
-		def, err := parseCatalogSectionQueryDefinition(section.Config)
+		def, err := ParseSectionQueryDefinition(section.Config)
 		if err != nil {
 			return nil, fmt.Errorf("%w: parsing section query definition: %w", ErrInvalidCatalogRequest, err)
 		}
@@ -628,7 +634,7 @@ func (r *CatalogResolver) resolveRecentTVSectionSource(
 	access AccessFilter,
 	section catalogPageSection,
 ) (*CatalogResult, bool, error) {
-	filters := parseCatalogSectionFilters(section.Config)
+	filters := ParseSectionConfigScope(section.Config)
 	requested := append([]int(nil), filters.LibraryIDs...)
 	if section.Scope == "library" && section.LibraryID != nil {
 		requested = []int{*section.LibraryID}
@@ -637,7 +643,7 @@ func (r *CatalogResolver) resolveRecentTVSectionSource(
 		ctx,
 		r.itemRepo.pool,
 		requested,
-		filters.FilterType,
+		filters.MediaScope,
 		access,
 	)
 	if err != nil || !tvScoped {
@@ -726,9 +732,9 @@ func (r *CatalogResolver) resolveSectionBrowseSource(ctx context.Context, req Ca
 		snapshot = *req.SnapshotAt
 	}
 
-	sectionFilters := parseCatalogSectionFilters(section.Config)
+	sectionFilters := ParseSectionConfigScope(section.Config)
 	query := QueryDefinition{
-		MediaScope: sectionFilters.FilterType,
+		MediaScope: sectionFilters.MediaScope,
 		LibraryIDs: append([]int(nil), sectionFilters.LibraryIDs...),
 		Sort: QuerySort{
 			Field: sort,
@@ -2029,13 +2035,6 @@ type catalogPageSection struct {
 	FetchItems func(ctx context.Context, limit int) (SectionRowItems, error)
 }
 
-type catalogSectionFilters struct {
-	FilterType       string `json:"filter_type"`
-	FilterLibraryID  *int   `json:"filter_library_id"`
-	FilterLibraryIDs []int  `json:"filter_library_ids"`
-	LibraryIDs       []int
-}
-
 func defaultCatalogLibrarySection(libraryID int, sectionID string) (catalogPageSection, bool) {
 	sections := []catalogPageSection{
 		{
@@ -2147,21 +2146,6 @@ func (r *CatalogResolver) loadStoredCatalogSection(ctx context.Context, req Cata
 	return section, nil
 }
 
-func parseCatalogSectionFilters(config json.RawMessage) catalogSectionFilters {
-	var filters catalogSectionFilters
-	if len(config) > 0 {
-		_ = json.Unmarshal(config, &filters)
-	}
-	filters.LibraryIDs = normalizeCatalogSectionLibraryIDs(filters.FilterLibraryID, filters.FilterLibraryIDs)
-	if filters.FilterType == "" && len(filters.LibraryIDs) == 0 {
-		if def, err := parseCatalogSectionQueryDefinition(config); err == nil {
-			filters.FilterType = def.MediaScope
-			filters.LibraryIDs = append([]int(nil), def.LibraryIDs...)
-		}
-	}
-	return filters
-}
-
 // parseCatalogSectionSort extracts the optional flat sort/order keys from a
 // watchlist/favorites section config.
 func parseCatalogSectionSort(config json.RawMessage) (string, string) {
@@ -2194,10 +2178,6 @@ func normalizeCatalogSectionLibraryIDs(single *int, multiple []int) []int {
 		}
 	}
 	return result
-}
-
-func parseCatalogSectionQueryDefinition(config json.RawMessage) (QueryDefinition, error) {
-	return parseCatalogCollectionQueryDefinition(config)
 }
 
 func parseCatalogCollectionQueryDefinition(config json.RawMessage) (QueryDefinition, error) {
@@ -2488,7 +2468,7 @@ func (r *CatalogResolver) fetchAccessibleItemsByID(ctx context.Context, contentI
 	}
 
 	if isEpisodeCatalogScope(req.Query.MediaScope) {
-		return r.fetchAccessibleEpisodeItemsByID(ctx, contentIDs, req, access)
+		return EpisodesByID(ctx, r.itemRepo.pool, contentIDs, req.Query, access)
 	}
 
 	filters, earlyEmpty, err := catalogBrowseFilters(req, access)
@@ -2520,15 +2500,17 @@ func (r *CatalogResolver) fetchAccessibleItemsByID(ctx context.Context, contentI
 	return ordered, nil
 }
 
-// fetchAccessibleEpisodeItemsByID is the episode-scope counterpart of
-// fetchAccessibleItemsByID. Episode rows are not present in media_items — they
-// hydrate through the episode catalog relation — so the browse-repository path
-// (which scans media_items and would match nothing) is replaced by the episode
-// query executor with the requested ids as the allowed-content set. Query
-// filters are applied in the same pass; sort and limit are stripped because
-// the caller re-imposes source order or its own sort downstream.
-func (r *CatalogResolver) fetchAccessibleEpisodeItemsByID(ctx context.Context, contentIDs []string, req CatalogRequest, access AccessFilter) ([]*models.MediaItem, error) {
-	filterDef := req.Query
+// EpisodesByID returns the episodes among contentIDs that def's filters and
+// access admit, in contentIDs order. Episodes are not in media_items, so the
+// episode query executor reads them with contentIDs as the allowed-content
+// set; def's sort and limit are dropped because callers impose their own
+// order. A watchlist or favorites page scoped to episodes and its row both
+// decide their entries here.
+func EpisodesByID(ctx context.Context, pool *pgxpool.Pool, contentIDs []string, def QueryDefinition, access AccessFilter) ([]*models.MediaItem, error) {
+	if len(contentIDs) == 0 {
+		return []*models.MediaItem{}, nil
+	}
+	filterDef := def
 	filterDef.Sort = QuerySort{}
 	filterDef.Limit = nil
 
@@ -2539,7 +2521,7 @@ func (r *CatalogResolver) fetchAccessibleEpisodeItemsByID(ctx context.Context, c
 		queryAccess.AllowedContentIDs = contentIDs
 	}
 
-	executor := r.queryExecutorForScope(filterDef.MediaScope, nil)
+	executor := newScopeQueryExecutor(pool, filterDef.MediaScope, nil)
 	items, _, err := executor.Preview(ctx, filterDef, queryAccess, len(contentIDs))
 	if err != nil {
 		return nil, err

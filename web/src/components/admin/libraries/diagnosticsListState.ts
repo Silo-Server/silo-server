@@ -8,12 +8,27 @@ export const PAGE_SIZE = 10;
 // Tailwind's lg breakpoint: tables from here up, cards below.
 const DESKTOP_QUERY = "(min-width: 64rem)";
 
+// Tailwind's xl breakpoint. Below it, with the admin sidebar open, the wide
+// diagnostics tables (Ambiguous Roots, Troubleshooting, Stale External IDs)
+// are wider than their section and would hide their last columns behind a
+// sideways scroll.
+const WIDE_TABLE_QUERY = "(min-width: 80rem)";
+
 /**
  * Whether the admin libraries page shows its tables, for the library list and
- * the diagnostics sections alike. Tests have no matchMedia and get the tables.
+ * the diagnostics sections whose tables fit from `lg` up. Tests have no
+ * matchMedia and get the tables.
  */
 export function useLibrariesTableLayout(): boolean {
   return useMediaQuery(DESKTOP_QUERY, true);
+}
+
+/**
+ * Whether a diagnostics section with a wide table shows it, from `xl` up, or
+ * shows cards. Tests have no matchMedia and get the tables.
+ */
+export function useWideDiagnosticsTableLayout(): boolean {
+  return useMediaQuery(WIDE_TABLE_QUERY, true);
 }
 
 export type SortDir = "asc" | "desc";

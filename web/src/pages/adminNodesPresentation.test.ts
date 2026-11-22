@@ -20,6 +20,8 @@ import {
   nodeHasHWDeviceInventory,
   hwDeviceSyntaxChanges,
   nodeUsesCUDADevices,
+  nodeUsesVideoToolbox,
+  restoreEnvManagedFields,
 } from "./adminNodesPresentation";
 
 const NOW = Date.parse("2026-08-26T12:00:00Z");
@@ -66,7 +68,7 @@ describe("describeNodeGPU", () => {
       backend: {
         label: "QSV",
         state: "failed",
-        badgeClass: "bg-warning/10 text-warning border-warning/15",
+        badgeClass: "bg-warning/10 text-warning-label border-warning/15",
         title: "QSV probe failed: h264_qsv smoke encode failed: device busy",
       },
       failures: [],
@@ -519,6 +521,16 @@ describe("buildNodeHWDeviceRows", () => {
   });
 });
 
+describe("nodeUsesVideoToolbox", () => {
+  it("follows a Mac node's own resolution and an explicit pin", () => {
+    const mac = makeNode({ capabilities: { resolved: "videotoolbox" } });
+    expect(nodeUsesVideoToolbox(mac, HW_ACCEL_INHERIT, "auto")).toBe(true);
+    expect(nodeUsesVideoToolbox(mac, "auto", "qsv")).toBe(true);
+    expect(nodeUsesVideoToolbox(makeNode({}), "videotoolbox")).toBe(true);
+    expect(nodeUsesVideoToolbox(mac, HW_ACCEL_INHERIT, "qsv")).toBe(false);
+  });
+});
+
 describe("nodeUsesCUDADevices", () => {
   it("follows what the node resolves to when the cluster names no backend", () => {
     const node = makeNode({ capabilities: { resolved: "nvenc" } });
@@ -937,5 +949,22 @@ describe("describeNodeDrain", () => {
       ),
     ).toMatchObject({ phase: "draining", label: "Draining · not answering" });
     expect(describeNodeDrain(makeNode({ healthy: false, drain_state: "none" }))).toBeNull();
+  });
+});
+
+describe("restoreEnvManagedFields", () => {
+  // A save must restate what the node declares, or the server refuses it.
+  it("sends the stored value for each declared field the form carries", () => {
+    const node = makeNode({
+      group: null,
+      max_jobs: 3,
+      hw_accel_override: "qsv",
+      env_managed: ["group", "max_jobs", "hw_accel_override", "public_url"],
+    });
+    const body = restoreEnvManagedFields(
+      { name: "edited", group: "typed", max_jobs: 9, hw_accel_override: null },
+      node,
+    );
+    expect(body).toEqual({ name: "edited", group: "", max_jobs: 3, hw_accel_override: "qsv" });
   });
 });

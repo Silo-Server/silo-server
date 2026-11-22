@@ -48,6 +48,7 @@ func TestHouseholdMutationRechecksPINAfterSlowBody(t *testing.T) {
 				{"child PIN changed", "/api/v2/profiles/child", `{"pin":"9876"}`, false},
 			} {
 				t.Run(setup+"/"+mutation.name+"/"+concurrent.name, func(t *testing.T) {
+					t.Parallel()
 					ctx, cancel := context.WithTimeout(t.Context(), 15*time.Second)
 					defer cancel()
 					h, store, users, headers := slowBodyHousehold(t, ctx, engine, setup)

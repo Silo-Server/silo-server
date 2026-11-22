@@ -144,6 +144,7 @@ func (s *Scanner) scanEbookPaths(ctx context.Context, folder *models.MediaFolder
 	if s == nil || folder == nil {
 		return fmt.Errorf("scanEbookPaths: nil scanner or folder")
 	}
+	ctx = withScopedScan(ctx, fullScan)
 	warning, err := s.scanWarningBeforeWalk(ctx, folder.ID, fullScan)
 	if err != nil {
 		return err
@@ -580,7 +581,7 @@ func (s *Scanner) reconcileEbookFileWithSkipState(ctx context.Context, folder *m
 			"path", filePath,
 			"error", skipErr,
 		)
-	} else if isUnchanged {
+	} else if isUnchanged && s.confirmUnchangedFiles(ctx, folder.ID, []string{filePath}) {
 		// New or changed books (in either format), and metadata enrichment,
 		// perform linking. Unchanged unlinked books need no candidate search.
 		atomic.AddInt64(skipped, 1)

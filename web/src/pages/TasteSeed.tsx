@@ -155,7 +155,7 @@ export default function TasteSeed() {
   return (
     <div className="min-h-[100dvh]">
       {/* Sticky header with progress + actions */}
-      <header className="bg-background/80 supports-[backdrop-filter]:bg-background/60 border-border sticky top-0 z-30 border-b backdrop-blur">
+      <header className="bg-background/80 supports-[backdrop-filter]:bg-background/60 border-border sticky top-(--impersonation-banner-height) z-30 border-b backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-3 px-4 py-4 sm:px-6">
           <div className="min-w-0 flex-1">
             <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight sm:text-2xl">

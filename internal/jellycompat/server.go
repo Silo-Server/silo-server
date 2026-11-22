@@ -154,7 +154,13 @@ type Dependencies struct {
 	// admin live-session table right after compat playback starts/stops, so
 	// the activity dashboard doesn't wait for the periodic reconciler tick.
 	// Optional.
-	SessionSyncer     PlaybackSessionSyncer
+	SessionSyncer PlaybackSessionSyncer
+
+	// RestoreReconstructedWatch returns the watch-time measurement saved for
+	// a native session, so one this server rebuilds after a restart keeps
+	// measuring the same play. Optional.
+	RestoreReconstructedWatch func(ctx context.Context, sessionID string) (playback.WatchTime, bool)
+
 	MarkerPopulation  MarkerPopulationService
 	FileResolver      FilePathResolver
 	MediaSourceOwners MediaSourceOwnerLookup // optional; resolves media-source ids sent as item ids

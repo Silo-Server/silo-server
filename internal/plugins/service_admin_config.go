@@ -9,7 +9,6 @@ import (
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
-	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
 // ConfigValidationError indicates that the caller supplied an invalid key or
@@ -55,23 +54,20 @@ func (s *Service) SetGlobalConfigWithClears(
 		return fmt.Errorf("plugin config store not configured")
 	}
 
-	_, manifest, err := s.loadForManifestRead(ctx, installationID, false)
-	if err != nil {
-		return err
-	}
-
 	if value == nil {
 		value = map[string]any{}
 	}
-	secretFields := GlobalConfigSecretFields(manifest, key)
-	secretPaths := GlobalConfigSecretPaths(manifest, key)
-	clearSet, err := validatedSecretClearSet(key, secretFields, clearSecrets)
-	if err != nil {
-		return &ConfigValidationError{Message: err.Error(), Cause: err}
-	}
-	const maxConfigSaveAttempts = 5
-	saved := false
-	for attempt := 0; attempt < maxConfigSaveAttempts; attempt++ {
+	clearSet := secretFieldSet(clearSecrets)
+	for range maxConfigSaveAttempts {
+		installation, manifest, err := s.currentManifestForConfig(ctx, installationID)
+		if errors.Is(err, ErrInstallationChanged) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		secretPaths := GlobalConfigSecretPaths(manifest, key)
+
 		merged, expectedUpdatedAt, err := s.mergeStoredConfig(
 			ctx,
 			installationID,
@@ -82,51 +78,66 @@ func (s *Service) SetGlobalConfigWithClears(
 		if err != nil {
 			return err
 		}
-		if err := applyGlobalConfigClears(manifest, key, merged, value, clearSet); err != nil {
-			return &ConfigValidationError{Message: err.Error(), Cause: err}
+		removeGlobalConfigClears(manifest, key, merged, value, clearSet)
+		validate := func() error {
+			if _, err := validatedSecretClearSet(key, GlobalConfigSecretFields(manifest, key), clearSecrets); err != nil {
+				return &ConfigValidationError{Message: err.Error(), Cause: err}
+			}
+			if err := validateMergedGlobalConfig(manifest, key, merged, value); err != nil {
+				return &ConfigValidationError{Message: err.Error(), Cause: err}
+			}
+			return nil
 		}
 
-		swapped, err := s.configs.CompareAndSwapGlobalConfig(
-			ctx,
-			installationID,
-			key,
-			merged,
-			expectedUpdatedAt,
-		)
+		swapped, err := s.swapValidatedGlobalConfig(ctx, installation, key, merged, expectedUpdatedAt, clearSet, validate)
+		if errors.Is(err, ErrInstallationChanged) {
+			continue
+		}
 		if err != nil {
 			return fmt.Errorf("persist plugin config: %w", err)
 		}
 		if swapped {
-			saved = true
-			break
+			return s.afterGlobalConfigSaved(ctx, installationID)
 		}
 	}
-	if !saved {
-		return fmt.Errorf("persist plugin config: concurrent updates did not settle")
+	return errors.New("persist plugin config: concurrent updates did not settle")
+}
+
+const maxConfigSaveAttempts = 5
+
+// Config writes must validate against the installed package even if a peer's
+// lifecycle event has yet to reach the installation cache.
+func (s *Service) currentManifestForConfig(ctx context.Context, id int) (*Installation, *pluginv1.PluginManifest, error) {
+	installation, err := s.installations.GetByID(ctx, id)
+	if err != nil {
+		return nil, nil, err
 	}
-	return s.afterGlobalConfigSaved(ctx, installationID)
+	manifest, err := s.ReadInstalledManifest(ctx, installation)
+	return installation, manifest, err
+}
+
+func (s *Service) swapValidatedGlobalConfig(
+	ctx context.Context, installation *Installation, key string, value map[string]any,
+	expectedUpdatedAt *time.Time, clears map[string]struct{}, validate func() error,
+) (bool, error) {
+	if store, ok := s.configs.(*RuntimeConfigStore); ok {
+		return store.compareAndSwapGlobalConfig(ctx, installation.ID, key, value, expectedUpdatedAt, installation, clears, validate)
+	}
+	if err := validate(); err != nil {
+		return false, err
+	}
+	return s.configs.CompareAndSwapGlobalConfig(ctx, installation.ID, key, value, expectedUpdatedAt)
 }
 
 // afterGlobalConfigSaved restarts the plugin on its new configuration and
 // notifies lifecycle hooks.
 func (s *Service) afterGlobalConfigSaved(ctx context.Context, installationID int) error {
-	var stopErr error
-	if s.host != nil {
-		if err := s.host.Stop(installationID); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
-			stopErr = fmt.Errorf("reload plugin after config update: %w", err)
-		}
-	}
-	// A reconfigured resident gets a fresh failure budget; the lifecycle
-	// reconcile below starts it again.
-	s.resident.Reset(installationID)
-	// Configuration is part of metadata match input identity. Notify hooks
-	// after the old process has been stopped so resolver reloads observe the new
-	// runtime. The durable config changed even when stopping failed, so hooks
-	// still run before returning that error and parked rows are not left asleep.
+	err := s.stopStaleLazyRuntime(ctx, installationID)
 	s.OnLifecycleChange(ctx)
-	// The config save advanced runtime_generation in the same transaction;
-	// both the lifecycle event above and a proxy's poll replace stale processes.
-	return stopErr
+	if err != nil {
+		return fmt.Errorf("reload plugin after config update: %w", err)
+	}
+	return nil
 }
 
 func validatedSecretClearSet(

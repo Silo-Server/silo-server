@@ -125,7 +125,8 @@ type Service struct {
 	signInAttempts SignInAttemptLimiter
 	// sessionsRevoked runs after a password change signed the account out
 	// of its other sessions; see OnSessionsRevoked.
-	sessionsRevoked func(ctx context.Context, userID int)
+	sessionsRevoked      func(ctx context.Context, userID int)
+	authProvidersChanged func(context.Context)
 }
 
 // PluginProviderSource supplies the current auth-plugin providers. The
@@ -569,7 +570,7 @@ func (s *Service) FindOAuthInstallation(installationID int) *PluginProvider {
 // completion code does when it is redeemed (OpenOAuthSession).
 func (s *Service) ResolveOAuthLogin(ctx context.Context, in OAuthLoginInput) (*models.User, int64, error) {
 	provider := s.FindOAuthInstallation(in.InstallationID)
-	if provider == nil {
+	if provider == nil || provider.CapabilityID() != in.CapabilityID {
 		return nil, 0, ErrInvalidCredentials
 	}
 	// A linking flow (LinkingUserID > 0) links the identity to that account
@@ -731,7 +732,7 @@ func (s *Service) LinkOAuthIdentity(ctx context.Context, in OAuthLoginInput) (*m
 		return nil, ErrNotPermitted
 	}
 	provider := s.FindOAuthInstallation(in.InstallationID)
-	if provider == nil {
+	if provider == nil || provider.CapabilityID() != in.CapabilityID {
 		return nil, ErrProviderUnavailable
 	}
 	user, _, err := provider.CompleteOAuth(ctx, in.Response, in.LinkingUserID, 0)
@@ -967,13 +968,14 @@ func (s *Service) loginWithProvider(
 	return pair, user, nil
 }
 
+// OnAuthProvidersChanged wires the provider rebuild after initial setup commits.
+func (s *Service) OnAuthProvidersChanged(fn func(context.Context)) {
+	s.authProvidersChanged = fn
+}
+
 // NeedsSetup reports whether the system still needs its initial user account.
 func (s *Service) NeedsSetup(ctx context.Context) (bool, error) {
-	count, err := s.users.Count(ctx)
-	if err != nil {
-		return false, fmt.Errorf("counting users: %w", err)
-	}
-	return count == 0, nil
+	return s.users.NeedsSetup(ctx)
 }
 
 // SetupInitialUser creates the first admin account and signs it in.
@@ -1039,6 +1041,9 @@ func (s *Service) SetupInitialUser(
 	})
 	if err != nil {
 		return nil, nil, err
+	}
+	if s.authProvidersChanged != nil {
+		s.authProvidersChanged(context.WithoutCancel(ctx))
 	}
 	return pair, user, nil
 }

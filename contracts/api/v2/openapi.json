@@ -594,6 +594,10 @@
           "id": {
             "type": "string"
           },
+          "managed_by_env_var": {
+            "description": "The variable in the server's environment that declares this provider, such as SILO_CONFIG_FILE, when the deployment declares it. Updating or deleting such a provider is 422 validation_failed with code managed_by_environment.",
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -4031,6 +4035,7 @@
             "type": "string"
           },
           "local_username": {
+            "description": "The matched account's username, or its email when it has none",
             "type": "string"
           },
           "match": {
@@ -4120,8 +4125,21 @@
             "type": "string"
           },
           "changes": {
-            "description": "A template collection's fields the admin changed from the template's defaults that a restore writes here: title, description, visibility, featured, sort order, item sort, source, sync schedule, poster, backdrop",
+            "description": "What a restore writes to a template collection here: the fields the admin changed from the template's defaults, and libraries when it adds the collection to more of them",
             "items": {
+              "enum": [
+                "title",
+                "description",
+                "visibility",
+                "featured",
+                "sort_order",
+                "item_sort",
+                "source",
+                "sync_schedule",
+                "poster",
+                "backdrop",
+                "libraries"
+              ],
               "type": "string"
             },
             "type": "array"
@@ -4232,8 +4250,21 @@
         "additionalProperties": false,
         "properties": {
           "changes": {
-            "description": "What a restore replaces in the section here: title, position, featured, item limit, enabled, web only, configuration, and N collection items",
+            "description": "What a restore replaces in the section here",
             "items": {
+              "enum": [
+                "type",
+                "title",
+                "title_translation",
+                "position",
+                "featured",
+                "item_limit",
+                "enabled",
+                "web_only",
+                "collection_replaced",
+                "configuration",
+                "collection_items"
+              ],
               "type": "string"
             },
             "type": "array"
@@ -4249,6 +4280,11 @@
           "local_id": {
             "description": "The matching section here: the same id on the server that took the backup, else the one section of the page with the same type and title",
             "type": "string"
+          },
+          "missing_collection_items": {
+            "description": "With the collection_items change: the items of the backup's collection, in this server's catalog, that the section's collection here lacks and a restore adds",
+            "format": "int64",
+            "type": "integer"
           },
           "scope": {
             "enum": [
@@ -4351,7 +4387,8 @@
               "kept_stricter",
               "unverified_backup",
               "over_restore_budget",
-              "needs_primary_profile"
+              "needs_primary_profile",
+              "managed_by_environment"
             ],
             "type": "string"
           },
@@ -4871,7 +4908,8 @@
               "kept_stricter",
               "unverified_backup",
               "over_restore_budget",
-              "needs_primary_profile"
+              "needs_primary_profile",
+              "managed_by_environment"
             ],
             "type": "string"
           },
@@ -5201,14 +5239,15 @@
             "type": "boolean"
           },
           "status": {
-            "description": "on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores",
+            "description": "on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores; managed_by_environment: this server's environment sets it, or sets another setting of the outside-service connection it belongs to (mail's SMTP settings, for example), so a restore never writes it and this server keeps its value",
             "enum": [
               "on_this_server",
               "differs",
               "needs_another_key",
               "kept_stricter",
               "cleared",
-              "unverified_backup"
+              "unverified_backup",
+              "managed_by_environment"
             ],
             "type": "string"
           }
@@ -5710,6 +5749,10 @@
             "description": "refreshAdminItemMetadata accepts mode reset, which resets an item, season or episode to its providers",
             "type": "boolean"
           },
+          "item_posters": {
+            "description": "listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always URLs this server issued",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -5733,6 +5776,7 @@
           "item_metadata",
           "item_metadata_reset",
           "item_file_paths",
+          "item_posters",
           "revision",
           "state",
           "allowed"
@@ -5877,6 +5921,11 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "poster_url": {
+            "description": "Card-size poster of a movie or series, or of an episode's series, as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent when there is no poster, and on a server that cannot issue poster links (the capabilities then report item_posters false). The URL expires; read it again from a later page or session row",
+            "format": "uri-reference",
+            "type": "string"
           },
           "rating_imdb": {
             "description": "Stored IMDb rating of a movie or series on IMDb's 0-10 scale",
@@ -9454,6 +9503,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "created_client_ip": {
+            "description": "Address the device registered the download from, as the trusted proxies resolve it; null when none was recorded, as for downloads registered before servers recorded it",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "delivery_format": {
             "type": "string"
           },
@@ -9507,6 +9563,13 @@
             ],
             "minLength": 1,
             "type": "string"
+          },
+          "last_client_ip": {
+            "description": "Address the device was last seen at for this download: set at registration, then by each accepted status report and by a file request from a new address, which replaces it at most once a minute, so it can be older than the latest file request; null when none was recorded",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "location": {
             "description": "Where its prepared file is: server or node:\u003cid\u003e; absent when it has none",
@@ -9601,7 +9664,9 @@
           "created_at",
           "updated_at",
           "completed_at",
-          "status_event_at"
+          "status_event_at",
+          "created_client_ip",
+          "last_client_ip"
         ],
         "type": "object"
       },
@@ -10294,6 +10359,14 @@
           "available": {
             "type": "boolean"
           },
+          "change_events": {
+            "description": "download.changed on the v2 events socket's admin downloads channel reports a managed download being created, changing status or revision, moving to another title in a catalog merge, or being removed. Delivery is at most once, so re-read the admin download routes on subscribe and reconnect",
+            "type": "boolean"
+          },
+          "client_ip": {
+            "description": "Download rows carry created_client_ip and last_client_ip",
+            "type": "boolean"
+          },
           "devices": {
             "description": "Device copies can be listed",
             "type": "boolean"
@@ -10326,6 +10399,8 @@
           "realtime_channel",
           "devices",
           "revocation",
+          "client_ip",
+          "change_events",
           "revision",
           "state",
           "allowed"
@@ -14195,6 +14270,10 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "deployment_managed": {
+            "description": "The API servers' deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE) lists this transcode node and supplies its key. issueAdminNodeKey and deleteAdminNode refuse it with node_deployment_managed until an API server starts with a document that no longer lists it (nodes: {} releases every node). An API server started with neither variable set leaves it managed. Requires the deployment_nodes node capability.",
+            "type": "boolean"
+          },
           "download_artifact_dir_override": {
             "description": "This node's own prepared-download directory; absent when inherited.",
             "type": "string"
@@ -14223,6 +14302,13 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "env_managed": {
+            "description": "Configuration fields the node declared from its own environment at its last start, named as in the update body. updateAdminNode refuses a change to any of them; restating the current value is accepted. Empty when the node declares nothing. Requires the env_declarations node capability.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "group": {
             "type": [
@@ -14334,7 +14420,9 @@
           "created_at",
           "drain_requested",
           "drain_state",
-          "key_issued"
+          "key_issued",
+          "deployment_managed",
+          "env_managed"
         ],
         "type": "object"
       },
@@ -14345,8 +14433,16 @@
             "description": "Whether the current principal may use the capability",
             "type": "boolean"
           },
+          "deployment_nodes": {
+            "description": "API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed. An API server that starts with a document no longer listing a node releases it (nodes: {} releases every node); one started with neither variable set changes nothing.",
+            "type": "boolean"
+          },
           "drain": {
             "description": "Transcode nodes can drain: the drain and resume operations, and drain_requested and drain_state on node rows.",
+            "type": "boolean"
+          },
+          "env_declarations": {
+            "description": "Nodes can declare their own configuration from their environment: env_managed on node rows names the fields a node declares, and updateAdminNode refuses a change to them with field code managed_by_environment.",
             "type": "boolean"
           },
           "node_keys": {
@@ -14381,6 +14477,8 @@
           "summary",
           "node_keys",
           "source_access",
+          "env_declarations",
+          "deployment_nodes",
           "revision",
           "state",
           "allowed"
@@ -15375,7 +15473,7 @@
             "type": "integer"
           },
           "reason": {
-            "description": "Free-form administrator reason shown to the player when supported",
+            "description": "Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate",
             "maxLength": 1024,
             "type": "string"
           },
@@ -15596,6 +15694,11 @@
               "null"
             ]
           },
+          "end_position_seconds": {
+            "description": "Position the play ended at, in seconds: how far into the media it got, not how long it was watched. A play resumed partway through ends past its resume point; played_seconds is the watch time",
+            "format": "double",
+            "type": "number"
+          },
           "end_reason": {
             "description": "Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from",
             "enum": [
@@ -15639,7 +15742,7 @@
             "type": "boolean"
           },
           "measured_since": {
-            "description": "First progress report behind the measurement",
+            "description": "First sample behind the measurement: the start, once its stream was prepared, or the first progress report",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -15649,7 +15752,7 @@
             ]
           },
           "measured_until": {
-            "description": "Last progress report behind the measurement",
+            "description": "Last sample behind the measurement: the latest progress report, or the final position the stop carried",
             "format": "date-time",
             "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
             "patternDescription": "a non-zero RFC 3339 instant",
@@ -15679,7 +15782,7 @@
             "type": "string"
           },
           "paused_seconds": {
-            "description": "Seconds the play spent paused between progress reports",
+            "description": "Seconds the play spent paused between samples",
             "format": "double",
             "type": [
               "number",
@@ -15735,6 +15838,88 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "subtitle": {
+            "additionalProperties": false,
+            "description": "The subtitle the play's plan delivered when it ended, in the live session row's shape; null when it showed none, for a Jellyfin-protocol or Audiobookshelf play, and on rows recorded before the server kept it",
+            "properties": {
+              "codec": {
+                "description": "The track's format in its source, as the inventory's codec names it; null when unknown",
+                "examples": [
+                  "subrip"
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "delivery": {
+                "description": "How the plan delivers it: burned into the video (subtitle.mode burn_in), carried in the stream the client plays (subtitle.embedded), a WebVTT rendition of the HLS stream (subtitle.hls_rendition), or a sidecar file the client fetches (subtitle.artifact). Clients ignore values they do not know",
+                "enum": [
+                  "burn_in",
+                  "embedded",
+                  "hls_rendition",
+                  "sidecar"
+                ],
+                "type": "string"
+              },
+              "forced": {
+                "type": "boolean"
+              },
+              "format": {
+                "description": "Format the client receives the track in: the sidecar artifact's or the HLS rendition's format. Null when it is burned in or carried in the stream as the source has it",
+                "examples": [
+                  "vtt"
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hearing_impaired": {
+                "type": "boolean"
+              },
+              "language": {
+                "description": "The track's language as the inventory names it (BCP 47; older rows may carry a legacy value); null when unknown",
+                "examples": [
+                  "en"
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source": {
+                "description": "Where the track comes from, as the inventory's source names it: a track in the media file, a subtitle file beside it, or one the server downloaded or stored",
+                "enum": [
+                  "embedded",
+                  "external",
+                  "downloaded"
+                ],
+                "type": "string"
+              },
+              "track_id": {
+                "description": "The track's inventory track_id, as the plan's subtitle.track_id names it",
+                "examples": [
+                  "file:42:subtitle:2"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "track_id",
+              "language",
+              "codec",
+              "format",
+              "source",
+              "delivery",
+              "forced",
+              "hearing_impaired"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
+          },
           "user_id": {
             "description": "Opaque identifier",
             "examples": [
@@ -15759,11 +15944,6 @@
               "string",
               "null"
             ]
-          },
-          "watched_seconds": {
-            "description": "Position the play ended at, in seconds. Not how long it was watched: a play resumed partway through reports the resume point plus what was watched; played_seconds is the watch time",
-            "format": "double",
-            "type": "number"
           }
         },
         "required": [
@@ -15779,7 +15959,7 @@
           "play_method",
           "started_at",
           "ended_at",
-          "watched_seconds",
+          "end_position_seconds",
           "duration_seconds",
           "completed",
           "played_seconds",
@@ -15799,6 +15979,7 @@
           "video_decision",
           "audio_decision",
           "end_reason",
+          "subtitle",
           "lifecycle_seq"
         ],
         "type": "object"
@@ -15939,9 +16120,6 @@
           "client_version": {
             "type": "string"
           },
-          "content_id": {
-            "type": "string"
-          },
           "device_id": {
             "description": "Device the client declared in X-Silo-Device-Id when playback started, the profile device registry's identity; a Jellyfin play carries the DeviceId of its MediaBrowser authorization. Absent when none was declared.",
             "type": "string"
@@ -15954,10 +16132,8 @@
             "description": "Whole-session method: direct, remux, direct_stream (copied video, converted audio) or transcode; absent when unknown",
             "type": "string"
           },
-          "episode_name": {
-            "type": "string"
-          },
           "episode_number": {
+            "description": "Episode number; absent when not an episode",
             "format": "int64",
             "type": "integer"
           },
@@ -15991,10 +16167,16 @@
             "minLength": 1,
             "type": "string"
           },
+          "media_item_id": {
+            "description": "Catalog content id of what is playing: the episode for an episode, as admin playback history's media_item_id. Absent when unknown",
+            "type": "string"
+          },
           "media_title": {
+            "description": "Episode or item title, as admin playback history names it; empty when the item is no longer in the catalog",
             "type": "string"
           },
           "media_type": {
+            "description": "episode, or the catalog item type; empty when unknown",
             "type": "string"
           },
           "node_display_name": {
@@ -16016,6 +16198,7 @@
             "type": "number"
           },
           "poster_url": {
+            "description": "Card-size poster of the title (an episode's series poster) as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent when there is no poster, and for art that is not cached yet on a server that cannot issue poster links (the catalog capabilities then report item_posters false)",
             "format": "uri-reference",
             "type": "string"
           },
@@ -16078,10 +16261,12 @@
             "type": "string"
           },
           "season_number": {
+            "description": "Episode season; absent when not an episode",
             "format": "int64",
             "type": "integer"
           },
-          "series_name": {
+          "series_title": {
+            "description": "Series title for an episode; absent otherwise",
             "type": "string"
           },
           "session_id": {
@@ -16149,6 +16334,88 @@
               "remote"
             ],
             "type": "string"
+          },
+          "subtitle": {
+            "additionalProperties": false,
+            "description": "The subtitle the session's current plan delivers, following each replan (a subtitle switch the client reports, a recovery); null when it shows none, for a session planned before the server recorded it, and for Jellyfin-protocol and Audiobookshelf sessions. A client that turns an already delivered sidecar on or off without a replan is not seen.",
+            "properties": {
+              "codec": {
+                "description": "The track's format in its source, as the inventory's codec names it; null when unknown",
+                "examples": [
+                  "subrip"
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "delivery": {
+                "description": "How the plan delivers it: burned into the video (subtitle.mode burn_in), carried in the stream the client plays (subtitle.embedded), a WebVTT rendition of the HLS stream (subtitle.hls_rendition), or a sidecar file the client fetches (subtitle.artifact). Clients ignore values they do not know",
+                "enum": [
+                  "burn_in",
+                  "embedded",
+                  "hls_rendition",
+                  "sidecar"
+                ],
+                "type": "string"
+              },
+              "forced": {
+                "type": "boolean"
+              },
+              "format": {
+                "description": "Format the client receives the track in: the sidecar artifact's or the HLS rendition's format. Null when it is burned in or carried in the stream as the source has it",
+                "examples": [
+                  "vtt"
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "hearing_impaired": {
+                "type": "boolean"
+              },
+              "language": {
+                "description": "The track's language as the inventory names it (BCP 47; older rows may carry a legacy value); null when unknown",
+                "examples": [
+                  "en"
+                ],
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "source": {
+                "description": "Where the track comes from, as the inventory's source names it: a track in the media file, a subtitle file beside it, or one the server downloaded or stored",
+                "enum": [
+                  "embedded",
+                  "external",
+                  "downloaded"
+                ],
+                "type": "string"
+              },
+              "track_id": {
+                "description": "The track's inventory track_id, as the plan's subtitle.track_id names it",
+                "examples": [
+                  "file:42:subtitle:2"
+                ],
+                "type": "string"
+              }
+            },
+            "required": [
+              "track_id",
+              "language",
+              "codec",
+              "format",
+              "source",
+              "delivery",
+              "forced",
+              "hearing_impaired"
+            ],
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "target_audio_channels": {
             "format": "int64",
@@ -16224,7 +16491,8 @@
           "stream_bitrate_kbps",
           "target_bitrate_kbps",
           "source_bitrate_kbps",
-          "source_audio_channels"
+          "source_audio_channels",
+          "subtitle"
         ],
         "type": "object"
       },
@@ -16309,6 +16577,10 @@
           "stream_location": {
             "type": "boolean"
           },
+          "subtitle": {
+            "description": "Rows and admin playback history entries carry subtitle",
+            "type": "boolean"
+          },
           "summary": {
             "type": "boolean"
           },
@@ -16353,6 +16625,7 @@
           "device_identity",
           "lifecycle_events",
           "adaptation_reasons",
+          "subtitle",
           "adaptation_reason_values",
           "revision",
           "state",
@@ -16387,7 +16660,7 @@
             "type": "string"
           },
           "reason": {
-            "description": "Free-form administrator reason shown to the player when supported",
+            "description": "Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate",
             "maxLength": 1024,
             "type": "string"
           },
@@ -16417,9 +16690,6 @@
       "AdminPlaybackSummaryItem": {
         "additionalProperties": false,
         "properties": {
-          "episode_name": {
-            "type": "string"
-          },
           "episode_number": {
             "format": "int64",
             "type": "integer"
@@ -16428,16 +16698,19 @@
             "type": "boolean"
           },
           "media_title": {
+            "description": "Episode or item title, as the session row names it",
             "type": "string"
           },
           "media_type": {
+            "description": "episode, or the catalog item type; empty when unknown",
             "type": "string"
           },
           "season_number": {
             "format": "int64",
             "type": "integer"
           },
-          "series_name": {
+          "series_title": {
+            "description": "Series title for an episode; absent otherwise",
             "type": "string"
           },
           "user_id": {
@@ -16484,7 +16757,7 @@
         "additionalProperties": false,
         "properties": {
           "reason": {
-            "description": "Free-form administrator reason shown to the player when supported",
+            "description": "Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate",
             "maxLength": 1024,
             "type": "string"
           }
@@ -16495,7 +16768,7 @@
         "additionalProperties": false,
         "properties": {
           "already_revoked": {
-            "description": "The session was already terminated before this request; the call converged without dispatching another command",
+            "description": "The session's playback attempt record already showed an administrator's end before this request: an earlier terminate, a stop the player did not confirm, or a stop the player confirmed over the control socket before its own stop reached the server. The call converged: nothing was dispatched, delivery is none and client_notified is false. A session whose record shows the player's own stop, or that expired, is not found (404), as is any ended session once its record lapses, at least 24 hours after the play started",
             "type": "boolean"
           },
           "authority_revoked": {
@@ -16503,7 +16776,7 @@
             "type": "boolean"
           },
           "client_notified": {
-            "description": "A dismissal command was written to the session's realtime lane. It is never awaited; false means no lane was open or the write failed",
+            "description": "A dismissal command was written to the session's realtime lane. It is never awaited; false means no lane was open, the write failed, or nothing was sent because the session was already revoked",
             "type": "boolean"
           },
           "command_id": {
@@ -16511,7 +16784,7 @@
             "type": "string"
           },
           "delivery": {
-            "description": "dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing to notify (already revoked)",
+            "description": "dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing was sent because the session was already revoked",
             "enum": [
               "dispatched",
               "unavailable",
@@ -16548,6 +16821,18 @@
           "auto_provision": {
             "type": "boolean"
           },
+          "callback_mode": {
+            "description": "Redirect URI mode for OAuth sign-in",
+            "enum": [
+              "installation",
+              "stable"
+            ],
+            "type": "string"
+          },
+          "callback_pending": {
+            "description": "True when an enabled OAuth binding is waiting for the public URL",
+            "type": "boolean"
+          },
           "callback_url": {
             "description": "Redirect URI to register at the OAuth (OIDC) provider for this installation: the v2 callback on the public URL (server.public_url). Empty for a password (LDAP) provider and while no public URL is configured",
             "examples": [
@@ -16575,6 +16860,13 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "env_managed": {
+            "description": "Binding fields owned by the deployment.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "post_logout_redirect_url": {
             "description": "Post-logout redirect URI to register at the OAuth (OIDC) provider when provider logout is on: the login page on the public URL. Empty for a password (LDAP) provider and while no public URL is configured",
@@ -16631,6 +16923,14 @@
             "description": "Create an account for a person who passes the provider's rules on first sign-in; omitted means true",
             "type": "boolean"
           },
+          "callback_mode": {
+            "description": "OAuth only. Omit to preserve the stored mode or to use installation for a new binding",
+            "enum": [
+              "installation",
+              "stable"
+            ],
+            "type": "string"
+          },
           "capability_id": {
             "maxLength": 256,
             "minLength": 1,
@@ -16657,6 +16957,40 @@
         ],
         "type": "object"
       },
+      "AdminPluginCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "env_declarations": {
+            "description": "Installation and binding reads can report env_managed ownership, mutations refuse changes to owned fields, and provisioning status is available.",
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "env_declarations",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
       "AdminPluginCapability": {
         "additionalProperties": false,
         "properties": {
@@ -16674,11 +17008,22 @@
             },
             "type": "array"
           },
+          "default_schedule": {
+            "$ref": "#/components/schemas/AdminTaskTrigger",
+            "description": "On a scheduled_task.v1 capability: the schedule its manifest declares, which the task runs unless it has a saved schedule or its binding sets a trigger the server can run. Omitted when the manifest declares none the server can run; without a saved schedule or runnable binding trigger, the task then runs once at server start"
+          },
           "description": {
             "type": "string"
           },
           "display_name": {
             "type": "string"
+          },
+          "env_managed": {
+            "description": "On an installed sign-in capability: the binding fields owned by the deployment. May appear before a binding exists.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
           },
           "id": {
             "type": "string"
@@ -17224,6 +17569,10 @@
             },
             "type": "array"
           },
+          "connection_check_supported": {
+            "description": "True when POST config/test contacts the provider for this plugin: a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics can still answer that checks are not supported.",
+            "type": "boolean"
+          },
           "created_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -17233,6 +17582,10 @@
           },
           "enabled": {
             "type": "boolean"
+          },
+          "env_managed": {
+            "$ref": "#/components/schemas/AdminPluginProvisionOwnership",
+            "description": "Present when the deployment owns this installation and its package source."
           },
           "global_config_schema": {
             "items": {
@@ -17363,7 +17716,8 @@
           "task_bindings",
           "runtime",
           "created_at",
-          "updated_at"
+          "updated_at",
+          "connection_check_supported"
         ],
         "type": "object"
       },
@@ -17439,6 +17793,68 @@
           "publisher_name",
           "publisher_url",
           "license_spdx"
+        ],
+        "type": "object"
+      },
+      "AdminPluginProvisionOwnership": {
+        "additionalProperties": false,
+        "properties": {
+          "binding_fields": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "Binding fields owned by the deployment, keyed by capability ID.",
+            "type": "object"
+          },
+          "config_fields": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "description": "Top-level fields owned by the deployment, keyed by global configuration entry.",
+            "type": "object"
+          },
+          "version_pin": {
+            "description": "Exact package version the deployment pins, if any.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "config_fields",
+          "binding_fields"
+        ],
+        "type": "object"
+      },
+      "AdminPluginProvisionStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "description": "Redacted reason or status detail, empty when there is none.",
+            "type": "string"
+          },
+          "plugin_id": {
+            "description": "The declared manifest plugin ID. An installation need not exist.",
+            "type": "string"
+          },
+          "state": {
+            "description": "The latest recorded provisioning outcome for the declaration.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Installed version when applied. Otherwise the requested version, if any.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "version",
+          "state",
+          "detail"
         ],
         "type": "object"
       },
@@ -17680,7 +18096,7 @@
         "additionalProperties": false,
         "properties": {
           "restart_required": {
-            "description": "Always true: bindings load at server start",
+            "description": "False when the binding applies without a restart: this server attempts a plugin task sync before answering and retries a failed one, and every other API server applies it at its next successful sync. True only on a server with no task scheduler, where it applies at the next start",
             "type": "boolean"
           }
         },
@@ -17697,7 +18113,7 @@
           },
           "trigger": {
             "additionalProperties": true,
-            "description": "Plugin-defined trigger document; omitted stores an empty object",
+            "description": "The task's schedule as a task trigger (type interval, daily, weekly or startup with that type's fields). The task runs it unless the task has a saved schedule (a task-page edit, or a schedule an earlier server release saved from the binding trigger); an empty or unrunnable trigger leaves the manifest default_trigger, else one run at server start. Omitted stores an empty object",
             "type": "object",
             "x-silo-extension-bag": "plugin-json-value"
           }
@@ -18955,6 +19371,10 @@
           "guarded_configuration": {
             "type": "boolean"
           },
+          "request_posters": {
+            "description": "Whether admin request reads return poster_url, a path on this server that serves the request's TMDB poster (getAdminRequestPoster)",
+            "type": "boolean"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -18985,6 +19405,7 @@
           "routing_series_status",
           "discover_layout",
           "discover_list_order",
+          "request_posters",
           "revision",
           "state",
           "allowed"
@@ -19025,9 +19446,17 @@
             ],
             "format": "int64",
             "type": "integer"
+          },
+          "requests_enabled": {
+            "description": "Whether the server-wide requests switch is on; the queue still answers while it is off",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
+          "requests_enabled",
           "needs_approval",
           "in_progress",
           "failed",
@@ -19069,7 +19498,7 @@
             "type": "string"
           },
           "message": {
-            "description": "A reason or error that came with the event",
+            "description": "A reason or error that came with the event. Withheld from API keys with scopes",
             "examples": [
               "auto approved"
             ],
@@ -21154,11 +21583,19 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "managed_by_env_vars": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "The environment variable that sets each key in managed_by_env, keyed by setting key.",
+            "type": "object"
           }
         },
         "required": [
           "configured",
-          "managed_by_env"
+          "managed_by_env",
+          "managed_by_env_vars"
         ],
         "type": "object"
       },
@@ -22598,6 +23035,11 @@
             "minLength": 1,
             "type": "string"
           },
+          "episode_number": {
+            "description": "Episode number for an episode that still exists; absent otherwise",
+            "format": "int64",
+            "type": "integer"
+          },
           "last_attempt_at": {
             "description": "RFC 3339 instant in UTC with millisecond precision",
             "format": "date-time",
@@ -22619,10 +23061,20 @@
             "format": "int64",
             "type": "integer"
           },
+          "season_number": {
+            "description": "Season number for a season or episode that still exists; absent otherwise",
+            "format": "int64",
+            "type": "integer"
+          },
+          "series_title": {
+            "description": "Series title for a season or episode that still exists; absent otherwise",
+            "type": "string"
+          },
           "target_type": {
             "type": "string"
           },
           "title": {
+            "description": "The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target has no title or no longer exists",
             "type": "string"
           },
           "type": {
@@ -24518,6 +24970,13 @@
             "patternDescription": "a non-zero RFC 3339 instant",
             "type": "string"
           },
+          "created_client_ip": {
+            "description": "Address the device registered the download from, as the trusted proxies resolve it; null when none was recorded, as for downloads registered before servers recorded it",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "delivery_format": {
             "type": "string"
           },
@@ -24568,6 +25027,13 @@
             ],
             "minLength": 1,
             "type": "string"
+          },
+          "last_client_ip": {
+            "description": "Address the device was last seen at for this download: set at registration, then by each accepted status report and by a file request from a new address, which replaces it at most once a minute, so it can be older than the latest file request; null when none was recorded",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "media_type": {
             "description": "Catalog type of content_id (movie, series, …); empty when unknown",
@@ -24631,7 +25097,9 @@
           "created_at",
           "updated_at",
           "completed_at",
-          "status_event_at"
+          "status_event_at",
+          "created_client_ip",
+          "last_client_ip"
         ],
         "type": "object"
       },
@@ -25137,6 +25605,7 @@
             "type": "string"
           },
           "watched_seconds": {
+            "description": "Seconds watched across the window's plays: each play's measured watch time (playback history played_seconds), excluding pauses, seeks and buffering. A play recorded before measurement existed counts its end position, capped at how long the play lasted",
             "format": "double",
             "minimum": 0,
             "type": "number"
@@ -26274,7 +26743,7 @@
         "additionalProperties": false,
         "properties": {
           "callback_url": {
-            "description": "Redirect URI to register at an OAuth (OIDC) provider for this installation, on the public URL; empty when no public URL is configured. Password (LDAP) providers do not use it",
+            "description": "Redirect URI to register at the OAuth provider. Empty for password providers, when the public URL is unset, or when the binding mode is unavailable.",
             "examples": [
               "https://silo.example.test/api/v2/auth/oauth/3/callback"
             ],
@@ -27734,6 +28203,30 @@
         ],
         "type": "object"
       },
+      "CatalogItemCollections": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "Server collections first, then personal collections, each by title; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/SectionCollectionCard"
+            },
+            "type": "array"
+          },
+          "preview_items": {
+            "description": "When items holds exactly one collection, up to 6 of its other titles as the first page of listCatalogItems lists the collection (its order, Show only filter and access rules), so a page can show them in place of its card; empty, never null, otherwise",
+            "items": {
+              "$ref": "#/components/schemas/CatalogItem"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "preview_items"
+        ],
+        "type": "object"
+      },
       "CatalogItemDetail": {
         "additionalProperties": false,
         "properties": {
@@ -28913,6 +29406,10 @@
             "description": "searchCatalogFacet accepts library_ids and answers values and values_has_more: ranked values with title counts that match word starts, and the most common values for an empty q",
             "type": "boolean"
           },
+          "item_collections": {
+            "description": "listCatalogItemCollections answers the collections a title's page lists under \"Also in\"",
+            "type": "boolean"
+          },
           "letter_index": {
             "description": "queryCatalogLetters answers how many titles of a title-ordered query-source browse file under each letter and where each letter's first title sits, for an alphabetical jump bar",
             "type": "boolean"
@@ -30076,6 +30573,26 @@
         ],
         "type": "object"
       },
+      "CollectionAdminPluginProvisionStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/AdminPluginProvisionStatus"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
       "CollectionAdminPluginRepository": {
         "additionalProperties": false,
         "properties": {
@@ -30896,6 +31413,46 @@
         "required": [
           "ordered_ids",
           "has_more"
+        ],
+        "type": "object"
+      },
+      "CollectionNotificationPluginChannel": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/NotificationPluginChannel"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "type": "object"
+      },
+      "CollectionNotificationPluginDestination": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "description": "The page's items; empty, never null",
+            "items": {
+              "$ref": "#/components/schemas/NotificationPluginDestination"
+            },
+            "type": "array"
+          },
+          "page": {
+            "$ref": "#/components/schemas/PageInfo",
+            "description": "Cursor state; absent for bounded unpaginated collections"
+          }
+        },
+        "required": [
+          "items"
         ],
         "type": "object"
       },
@@ -40353,7 +40910,7 @@
             "type": "boolean"
           },
           "last_error": {
-            "description": "Admins only: why the last submission to a download server failed. It can name servers and routing rules",
+            "description": "Admins only, and left out of the admin request list for API keys with scopes: why the last submission to a download server failed. It can name servers and routing rules",
             "type": "string"
           },
           "library_content_id": {
@@ -40383,6 +40940,14 @@
           },
           "poster_path": {
             "description": "TMDB image path",
+            "type": "string"
+          },
+          "poster_url": {
+            "description": "Admin request reads only (listAdminRequests and the admin request actions): the poster as a root-relative path on this server, getAdminRequestPoster, which serves the TMDB poster through the server. Fetch it with the credentials that read the row. It does not expire. Absent when the request has no TMDB poster, and on a server that cannot fetch posters (the admin request capabilities then report request_posters false)",
+            "examples": [
+              "/api/v2/admin/requests/1834729/poster"
+            ],
+            "format": "uri-reference",
             "type": "string"
           },
           "provider": {
@@ -41504,6 +42069,9 @@
           "in_app": {
             "$ref": "#/components/schemas/NotificationInAppCapability"
           },
+          "plugin_destinations": {
+            "$ref": "#/components/schemas/NotificationPluginDestinationCapability"
+          },
           "revision": {
             "description": "Opaque revision of this document",
             "type": "string"
@@ -41537,6 +42105,7 @@
           "email",
           "discord",
           "series",
+          "plugin_destinations",
           "revision",
           "state",
           "allowed"
@@ -41953,6 +42522,397 @@
         "required": [
           "read_cutoff",
           "items"
+        ],
+        "type": "object"
+      },
+      "NotificationPluginChannel": {
+        "additionalProperties": false,
+        "properties": {
+          "capability_id": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "display_name": {
+            "type": "string"
+          },
+          "plugin_id": {
+            "description": "Names the channel together with capability_id; both stay stable across plugin upgrades",
+            "type": "string"
+          },
+          "settings_form": {
+            "$ref": "#/components/schemas/NotificationPluginSettingsForm",
+            "description": "The destination settings form the plugin declares"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "capability_id",
+          "display_name",
+          "description",
+          "settings_form"
+        ],
+        "type": "object"
+      },
+      "NotificationPluginDestination": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "description": "An enabled plugin provides the destination's channel. False while that plugin is disabled or uninstalled; nothing is sent then",
+            "type": "boolean"
+          },
+          "capability_id": {
+            "type": "string"
+          },
+          "channel_name": {
+            "description": "The channel's display name; empty while it is unavailable",
+            "type": "string"
+          },
+          "consecutive_failures": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "created_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "disabled_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "etag": {
+            "description": "Original validator for conditional update and deletion; preserve unchanged with the observed row.",
+            "type": "string"
+          },
+          "id": {
+            "description": "Opaque identifier",
+            "examples": [
+              "1"
+            ],
+            "minLength": 1,
+            "type": "string"
+          },
+          "last_failure_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision, or null",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_failure_message": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "last_success_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision, or null",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "notify_next_up": {
+            "type": "boolean"
+          },
+          "notify_requests": {
+            "type": "boolean"
+          },
+          "plugin_id": {
+            "type": "string"
+          },
+          "secret_settings_set": {
+            "description": "Secret settings that have a stored value",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "description": "Stored settings the channel's current schema declares and does not mark secret; empty while the channel is unavailable",
+            "type": "object",
+            "x-silo-extension-bag": "plugin-json-value"
+          }
+        },
+        "required": [
+          "etag",
+          "id",
+          "name",
+          "plugin_id",
+          "capability_id",
+          "channel_name",
+          "available",
+          "enabled",
+          "notify_next_up",
+          "notify_requests",
+          "settings",
+          "secret_settings_set",
+          "consecutive_failures",
+          "disabled_reason",
+          "last_success_at",
+          "last_failure_at",
+          "last_failure_message",
+          "created_at"
+        ],
+        "type": "object"
+      },
+      "NotificationPluginDestinationCapability": {
+        "additionalProperties": false,
+        "properties": {
+          "available": {
+            "description": "At least one enabled plugin provides a channel; GET /notifications/plugin-channels lists them",
+            "type": "boolean"
+          },
+          "max_per_profile": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "available",
+          "max_per_profile"
+        ],
+        "type": "object"
+      },
+      "NotificationPluginDestinationCreateInputBody": {
+        "additionalProperties": false,
+        "properties": {
+          "capability_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "enabled": {
+            "description": "Defaults to true",
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "notify_next_up": {
+            "description": "Defaults to true",
+            "type": "boolean"
+          },
+          "notify_requests": {
+            "description": "Defaults to true",
+            "type": "boolean"
+          },
+          "plugin_id": {
+            "maxLength": 256,
+            "minLength": 1,
+            "type": "string"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "description": "Settings fields, checked against the channel's settings form: declared fields only, each of its declared type, and every required field present",
+            "type": "object",
+            "x-silo-extension-bag": "plugin-json-value"
+          }
+        },
+        "required": [
+          "plugin_id",
+          "capability_id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "NotificationPluginDestinationWrite": {
+        "additionalProperties": false,
+        "properties": {
+          "clear_secrets": {
+            "description": "Secret settings to remove",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "type": "array"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "type": "string"
+          },
+          "notify_next_up": {
+            "type": "boolean"
+          },
+          "notify_requests": {
+            "type": "boolean"
+          },
+          "settings": {
+            "additionalProperties": true,
+            "description": "Settings fields, merged over the stored ones. A non-secret field sent as null is removed; a secret field sent blank or left out keeps its stored value. Each value is checked against the channel's settings form",
+            "type": "object",
+            "x-silo-extension-bag": "plugin-json-value"
+          }
+        },
+        "type": "object"
+      },
+      "NotificationPluginSettingsField": {
+        "additionalProperties": false,
+        "properties": {
+          "control": {
+            "description": "How to render the input. password hides what is typed; select picks one of options. A client that doesn't know a control renders the field by its type",
+            "enum": [
+              "text",
+              "password",
+              "number",
+              "switch",
+              "select"
+            ],
+            "type": "string"
+          },
+          "default_value": {
+            "description": "The value a new destination starts with, of the field's type; absent when there is none",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          },
+          "description": {
+            "description": "Help text; absent when the plugin gives none",
+            "type": "string"
+          },
+          "key": {
+            "description": "The setting's key in settings",
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "max_length": {
+            "description": "Most characters in a string; absent when unbounded",
+            "format": "int64",
+            "type": "integer"
+          },
+          "maximum": {
+            "description": "Largest allowed number, inclusive; absent when unbounded",
+            "format": "double",
+            "type": "number"
+          },
+          "min_length": {
+            "description": "Fewest characters in a string; absent when unbounded",
+            "format": "int64",
+            "type": "integer"
+          },
+          "minimum": {
+            "description": "Smallest allowed number, inclusive; absent when unbounded",
+            "format": "double",
+            "type": "number"
+          },
+          "options": {
+            "description": "The choices of a select field, in order; absent for other controls",
+            "items": {
+              "$ref": "#/components/schemas/NotificationPluginSettingsOption"
+            },
+            "type": "array"
+          },
+          "pattern": {
+            "description": "A Go RE2 regular expression a string must match somewhere in it; absent when there is none. A client may check it before saving; the server's check is the one that counts",
+            "type": "string"
+          },
+          "placeholder": {
+            "description": "Absent when the plugin gives none",
+            "type": "string"
+          },
+          "required": {
+            "description": "The server refuses a save without a value. A stored secret left blank on an edit counts",
+            "type": "boolean"
+          },
+          "secret": {
+            "description": "Write-only: never returned in settings; listed in secret_settings_set when stored. Leave it blank on an edit to keep the stored value. A destination's secret_settings_set can also name a setting saved as secret before a plugin upgrade unmarked it; treat that one as secret too",
+            "type": "boolean"
+          },
+          "type": {
+            "description": "The JSON type the value is sent as",
+            "enum": [
+              "string",
+              "integer",
+              "number",
+              "boolean"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "control",
+          "type",
+          "required",
+          "secret"
+        ],
+        "type": "object"
+      },
+      "NotificationPluginSettingsForm": {
+        "additionalProperties": false,
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationPluginSettingsField"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "fields"
+        ],
+        "type": "object"
+      },
+      "NotificationPluginSettingsOption": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "description": "The choice, of the field's type",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              }
+            ]
+          }
+        },
+        "required": [
+          "value",
+          "label"
         ],
         "type": "object"
       },
@@ -42920,6 +43880,10 @@
             "description": "Whether startOAuthLogin, initOAuthLogin and startNativeOAuthLogin accept prompt=select_account, which asks the provider to let the person choose another provider account (a Switch account sign-in)",
             "type": "boolean"
           },
+          "stable_callback": {
+            "description": "Whether finishStableOAuthCallback accepts provider redirects for bindings using the stable callback mode",
+            "type": "boolean"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -42936,6 +43900,7 @@
           "native",
           "linking",
           "provider_logout",
+          "stable_callback",
           "select_account",
           "revision",
           "state"
@@ -45566,24 +46531,10 @@
             ],
             "type": "string"
           },
-          "content_id": {
-            "description": "Catalog content id of the playing item; empty when unknown",
-            "examples": [
-              "tt0111161"
-            ],
-            "type": "string"
-          },
           "effective_play_method": {
             "description": "Bucketed method: direct, remux, direct_stream or transcode; empty when unknown",
             "examples": [
               "direct"
-            ],
-            "type": "string"
-          },
-          "episode_name": {
-            "description": "Empty unless an episode",
-            "examples": [
-              ""
             ],
             "type": "string"
           },
@@ -45644,14 +46595,22 @@
             "minLength": 1,
             "type": "string"
           },
+          "media_item_id": {
+            "description": "Catalog content id of what is playing: the episode for an episode; empty when unknown",
+            "examples": [
+              "tt0111161"
+            ],
+            "type": "string"
+          },
           "media_title": {
+            "description": "Episode or item title; empty when unknown",
             "examples": [
               "The Shawshank Redemption"
             ],
             "type": "string"
           },
           "media_type": {
-            "description": "Catalog item type; empty when unknown",
+            "description": "episode, or the catalog item type; empty when unknown",
             "examples": [
               "movie"
             ],
@@ -45801,8 +46760,8 @@
               "null"
             ]
           },
-          "series_name": {
-            "description": "Empty unless an episode",
+          "series_title": {
+            "description": "Series title for an episode; empty otherwise",
             "examples": [
               ""
             ],
@@ -46003,11 +46962,10 @@
           "profile_name",
           "media_file_id",
           "requested_media_file_id",
-          "content_id",
+          "media_item_id",
           "media_title",
           "media_type",
-          "series_name",
-          "episode_name",
+          "series_title",
           "season_number",
           "episode_number",
           "poster_url",
@@ -46080,6 +47038,84 @@
         },
         "required": [
           "items"
+        ],
+        "type": "object"
+      },
+      "PlaybackSessionSubtitle": {
+        "additionalProperties": false,
+        "properties": {
+          "codec": {
+            "description": "The track's format in its source, as the inventory's codec names it; null when unknown",
+            "examples": [
+              "subrip"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "delivery": {
+            "description": "How the plan delivers it: burned into the video (subtitle.mode burn_in), carried in the stream the client plays (subtitle.embedded), a WebVTT rendition of the HLS stream (subtitle.hls_rendition), or a sidecar file the client fetches (subtitle.artifact). Clients ignore values they do not know",
+            "enum": [
+              "burn_in",
+              "embedded",
+              "hls_rendition",
+              "sidecar"
+            ],
+            "type": "string"
+          },
+          "forced": {
+            "type": "boolean"
+          },
+          "format": {
+            "description": "Format the client receives the track in: the sidecar artifact's or the HLS rendition's format. Null when it is burned in or carried in the stream as the source has it",
+            "examples": [
+              "vtt"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "hearing_impaired": {
+            "type": "boolean"
+          },
+          "language": {
+            "description": "The track's language as the inventory names it (BCP 47; older rows may carry a legacy value); null when unknown",
+            "examples": [
+              "en"
+            ],
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source": {
+            "description": "Where the track comes from, as the inventory's source names it: a track in the media file, a subtitle file beside it, or one the server downloaded or stored",
+            "enum": [
+              "embedded",
+              "external",
+              "downloaded"
+            ],
+            "type": "string"
+          },
+          "track_id": {
+            "description": "The track's inventory track_id, as the plan's subtitle.track_id names it",
+            "examples": [
+              "file:42:subtitle:2"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "track_id",
+          "language",
+          "codec",
+          "format",
+          "source",
+          "delivery",
+          "forced",
+          "hearing_impaired"
         ],
         "type": "object"
       },
@@ -47838,6 +48874,88 @@
         ],
         "type": "object"
       },
+      "ProfileSectionBaseline": {
+        "additionalProperties": false,
+        "properties": {
+          "section_tokens": {
+            "description": "Opaque server-keyed tokens, bound to the acting profile, for every server section on this page in a library the profile is allowed (enabled, disabled, or fallback defaults when no stored row is enabled), sorted deterministically. Rows tied to libraries the profile isn't allowed are left out.",
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "visible_sections": {
+            "description": "Pre-override active server sections the acting profile's access policy permits, in display order",
+            "items": {
+              "$ref": "#/components/schemas/ProfileSectionBaselineRow"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "section_tokens",
+          "visible_sections"
+        ],
+        "type": "object"
+      },
+      "ProfileSectionBaselineRow": {
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "examples": [
+              "s-continue-watching"
+            ],
+            "type": "string"
+          },
+          "section_type": {
+            "description": "The recipe; the set is extensible",
+            "examples": [
+              "continue_watching"
+            ],
+            "type": "string"
+          },
+          "title": {
+            "description": "The server's title for this row before any profile overrides",
+            "examples": [
+              "Continue Watching"
+            ],
+            "type": "string"
+          },
+          "title_args": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "description": "Values of the title_key message's placeholders by name, such as library for a generated library row; present only with title_key, and absent when the message has none",
+            "examples": [
+              {
+                "library": "Movies"
+              }
+            ],
+            "type": "object"
+          },
+          "title_key": {
+            "description": "Key of the shared translation catalog message whose English is title, present only while title is the server's own text: a built-in or generated section, recommendation row or request Discover row name, or a seasonal row's built-in in-season title. A client that has the key shows its translation, filling title_args, and otherwise shows title. Absent when an administrator or the profile typed the title, except that upgrading keyed existing titles identical to a built-in name, and a profile title equal to the administrator's keeps the key. A client acts on title_key whenever it is present",
+            "examples": [
+              "home.section.recentlyAddedIn"
+            ],
+            "type": "string"
+          },
+          "token": {
+            "description": "Opaque server-keyed token identifying this server section on this page for the acting profile, for layout export and import comparisons",
+            "examples": [
+              "m3s9R1pQv8fK2nL7wX4yZA"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "section_type",
+          "title",
+          "token"
+        ],
+        "type": "object"
+      },
       "ProfileSectionFlags": {
         "additionalProperties": false,
         "properties": {
@@ -47848,10 +48966,18 @@
               true
             ],
             "type": "boolean"
+          },
+          "home_layout_baseline": {
+            "description": "True when this server serves getProfileSectionBaseline, so a home layout export can record the server's rows and an import on this server can offer to hide rows added since.",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
-          "allow_profile_custom_sections"
+          "allow_profile_custom_sections",
+          "home_layout_baseline"
         ],
         "type": "object"
       },
@@ -50134,7 +51260,7 @@
             "type": "string"
           },
           "instance_name": {
-            "description": "Admins only: the download server's name",
+            "description": "Admins only, and left out of the admin request list for API keys with scopes: the download server's name",
             "type": "string"
           },
           "integration_id": {
@@ -50152,7 +51278,7 @@
             "type": "boolean"
           },
           "last_error": {
-            "description": "Admins only: why the download server failed this target",
+            "description": "Admins only, and left out of the admin request list for API keys with scopes: why the download server failed this target",
             "type": "string"
           },
           "quality": {
@@ -50170,7 +51296,7 @@
             "type": "string"
           },
           "route_name": {
-            "description": "Admins only: the routing rule that sent this target to its server, as named when it was sent",
+            "description": "Admins only, and left out of the admin request list for API keys with scopes: the routing rule that sent this target to its server, as named when it was sent",
             "type": "string"
           },
           "status": {
@@ -52846,6 +53972,10 @@
             "type": "object"
           },
           "mime_type": {
+            "type": "string"
+          },
+          "parallel_range_url": {
+            "format": "uri-reference",
             "type": "string"
           },
           "protocol": {
@@ -64357,7 +65487,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Disconnect a provider and discard its key. A provider a job uses cannot be deleted.",
+        "summary": "Disconnect a provider and discard its key. A provider a job uses cannot be deleted, and one the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment.",
         "tags": [
           "admin-ai"
         ],
@@ -64549,7 +65679,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request.",
+        "summary": "Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request. A provider the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment.",
         "tags": [
           "admin-ai"
         ],
@@ -104214,6 +105344,16 @@
             },
             "description": "Not Acceptable"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "412": {
             "content": {
               "application/problem+json": {
@@ -104544,7 +105684,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Update stored node configuration under the original If-Match revision. Configuration changes advance ETag and persist pool invalidation; a no-change PUT retains ETag. Disabling alone removes new placement and routine health sampling after reconciliation, preserves the last health sample, leaves existing streams serving and does not contact the worker. The response acknowledges stored configuration, not worker reload, replica completion or session teardown.",
+        "summary": "Update stored node configuration under the original If-Match revision. A field named in the node's env_managed is set by the node's environment: a change to it is 422 validation_failed with field code managed_by_environment at body.\u003cfield\u003e, and restating its current value is accepted. Configuration changes advance ETag and persist pool invalidation; a no-change PUT retains ETag. Disabling alone removes new placement and routine health sampling after reconciliation, preserves the last health sample, leaves existing streams serving and does not contact the worker. The response acknowledges stored configuration, not worker reload, replica completion or session teardown.",
         "tags": [
           "admin-nodes"
         ],
@@ -108708,6 +109848,205 @@
         "x-silo-conditional": true
       }
     },
+    "/api/v2/admin/plugins/capabilities": {
+      "get": {
+        "operationId": "getAdminPluginCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminPluginCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover plugin administration features.",
+        "tags": [
+          "admin-plugins"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true
+      }
+    },
     "/api/v2/admin/plugins/catalog": {
       "get": {
         "operationId": "listAdminPluginCatalog",
@@ -109723,6 +111062,16 @@
             },
             "description": "Request Timeout"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -109789,7 +111138,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Install a plugin from a catalog repository (repository_id, plugin_id, version) or a direct archive URL, fetching over the network. An installation with the same plugin_id is stopped and replaced rather than duplicated. There is no replay identity: a lost response may follow a committed install; reconcile from the installation list and never automatically retry.",
+        "summary": "Install a plugin from a catalog repository (repository_id, plugin_id, version) or a direct archive URL, fetching over the network. An installation with the same plugin_id is stopped and replaced rather than duplicated; an install that finds none but loses the race to create it is 409. There is no replay identity: a lost response may follow a committed install; reconcile from the installation list and never automatically retry.",
         "tags": [
           "admin-plugins"
         ],
@@ -111377,7 +112726,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace the scheduled task binding for one capability and mark a server restart required. The whole row is assigned, so repeating the request converges on one stored binding.",
+        "summary": "Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task and cancels a run in progress, an enabled one registers it while its installation is enabled, and a changed trigger becomes its default schedule. The whole row is assigned, so repeating the request converges on one stored binding.",
         "tags": [
           "admin-plugins"
         ],
@@ -111546,13 +112895,155 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Install the recorded available version from the installation's repository, fetching over the network, and clear the marker. No applicable update is 409. There is no replay identity: a lost response may follow a committed update; reconcile from the installation and never automatically retry.",
+        "summary": "Install the recorded available version from the installation's repository, fetching over the network, and clear the marker. No applicable update is 409, as is an update that another install of the plugin replaced while its package downloaded. There is no replay identity: a lost response may follow a committed update; reconcile from the installation and never automatically retry.",
         "tags": [
           "admin-plugins"
         ],
         "x-silo-class": "acting_admin",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/plugins/provisioning-status": {
+      "get": {
+        "operationId": "listAdminPluginProvisioningStatus",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionAdminPluginProvisionStatus"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read recorded environment provisioning status, including declarations with no installation.",
+        "tags": [
+          "admin-plugins"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },
@@ -112378,6 +113869,16 @@
             },
             "description": "Request Timeout"
           },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "413": {
             "content": {
               "application/problem+json": {
@@ -112444,7 +113945,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Install a plugin from one uploaded archive. A zip archive is installed from its manifest; any other file is treated as a plugin binary whose manifest the server obtains by executing it. An installation with the same plugin_id is replaced; there is no replay identity, so a delayed retry can replace a newer installation. Never automatically retry.",
+        "summary": "Install a plugin from one uploaded archive. A zip archive is installed from its manifest; any other file is treated as a plugin binary whose manifest the server obtains by executing it. An installation with the same plugin_id is replaced; an upload that finds none but loses the race to create it is 409. There is no replay identity, so a delayed retry can replace a newer installation. Never automatically retry.",
         "tags": [
           "admin-plugins"
         ],
@@ -124457,6 +125958,141 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/admin/requests/{id}/poster": {
+      "get": {
+        "operationId": "getAdminRequestPoster",
+        "parameters": [
+          {
+            "description": "The request",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/*": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Poster bytes"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "No such request, the request has no TMDB poster, or TMDB refused or failed"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Poster fetches are busy or not configured; retry after Retry-After"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read a media request's poster through the server, from the path admin request reads return in poster_url.",
+        "tags": [
+          "admin"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-raw-protocol": "artwork-image",
+        "x-silo-raw-reason": "Poster bytes bypass JSON encoding.",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/admin/requests/{id}/retry": {
       "post": {
         "operationId": "adminRetryRequest",
@@ -136179,7 +137815,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Replace a captured schedule and apply it on this process. Other processes reload on restart.",
+        "summary": "Replace a captured schedule and apply it on this process. Other processes install a plugin task's schedule at their next periodic plugin task sync, and a core task's when they restart.",
         "tags": [
           "admin-tasks"
         ],
@@ -146585,6 +148221,78 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/auth/oauth/callback": {
+      "get": {
+        "description": "Accepts only the browser holding the flow's binding cookie. A web sign-in continues to /login/oauth-complete?code=; a failure to /login?error=oauth_failed\u0026reason=\u003creason\u003e (not_permitted, account_required, email_in_use, identity_linked_elsewhere, account_disabled, provider_unavailable, state_invalid, session_expired, already_linked, login_failed). A web linking flow returns to its next path with linked=1 or error=oauth_link_failed\u0026reason=\u003creason\u003e; a native flow to the app redirect, which carries iss (see startNativeOAuthLogin).",
+        "operationId": "finishStableOAuthCallback",
+        "parameters": [
+          {
+            "description": "Provider redirect value; validated by the owning handshake.",
+            "in": "query",
+            "name": "state",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider redirect value; validated by the owning handshake.",
+            "in": "query",
+            "name": "code",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Provider redirect value; validated by the owning handshake.",
+            "in": "query",
+            "name": "error",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "302": {
+            "description": "Redirect: to the provider, to the same start on the public origin, or to the flow's completion or failure location.",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Plain-text handshake failure."
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "summary": "Continue the OAuth handshake at the provider's redirect back.",
+        "tags": [
+          "auth"
+        ],
+        "x-silo-class": "public",
+        "x-silo-raw-protocol": "oauth-redirect",
+        "x-silo-raw-reason": "Browser form submission and provider callback require HTTP redirects, without JSON negotiation.",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/auth/oauth/capabilities": {
       "get": {
         "operationId": "getOAuthHandshakeCapabilities",
@@ -153866,6 +155574,275 @@
           }
         ],
         "summary": "The box set a movie's page shows: the movie's box set with its movies the viewer can see, from library_id or the first of the movie's libraries with box sets on. box_set is absent when there is none; 404 when the ID is missing, hidden, or not a catalog title (an episode or season).",
+        "tags": [
+          "catalog"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/catalog/items/{id}/collections": {
+      "get": {
+        "operationId": "listCatalogItemCollections",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Content id of the movie or series",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Content id of the movie or series",
+              "examples": [
+                "movie:heat-1995"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library the title is being viewed in. It picks the box set whose synced copy is left out, as getCatalogItemBoxSet does. Absent uses the first of the title's libraries with box sets on",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "The library the title is being viewed in. It picks the box set whose synced copy is left out, as getCatalogItemBoxSet does. Absent uses the first of the title's libraries with box sets on",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "description": "Artwork size for every image in the response; absent picks each surface's default",
+            "explode": false,
+            "in": "query",
+            "name": "image_size",
+            "schema": {
+              "description": "Artwork size for every image in the response; absent picks each surface's default",
+              "enum": [
+                "small",
+                "medium",
+                "large",
+                "original"
+              ],
+              "examples": [
+                "medium"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+            "explode": false,
+            "in": "query",
+            "name": "poster_width",
+            "schema": {
+              "description": "Width in device pixels the client draws poster_url at. Overrides image_size for posters: the narrowest cached size at least this wide, else the original",
+              "examples": [
+                352
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+            "explode": false,
+            "in": "query",
+            "name": "backdrop_width",
+            "schema": {
+              "description": "Width in device pixels the client draws backdrop_url and backdrop_urls at. Overrides image_size for backdrops",
+              "examples": [
+                2688
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+            "explode": false,
+            "in": "query",
+            "name": "logo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws logo_url at. Overrides image_size for logos",
+              "examples": [
+                1760
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
+            "explode": false,
+            "in": "query",
+            "name": "still_width",
+            "schema": {
+              "description": "Width in device pixels the client draws an episode's or a local extra's still_url at. Overrides image_size for those stills",
+              "examples": [
+                720
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+            "explode": false,
+            "in": "query",
+            "name": "photo_width",
+            "schema": {
+              "description": "Width in device pixels the client draws a cast or crew photo_url at. Overrides image_size for headshots",
+              "examples": [
+                400
+              ],
+              "format": "int64",
+              "maximum": 7680,
+              "minimum": 1,
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogItemCollections"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "The collections a title's page lists under \"Also in\": visible manual and synced collections, server and personal, that store the title. Smart collections are not listed, nor the synced copy of the box set the page shows. When only one collection holds the title, preview_items carries up to 6 of its other titles. 404 when the ID is missing, hidden, or not a catalog title.",
         "tags": [
           "catalog"
         ],
@@ -182676,6 +184653,96 @@
         "x-silo-service-backed": true
       }
     },
+    "/api/v2/item-posters/{content_id}": {
+      "get": {
+        "operationId": "getItemPoster",
+        "parameters": [
+          {
+            "description": "Content ID of the movie or series whose poster the link names.",
+            "in": "path",
+            "name": "content_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "exp",
+            "required": true,
+            "schema": {
+              "format": "int64",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sig",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/*": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Poster bytes of art not cached yet"
+          },
+          "302": {
+            "description": "Redirect to the cached poster's signed URL",
+            "headers": {
+              "Location": {
+                "schema": {
+                  "format": "uri-reference",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Link invalid or expired, item gone, no poster, or the provider refused or failed"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Poster request rate limit exceeded",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds to wait before retrying.",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Poster fetches are busy or not configured; retry after Retry-After"
+          }
+        },
+        "summary": "Read a catalog item's current poster from a signed link that admin reads return in poster_url. Cached art redirects to its stored object; art not cached yet is fetched from its provider through the server and queued for caching.",
+        "tags": [
+          "artwork"
+        ],
+        "x-silo-class": "public",
+        "x-silo-raw-protocol": "artwork-image",
+        "x-silo-raw-reason": "Poster bytes and redirects bypass JSON encoding.",
+        "x-silo-service-backed": true
+      }
+    },
     "/api/v2/libraries": {
       "get": {
         "operationId": "listLibraries",
@@ -193778,6 +195845,1113 @@
         "x-silo-class": "public",
         "x-silo-raw-protocol": "html-callback",
         "x-silo-raw-reason": "Mail clients follow tokenized links without a Silo session; RFC 8058 clients POST form data and consume HTML.",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/notifications/plugin-channels": {
+      "get": {
+        "operationId": "listNotificationPluginChannels",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionNotificationPluginChannel"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the notification channels the enabled plugins provide, with each channel's destination settings form.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/notifications/plugin-destinations": {
+      "get": {
+        "operationId": "listNotificationPluginDestinations",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Page size; default 50, maximum 200",
+            "explode": false,
+            "in": "query",
+            "name": "limit",
+            "schema": {
+              "default": 50,
+              "description": "Page size; default 50, maximum 200",
+              "examples": [
+                50
+              ],
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1,
+              "type": "integer"
+            }
+          },
+          {
+            "explode": false,
+            "in": "query",
+            "name": "cursor",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CollectionNotificationPluginDestination"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the acting profile's plugin destinations. A destination whose plugin is disabled or removed reads as unavailable, without its settings.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-service-backed": true
+      },
+      "post": {
+        "operationId": "createNotificationPluginDestination",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPluginDestinationCreateInputBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPluginDestination"
+                }
+              }
+            },
+            "description": "Created",
+            "headers": {
+              "ETag": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Add a destination on a plugin-provided channel to the acting profile, after the plugin accepts its settings. A channel no enabled plugin provides is a 422 at body.capability_id. Send once; a replay answers 422 for the name already taken.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/notifications/plugin-destinations/{id}": {
+      "delete": {
+        "operationId": "deleteNotificationPluginDestination",
+        "parameters": [
+          {
+            "description": "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Delete the acting profile's plugin destination and its queued messages. Does not recall a message already sent.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-guarded": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      },
+      "put": {
+        "operationId": "updateNotificationPluginDestination",
+        "parameters": [
+          {
+            "description": "The resource's current ETag, or \"*\" to overwrite deliberately. A missing field is 428 precondition_required; a stale tag is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-Match",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional second precondition, evaluated after If-Match succeeds: \"*\" or any tag matching the current representation is 412 precondition_failed with the current ETag.",
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/NotificationPluginDestinationWrite"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPluginDestination"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "408": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Timeout"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "413": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "415": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unsupported Media Type"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "428": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Required"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update a plugin destination using the original observed validator. Changed settings are checked by the plugin again. Never rebase or replay an uncertain update.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-guarded": true,
+        "x-silo-retry-safety": "natural_idempotent",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/notifications/plugin-destinations/{id}/test": {
+      "post": {
+        "operationId": "testNotificationPluginDestination",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Opaque identifier",
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "description": "Opaque identifier",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationDestinationTestResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Send one test message to the acting profile's plugin destination now. A failed send is a 200 result with ok false; it isn't retried or counted.",
+        "tags": [
+          "notifications"
+        ],
+        "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
+        "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
     },
@@ -205539,6 +208713,181 @@
         "x-silo-class": "profile_scoped",
         "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/profile/sections/baseline": {
+      "get": {
+        "operationId": "getProfileSectionBaseline",
+        "parameters": [
+          {
+            "description": "The household profile acting for this request; it must belong to the authenticated account.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "required": true,
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The page the overrides apply to",
+            "explode": false,
+            "in": "query",
+            "name": "scope",
+            "schema": {
+              "default": "home",
+              "description": "The page the overrides apply to",
+              "enum": [
+                "home",
+                "library"
+              ],
+              "examples": [
+                "home"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "The library; required when scope is library and refused otherwise",
+            "explode": false,
+            "in": "query",
+            "name": "library_id",
+            "schema": {
+              "description": "The library; required when scope is library and refused otherwise",
+              "examples": [
+                "1"
+              ],
+              "minLength": 1,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProfileSectionBaseline"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get one page's pre-override server section baseline for home layout export and import.",
+        "tags": [
+          "profile_sections"
+        ],
+        "x-silo-class": "profile_scoped",
         "x-silo-service-backed": true
       }
     },
@@ -241168,7 +244517,7 @@
           },
           "required": true
         },
-        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on the granted source, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503.",
+        "description": "Make trickplay sprite sheets for a mediasample Sheets request of samples on the granted source, up to the node's configured number of runs at once, at idle priority, on the node's own hardware. No durable replay receipt; the API server keeps the lease and retries elsewhere. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503. A node that declares a job cap refuses new work once it runs that many jobs (the jobs health reports as active_jobs, admitted and not yet counted included) with 503, X-Silo-Node-Refusal: at_capacity and Retry-After.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -241244,7 +244593,25 @@
                 }
               }
             },
-            "description": "Node at its trickplay run capacity, re-probing, unconfigured, or unable to reach the core's source authority"
+            "description": "Node at its trickplay run capacity or its job cap (reason node_busy), re-probing, unconfigured, or unable to reach the core's source authority",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds, with the refusal header.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-Node-Refusal": {
+                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
+                "schema": {
+                  "enum": [
+                    "at_capacity",
+                    "storage_full"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },
@@ -242344,7 +245711,7 @@
           },
           "required": true
         },
-        "description": "Synchronously prepare or reuse a node-local MP4 under an artifact lifecycle lock. The JSON decoder reads at most 64 KiB, ignores unknown keys and uses zero values for omitted options. Source grant and GPU admission apply. Ordinary nonempty artifacts can be reused by ID alone; requested execution attestations require a matching receipt. Missing/mismatched receipts may cause replacement. Request cancellation is not proof that no artifact was published; there is no durable job admission or automatic replay guarantee. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503. The execution fingerprint excludes source_grant.",
+        "description": "Synchronously prepare or reuse a node-local MP4 under an artifact lifecycle lock. The JSON decoder reads at most 64 KiB, ignores unknown keys and uses zero values for omitted options. Source grant and GPU admission apply. Ordinary nonempty artifacts can be reused by ID alone; requested execution attestations require a matching receipt. Missing/mismatched receipts may cause replacement. Request cancellation is not proof that no artifact was published; there is no durable job admission or automatic replay guarantee. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open) and reads only the path the core approves, never the input path the request names, for the job's life; a source the core withdraws ends the job. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a core the node cannot reach 503. The execution fingerprint excludes source_grant. A node that declares a job cap refuses new work once it runs that many jobs (the jobs health reports as active_jobs, admitted and not yet counted included) with 503, X-Silo-Node-Refusal: at_capacity and Retry-After; a request for an artifact the node is preparing or has prepared continues a job the node holds and is never refused at the cap. A node that declares a prepared-download budget refuses a new preparation once its last measurement of the directory reaches it, with 503 and X-Silo-Node-Refusal: storage_full.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -242430,6 +245797,22 @@
             },
             "description": "Service Unavailable",
             "headers": {
+              "Retry-After": {
+                "description": "Seconds, with the refusal header.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-Node-Refusal": {
+                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
+                "schema": {
+                  "enum": [
+                    "at_capacity",
+                    "storage_full"
+                  ],
+                  "type": "string"
+                }
+              },
               "X-Silo-Tone-Map-Execution-Error": {
                 "description": "Bounded tone-map refusal code when available; not present on all failures.",
                 "schema": {
@@ -243675,9 +247058,17 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "description": "On a release (fence=0), the start_id of the start being released; a job another start published under the ID is left running. Ignored on a fenced stop.",
+            "in": "query",
+            "name": "start_id",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
-        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; a fenced stop also fences a progressive remux under the ID. The core deletes the stored recipe itself before it calls; the node closes the session's source. Local teardown may precede a 503 progressive-remux shutdown failure. A transport that runs nothing here returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
+        "description": "Stop a transport under its lifecycle lock. Every stop installs a process-local token-lifetime fence that refuses token reconstruction (410) until a fresh start reuses the ID, unless fence=0 marks it a release of a transport moving to another node; a fenced stop also fences a progressive remux under the ID. A release ends only the job it was sent for and answers 404 for another: with start_id, the HLS job that start published; without it, the HLS job running when the release arrived or a rebuild published while it waited for the lock, not a job a start published then. A fenced stop ends any job. The core deletes the stored recipe itself before it calls; the node closes the session's source. Local teardown may precede a 503 progressive-remux shutdown failure. A transport that runs nothing here returns 404 after cleanup attempts. This ID-addressed command has no durable replay identity and must not be automatically repeated against a possible successor.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "DELETE",
@@ -243731,7 +247122,7 @@
           },
           "required": true
         },
-        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may move an early hardware startup failure to a safer path: under hw_accel=auto CPU decode with GPU encode, then software; otherwise the VideoToolbox software retry. No durable admission/replay receipt or automatic caller retry is implied. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open), runs FFmpeg on the path the core approves, never on input_path, and keeps the source open for the session's life; a source the core withdraws ends the session. With core source access the input is a loopback relay URL. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a text subtitle burn-in that cannot be staged on a node reading its source through the core 409 (libass would read the whole file through the core), a core the node cannot reach 503. playback_session_id, user_id, profile_id and media_file_id name the playback session the node files its session record and stream telemetry under.",
+        "description": "Start a process-local HLS session after input, recipe, GPU and configuration guards. Ordinary JSON decoding ignores unknown keys and defaults omitted fields; there is no decoder body limit. A same-ID start can tear down and replace an earlier session before failing, and RequireReady may move an early hardware startup failure to a safer path: under hw_accel=auto CPU decode with GPU encode, then software; otherwise the VideoToolbox software retry. No durable admission/replay receipt or automatic caller retry is implied. source_grant is required: the node exchanges it at the core (POST /api/internal/nodes/self/sources/open), runs FFmpeg on the path the core approves, never on input_path, and keeps the source open for the session's life; a source the core withdraws ends the session. With core source access the input is a loopback relay URL. A missing or refused grant returns 400, a node mount that does not show the approved revision 409, a text subtitle burn-in that cannot be staged on a node reading its source through the core 409 (libass would read the whole file through the core), a core the node cannot reach 503. playback_session_id, user_id, profile_id and media_file_id name the playback session the node files its session record and stream telemetry under. A node that declares a job cap refuses new work once it runs that many jobs (the jobs health reports as active_jobs, admitted and not yet counted included) with 503, X-Silo-Node-Refusal: at_capacity and Retry-After; a same-id replacement, or a start for a playback_session_id the node already runs a session or progressive remux for continues a job the node holds and is never refused at the cap.",
         "retry_safety": "non_retryable",
         "listener": "transcode_node",
         "method": "POST",
@@ -243821,6 +247212,22 @@
             },
             "description": "Service Unavailable",
             "headers": {
+              "Retry-After": {
+                "description": "Seconds, with the refusal header.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-Node-Refusal": {
+                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
+                "schema": {
+                  "enum": [
+                    "at_capacity",
+                    "storage_full"
+                  ],
+                  "type": "string"
+                }
+              },
               "X-Silo-Tone-Map-Execution-Error": {
                 "description": "Existing tone-map refusal code when available.",
                 "schema": {
@@ -246239,7 +249646,7 @@
             }
           }
         ],
-        "description": "Every GET and HEAD resolves the transport at the core (POST /api/internal/nodes/self/resolve, purpose remux), passing the stream token unread; a transport this process stopped is refused with 410 first, and a GET for a transport that already has a request running (409) or on a node that has reported itself drained (503) is refused before the core is asked. The core's refusals map to the node's answers: invalid_token 401, wrong_route 503, denied and stopped 410, source_changed 400, not_found 404, anything else (the core unavailable, or its per-node budget answering 429) 503. The token must bind the exact transport and this node's remux-execution/proxy-egress route; audio-downmix recipes require the exact stereo shape; a theme_aac_v1 recipe converts one detail-page theme to AAC. A GET opens the source the resolution grants (a refused grant 400, a mount that does not show the approved revision 409, the core unreachable 503) and reads only that path; a concurrent GET returns 409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; a committed 200 can truncate on encoder/read failure, and a source the core withdraws ends it. HEAD validates authority but opens no source and starts no encoder. Process-local fences are not durable across node replacement.",
+        "description": "Every GET and HEAD resolves the transport at the core (POST /api/internal/nodes/self/resolve, purpose remux), passing the stream token unread; a transport this process stopped is refused with 410 first, and a GET for a transport that already has a request running (409) or on a node that has reported itself drained (503) is refused before the core is asked. The core's refusals map to the node's answers: invalid_token 401, wrong_route 503, denied and stopped 410, source_changed 400, not_found 404, anything else (the core unavailable, or its per-node budget answering 429) 503. The token must bind the exact transport and this node's remux-execution/proxy-egress route; audio-downmix recipes require the exact stereo shape; a theme_aac_v1 recipe converts one detail-page theme to AAC. A GET opens the source the resolution grants (a refused grant 400, a mount that does not show the approved revision 409, the core unreachable 503) and reads only that path; a concurrent GET returns 409. GET starts request-scoped MP4 remux with cancellation/stop/reload tracking; a committed 200 can truncate on encoder/read failure, and a source the core withdraws ends it. HEAD validates authority but opens no source and starts no encoder. Process-local fences are not durable across node replacement. A node that declares a job cap refuses new work once it runs that many jobs (the jobs health reports as active_jobs, admitted and not yet counted included) with 503, X-Silo-Node-Refusal: at_capacity and Retry-After; a GET for a playback session the node runs a session or progressive remux for, or served a progressive remux for within the last ten minutes (a seek or a reconnect) continues a job the node holds and is never refused at the cap.",
         "listener": "transcode_node",
         "method": "GET",
         "path": "/remux/{session_id}",
@@ -246333,7 +249740,25 @@
                 }
               }
             },
-            "description": "Service Unavailable"
+            "description": "Service Unavailable",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds, with the refusal header.",
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "X-Silo-Node-Refusal": {
+                "description": "Why the node refused new work: at_capacity at the job cap it declares (SILO_NODE_MAX_TRANSCODES), storage_full at the prepared-download budget it declares. Absent on every other 503, a draining refusal included; a caller that does not know it treats the 503 as a draining refusal.",
+                "schema": {
+                  "enum": [
+                    "at_capacity",
+                    "storage_full"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       },
@@ -247042,6 +250467,107 @@
               }
             },
             "description": "Not Found"
+          },
+          "503": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      },
+      {
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_Registration"
+              }
+            }
+          },
+          "required": true
+        },
+        "description": "The configuration the calling node declares from its environment, sent at startup before its first configuration read and again every minute while the node runs, so a row or lock changed on the core is put back. The core validates the declared fields as an administrator update is validated, writes them to the node's row, and sets env_managed to exactly the declared field names, so a field the node no longer declares is unlocked; an empty body unlocks every field. changed in the answer reports whether the registration changed the row or its locks; an unchanged one commits no configuration revision and makes no API server reload its node pools. Administrator updates that would change a locked field are refused. A changed URL must be free among transcode nodes (409 url_taken). A refused value is 422 invalid naming its field. 404: the node row is gone. 429: the node exceeded its request budget on this server. 503 is transient.",
+        "retry_safety": "natural_idempotent",
+        "listener": "api",
+        "method": "PUT",
+        "path": "/api/internal/nodes/self/registration",
+        "handler": "(*internal/nodecontrol.Server).HandleRegistration",
+        "auth_class": "node_signed",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_RegistrationResult"
+                }
+              }
+            },
+            "description": "Applied."
+          },
+          "400": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_RegistrationRefusal"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_RegistrationRefusal"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Too Many Requests"
           },
           "503": {
             "content": {
@@ -248824,6 +252350,94 @@
         ],
         "type": "object"
       },
+      "nodecontrol_Registration": {
+        "additionalProperties": false,
+        "properties": {
+          "download_artifact_dir_override": {
+            "type": "string"
+          },
+          "download_artifact_max_bytes_override": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "group": {
+            "type": "string"
+          },
+          "hw_accel_override": {
+            "enum": [
+              "auto",
+              "qsv",
+              "vaapi",
+              "nvenc",
+              "videotoolbox",
+              "none"
+            ],
+            "type": "string"
+          },
+          "hw_device_override": {
+            "type": "string"
+          },
+          "max_jobs": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source_access": {
+            "enum": [
+              "local",
+              "core"
+            ],
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "type": "object"
+      },
+      "nodecontrol_RegistrationRefusal": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "field"
+        ],
+        "type": "object"
+      },
+      "nodecontrol_RegistrationResult": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "type": "boolean"
+          },
+          "env_managed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "node": {
+            "$ref": "#/x-silo-worker-protocols/schemas/nodecontrol_NodeIdentity"
+          }
+        },
+        "required": [
+          "node",
+          "env_managed"
+        ],
+        "type": "object"
+      },
       "nodecontrol_Report": {
         "additionalProperties": false,
         "properties": {
@@ -249927,6 +253541,9 @@
             "format": "double",
             "type": "number"
           },
+          "subtitle": {
+            "$ref": "#/x-silo-worker-protocols/schemas/playback_SessionSubtitle"
+          },
           "subtitle_burn_in": {
             "type": "boolean"
           },
@@ -250068,6 +253685,43 @@
         "required": [
           "path",
           "description"
+        ],
+        "type": "object"
+      },
+      "playback_SessionSubtitle": {
+        "additionalProperties": false,
+        "properties": {
+          "codec": {
+            "type": "string"
+          },
+          "delivery": {
+            "type": "string"
+          },
+          "forced": {
+            "type": "boolean"
+          },
+          "format": {
+            "type": "string"
+          },
+          "hearing_impaired": {
+            "type": "boolean"
+          },
+          "language": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "track_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "track_id",
+          "source",
+          "delivery",
+          "forced",
+          "hearing_impaired"
         ],
         "type": "object"
       },
@@ -250451,6 +254105,9 @@
             "type": "string"
           },
           "source_video_profile": {
+            "type": "string"
+          },
+          "start_id": {
             "type": "string"
           },
           "start_segment_number": {

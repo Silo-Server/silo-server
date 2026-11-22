@@ -7,7 +7,7 @@
 # transcoding (VA-API or NVIDIA), and the ports proxy nodes on other hosts use
 # to reach this server. A node's own host runs this same file: a transcode
 # node with MODE, SILO_CORE_URL and SILO_NODE_KEY in its .env, a proxy node
-# with MODE, DATABASE_URL, REDIS_URL and NODE_URL; see the node section of
+# with MODE, DATABASE_URL, REDIS_URL and SILO_NODE_URL; see the node section of
 # .env.example.
 #
 # This file is an example of a new install. An existing install keeps its own
@@ -109,6 +109,8 @@ services:
       - /proc/meminfo:/host/proc/meminfo:ro
       - /proc/stat:/host/proc/stat:ro
       - /proc/loadavg:/host/proc/loadavg:ro
+    # .env also carries the server settings an operator sets from the
+    # environment (SILO_PUBLIC_URL, SILO_SMTP_HOST, ...); .env.example lists them.
     env_file:
       - path: .env
         required: false

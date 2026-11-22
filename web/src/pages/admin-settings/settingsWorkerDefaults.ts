@@ -18,9 +18,17 @@ export const WORKER_SETTING_DEFAULTS: Readonly<Record<string, string>> = {
   "matcher.batch_size": "500",
 };
 
-/** True when at least one of the keys holds something other than its default. */
-export function hasWorkerOverrides(getValue: (key: string) => string): boolean {
+/**
+ * True when at least one of the keys holds something other than its default.
+ * `restorable` leaves out keys Restore defaults cannot change, such as a count
+ * the environment sets.
+ */
+export function hasWorkerOverrides(
+  getValue: (key: string) => string,
+  restorable: (key: string) => boolean = () => true,
+): boolean {
   return Object.entries(WORKER_SETTING_DEFAULTS).some(
-    ([key, fallback]) => getValue(key).trim() !== "" && getValue(key).trim() !== fallback,
+    ([key, fallback]) =>
+      restorable(key) && getValue(key).trim() !== "" && getValue(key).trim() !== fallback,
   );
 }
