@@ -656,36 +656,6 @@ func TestPlanPlaybackV3Profile7UsesVersionedClientTransformationsOnSameFile(t *t
 	}
 }
 
-// copyUnsafeFixtureV3 returns an SDR source that would normally take a
-// video-copy remux (its audio needs conversion, its container is not offered),
-// with the copy-safety flag settable by the caller.
-func copyUnsafeFixtureV3(multiPPS bool) (*models.MediaFile, StartRequestV3) {
-	file := detailedFixtureFileV3()
-	file.VideoTracks[0].VideoRange = "SDR"
-	file.VideoTracks[0].VideoRangeType = "SDR"
-	file.VideoTracks[0].ColorTransfer = "bt709"
-	file.AudioTracks[0] = models.AudioTrack{Codec: "truehd", Channels: 8, Layout: "7.1"}
-	file.CodecAudio = "truehd"
-	file.VideoTracks[0].MultiplePPS = &multiPPS
-	req := validStartRequestV3()
-	req.Capabilities.Containers = []string{"mp4"}
-	req.Capabilities.VideoDecode = hevcMain10DecodeV3()
-	return file, req
-}
-
-func TestPlanPlaybackV3CopyUnsafeSourceForcesTranscode(t *testing.T) {
-	// The source carries conflicting in-band PPS, so the video stream-copy remux
-	// is disqualified and planning must fall through to a real transcode.
-	file, req := copyUnsafeFixtureV3(true)
-	result := planFileV3(req, file)
-	if result.PlayMethod != PlayTranscode {
-		t.Fatalf("PlayMethod = %q, want transcode; result = %s", result.PlayMethod, ExplainPlannerResultV3(result))
-	}
-	if result.Plan == nil || result.Plan.DecisionReason != "copy_routes_exhausted" {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
-	}
-}
-
 func TestPlanPlaybackV3FallsBackFromProgressiveToHLSWithoutRepeatingKey(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].VideoRange = "SDR"
@@ -709,21 +679,16 @@ func TestPlanPlaybackV3FallsBackFromProgressiveToHLSWithoutRepeatingKey(t *testi
 	}
 }
 
-// The copy-safety verdict has to be readable from the row alone. The track
-// flags are stamped by the probe ensurer, which the replan path and the
-// Jellyfin-protocol route decision never run; without this the replan a
-// plan_invalidated command triggers would just walk to the sibling stream-copy
-// delivery, which is broken for exactly the same reason.
-func TestPlanPlaybackV3HonorsThePersistedCopySafetyVerdict(t *testing.T) {
+// A copy-unsafe source streams like any other: decoders that apply in-band
+// parameter sets play its copy, and strict ones fail it and recover to the
+// encode. Only downloads still encode it up front.
+func TestPlanPlaybackV3CopyUnsafeSourceStillCopies(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].VideoRange = "SDR"
 	file.VideoTracks[0].VideoRangeType = "SDR"
 	file.VideoTracks[0].ColorTransfer = "bt709"
 	req := hdr10ClientRequestV3(false)
 	req.Capabilities.Containers = []string{"mp4"}
-
-	// Only the persisted columns carry the verdict, exactly as a raw repository
-	// read delivers them.
 	mtime := time.Date(2026, time.March, 4, 5, 6, 7, 0, time.UTC)
 	multi := true
 	scanSize := file.FileSize
@@ -731,25 +696,10 @@ func TestPlanPlaybackV3HonorsThePersistedCopySafetyVerdict(t *testing.T) {
 	file.MultiplePPS = &multi
 	file.MultiplePPSScanSize = &scanSize
 	file.MultiplePPSScanMtime = &mtime
-	if file.VideoTracks[0].MultiplePPS != nil || file.VideoTracks[0].VideoCopyUnsafe {
-		t.Fatal("fixture already carries the runtime copy-safety flags; the test would prove nothing")
-	}
 
 	result := planFileV3(req, file)
-	if result.Plan == nil {
-		t.Fatalf("result = %s", ExplainPlannerResultV3(result))
-	}
-	switch result.Plan.Delivery {
-	case DeliveryRemuxProgressiveV3, DeliveryRemuxHLSV3:
-		t.Fatalf("delivery = %q, want a route that does not stream-copy a copy-unsafe source", result.Plan.Delivery)
-	}
-
-	// A stale verdict (the file was rewritten) must not be honored.
-	staleSize := file.FileSize + 1
-	file.MultiplePPSScanSize = &staleSize
-	stale := planFileV3(req, file)
-	if stale.Plan == nil || stale.Plan.Delivery != DeliveryRemuxProgressiveV3 {
-		t.Fatalf("stale verdict = %s, want the ordinary remux back", ExplainPlannerResultV3(stale))
+	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.Plan.Source.VideoCopyUnsafe {
+		t.Fatalf("result = %s, want the progressive copy of a source marked copy-unsafe", ExplainPlannerResultV3(result))
 	}
 }
 
