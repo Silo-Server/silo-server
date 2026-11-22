@@ -3202,6 +3202,10 @@ func main() {
 			if event.Type != cache.EventSettingsChanged {
 				return
 			}
+			// Publishers name the changed key; an empty payload names none.
+			if event.Payload != "" && !strings.HasPrefix(event.Payload, "direct_connections.") {
+				return
+			}
 			if err := directConn.SettingsChanged(appCtx); err != nil {
 				slog.WarnContext(appCtx, "direct connections: settings reload failed", "component", "directconn", "error", err)
 			}
