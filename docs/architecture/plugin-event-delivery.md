@@ -48,6 +48,14 @@ becomes absent (a job the server queued itself has no `created_by_user_id`).
 `notification.created` also gets the envelope's account as `user_id`,
 because profile IDs repeat across accounts.
 
+For `session.started`, `session.paused` and `session.resumed`, the plugin's
+live row uses `content_id`, `series_name` and `episode_name`. Its `media_title`
+and `media_type` describe the catalog item linked to the file. For a TV episode
+these are the show's title and `series`; both are empty when the file has no
+linked catalog item. The producing server passes that item to its local
+dispatcher alongside the WebSocket payload. A stopped event carries the
+playback history entry when the server could read it.
+
 Then `events.Project` rewrites the payload into the catalog's public shape:
 the fields of the SDK payload type and nothing else, in nested objects too
 (a session, a history entry, a notification's `reason_flags`). A field the host adds

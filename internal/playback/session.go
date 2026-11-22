@@ -92,6 +92,9 @@ type Session struct {
 	// AdaptationReasons says why the route changes the file (see
 	// AdaptationReasons); empty for direct play or an unplanned session.
 	AdaptationReasons []string
+	// Subtitle is the subtitle the current plan delivers, for the admin
+	// views; nil when it shows none or the session has no plan.
+	Subtitle *SessionSubtitle
 
 	// Byte-affecting transcode recipe fields the offloaded restart path needs to
 	// rebuild the exact same stream after an audio switch. Local transcodes read
@@ -170,6 +173,7 @@ type SessionStreamState struct {
 	TranscodeHWAccel              string
 	ToneMapMode                   tonemap.Mode
 	AdaptationReasons             []string
+	Subtitle                      *SessionSubtitle
 	TranscodeNodeURL              string
 	TranscodeTransportID          string
 	TranscodeRouteSet             bool
@@ -1274,6 +1278,7 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TranscodeHWAccel = state.TranscodeHWAccel
 	s.ToneMapMode = state.ToneMapMode
 	s.AdaptationReasons = state.AdaptationReasons
+	s.Subtitle = state.Subtitle
 	if state.TranscodeRouteSet {
 		s.TranscodeNodeURL = state.TranscodeNodeURL
 		s.TranscodeTransportID = state.TranscodeTransportID
@@ -1326,6 +1331,7 @@ func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 		TranscodeHWAccel:              s.TranscodeHWAccel,
 		ToneMapMode:                   s.ToneMapMode,
 		AdaptationReasons:             s.AdaptationReasons,
+		Subtitle:                      s.Subtitle,
 		TranscodeNodeURL:              s.TranscodeNodeURL,
 		TranscodeTransportID:          s.TranscodeTransportID,
 		TranscodeRouteSet:             true,
@@ -1370,6 +1376,7 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TranscodeHWAccel = state.TranscodeHWAccel
 	s.ToneMapMode = state.ToneMapMode
 	s.AdaptationReasons = state.AdaptationReasons
+	s.Subtitle = state.Subtitle
 	s.TranscodeNodeURL = state.TranscodeNodeURL
 	s.TranscodeTransportID = state.TranscodeTransportID
 	s.RoutingNetworkProvider = state.RoutingNetworkProvider

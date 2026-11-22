@@ -202,11 +202,12 @@ func (t *playbackStartTimingsV3) log(ctx context.Context, attemptID string) {
 }
 
 type playbackStartSideEffectsV3 struct {
-	session   playback.Session
-	file      models.MediaFile
-	userID    int
-	profileID string
-	state     *playbackStartSideEffectsStateV3
+	session        playback.Session
+	file           models.MediaFile
+	preferenceFile *models.MediaFile
+	userID         int
+	profileID      string
+	state          *playbackStartSideEffectsStateV3
 	// legacyAudioTrackIndex is the audio an /api/v1 start played, which the
 	// frozen bridge still saves as the series preference; nil on /api/v2.
 	legacyAudioTrackIndex *int
@@ -255,6 +256,67 @@ func withNativeDeliveryFeaturesV3(mode mediaAuthModeV3, req playback.StartReques
 	mode.hlsVariableSubstitution = playback.HLSVariableSubstitutionV3(req)
 	mode.progressiveRangeRefusal = playback.ProgressiveRangeRefusalV3(req)
 	return mode
+}
+
+// setPlanStreamURLsV3 publishes the prepared transport's URL as the plan's
+// stream URL and, when the client may read the file over parallel ranges, the
+// URL to read them from as stream.parallel_range_url.
+func (h *PlaybackHandler) setPlanStreamURLsV3(ctx context.Context, plan *playback.PlanV3, transport preparedTransportV3, clientFeatures []string, loginBound bool) {
+	plan.Stream.URL = transport.url
+	plan.Stream.ParallelRangeURL = h.parallelRangeURLV3(ctx, plan.Delivery, transport, clientFeatures, loginBound)
+}
+
+// parallelRangeURLV3 is the URL a client that negotiated
+// parallel_range_origin_v1 reads an original_http file's ranges from, or empty
+// when it reads stream.url as before. The URL always authorizes itself: the
+// client uses it exactly as given and adds no account token to it.
+//
+//   - A proxy node serves the file: the node's own direct-play URL. Its token
+//     is in the path, signed for that node, on the address chosen for the
+//     client's access path. A node's header-authorized route is not published.
+//   - The API serves the file: the same stream on the admin's media origin
+//     (server.web_media_url) when one is set and the client came by the default
+//     access path, else the stream URL itself, which the client stripes on only
+//     when its page loaded over HTTP/1.1. Either carries st, which authorizes
+//     each range of an attempt a login session started (loginBound) and no
+//     other, so any other attempt gets no URL. A client that reached the
+//     server through a network access provider cannot be assumed to reach the
+//     media origin.
+//
+// A client that also negotiated header_authenticated_media_v1 gets none: its
+// URLs carry no credential.
+func (h *PlaybackHandler) parallelRangeURLV3(ctx context.Context, delivery playback.DeliveryV3, transport preparedTransportV3, clientFeatures []string, loginBound bool) string {
+	if delivery != playback.DeliveryOriginalHTTPV3 ||
+		!playback.HasFeatureV3(clientFeatures, playback.FeatureParallelRangeOriginV1) ||
+		playback.HasFeatureV3(clientFeatures, playback.FeatureHeaderAuthenticatedMediaV3) {
+		return ""
+	}
+	switch transport.routingEgress {
+	case noderouting.EgressProxy:
+		if node, path, ok := strings.Cut(transport.url, "/stream/direct/"); ok && path != "" &&
+			(strings.HasPrefix(node, "https://") || strings.HasPrefix(node, "http://")) {
+			return transport.url
+		}
+	case noderouting.EgressAPI:
+		if !loginBound || !strings.HasPrefix(transport.url, "/stream/") {
+			return ""
+		}
+		if _, query, _ := strings.Cut(transport.url, "?"); !hasQueryParamV3(query, "st") {
+			return ""
+		}
+		if h.SettingsRepo != nil && netaccess.PathFromContext(ctx).IsDefault() {
+			if origin, _ := h.SettingsRepo.Get(ctx, config.WebMediaURLSettingKey); origin != "" {
+				return origin + "/api/v2" + transport.url
+			}
+		}
+		return transport.url
+	}
+	return ""
+}
+
+// hasQueryParamV3 reports whether a raw query names the parameter.
+func hasQueryParamV3(rawQuery, name string) bool {
+	return strings.HasPrefix(rawQuery, name+"=") || strings.Contains(rawQuery, "&"+name+"=")
 }
 
 // headerAuthenticatedMediaV3 resolves the negotiated media transport mode from
@@ -2400,7 +2462,7 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 		abort()
 		return playback.DecisionResponseV3{}, subtitleArtifactErrorV3("Failed to freeze the selected subtitle identity.", frozenErr)
 	}
-	result.Plan.Stream.URL = transport.url
+	h.setPlanStreamURLsV3(r.Context(), result.Plan, transport, req.ClientFeatures, apimw.LoginSessionID(r.Context()) != "")
 	if err := h.attachSubtitleArtifactV3(r.Context(), session.ID, effectiveFile, result.Plan, result.SubtitleTrackIndex, &frozenRecipe, req.ClientFeatures); err != nil {
 		transport.rollback()
 		abort()
@@ -2443,7 +2505,13 @@ func (h *PlaybackHandler) startPlannedPlaybackV3(r *http.Request, userID int, pr
 	// scrobbles or analysis work for the short-lived session they roll back.
 	h.raceCopySafetyV3(effectiveFile.ID, result.Plan)
 	// Only explicit picks are saved, never the audio a start happened to play.
-	h.enqueuePlaybackStartSideEffectsV3(r.Context(), session, effectiveFile, userID, profileID, nil)
+	var preferenceFile *models.MediaFile
+	if requestedFile.ID != effectiveFile.ID && catalog.ResolveEditionAliases(
+		[]*models.MediaFile{requestedFile, effectiveFile}, catalog.AccessFilter{},
+	).AllowsSubstitution(requestedFile, effectiveFile) {
+		preferenceFile = requestedFile
+	}
+	h.enqueuePlaybackStartSideEffectsV3(r.Context(), session, effectiveFile, preferenceFile, userID, profileID, nil)
 	h.prefetchSubtitlesV3(session.ID, effectiveFile, req, result)
 	h.enqueueRouteEventV3(playback.RouteEventRecordV3{RouteEventV3: playback.RouteEventV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: req.PlaybackAttemptID, SessionID: session.ID, PlanID: result.Plan.PlanID, Event: playback.RouteEventPlanSelectedV3, AppliedQuirkIDs: appliedQuirkIDsV3(result.Plan), QuirkRegistryRevision: appliedQuirkRevisionV3(result.Plan), OutputContextID: req.ClientPlaybackContext.Output.OutputContextID}, UserID: userID, ProfileID: profileID, ClientName: clientInfo.Name, ClientVersion: clientInfo.Version, ClientBuild: clientInfo.Build, ClientChannel: clientInfo.Channel, ClientModel: req.ClientPlaybackContext.Device.Model})
 	return response, nil
@@ -2477,7 +2545,7 @@ func (h *PlaybackHandler) replayDuplicateStartV3(ctx context.Context, userID int
 	return decisionResponseFromAttemptV3(existing), nil
 }
 
-func (h *PlaybackHandler) enqueuePlaybackStartSideEffectsV3(ctx context.Context, session *playback.Session, file *models.MediaFile, userID int, profileID string, legacyAudioTrackIndex *int) {
+func (h *PlaybackHandler) enqueuePlaybackStartSideEffectsV3(ctx context.Context, session *playback.Session, file, preferenceFile *models.MediaFile, userID int, profileID string, legacyAudioTrackIndex *int) {
 	if h == nil || session == nil || file == nil {
 		return
 	}
@@ -2507,6 +2575,9 @@ func (h *PlaybackHandler) enqueuePlaybackStartSideEffectsV3(ctx context.Context,
 		state:     state,
 
 		legacyAudioTrackIndex: legacyAudioTrackIndex,
+	}
+	if preferenceFile != nil {
+		task.preferenceFile = new(*preferenceFile)
 	}
 	h.v3StartEffectsMu.Lock()
 	h.v3StartEffectsPending[session.ID] = state
@@ -2623,7 +2694,11 @@ func (h *PlaybackHandler) runPlaybackStartSideEffectsV3(task playbackStartSideEf
 	if task.legacyAudioTrackIndex != nil {
 		h.persistLegacyAudioPreferenceV3(ctx, task.session.ID, task.userID, task.profileID, &task.file, *task.legacyAudioTrackIndex)
 	}
-	h.persistSeriesPlaybackPreference(ctx, task.userID, task.profileID, &task.file)
+	preferenceFile := task.preferenceFile
+	if preferenceFile == nil {
+		preferenceFile = &task.file
+	}
+	h.persistSeriesPlaybackPreference(ctx, task.userID, task.profileID, preferenceFile)
 	h.syncSessionsNow(ctx, "v3_start")
 }
 
@@ -3293,7 +3368,7 @@ func (h *PlaybackHandler) prepareIdentityTransportV3(r *http.Request, session *p
 	}
 	var sessionRecipe *playback.RecipeCard
 	if mode.headerAuth {
-		sessionRecipe = sessionRecipeCardV3(identityRecipeCard(&routeSession), session, result.AdaptationReasons)
+		sessionRecipe = sessionRecipeCardV3(identityRecipeCard(&routeSession), session, result)
 	}
 	return preparedTransportV3{
 		sessionRecipe:      sessionRecipe,
@@ -4369,7 +4444,7 @@ func (h *PlaybackHandler) prepareLocalTransportV3(r *http.Request, session *play
 	card.RoutingEgress = string(noderouting.EgressAPI)
 	var sessionRecipe *playback.RecipeCard
 	if mode.headerAuth {
-		sessionRecipe = sessionRecipeCardV3(card, session, result.AdaptationReasons)
+		sessionRecipe = sessionRecipeCardV3(card, session, result)
 	} else {
 		url = appendStreamToken(url, h.signSessionToken(card, mode.headerAuth))
 	}
@@ -4716,7 +4791,7 @@ func (h *PlaybackHandler) prepareRemoteTransportV3(r *http.Request, session *pla
 	}
 	var sessionRecipe *playback.RecipeCard
 	if mode.headerAuth {
-		sessionRecipe = sessionRecipeCardV3(card, session, result.AdaptationReasons)
+		sessionRecipe = sessionRecipeCardV3(card, session, result)
 	}
 	return preparedTransportV3{sessionRecipe: sessionRecipe, url: url, nodeURL: node.URL, transportID: transportID, hwAccel: confirmedHWAccel, toneMapMode: confirmedToneMapMode,
 		routingWorkload: routingWorkloadV3(result), routingExecution: noderouting.ExecutionTranscode, routingExecutorID: node.ID, routingExecutorURL: node.URL,
@@ -4864,6 +4939,7 @@ func (h *PlaybackHandler) v3SessionStreamState(ctx context.Context, session *pla
 		AudioTrackIndex:               plannedAudioTrackIndexV3(result, session.AudioTrackIndex),
 		TranscodeAudio:                result.TranscodeAudio,
 		AdaptationReasons:             result.AdaptationReasons,
+		Subtitle:                      playback.SessionSubtitleFromPlanV3(result.Plan),
 		RemuxDVMode:                   remuxDVModeForPlanV3(result.Plan),
 		RemuxResumeLeadingPictureDrop: result.RemuxResumeLeadingPictureDrop,
 		TranscodeHWAccel:              transport.hwAccel,
@@ -5629,6 +5705,7 @@ func (h *PlaybackHandler) reuseActiveHLSTransportV3(ctx context.Context, session
 			// The bytes are unchanged, but a subtitle change can change why
 			// the route adapts.
 			transport.sessionRecipe.AdaptationReasons = adaptationReasons
+			transport.sessionRecipe.Subtitle = playback.SessionSubtitleFromPlanV3(plan)
 		}
 	}
 	slog.InfoContext(ctx, "protocol v3 replan reused active HLS A/V transport",
@@ -6005,6 +6082,10 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 	// edition, choose a version again. Under a buffering budget that must not
 	// be the source that stalled. A track change stays on the mounted version.
 	choosesVersion := qualityChange || (intentChange && !pinnedTrackChange)
+	edition := effectiveFile
+	if effectiveFile.EditionKey != requestedFile.EditionKey {
+		edition = requestedFile
+	}
 	if !seekReanchor {
 		var limitErr error
 		learnedLimit, limitErr = h.applyLearnedLimit(r, &start, !seekScopedRecovery)
@@ -6013,7 +6094,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		plannerSettings, plannerSettingsErr = h.plannerSettingsV3Result(r.Context())
 		if choosesVersion {
-			effectiveFile, start, audioIndex = h.lowerBufferedVersionForIntent(r, start, effectiveFile, audioIndex, plannerSettings, desired)
+			effectiveFile, start, audioIndex = h.lowerBufferedVersionForIntent(r, start, effectiveFile, edition, audioIndex, plannerSettings, desired)
 		}
 		if requestedEditionResolved {
 			lowerVersion = h.lowerVersionV3(r.Context(), start, requestedFile, plannerSettings, requestAccessFilter(r))
@@ -6087,7 +6168,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			readingErr = h.applyConnectionReading(r, &unlimitedStart)
 		}
 		if choosesVersion {
-			unlimitedFile, unlimitedStart, unlimitedAudioIndex = h.lowerBufferedVersionForIntent(r, unlimitedStart, unlimitedFile, unlimitedAudioIndex, plannerSettings, desired)
+			unlimitedFile, unlimitedStart, unlimitedAudioIndex = h.lowerBufferedVersionForIntent(r, unlimitedStart, unlimitedFile, edition, unlimitedAudioIndex, plannerSettings, desired)
 		}
 		unlimited, unlimitedErr := h.planReplanV3(r, planning, unlimitedStart, unlimitedFile, unlimitedAudioIndex, false)
 		if readingErr != nil || unlimitedErr != nil || unlimited.result.Plan == nil || deliveredKbpsV3(result.Plan) >= deliveredKbpsV3(unlimited.result.Plan) {
@@ -6226,7 +6307,7 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 		}
 		break
 	}
-	result.Plan.Stream.URL = transport.url
+	h.setPlanStreamURLsV3(r.Context(), result.Plan, transport, start.ClientFeatures, record.LoginSessionID != "")
 	response := playback.DecisionResponseV3{ProtocolVersion: playback.ProtocolV3, ServerFeatures: playback.NativeServerFeaturesV3(), Outcome: playback.OutcomePlayableV3, SessionID: session.ID, PlaybackPlan: result.Plan}
 	updated := *record
 	updated.CurrentPlanID = result.Plan.PlanID

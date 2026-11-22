@@ -1,6 +1,14 @@
-import type { useServerText } from "@/i18n";
+import type { TaskCategory } from "@/api/types";
+import type { MessageKey, useServerText } from "@/i18n";
 
 type ServerText = ReturnType<typeof useServerText>;
+
+/** The label of each scheduled-task category, on the task list and a task's page. */
+export const TASK_CATEGORY_LABELS: Record<TaskCategory, MessageKey> = {
+  library: "web.admin.tasks.category.library",
+  metadata: "web.admin.tasks.category.metadata",
+  system: "web.admin.tasks.category.system",
+};
 
 /**
  * A scheduled task's name or description in the interface language. Silo's own

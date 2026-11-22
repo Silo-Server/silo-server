@@ -18,7 +18,7 @@ type AdminPluginConfigurationService interface {
 	SetAdminPluginConfig(context.Context, int, handlers.PluginConfigInput) error
 	TestAdminPluginConfig(context.Context, int, handlers.PluginConfigInput) (handlers.PluginConnectionCheckResult, error)
 	SetAdminPluginAuthBinding(context.Context, int, handlers.PluginAuthBindingInput) error
-	SetAdminPluginTaskBinding(context.Context, int, string, handlers.PluginTaskBindingInput) error
+	SetAdminPluginTaskBinding(context.Context, int, string, handlers.PluginTaskBindingInput) (restartRequired bool, err error)
 }
 
 // AdminPluginConfigWrite is one global configuration entry as the operator
@@ -52,6 +52,7 @@ type AdminPluginAuthBindingWrite struct {
 	DisplayOrder  int    `json:"display_order" minimum:"0" maximum:"100000"`
 	AutoProvision *bool  `json:"auto_provision,omitempty" doc:"Create an account for a person who passes the provider's rules on first sign-in; omitted means true"`
 	DefaultLogin  bool   `json:"default_login"`
+	CallbackMode  string `json:"callback_mode,omitempty" enum:"installation,stable" doc:"OAuth only. Omit to preserve the stored mode or to use installation for a new binding"`
 }
 type AdminPluginAuthBindingInput struct {
 	ID      ID `path:"id" pattern:"^[1-9][0-9]*$"`
@@ -74,7 +75,7 @@ type AdminPluginTaskBindingInput struct {
 	Body         AdminPluginTaskBindingWrite
 }
 type AdminPluginTaskBindingResult struct {
-	RestartRequired bool `json:"restart_required" doc:"Always true: bindings load at server start"`
+	RestartRequired bool `json:"restart_required" doc:"False when the binding applies without a restart: this server attempts a plugin task sync before answering and retries a failed one, and every other API server applies it at its next successful sync. True only on a server with no task scheduler, where it applies at the next start"`
 }
 type AdminPluginTaskBindingOutput struct{ Body AdminPluginTaskBindingResult }
 
@@ -94,6 +95,13 @@ func adminPluginInstallationID(id ID) (int, *Problem) {
 // adminPluginMutationProblem maps the seam's typed errors. Validation detail
 // from the plugin's own schema is the operator's feedback and is kept.
 func adminPluginMutationProblem(err error) error {
+	if errors.Is(err, plugins.ErrManagedByEnvironment) {
+		location := locationBody
+		if locked, ok := errors.AsType[*plugins.ManagedByEnvironmentError](err); ok && locked.Field != "" {
+			location += "." + locked.Field
+		}
+		return validationProblem(location, codeManagedByEnvironment, "Set by the environment. Change it there and restart the affected service.")
+	}
 	// A package the install or update refused (download, checksum, platform,
 	// API version, identity) is the admin's to act on, so say why. An
 	// unreachable catalog or download host may answer a retry.
@@ -114,6 +122,8 @@ func adminPluginMutationProblem(err error) error {
 		return NewProblem(TypeConflict, "Another install of this plugin finished first, so Silo didn't install it again. Check the installed version and try again.")
 	case errors.Is(err, handlers.ErrPluginBuiltinInstallation):
 		return NewProblem(TypeConflict, "Built-in host providers cannot be modified.")
+	case errors.Is(err, plugins.ErrAuthBindingIneligible):
+		return NewProblem(TypeConflict, "An enabled sign-in binding is incompatible with this plugin release. Disable or update the binding before enabling the plugin or replacing the release.")
 	case errors.Is(err, plugins.ErrAuthProviderAlreadyEnabled):
 		return NewProblem(TypeProviderAlreadyEnabled, "Another sign-in provider is already enabled. Turn it off first: a server has one external sign-in provider.")
 	case errors.As(err, &validation):
@@ -188,12 +198,12 @@ func registerAdminPluginConfiguration(reg *Registry) {
 		}
 		b := in.Body
 		autoProvision := b.AutoProvision == nil || *b.AutoProvision
-		if err := reg.deps.AdminPluginConfiguration.SetAdminPluginAuthBinding(ctx, id, handlers.PluginAuthBindingInput{CapabilityID: b.CapabilityID, Enabled: b.Enabled, DisplayOrder: b.DisplayOrder, AutoProvision: autoProvision, DefaultLogin: b.DefaultLogin}); err != nil {
+		if err := reg.deps.AdminPluginConfiguration.SetAdminPluginAuthBinding(ctx, id, handlers.PluginAuthBindingInput{CapabilityID: b.CapabilityID, Enabled: b.Enabled, DisplayOrder: b.DisplayOrder, AutoProvision: autoProvision, DefaultLogin: b.DefaultLogin, CallbackMode: b.CallbackMode}); err != nil {
 			return nil, adminPluginMutationProblem(err)
 		}
 		return &AdminPluginAuthBindingOutput{RestartRequired: authBindingRestartRequired}, nil
 	})
-	task := op("PUT", "task-bindings/{capability_id}", "updateAdminPluginTaskBinding", "Replace the scheduled task binding for one capability and mark a server restart required. The whole row is assigned, so repeating the request converges on one stored binding.", RetrySafetyNaturalIdempotent)
+	task := op("PUT", "task-bindings/{capability_id}", "updateAdminPluginTaskBinding", "Replace the scheduled task binding for one capability and apply it on every API server: a disabled binding removes the task and cancels a run in progress, an enabled one registers it while its installation is enabled, and a changed trigger becomes its default schedule. The whole row is assigned, so repeating the request converges on one stored binding.", RetrySafetyNaturalIdempotent)
 	Register(reg, task, func(ctx context.Context, in *AdminPluginTaskBindingInput) (*AdminPluginTaskBindingOutput, error) {
 		if reg.deps.AdminPluginConfiguration == nil {
 			return nil, unavailable("plugin configuration")
@@ -208,9 +218,10 @@ func registerAdminPluginConfiguration(reg *Registry) {
 		if strings.TrimSpace(in.CapabilityID) == "" {
 			return nil, validationProblem("path.capability_id", codeInvalid, "A capability ID is required.")
 		}
-		if err := reg.deps.AdminPluginConfiguration.SetAdminPluginTaskBinding(ctx, id, in.CapabilityID, handlers.PluginTaskBindingInput{Enabled: in.Body.Enabled, Trigger: map[string]any(in.Body.Trigger)}); err != nil {
+		restartRequired, err := reg.deps.AdminPluginConfiguration.SetAdminPluginTaskBinding(ctx, id, in.CapabilityID, handlers.PluginTaskBindingInput{Enabled: in.Body.Enabled, Trigger: map[string]any(in.Body.Trigger)})
+		if err != nil {
 			return nil, adminPluginMutationProblem(err)
 		}
-		return &AdminPluginTaskBindingOutput{Body: AdminPluginTaskBindingResult{RestartRequired: true}}, nil
+		return &AdminPluginTaskBindingOutput{Body: AdminPluginTaskBindingResult{RestartRequired: restartRequired}}, nil
 	})
 }

@@ -21,6 +21,9 @@ export function ConnectStep() {
   // The snapshot always carries the effective value, so the default (on) is
   // never read as blank.
   const jellyfinEnabled = form.getValue("jellyfin_compat.enabled") === "true";
+  // An address typed before turning Jellyfin off stays in view, marked as
+  // changed, so Continue never saves a value the admin can't see.
+  const addressKept = !jellyfinEnabled && form.isDirty("jellyfin_compat.public_url");
   useStepSummary(
     "connect",
     jellyfinEnabled
@@ -51,12 +54,14 @@ export function ConnectStep() {
           onChange={(v) => form.setValue("jellyfin_compat.enabled", v)}
           managedByEnv={form.envVar("jellyfin_compat.enabled")}
         />
-        {jellyfinEnabled ? (
+        {jellyfinEnabled || addressKept ? (
           <SettingField
             label={t("web.setup.connect.addressLabel")}
+            dirty={addressKept}
             description={t("web.setup.connect.addressDescription")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="http://your-server:8096"
+            dir="ltr"
             value={form.getValue("jellyfin_compat.public_url")}
             onChange={(v) => form.setValue("jellyfin_compat.public_url", v)}
             managedByEnv={form.envVar("jellyfin_compat.public_url")}

@@ -17,6 +17,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
@@ -61,6 +62,7 @@ func newExternalSignInEnv(t *testing.T) *externalSignInEnv {
 		_, _ = pool.Exec(cleanup, `DELETE FROM plugin_installations WHERE id = $1`, env.installationID)
 		_, _ = pool.Exec(cleanup, `DELETE FROM users WHERE username LIKE $1 OR email LIKE $1`, "%"+env.suffix+"%")
 	})
+	env.localAccount(t, "setup-complete", models.RoleUser)
 	env.resolver = NewAccountResolver(pool, NewAccountProvisioner(NewUserRepository(pool), pgstore.NewPostgresProvider(pool)),
 		func(_ context.Context, userID int) { env.revoked = append(env.revoked, userID) })
 	return env
@@ -931,5 +933,64 @@ func TestExternalSignInEmailAutoMatchRevokesCredentialsDB(t *testing.T) {
 	}
 	if len(env.revoked) != 1 || env.revoked[0] != invited.ID {
 		t.Fatalf("session hook ran for %v, want [%d]", env.revoked, invited.ID)
+	}
+}
+
+func TestExternalAccountCannotPreemptInitialSetupDB(t *testing.T) {
+	env := newExternalSignInEnv(t)
+	ctx := t.Context()
+	tx, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	// Shadow users in this transaction so it represents an empty deployment
+	// even when the disposable test database contains other fixtures.
+	if _, err := tx.Exec(ctx, "CREATE TEMP TABLE users (id INTEGER) ON COMMIT DROP"); err != nil {
+		t.Fatal(err)
+	}
+	user, id, err := env.resolver.createAccount(ctx, tx, ResolveInput{
+		InstallationID: env.installationID, AutoProvision: true, Identity: env.identity("first"),
+	})
+	if !errors.Is(err, ErrAccountRequired) || user != nil || id != 0 {
+		t.Fatalf("external account creation before setup: user %v, identity %d, error %v", user, id, err)
+	}
+}
+
+func TestPluginAuthBindingCallbackModeDB(t *testing.T) {
+	env := newExternalSignInEnv(t)
+	ctx := t.Context()
+	if _, err := env.pool.Exec(ctx, `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+		VALUES ($1, 'auth_provider.v1', 'oidc', '{"auth_modes":["oauth2"]}'),
+		       ($1, 'auth_provider.v1', 'ldap', '{"auth_modes":["password"]}')`, env.installationID); err != nil {
+		t.Fatal(err)
+	}
+	store := plugins.NewRuntimeConfigStore(env.pool)
+	binding := plugins.AuthBinding{InstallationID: env.installationID, CapabilityID: "oidc"}
+	checkMode := func(want string) {
+		t.Helper()
+		got, err := store.GetAuthBinding(ctx, env.installationID, "oidc")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got.CallbackMode != want {
+			t.Fatalf("callback mode = %q, want %q", got.CallbackMode, want)
+		}
+	}
+	checkMode(plugins.AuthCallbackInstallation)
+	binding.CallbackMode = plugins.AuthCallbackStable
+	if err := store.UpsertAuthBinding(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	checkMode(plugins.AuthCallbackStable)
+	binding.CallbackMode = ""
+	if err := store.UpsertAuthBinding(ctx, binding); err != nil {
+		t.Fatal(err)
+	}
+	checkMode(plugins.AuthCallbackStable)
+	binding.CapabilityID, binding.CallbackMode = "ldap", plugins.AuthCallbackInstallation
+	err := store.UpsertAuthBinding(ctx, binding)
+	if _, ok := errors.AsType[*plugins.ConfigValidationError](err); !ok {
+		t.Fatalf("explicit LDAP callback mode: %v, want validation error", err)
 	}
 }

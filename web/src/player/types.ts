@@ -30,6 +30,9 @@ export interface PlayerFileVersion {
   presentation_kind?: string;
   presentation_group_key?: string;
   presentation_part_index?: number;
+  presentation_part_total?: number;
+  multi_episode_start?: number;
+  multi_episode_end?: number;
   effective_audio_track_index?: number;
   effective_audio_language?: string;
   audio_channels?: number;

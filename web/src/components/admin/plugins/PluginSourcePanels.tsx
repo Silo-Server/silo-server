@@ -144,6 +144,7 @@ export function PluginRepositoriesPanel({
             className="sm:flex-1"
           />
           <Input
+            dir="ltr"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             placeholder={REPOSITORY_URL_PLACEHOLDER}

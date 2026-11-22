@@ -20,6 +20,7 @@ import type {
 } from "@/api/types";
 
 import { settingsKeys, subtitleKeys } from "./keys";
+import { settingWriteOptions } from "./settingWriteOffline";
 import { invalidateItemDetails, runOrderedPreferenceWrite } from "./trackPreferences";
 import { canonicalLanguageWireValue } from "@/lib/languageNames";
 
@@ -178,6 +179,7 @@ export function useDeleteSubtitlePreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...settingWriteOptions,
     mutationFn: (prefId: string) =>
       runOrderedPreferenceWrite("subtitle", prefId, (profileContext) =>
         v2("DELETE /api/v2/subtitle-prefs/{series_id}", {
@@ -217,6 +219,7 @@ export function useSetSubtitlePreference() {
   const queryClient = useQueryClient();
 
   return useMutation({
+    ...settingWriteOptions,
     mutationFn: ({ prefId, selection }: SetSubtitlePreferenceInput) =>
       runOrderedPreferenceWrite("subtitle", prefId, (profileContext) =>
         v2("PUT /api/v2/subtitle-prefs/{series_id}", {

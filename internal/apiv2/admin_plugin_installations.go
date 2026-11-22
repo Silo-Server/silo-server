@@ -123,6 +123,7 @@ type AdminPluginConfigSchema struct {
 	AdminForm   *AdminPluginForm `json:"admin_form,omitempty"`
 }
 type AdminPluginCapability struct {
+	EnvManaged    []string                  `json:"env_managed,omitempty" doc:"On an installed sign-in capability: the binding fields owned by the deployment. May appear before a binding exists."`
 	Type          string                    `json:"type"`
 	ID            string                    `json:"id"`
 	DisplayName   string                    `json:"display_name"`
@@ -154,11 +155,14 @@ type AdminPluginConfigValue struct {
 	ConfiguredSecrets []string        `json:"configured_secrets" doc:"Secret fields that hold a value on the server"`
 }
 type AdminPluginAuthBinding struct {
-	CapabilityID  string `json:"capability_id"`
-	Enabled       bool   `json:"enabled"`
-	DisplayOrder  int    `json:"display_order"`
-	AutoProvision bool   `json:"auto_provision"`
-	DefaultLogin  bool   `json:"default_login"`
+	CallbackPending bool     `json:"callback_pending,omitzero" doc:"True when an enabled OAuth binding is waiting for the public URL"`
+	CallbackMode    string   `json:"callback_mode,omitempty" enum:"installation,stable" doc:"Redirect URI mode for OAuth sign-in"`
+	EnvManaged      []string `json:"env_managed,omitempty" doc:"Binding fields owned by the deployment."`
+	CapabilityID    string   `json:"capability_id"`
+	Enabled         bool     `json:"enabled"`
+	DisplayOrder    int      `json:"display_order"`
+	AutoProvision   bool     `json:"auto_provision"`
+	DefaultLogin    bool     `json:"default_login"`
 	// CallbackURL and PostLogoutRedirectURL are what the administrator
 	// registers at an OAuth provider for this binding.
 	CallbackURL           string  `json:"callback_url" format:"uri-reference" doc:"Redirect URI to register at the OAuth (OIDC) provider for this installation: the v2 callback on the public URL (server.public_url). Empty for a password (LDAP) provider and while no public URL is configured" example:"https://silo.example.test/api/v2/auth/oauth/3/callback"`
@@ -228,37 +232,45 @@ type AdminPluginSignature struct {
 	VerifiedAt *Instant `json:"verified_at,omitempty" doc:"When Silo verified the signature. Present only when state is verified."`
 }
 
+// AdminPluginProvisionOwnership exposes only the provisioned version and field names.
+type AdminPluginProvisionOwnership struct {
+	VersionPin    string              `json:"version_pin,omitempty" doc:"Exact package version the deployment pins, if any."`
+	ConfigFields  map[string][]string `json:"config_fields" doc:"Top-level fields owned by the deployment, keyed by global configuration entry."`
+	BindingFields map[string][]string `json:"binding_fields" doc:"Binding fields owned by the deployment, keyed by capability ID."`
+}
+
 // AdminPluginInstallation is one manageable installation with its redacted
 // configuration and bindings.
 type AdminPluginInstallation struct {
-	ID                 ID                        `json:"id"`
-	RepositoryID       *ID                       `json:"repository_id,omitempty"`
-	PluginID           string                    `json:"plugin_id"`
-	Version            string                    `json:"version"`
-	InstallPath        string                    `json:"install_path"`
-	Enabled            bool                      `json:"enabled"`
-	Kind               string                    `json:"kind"`
-	UpdatePolicy       string                    `json:"update_policy"`
-	AvailableVersion   string                    `json:"available_version,omitempty"`
-	SourceKind         string                    `json:"source_kind" enum:"silo,approved_community,external"`
-	RepositoryName     string                    `json:"repository_name,omitempty"`
-	RepoURL            string                    `json:"repo_url,omitempty" format:"uri-reference"`
-	Presentation       *AdminPluginPresentation  `json:"presentation,omitempty"`
-	UpdatesPaused      bool                      `json:"updates_paused" doc:"True while the installation's repository is disabled. Silo does not check it for new versions or install from it, so available_version cannot be applied until the repository is enabled again."`
-	UpdateFailure      *AdminPluginUpdateFailure `json:"update_failure,omitempty" doc:"The last automatic update that failed, such as a download that did not match its catalog checksum. Absent when the last check did not fail for this plugin."`
-	Signature          AdminPluginSignature      `json:"signature" doc:"The release signature check of the installed package."`
-	Capabilities       []AdminPluginCapability   `json:"capabilities"`
-	GlobalConfigSchema []AdminPluginConfigSchema `json:"global_config_schema"`
-	UserConfigSchema   []AdminPluginConfigSchema `json:"user_config_schema"`
-	Routes             []PluginRoute             `json:"routes"`
-	Assets             []PluginAsset             `json:"assets"`
-	Metadata           PluginJSONValue           `json:"metadata"`
-	GlobalConfigs      []AdminPluginConfigValue  `json:"global_configs"`
-	AuthBindings       []AdminPluginAuthBinding  `json:"auth_bindings"`
-	TaskBindings       []AdminPluginTaskBinding  `json:"task_bindings"`
-	Runtime            AdminPluginRuntime        `json:"runtime"`
-	CreatedAt          Instant                   `json:"created_at"`
-	UpdatedAt          Instant                   `json:"updated_at"`
+	EnvManaged         *AdminPluginProvisionOwnership `json:"env_managed,omitempty" doc:"Present when the deployment owns this installation and its package source."`
+	ID                 ID                             `json:"id"`
+	RepositoryID       *ID                            `json:"repository_id,omitempty"`
+	PluginID           string                         `json:"plugin_id"`
+	Version            string                         `json:"version"`
+	InstallPath        string                         `json:"install_path"`
+	Enabled            bool                           `json:"enabled"`
+	Kind               string                         `json:"kind"`
+	UpdatePolicy       string                         `json:"update_policy"`
+	AvailableVersion   string                         `json:"available_version,omitempty"`
+	SourceKind         string                         `json:"source_kind" enum:"silo,approved_community,external"`
+	RepositoryName     string                         `json:"repository_name,omitempty"`
+	RepoURL            string                         `json:"repo_url,omitempty" format:"uri-reference"`
+	Presentation       *AdminPluginPresentation       `json:"presentation,omitempty"`
+	UpdatesPaused      bool                           `json:"updates_paused" doc:"True while the installation's repository is disabled. Silo does not check it for new versions or install from it, so available_version cannot be applied until the repository is enabled again."`
+	UpdateFailure      *AdminPluginUpdateFailure      `json:"update_failure,omitempty" doc:"The last automatic update that failed, such as a download that did not match its catalog checksum. Absent when the last check did not fail for this plugin."`
+	Signature          AdminPluginSignature           `json:"signature" doc:"The release signature check of the installed package."`
+	Capabilities       []AdminPluginCapability        `json:"capabilities"`
+	GlobalConfigSchema []AdminPluginConfigSchema      `json:"global_config_schema"`
+	UserConfigSchema   []AdminPluginConfigSchema      `json:"user_config_schema"`
+	Routes             []PluginRoute                  `json:"routes"`
+	Assets             []PluginAsset                  `json:"assets"`
+	Metadata           PluginJSONValue                `json:"metadata"`
+	GlobalConfigs      []AdminPluginConfigValue       `json:"global_configs"`
+	AuthBindings       []AdminPluginAuthBinding       `json:"auth_bindings"`
+	TaskBindings       []AdminPluginTaskBinding       `json:"task_bindings"`
+	Runtime            AdminPluginRuntime             `json:"runtime"`
+	CreatedAt          Instant                        `json:"created_at"`
+	UpdatedAt          Instant                        `json:"updated_at"`
 
 	ConnectionCheckSupported bool `json:"connection_check_supported" doc:"True when POST config/test contacts the provider for this plugin: a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics can still answer that checks are not supported."`
 }
@@ -417,6 +429,18 @@ func (reg *Registry) adminPluginInstallationOf(v handlers.PluginInstallationView
 		return AdminPluginInstallation{}, err
 	}
 	out := AdminPluginInstallation{ID: IDFromInt(int64(v.ID)), PluginID: v.PluginID, Version: v.Version, InstallPath: v.InstallPath, Enabled: v.Enabled, Kind: v.Kind, UpdatePolicy: v.UpdatePolicy, SourceKind: v.SourceKind, RepositoryName: v.RepositoryName, RepoURL: v.RepoURL, Presentation: adminPluginPresentationOf(v.Presentation), UpdatesPaused: v.UpdatesPaused, Capabilities: caps, GlobalConfigSchema: global, UserConfigSchema: user, Routes: pluginRoutesOf(v.Routes), Assets: pluginAssetsOf(v.Assets), Metadata: NonNilMap(PluginJSONValue(v.Metadata)), GlobalConfigs: make([]AdminPluginConfigValue, 0, len(v.GlobalConfigs)), AuthBindings: make([]AdminPluginAuthBinding, 0, len(v.AuthBindings)), TaskBindings: make([]AdminPluginTaskBinding, 0, len(v.TaskBindings)), Runtime: adminPluginRuntimeOf(v.Runtime), CreatedAt: NewInstant(v.CreatedAt), UpdatedAt: NewInstant(v.UpdatedAt)}
+	if ownership := v.ProvisionOwnership; ownership.Managed {
+		out.EnvManaged = &AdminPluginProvisionOwnership{
+			VersionPin:    ownership.VersionPin,
+			ConfigFields:  NonNilMap(ownership.ConfigFields),
+			BindingFields: NonNilMap(ownership.BindingFields),
+		}
+		for i := range out.Capabilities {
+			if out.Capabilities[i].Type == sdkcapability.AuthProvider {
+				out.Capabilities[i].EnvManaged = ownership.BindingFields[out.Capabilities[i].ID]
+			}
+		}
+	}
 	if v.RepositoryID != nil {
 		out.RepositoryID = new(IDFromInt(int64(*v.RepositoryID)))
 	}
@@ -431,27 +455,31 @@ func (reg *Registry) adminPluginInstallationOf(v handlers.PluginInstallationView
 	for _, c := range v.GlobalConfigs {
 		out.GlobalConfigs = append(out.GlobalConfigs, AdminPluginConfigValue{Key: c.Key, Value: NonNilMap(PluginJSONValue(c.Value)), ConfiguredSecrets: NonNil(c.ConfiguredSecrets)})
 	}
-	if svc := reg.deps.OAuth; svc != nil {
-		for i := range out.Capabilities {
-			if out.Capabilities[i].SignInMode != auth.ProviderModeOAuth {
-				continue
-			}
-			postLogout, callback := svc.PostLogoutRedirectURL(), ""
-			if postLogout != "" {
-				callback = svc.CallbackURL(Prefix, v.ID)
-			}
-			out.Capabilities[i].CallbackURL, out.Capabilities[i].PostLogoutRedirectURL = &callback, &postLogout
-		}
-	}
+	callbackModes := make(map[string]string, len(v.AuthBindings))
 	for _, b := range v.AuthBindings {
 		binding := AdminPluginAuthBinding{CapabilityID: b.CapabilityID, Enabled: b.Enabled, DisplayOrder: b.DisplayOrder, AutoProvision: b.AutoProvision, DefaultLogin: b.DefaultLogin, CreatedAt: NewInstant(b.CreatedAt), UpdatedAt: NewInstant(b.UpdatedAt)}
-		if svc := reg.deps.OAuth; svc != nil && authBindingIsOAuth(v.Capabilities, b.CapabilityID) {
-			binding.PostLogoutRedirectURL = svc.PostLogoutRedirectURL()
-			if binding.PostLogoutRedirectURL != "" {
-				binding.CallbackURL = svc.CallbackURL(Prefix, v.ID)
+		if authBindingIsOAuth(v.Capabilities, b.CapabilityID) {
+			binding.CallbackMode = cmp.Or(b.CallbackMode, plugins.AuthCallbackInstallation)
+			callbackModes[b.CapabilityID] = binding.CallbackMode
+			if svc := reg.deps.OAuth; svc != nil {
+				binding.PostLogoutRedirectURL = svc.PostLogoutRedirectURL()
+				binding.CallbackURL = svc.CallbackURL(Prefix, v.ID, binding.CallbackMode)
+				binding.CallbackPending = v.Enabled && b.Enabled && binding.CallbackURL == ""
 			}
 		}
+		binding.EnvManaged = v.ProvisionOwnership.BindingFields[b.CapabilityID]
 		out.AuthBindings = append(out.AuthBindings, binding)
+	}
+	for i := range out.Capabilities {
+		capability := &out.Capabilities[i]
+		if capability.SignInMode == "" {
+			continue
+		}
+		capability.EnvManaged = v.ProvisionOwnership.BindingFields[capability.ID]
+		if svc := reg.deps.OAuth; svc != nil && capability.SignInMode == auth.ProviderModeOAuth {
+			capability.CallbackURL = new(svc.CallbackURL(Prefix, v.ID, callbackModes[capability.ID]))
+			capability.PostLogoutRedirectURL = new(svc.PostLogoutRedirectURL())
+		}
 	}
 	for _, b := range v.TaskBindings {
 		out.TaskBindings = append(out.TaskBindings, AdminPluginTaskBinding{CapabilityID: b.CapabilityID, Enabled: b.Enabled, Trigger: NonNilMap(PluginJSONValue(b.Trigger)), CreatedAt: NewInstant(b.CreatedAt), UpdatedAt: NewInstant(b.UpdatedAt)})

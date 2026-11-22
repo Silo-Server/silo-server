@@ -251,12 +251,14 @@ answers any owner.
 | Downloads | `/admin/downloads/entries`, `/admin/downloads/devices`, `/admin/downloads/storage/capabilities`, `/admin/downloads/preparations`, `/admin/downloads/preparations/capabilities` |
 | Hosts and nodes | `/admin/system/resources`, `/admin/system/resources/capabilities`, `/admin/nodes/summary`, `/admin/nodes/capabilities`, `/admin/server/status` |
 | Catalog | `/admin/catalog/items`, `/admin/catalog/capabilities` |
-| Media requests | `/admin/requests`, `/admin/requests/counts`, `/admin/requests/capabilities`, `/admin/requests/{id}/events` |
+| Media requests | `/admin/requests`, `/admin/requests/counts`, `/admin/requests/capabilities`, `/admin/requests/{id}/events`, `/admin/requests/{id}/poster` |
 
 The scope never returns filesystem paths, node addresses, storage keys, setting
 values or credentials. Operations that carry them stay outside it: item files, download
 storage other than its capabilities, settings, logs, API keys, audit, per-device setting values, node
-sessions, and the request integrations, settings and routes. Five monitored
+sessions, and the request integrations, settings and routes. The one setting value
+it returns is `requests_enabled` on `/admin/requests/counts`, the server-wide
+requests switch, so a monitor can tell a disabled feature from an empty queue. Five monitored
 reads withhold details from scoped keys:
 
 - `/admin/system/resources` omits each disk's `path`.
@@ -278,7 +280,7 @@ cached aggregate, so a polling tool cannot force the aggregate queries.
 Unscoped keys and login sessions keep the full documents.
 
 The scope also admits one write, `POST /api/v2/events/ws-ticket`, which opens
-the realtime events socket for the `sessions` and `catalog` channels for up to
+the realtime events socket for the `sessions`, `catalog` and `downloads` channels for up to
 four hours. The key's revision and scope are rechecked every 15 seconds; see
 [API-key handshake](realtime-api.md#api-key-handshake).
 

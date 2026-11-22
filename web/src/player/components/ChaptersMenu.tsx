@@ -44,19 +44,10 @@ export function ChaptersMenu({
   // broken, so without any the list leads with chapter numbers instead.
   const hasThumbnails = chapters.some((chapter) => Boolean(chapter.thumbnail_url));
 
-  const handleBlur = useCallback(
-    (e: React.FocusEvent) => {
-      if (!menuRef.current?.contains(e.relatedTarget as Node)) {
-        setOpen(false);
-      }
-    },
-    [setOpen],
-  );
-
   if (chapters.length === 0) return null;
 
   return (
-    <div ref={menuRef} className="relative" onBlur={handleBlur}>
+    <div ref={menuRef} className="relative">
       {!hideTrigger && (
         <button
           type="button"

@@ -598,6 +598,7 @@ type matchCase struct {
 	doc       UserDocument
 	match     string
 	local     int
+	localName string
 	reason    string
 	differing string
 }
@@ -651,6 +652,9 @@ func checkMatch(t *testing.T, p accountPlan, c matchCase) {
 	if !p.item.Selectable || acct.Match != c.match || p.localID != c.local {
 		t.Fatalf("plan = %+v %+v local %d, want %s %d", p.item, acct, p.localID, c.match, c.local)
 	}
+	if c.localName != "" && acct.LocalUsername != c.localName {
+		t.Fatalf("local_username = %q, want %q", acct.LocalUsername, c.localName)
+	}
 	if c.doc.Account.Role == "admin" && !acct.Admin {
 		t.Fatal("an administrator account is not marked")
 	}
@@ -669,6 +673,9 @@ func TestUserMatchingDB(t *testing.T) {
 	carol := testAccount(t, pool, "carol-"+sfx, "h", nil, nil)
 	testAccount(t, pool, "dan-"+sfx, "h", nil, nil)
 	sharedSignIn(t, pool, carol, "DAN-"+sfx)
+	// An email-only account, as restoring one with no username creates.
+	sam := testAccount(t, pool, "sam-"+sfx, "h", nil, nil)
+	dbExec(t, pool, `UPDATE users SET username = NULL WHERE id = $1`, sam)
 	testProfile(t, pool, alice, "a1-"+sfx, "Kids", true, "")
 	testProfile(t, pool, alice, "a2-"+sfx, "kids", false, "")
 	testProfile(t, pool, alice, "a3-"+sfx, "Main", false, "")
@@ -692,6 +699,8 @@ func TestUserMatchingDB(t *testing.T) {
 	for _, c := range []matchCase{
 		{name: "username case-insensitively", doc: UserDocument{Account: matchAccount("alice-"+sfx, "")}, match: MatchLogin, local: alice},
 		{name: "email alone", doc: UserDocument{Account: matchAccount("someone-"+sfx, "BOB-"+sfx+"@example.test")}, match: MatchLogin, local: bob},
+		{name: "email of an account with no username", doc: UserDocument{Account: matchAccount("sam-old-"+sfx, "SAM-"+sfx+"@example.test")}, match: MatchLogin, local: sam,
+			localName: "sam-" + sfx + "@example.test"},
 		{name: "username and email disagree", doc: UserDocument{Account: matchAccount("alice-"+sfx, "bob-"+sfx+"@example.test")}, reason: ReasonAmbiguousAccount},
 		{name: "one sign-in, two accounts", doc: UserDocument{Account: matchAccount("dan-"+sfx, "")}, reason: ReasonAmbiguousAccount},
 		{name: "nobody", doc: UserDocument{Account: matchAccount("nobody-"+sfx, "nobody-"+sfx+"@example.test")}, match: MatchNew},
