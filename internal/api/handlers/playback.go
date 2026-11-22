@@ -1433,6 +1433,21 @@ func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playba
 	return result
 }
 
+// recordCommittedSubtitle gives a native play's entry the subtitle its
+// attempt's last replan committed. History keeps the subtitle recorded
+// latest, and a copy that missed a replan on another server, or whose own
+// replan failed, still holds an older one.
+func (h *PlaybackHandler) recordCommittedSubtitle(ctx context.Context, session *playback.Session, entry *AdminPlaybackHistoryEntry) {
+	if h.PlanStoreV3 == nil || session.IsJellyfinCompat {
+		return
+	}
+	record, err := h.PlanStoreV3.GetAttempt(ctx, session.ID)
+	if err != nil || record == nil || record.UserID != session.UserID || record.CurrentPlanID == "" {
+		return
+	}
+	entry.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
+}
+
 // recordAdminStopHistory records a session's end in the admin log; see
 // recordAdminEnd.
 func (h *PlaybackHandler) recordAdminStopHistory(ctx context.Context, session *playback.Session, reason PlaybackEndReason) error {
@@ -1454,6 +1469,9 @@ func (h *PlaybackHandler) recordAdminEnd(ctx context.Context, session *playback.
 	}
 	entry.EndReason = reason
 	entry.SubtitleAt = subtitleAt
+	if subtitleAt.IsZero() {
+		h.recordCommittedSubtitle(ctx, session, entry)
+	}
 	// An end goes through the session's lifecycle, which announces it;
 	// a teardown the client can recover from records its stretch only.
 	if reason != "" {
