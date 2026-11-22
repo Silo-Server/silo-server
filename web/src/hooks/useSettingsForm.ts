@@ -78,6 +78,10 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   const [localValues, setLocalValues] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [restartRequired, setRestartRequired] = useState(false);
+  // Counts the times the drafts were settled or thrown away from outside a
+  // field: a save, Discard, a profile switch, or a reload that undid them.
+  // State a page keeps beside the drafts resets when it changes.
+  const [resetRevision, setResetRevision] = useState(0);
   const editVersions = useRef(new Map<string, number>());
   const dirtyRef = useRef(dirty);
   const context = captureProfileRequestContext();
@@ -94,6 +98,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     dirtyRef.current = new Set();
     editedOver.current.clear();
     draftGeneration.current++;
+    setResetRevision((revision) => revision + 1);
   }
   useEffect(() => {
     dirtyRef.current = dirty;
@@ -413,6 +418,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       editBaseline.current = fresh;
       baselineConfigured.current = configured;
       setBaselineRevision((revision) => revision + 1);
+      if (replaced.length > 0) setResetRevision((revision) => revision + 1);
       dismissConflict();
     } finally {
       reloading.current = false;
@@ -480,6 +486,9 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         if (result.restart_required) setRestartRequired(true);
         return;
       }
+      // The save went through, so a refusal shown before it no longer applies.
+      dismissConflict();
+      setResetRevision((revision) => revision + 1);
       const settledKeys = submittedKeys.filter(
         (key) => (editVersions.current.get(key) ?? 0) === submittedVersions.get(key),
       );
@@ -508,12 +517,13 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       savedOver.current = settings;
       for (const key of submittedKeys) {
         // A later edit of a key this save wrote began over the written value,
-        // which secrets only show as set.
+        // which secrets only show as set. The values leave out every secret,
+        // including one this save cleared.
         if (!stillStaged.includes(key)) editedOver.current.delete(key);
         else
           editedOver.current.set(key, {
             value: result.values[key],
-            secretSet: !Object.hasOwn(result.values, key),
+            secretSet: (values[key] ?? "").trim() !== "" && !Object.hasOwn(result.values, key),
           });
       }
       setLocalValues((previous) => {
@@ -539,7 +549,15 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         setRestartRequired(true);
       }
     },
-    [conflictToastId, dirty, localValues, reloadAfterConflict, settings, updateSettings],
+    [
+      conflictToastId,
+      dirty,
+      dismissConflict,
+      localValues,
+      reloadAfterConflict,
+      settings,
+      updateSettings,
+    ],
   );
 
   const discard = useCallback(() => {
@@ -553,6 +571,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     editBaseline.current = undefined;
     editedOver.current.clear();
     draftGeneration.current++;
+    setResetRevision((revision) => revision + 1);
     setDirty(new Set());
   }, [settings, keys]);
 
@@ -598,6 +617,8 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     sensitiveManagedByEnv,
     envVar,
     sensitiveStatusReady: sensitiveData != null,
+    /** Changes when the drafts were settled or thrown away from outside a field. */
+    resetRevision,
     sensitiveStatusError,
     buildConnectionCheckRequest,
     beginSettingsTransition,

@@ -65,6 +65,21 @@ describe("RedisGroup", () => {
     expect(screen.getByText("0 staged")).toBeInTheDocument();
   });
 
+  it("keeps Use Redis on while the admin types the database number back, with another edit staged", async () => {
+    render(<Harness />);
+    await userEvent.type(screen.getByLabelText("Other setting"), "https://media.example.com");
+    const useRedis = screen.getByRole("switch", { name: "Use Redis" });
+    await userEvent.click(useRedis);
+    const database = screen.getByLabelText("Database number");
+    await userEvent.clear(database);
+    await userEvent.type(database, "2");
+    await userEvent.clear(database);
+    await userEvent.type(database, "0");
+
+    expect(useRedis).toBeChecked();
+    expect(screen.getByLabelText("Connection URL")).toBeInTheDocument();
+  });
+
   it("shows the connection REDIS_URL sets once it takes over a staged switch-off", async () => {
     sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
     const { rerender } = render(<Harness />);
