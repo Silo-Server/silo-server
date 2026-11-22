@@ -1,6 +1,8 @@
 package directconn
 
 import (
+	"net"
+	"net/netip"
 	"strconv"
 	"strings"
 
@@ -91,6 +93,7 @@ func localFeatureStates(cfg settings, heldAtStart bool, caps engine.CapabilityRe
 }
 
 func networkFeatureStates(cfg settings, nat engine.NATReport, natErr error, mapping engine.PortMappingReport, mappingErr error) []Feature {
+	measuresV4, measuresV6 := stunFamilies(cfg.servers())
 	rows := make([]Feature, 0, 6)
 	for _, name := range []string{"nat_mapping", "ipv4", featureIPv6, "nat_hairpin", "port_mapping", "reachability"} {
 		f := Feature{Feature: name, Kind: "network", State: stateOff, Reason: reasonDisabled}
@@ -120,9 +123,11 @@ func networkFeatureStates(cfg settings, nat engine.NATReport, natErr error, mapp
 		case "ipv4", featureIPv6:
 			available := nat.IPv4
 			addr := nat.GlobalV4
+			measured := measuresV4
 			if name == featureIPv6 {
 				available = nat.IPv6
 				addr = nat.GlobalV6
+				measured = measuresV6
 			}
 			switch {
 			case natErr != nil:
@@ -137,6 +142,9 @@ func networkFeatureStates(cfg settings, nat engine.NATReport, natErr error, mapp
 				if addr.IsValid() {
 					f.Detail = addr.String()
 				}
+			case !measured:
+				// No configured server can answer in this family; f stays
+				// unknown/not_measured.
 			default:
 				f.State = stateOff
 				f.Reason = "not_available"
@@ -177,6 +185,32 @@ func networkFeatureStates(cfg settings, nat engine.NATReport, natErr error, mapp
 		rows = append(rows, f)
 	}
 	return rows
+}
+
+// stunFamilies reports which address families the STUN servers can measure. The
+// prober sends to an IP literal only in its own family, so a list of IPv4
+// literals cannot show whether IPv6 works. A host name, or an entry that does not
+// parse, can reach either family.
+func stunFamilies(servers []string) (v4, v6 bool) {
+	for _, server := range servers {
+		host, _, err := net.SplitHostPort(server)
+		if err != nil {
+			return true, true
+		}
+		addr, err := netip.ParseAddr(host)
+		switch {
+		case err != nil:
+			return true, true
+		case addr.Is4():
+			v4 = true
+		default:
+			v6 = true
+		}
+	}
+	if !v4 && !v6 {
+		return true, true
+	}
+	return v4, v6
 }
 
 func observedAddress(nat engine.NATReport) string {

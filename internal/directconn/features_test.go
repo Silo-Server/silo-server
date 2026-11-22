@@ -190,3 +190,25 @@ func testUnsupportedPlatformFeatureStates(t *testing.T) {
 		}
 	}
 }
+
+// A family that no configured STUN server can answer in is not measured, rather
+// than reported unavailable.
+func TestAddressFamilyMeasuredOnlyWithAServerInIt(t *testing.T) {
+	base := engine.CapabilityReport{Platform: "linux"}
+	for _, tc := range []struct {
+		name, servers, target, state, reason string
+		nat                                  engine.NATReport
+	}{
+		{"IPv4 literals leave IPv6 unmeasured", "198.51.100.1:3478,198.51.100.2:3478", "ipv6", "unknown", "not_measured", engine.NATReport{UDP: true, IPv4: true}},
+		{"IPv6 literals leave IPv4 unmeasured", "[2001:db8::2]:3478", "ipv4", "unknown", "not_measured", engine.NATReport{UDP: true, IPv6: true}},
+		{"a host name measures both", "198.51.100.1:3478,stun.example:3478", "ipv6", "off", "not_available", engine.NATReport{UDP: true, IPv4: true}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := settings{enabled: true, stunServers: tc.servers}
+			f := feature(t, featureStates(cfg, false, base, nil, tc.nat, nil, engine.PortMappingReport{}, nil), tc.target)
+			if f.State != tc.state || f.Reason != tc.reason {
+				t.Fatalf("%s = %s/%s, want %s/%s", tc.target, f.State, f.Reason, tc.state, tc.reason)
+			}
+		})
+	}
+}
