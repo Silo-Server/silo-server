@@ -115,13 +115,16 @@ export function UnmatchedItemsSection({ embedded = false }: { embedded?: boolean
   // so the search box and empty states stay put while refetches run.
   if (!embedded && !open && !awaitingTotal && !ignoredTotal && search.trim() === "") return null;
 
-  const emptyMessage = ignoredView
-    ? search.trim()
-      ? t("web.admin.libraries.unmatched.emptyIgnoredSearch")
-      : t("web.admin.libraries.unmatched.emptyIgnored")
-    : search.trim()
-      ? t("web.admin.libraries.unmatched.emptyAwaitingSearch")
-      : t("web.admin.libraries.unmatched.emptyAwaiting");
+  const isInitialLoading = data === undefined && isFetching;
+  const emptyMessage = isInitialLoading
+    ? t("common.loading")
+    : ignoredView
+      ? search.trim()
+        ? t("web.admin.libraries.unmatched.emptyIgnoredSearch")
+        : t("web.admin.libraries.unmatched.emptyIgnored")
+      : search.trim()
+        ? t("web.admin.libraries.unmatched.emptyAwaitingSearch")
+        : t("web.admin.libraries.unmatched.emptyAwaiting");
 
   // The row's Match and Ignore/Restore actions, sized by the layout showing them.
   const rowActions = (u: UnmatchedLibraryItem, buttonClassName: string) => (

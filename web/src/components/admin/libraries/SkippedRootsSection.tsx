@@ -126,7 +126,18 @@ export function SkippedRootsSection({
           pag.setPage(0);
         }}
       />
-      {!isLoading && pag.rows.length === 0 ? (
+      {data === undefined && isError ? (
+        <div
+          role="alert"
+          className="border-border/40 bg-background/40 text-destructive rounded-xl border px-4 py-8 text-center text-sm"
+        >
+          {t("web.admin.common.diagnosticsSection.countError")}
+        </div>
+      ) : data === undefined && isLoading ? (
+        <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
+          {t("web.admin.libraries.skippedRoots.loading")}
+        </div>
+      ) : data !== undefined && pag.rows.length === 0 ? (
         <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
           {t("web.admin.libraries.health.skippedEmpty")}
         </div>

@@ -17,6 +17,7 @@ import {
 } from "@/components/admin/libraries/libraryActivityHelpers";
 import { findLibraryType } from "@/components/admin/libraries/libraryTypes";
 import { formatJobProgress } from "@/components/adminCatalogMaintenanceFormatters";
+import { PathText } from "@/components/PathText";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { numberText, useT } from "@/i18n";
@@ -33,6 +34,7 @@ import { cn } from "@/lib/utils";
 const SEPARATOR = "·";
 const SPACED_SEPARATOR = ` ${SEPARATOR} `;
 const EM_DASH = "—";
+const COMMA_SEPARATOR = ", ";
 const QUEUED_PREVIEW_LIMIT = 2;
 
 /** Calm single-line summary banner shown above the Libraries list while scans or refreshes run. */
@@ -375,7 +377,9 @@ function ActivityLibraryCard({
           <div className="bg-secondary flex h-8 w-8 shrink-0 items-center justify-center rounded-lg">
             <TypeIcon className="text-muted-foreground h-4 w-4" aria-hidden="true" />
           </div>
-          <h3 className="truncate text-sm font-semibold">{name}</h3>
+          <h3 dir="auto" className="bidi-text truncate text-sm font-semibold">
+            {name}
+          </h3>
           <Badge variant="secondary" className="text-[11px] tabular-nums">
             {countParts.join(SPACED_SEPARATOR)}
           </Badge>
@@ -417,7 +421,7 @@ function ActivityLibraryCard({
                       className="text-foreground/90 truncate font-mono text-xs"
                       title={scan.path}
                     >
-                      {formatActiveScanTarget(scan)}
+                      <PathText path={formatActiveScanTarget(scan)} />
                     </code>
                     {scan.trigger ? (
                       <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
@@ -430,9 +434,15 @@ function ActivityLibraryCard({
                   </span>
                 </div>
                 {pct !== null ? (
-                  <div className="bg-border/70 h-1.5 w-full overflow-hidden rounded-full">
+                  <div
+                    role="progressbar"
+                    aria-valuemin={0}
+                    aria-valuemax={100}
+                    aria-valuenow={pct}
+                    className="bg-border/70 h-1.5 w-full overflow-hidden rounded-full forced-colors:bg-transparent forced-colors:outline forced-colors:outline-[CanvasText]"
+                  >
                     <div
-                      className="bg-success h-full rounded-full transition-[width] duration-300"
+                      className="bg-success h-full rounded-full transition-[width] duration-300 forced-colors:bg-[Highlight]"
                       style={{ width: `${pct}%` }}
                     />
                   </div>
@@ -455,7 +465,12 @@ function ActivityLibraryCard({
               </span>
               <span aria-hidden="true">{EM_DASH}</span>
               <span dir="ltr" className="truncate font-mono text-[11px]">
-                {queuedPreview.join(", ")}
+                {queuedPreview.map((target, index) => (
+                  <span key={`${target}-${index}`}>
+                    {index > 0 ? COMMA_SEPARATOR : null}
+                    <PathText path={target} />
+                  </span>
+                ))}
               </span>
               {remainingQueued > 0 ? (
                 <span className="shrink-0 tabular-nums">
@@ -503,7 +518,7 @@ function ActivityLibraryCard({
                   <span className="bg-muted-foreground/40 h-1.5 w-1.5 shrink-0 rounded-full" />
                   <span className="shrink-0">{formatActiveScanMode(scan)}</span>
                   <code dir="ltr" className="text-foreground/80 min-w-0 flex-1 truncate font-mono">
-                    {formatActiveScanTarget(scan)}
+                    <PathText path={formatActiveScanTarget(scan)} />
                   </code>
                   <span className="shrink-0 text-[10px]">
                     {t("web.admin.libraries.scanQueue.waiting")}

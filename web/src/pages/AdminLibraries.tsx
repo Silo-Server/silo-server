@@ -45,6 +45,7 @@ import { useLibrariesTableLayout } from "@/components/admin/libraries/diagnostic
 import { useLibraryRows, type LibraryRow } from "@/components/admin/libraries/useLibraryRows";
 import type { AdminTrickplayLibrary } from "@/hooks/queries/admin/trickplay";
 import { PageHeader } from "@/components/page/PageHeader";
+import { PathText } from "@/components/PathText";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -591,7 +592,9 @@ function LibraryTable({
                             />
                           </div>
                           <div className="min-w-0 flex-1 space-y-0.5">
-                            <div className="truncate font-medium">{lib.name}</div>
+                            <div dir="auto" className="bidi-text truncate font-medium">
+                              {lib.name}
+                            </div>
                             <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-xs">
                               <span className="shrink-0">{libraryTypeLabel(lib.type)}</span>
                               <span aria-hidden="true">{SEPARATOR}</span>
@@ -603,7 +606,7 @@ function LibraryTable({
                               >
                                 {lib.paths.length === 1 ? (
                                   <span dir="ltr" className="font-mono text-[11px]">
-                                    {lib.paths[0]}
+                                    <PathText path={lib.paths[0]} />
                                   </span>
                                 ) : (
                                   t("web.admin.libraries.list.folderCount", {
@@ -742,7 +745,14 @@ function SortableLibraryRow({
   };
 
   return (
-    <TableRow ref={setNodeRef} style={style} className="group">
+    <TableRow
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "group",
+        progressPercent !== null && "forced-colors:border-b-2 forced-colors:border-b-[Highlight]",
+      )}
+    >
       <TableCell className="w-10">
         <button
           type="button"

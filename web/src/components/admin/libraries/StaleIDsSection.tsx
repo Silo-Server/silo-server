@@ -96,7 +96,18 @@ export function StaleIDsSection({
           pag.setPage(0);
         }}
       />
-      {!isLoading && pag.rows.length === 0 ? (
+      {stalePages === undefined && isError ? (
+        <div
+          role="alert"
+          className="border-border/40 bg-background/40 text-destructive rounded-xl border px-4 py-8 text-center text-sm"
+        >
+          {t("web.admin.common.diagnosticsSection.countError")}
+        </div>
+      ) : stalePages === undefined && isLoading ? (
+        <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
+          {t("common.loading")}
+        </div>
+      ) : stalePages !== undefined && pag.rows.length === 0 ? (
         <div className="border-border/40 bg-background/40 text-muted-foreground rounded-xl border px-4 py-8 text-center text-sm">
           {t("web.admin.libraries.health.staleEmpty")}
         </div>
