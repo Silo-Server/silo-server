@@ -491,6 +491,17 @@ jobs:
   # after it: golangci-lint (changed lines, then router recovery) and go vet
   # each took about half of the old combined job, and over 15 minutes when a
   # pull request changed go.mod and every cache missed.
+  runner-probe:
+    name: TEMP runner disk probe
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Report disk and memory
+        run: |
+          df -h / /mnt /tmp "$HOME" || true
+          free -m
+          nproc
+          lsblk || true
+
   go-vet:
     name: Go vet and contracts
     needs: select
