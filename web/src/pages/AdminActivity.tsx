@@ -103,13 +103,29 @@ const SORT_DESC_MARK = "▼";
 const ROW_LINK_CLASS =
   "rounded-sm decoration-1 underline-offset-3 transition-colors hover:text-primary hover:underline active:underline focus-visible:text-primary focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
 /**
- * Truncates a row link with "…". Not `truncate`: its `overflow: hidden` clips
- * the text to the link's rounded corners, which cuts off a first or last
- * letter's descender (the "j" in "jordan") at some row offsets. Clipping only
- * the inline axis keeps the corners out of it. `min-w-0` lets a flex item
- * shrink, which `overflow: hidden` used to do.
+ * A row link's text, truncated with "…" inside the link. The link itself can't
+ * truncate: Firefox and WebKit clip its text to its rounded corners with either
+ * `overflow: hidden` or `overflow-x: clip`, which cuts off a first or last
+ * letter's descender (the "j" in "jordan"). This box has no corners, and the
+ * link keeps its rounded focus ring. It clips only the inline axis: `truncate`'s
+ * `overflow: hidden` would cut the top of "Ẩ" and Arabic vowel marks below the
+ * line. Padding offset by a negative margin, as in `OVERFLOW_CLIP`, moves the clip
+ * past the text's edges, so ink that reaches beyond them (the hook of a leading
+ * "j") stays whole. The box takes no pointer events, so its padding can't catch
+ * a click meant for a neighbouring link or the row; the link's own box still
+ * does. A flex-item link needs `min-w-0` to shrink; a block link needs
+ * `flow-root`, or the negative margins pass through it and stretch its focus
+ * ring.
  */
-const ROW_LINK_TRUNCATE_CLASS = "min-w-0 overflow-x-clip text-ellipsis whitespace-nowrap";
+function RowLinkText({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return (
+    <span
+      className={`pointer-events-none -m-[0.25em] block overflow-x-clip p-[0.25em] text-ellipsis whitespace-nowrap ${className}`}
+    >
+      {children}
+    </span>
+  );
+}
 /**
  * A clickable row's highlight and lit expand chevron, held back while the
  * pointer is on a link or a button that does something else; the expand
@@ -910,9 +926,9 @@ function StreamRow({
                   to={`/admin/users/${session.user_id}`}
                   title={username}
                   dir="auto"
-                  className={`${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS}`}
+                  className={`${ROW_LINK_CLASS} min-w-0`}
                 >
-                  {username}
+                  <RowLinkText>{username}</RowLinkText>
                 </Link>
                 <ProfilePill session={session} />
                 <JellyfinSessionPill session={session} />
@@ -990,9 +1006,9 @@ function TitleLink({ session }: { session: AdminSession }) {
       to={itemHref}
       title={title}
       dir="auto"
-      className={`bidi-text ${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS} block w-fit max-w-full text-[13px] font-medium`}
+      className={`${ROW_LINK_CLASS} flow-root w-fit max-w-full text-[13px] font-medium`}
     >
-      {title}
+      <RowLinkText className="bidi-text">{title}</RowLinkText>
     </Link>
   ) : (
     <div title={title} dir="auto" className="bidi-text truncate text-[13px] font-medium">
@@ -1020,7 +1036,10 @@ function MediaCell({ session }: { session: AdminSession }) {
 /**
  * Position through the title, with a bar, and whether the viewer paused. The
  * bar narrows before anything wraps; past that the line wraps, so its end
- * (usually the pause label) never paints over the next column.
+ * (usually the pause label) never paints over the next column. When the
+ * position alone is wider than the column (a large minimum font size), it
+ * wraps at the " / ", and a one-word pause label drops below its icon rather
+ * than breaking mid-word.
  */
 function ProgressLine({ session }: { session: AdminSession }) {
   const t = useT();
@@ -1038,10 +1057,10 @@ function ProgressLine({ session }: { session: AdminSession }) {
           />
         </span>
       ) : null}
-      <span className="shrink-0 tabular-nums">{formatPlaybackPosition(session)}</span>
+      <span className="max-w-full shrink-0 tabular-nums">{formatPlaybackPosition(session)}</span>
       {session.is_paused ? (
-        <span className="text-warning inline-flex shrink-0 items-center gap-1 font-medium">
-          <Pause aria-hidden="true" className="h-3 w-3" />
+        <span className="text-warning inline-flex max-w-full shrink-0 flex-wrap items-center gap-1 font-medium">
+          <Pause aria-hidden="true" className="h-3 w-3 shrink-0" />
           {t("web.admin.activity.row.paused")}
         </span>
       ) : (
@@ -1102,9 +1121,9 @@ function ViewerCell({
           to={`/admin/users/${session.user_id}`}
           title={username}
           dir="auto"
-          className={`${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS} text-[13px] font-medium`}
+          className={`${ROW_LINK_CLASS} min-w-0 text-[13px] font-medium`}
         >
-          {username}
+          <RowLinkText>{username}</RowLinkText>
         </Link>
         <ProfilePill session={session} />
       </div>
@@ -1129,9 +1148,9 @@ function ViewerCell({
               type="button"
               onClick={() => onIPLookup(clientIP)}
               title={clientIPTitle}
-              className={`${ROW_LINK_CLASS} ${ROW_LINK_TRUNCATE_CLASS} tabular-nums`}
+              className={`${ROW_LINK_CLASS} min-w-0 tabular-nums`}
             >
-              {clientIP}
+              <RowLinkText>{clientIP}</RowLinkText>
             </button>
           ) : null}
         </div>
@@ -1704,6 +1723,7 @@ function IPLookupDialog({
             type="text"
             placeholder={t("web.admin.activity.ipLookup.placeholder")}
             aria-label={t("web.admin.activity.ipLookup.placeholder")}
+            dir={ipSearch ? "ltr" : undefined}
             value={ipSearch}
             onChange={(e) => setIPSearch(e.target.value)}
             className="placeholder:font-ui max-w-xs font-mono text-sm"

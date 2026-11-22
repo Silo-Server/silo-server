@@ -89,3 +89,40 @@ func TestRoutesAreRecheckedUnderTheLock(t *testing.T) {
 		t.Fatalf("a route changed under the restore = %v, want errSettingsChanged", err)
 	}
 }
+
+// TestEnvironmentKeepsWholeConnections: when this server's environment sets
+// any setting of an outside-service connection, every setting of it that
+// differs keeps this server's value, so a restore never pairs, say, the
+// environment's plain-text mail transport with the backup's host and
+// password. Settings outside the connection still restore.
+func TestEnvironmentKeepsWholeConnections(t *testing.T) {
+	const username, subtitle = "email.smtp_username", "branding.login_subtitle"
+	// Email's switch is an access setting: turning it on is kept stricter.
+	before := map[string]string{subtitle: ItemDiffers, settingSMTPHost: ItemDiffers, settingSMTPPassword: ItemDiffers,
+		username: ItemDiffers, settingEmailEnabled: SettingKeptStricter}
+	mail := []string{settingSMTPHost, settingSMTPPassword, username, settingEmailEnabled}
+	for name, tc := range map[string]struct {
+		env       string
+		untouched []string
+	}{
+		"the mail transport from the environment": {env: settingSMTPSecurity, untouched: []string{subtitle}},
+		"nothing from the environment":            {untouched: append([]string{subtitle}, mail...)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var plans []settingPlan
+			for key, status := range before {
+				plans = append(plans, settingPlan{preview: PreviewSetting{Key: key, Status: status}})
+			}
+			keepEnvironmentBundles(plans, func(key string) bool { return key == tc.env })
+			for _, p := range plans {
+				want := SettingManagedByEnvironment
+				if slices.Contains(tc.untouched, p.preview.Key) {
+					want = before[p.preview.Key]
+				}
+				if p.preview.Status != want {
+					t.Fatalf("%s = %s, want %s", p.preview.Key, p.preview.Status, want)
+				}
+			}
+		})
+	}
+}

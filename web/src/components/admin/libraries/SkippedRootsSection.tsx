@@ -17,7 +17,7 @@ import {
 } from "@/components/admin/libraries/DiagnosticsListParts";
 import {
   pathLeaf,
-  useLibrariesTableLayout,
+  useWideDiagnosticsTableLayout,
   usePagination,
   useSort,
 } from "@/components/admin/libraries/diagnosticsListState";
@@ -47,7 +47,7 @@ const REASON_BADGE_CLASS = "border-warning/30 bg-warning/5 text-warning";
 /** The "Troubleshooting" section: roots the scanner skipped, and why. */
 export function SkippedRootsSection() {
   const t = useT();
-  const showTable = useLibrariesTableLayout();
+  const showTable = useWideDiagnosticsTableLayout();
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const debouncedSearch = useDebounce(search, 250);
@@ -154,7 +154,16 @@ export function SkippedRootsSection() {
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm">{root.library_name}</TableCell>
+                      <TableCell className="text-sm whitespace-normal">
+                        {/* A long library name wraps, so it can't push the table past
+                            its section. */}
+                        <span
+                          dir="auto"
+                          className="align-with-page block w-fit max-w-full wrap-anywhere"
+                        >
+                          {root.library_name}
+                        </span>
+                      </TableCell>
                       <TableCell>
                         <Badge variant="outline" className={REASON_BADGE_CLASS}>
                           {root.reason}
@@ -172,7 +181,10 @@ export function SkippedRootsSection() {
                     </TableRow>
                     {isExpanded && (
                       <TableRow className="hover:bg-transparent">
-                        <TableCell colSpan={6} className="bg-muted/30 border-b px-4 py-3">
+                        <TableCell
+                          colSpan={6}
+                          className="bg-muted/30 border-b px-4 py-3 whitespace-normal"
+                        >
                           <SkippedRootDetails root={root} />
                         </TableCell>
                       </TableRow>
