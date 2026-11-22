@@ -153,12 +153,20 @@ func (s *Service) TestGlobalConfigWithClears(
 	if err != nil {
 		return err
 	}
+	// A plugin that checks itself reads the staged settings from the
+	// TestConfiguration request, so its temporary instance starts unconfigured:
+	// Runtime.Configure may reject input the plugin cannot store, and that
+	// rejection would end the start before the plugin could explain it.
+	startConfig := configEntries
+	if sdkmanifest.SupportsConfigurationCheck(manifest) {
+		startConfig = nil
+	}
 	testInstallationID := -int(s.testConfigSeq.Add(1))
 	client, err := s.host.Start(ctx, pluginhost.StartRequest{
 		InstallationID: testInstallationID,
 		BinaryPath:     binaryPath,
 		Manifest:       manifest,
-		Config:         configEntries,
+		Config:         startConfig,
 	})
 	if err != nil {
 		return &ConnectionTestError{
