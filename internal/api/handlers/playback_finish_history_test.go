@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/tonemap"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/worker"
 )
@@ -990,22 +991,44 @@ func TestAdminPlaybackHistoryRouteFactsDB(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Identical duplicate re-finalization at +15m must not bump ended_at.
+	if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+		SessionID: sessionID, UserID: account, ProfileID: "p-1", PlayMethod: "transcode",
+		StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(15 * time.Minute).Format(time.RFC3339Nano),
+		EndPositionSeconds: 720,
+		TargetVideoCodec:   "hevc", TargetResolution: "720p", TargetAudioCodec: "aac", TargetAudioChannels: 2,
+		OutputContainer: "fmp4", OutputProtocol: "hls", TargetBitrateKbps: 4000,
+		TranscodeHWAccel: "qsv", ToneMapMode: "software",
+		AdaptationReasons: []string{"bitrate_cap", "subtitle_burn_in"},
+		ReportingNode:     "api-2", StreamLocation: "remote", CompatOrigin: true,
+		RoutingExecution: "local", RoutingEgress: "api",
+		RouteFactsRecorded: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
+	assertFinalRouteFactsDB(t, pool, sessionID, started.Add(12*time.Minute))
+}
+
+func assertFinalRouteFactsDB(t *testing.T, pool *pgxpool.Pool, sessionID string, wantEnded time.Time) {
+	t.Helper()
 	var videoCodec, resolution, audioCodec, container, protocol, hwAccel, toneMap, reportingNode, streamLoc, routingExec, routingEgress string
 	var audioCh, bitrate int
+	var execNodeID, egressNodeID *int
+	var endedAt time.Time
 	var reasons []string
 	var compat, recorded bool
-	if err := pool.QueryRow(ctx, `
+	if err := pool.QueryRow(t.Context(), `
 		SELECT COALESCE(target_video_codec,''), COALESCE(target_resolution,''), COALESCE(target_audio_codec,''),
 			COALESCE(target_audio_channels,0), COALESCE(output_container,''), COALESCE(output_protocol,''),
 			COALESCE(target_bitrate_kbps,0), COALESCE(transcode_hw_accel,''), COALESCE(tone_map_mode,''),
 			adaptation_reasons, COALESCE(reporting_node,''), COALESCE(stream_location,''),
-			COALESCE(compat_origin, FALSE), COALESCE(routing_execution,''), COALESCE(routing_egress,''),
-			route_facts_recorded
+			COALESCE(compat_origin, FALSE), COALESCE(routing_execution,''), routing_execution_node_id,
+			COALESCE(routing_egress,''), routing_egress_node_id, route_facts_recorded, ended_at
 		FROM admin_playback_history WHERE session_id = $1`, sessionID).Scan(
 		&videoCodec, &resolution, &audioCodec, &audioCh, &container, &protocol,
 		&bitrate, &hwAccel, &toneMap, &reasons, &reportingNode, &streamLoc,
-		&compat, &routingExec, &routingEgress, &recorded,
+		&compat, &routingExec, &execNodeID, &routingEgress, &egressNodeID, &recorded, &endedAt,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -1013,8 +1036,57 @@ func TestAdminPlaybackHistoryRouteFactsDB(t *testing.T) {
 		container != "fmp4" || protocol != "hls" || bitrate != 4000 || hwAccel != "qsv" ||
 		toneMap != "software" || !reflect.DeepEqual(reasons, []string{"bitrate_cap", "subtitle_burn_in"}) ||
 		reportingNode != "api-2" || streamLoc != "remote" || !compat ||
-		routingExec != "local" || routingEgress != "api" || !recorded {
-		t.Fatalf("unexpected route facts: codec=%q res=%q audio=%q/%d container=%q proto=%q kbps=%d hw=%q tm=%q reasons=%v node=%q loc=%q compat=%v exec=%q egress=%q recorded=%v",
-			videoCodec, resolution, audioCodec, audioCh, container, protocol, bitrate, hwAccel, toneMap, reasons, reportingNode, streamLoc, compat, routingExec, routingEgress, recorded)
+		routingExec != "local" || execNodeID != nil || routingEgress != "api" || egressNodeID != nil ||
+		!recorded || !endedAt.Equal(wantEnded) {
+		t.Fatalf("unexpected route facts: codec=%q res=%q audio=%q/%d container=%q proto=%q kbps=%d hw=%q tm=%q reasons=%v node=%q loc=%q compat=%v exec=%q/%v egress=%q/%v recorded=%v ended=%v",
+			videoCodec, resolution, audioCodec, audioCh, container, protocol, bitrate, hwAccel, toneMap, reasons, reportingNode, streamLoc, compat, routingExec, execNodeID, routingEgress, egressNodeID, recorded, endedAt)
+	}
+}
+
+func TestApplyAttemptPlanFactsReplan(t *testing.T) {
+	session := &playback.Session{
+		PlayMethod:          playback.PlayDirect,
+		OutputContainer:     "mkv",
+		OutputProtocol:      "http",
+		RoutingExecution:    "local",
+		RoutingEgress:       "proxy",
+		RoutingEgressNodeID: 9,
+		TranscodeHWAccel:    "vaapi",
+	}
+	record := &playback.AttemptRecordV3{
+		CurrentPlanID: "plan-2",
+		CurrentPlan: playback.PlanV3{
+			PlanID:   "plan-2",
+			Delivery: playback.DeliveryTranscodeHLSV3,
+			EffectiveRecipe: playback.EffectiveRecipeV3{
+				SegmentContainer: "fmp4",
+			},
+			Subtitle: playback.SubtitleDecisionV3{
+				Mode:    playback.SubtitleBurnInV3,
+				TrackID: "file:1:subtitle:0",
+				Inventory: []playback.SubtitleInventoryItemV3{{
+					TrackID: "file:1:subtitle:0", Codec: "hdmv_pgs_subtitle", Source: "embedded",
+				}},
+			},
+		},
+		FrozenRecipe: playback.ExecutableRecipeV3{
+			PlanID:              "plan-2",
+			PlayMethod:          playback.PlayTranscode,
+			TargetVideoCodec:    "h264",
+			TargetResolution:    "1080p",
+			TargetAudioCodec:    "aac",
+			TargetAudioChannels: 2,
+			TargetBitrateKbps:   8000,
+			ToneMapMode:         tonemap.ModeHardware,
+			AdaptationReasons:   []string{"subtitle_burn_in"},
+		},
+	}
+	applyAttemptPlanFacts(session, record)
+	if session.PlayMethod != playback.PlayTranscode || session.TargetVideoCodec != "h264" ||
+		session.OutputProtocol != "hls" || session.OutputContainer != "fmp4" ||
+		session.RoutingEgress != "" || session.RoutingEgressNodeID != 0 || session.TranscodeHWAccel != "" ||
+		session.Subtitle == nil || session.Subtitle.Delivery != playback.SessionSubtitleDeliveryBurnIn ||
+		!reflect.DeepEqual(session.AdaptationReasons, []string{"subtitle_burn_in"}) {
+		t.Fatalf("unexpected replanned session: %+v", session)
 	}
 }

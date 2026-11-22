@@ -215,7 +215,7 @@ func TestDownsampleCompletedDaysAndPruneDB(t *testing.T) {
 	seedDownsampleTestSamples(t, pool, m1, m2, recentDay.Add(14*time.Hour), todayUTC.Add(time.Minute))
 
 	s := NewSampler(pool, nil, "replica-a")
-	if err := s.downsampleCompletedDays(ctx); err != nil {
+	if err := s.downsampleCompletedDays(ctx, false); err != nil {
 		t.Fatalf("downsampleCompletedDays: %v", err)
 	}
 	assertOldDayRollup(t, pool, oldDay, m1, m2)
@@ -230,18 +230,18 @@ func TestDownsampleCompletedDaysAndPruneDB(t *testing.T) {
 	if err := pool.QueryRow(ctx, `SELECT egress_bytes, peak_egress_kbps FROM dashboard_node_egress_daily WHERE day = $1 AND node_id = 10`, oldDay.Format("2006-01-02")).Scan(&node10Bytes, &node10Peak); err != nil {
 		t.Fatal(err)
 	}
-	if node10Bytes != (7000+5000)*7500 || node10Peak != 7000 {
-		t.Fatalf("node 10 oldDay rollup = bytes %d peak %d, want %d and 7000", node10Bytes, node10Peak, (7000+5000)*7500)
+	if node10Bytes != (7000+5000)*BytesPerKbpsMinute || node10Peak != 7000 {
+		t.Fatalf("node 10 oldDay rollup = bytes %d peak %d, want %d and 7000", node10Bytes, node10Peak, (7000+5000)*BytesPerKbpsMinute)
 	}
 
-	// Simulate partial raw deletion before re-rollup: monotonic GREATEST preserves full totals.
+	// Simulate partial raw deletion before re-rollup: already-archived days are left intact.
 	if _, err := pool.Exec(ctx, `DELETE FROM dashboard_metric_samples WHERE bucket = $1`, m1); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := pool.Exec(ctx, `DELETE FROM dashboard_node_egress_samples WHERE bucket = $1`, m1); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.downsampleCompletedDays(ctx); err != nil {
+	if err := s.downsampleCompletedDays(ctx, false); err != nil {
 		t.Fatalf("second downsampleCompletedDays: %v", err)
 	}
 	var egressBytes int64
@@ -253,7 +253,14 @@ func TestDownsampleCompletedDaysAndPruneDB(t *testing.T) {
 		t.Fatalf("after partial raw delete + rerollup: bytes=%d peak=%d, want 187500000 and 15000", egressBytes, peakEgress)
 	}
 
-	s.pruneExpired(ctx)
+	// When another replica holds the advisory lock, a second replica must skip
+	// pruning as well as archiving so expired samples are never dropped while
+	// the lock holder is mid-rollup.
+	assertLockContentionSkipsPrune(t, pool, s, recentDay)
+
+	if err := s.downsampleCompletedDays(ctx, true); err != nil {
+		t.Fatalf("downsampleCompletedDays with prune: %v", err)
+	}
 	var oldRawCount, remainingRawCount, dailyCount int
 	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM dashboard_metric_samples WHERE bucket < $1`, recentDay).Scan(&oldRawCount); err != nil {
 		t.Fatal(err)
@@ -266,5 +273,32 @@ func TestDownsampleCompletedDaysAndPruneDB(t *testing.T) {
 	}
 	if oldRawCount != 0 || remainingRawCount != 2 || dailyCount != 2 {
 		t.Fatalf("after prune: oldRaw=%d remainingRaw=%d daily=%d, want 0, 2, 2", oldRawCount, remainingRawCount, dailyCount)
+	}
+}
+
+func assertLockContentionSkipsPrune(t *testing.T, pool *pgxpool.Pool, s *Sampler, recentDay time.Time) {
+	t.Helper()
+	ctx := t.Context()
+	lockTx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = lockTx.Rollback(ctx) }()
+	var gotLock bool
+	if err := lockTx.QueryRow(ctx, `SELECT pg_try_advisory_xact_lock($1)`, downsampleLockKey).Scan(&gotLock); err != nil || !gotLock {
+		t.Fatalf("acquire test advisory lock: locked=%v err=%v", gotLock, err)
+	}
+	if err := s.downsampleCompletedDays(ctx, true); err != nil {
+		t.Fatalf("contended downsampleCompletedDays: %v", err)
+	}
+	var oldRawCount int
+	if err := pool.QueryRow(ctx, `SELECT COUNT(*) FROM dashboard_metric_samples WHERE bucket < $1`, recentDay).Scan(&oldRawCount); err != nil {
+		t.Fatal(err)
+	}
+	if oldRawCount == 0 {
+		t.Fatal("contended replica pruned expired raw samples without holding advisory lock")
+	}
+	if err := lockTx.Rollback(ctx); err != nil {
+		t.Fatal(err)
 	}
 }

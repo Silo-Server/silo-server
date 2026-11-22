@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/dashmetrics"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -27,6 +28,7 @@ const (
 	insightsSortCompletionPct = "completion_pct"
 	insightsSortLastSeen      = "last_seen"
 	insightsHWSoftwareKey     = "software"
+	insightsHWAutoKey         = "auto"
 )
 
 func roundInsightsRate(num, den int64) float64 {
@@ -72,7 +74,7 @@ func queryInsightsGlobalBounds(ctx context.Context, tx pgx.Tx) (oldestHistory, o
 			(SELECT MIN(started_at) FROM admin_playback_history),
 			(SELECT MIN(started_at) FROM admin_playback_history WHERE measured),
 			(SELECT MIN(started_at) FROM admin_playback_history WHERE route_facts_recorded),
-			(SELECT MIN(day)::timestamptz FROM dashboard_metric_daily),
+			(SELECT MIN(day)::timestamp AT TIME ZONE 'UTC' FROM dashboard_metric_daily),
 			(SELECT MIN(bucket) FROM dashboard_metric_samples),
 			now()
 	`).Scan(&oldestHistory, &oldestMeasured, &oldestRouteFacts, &oldestDailyDay, &oldestRawSample, &dbNow)
@@ -119,101 +121,74 @@ func resolveAllTimeBounds(win *resolvedInsightsWindow, earliest *time.Time) {
 	win.BucketUnit = InsightsBucketDay
 }
 
-const insightsCombinedDailyMetricsCTE = `
+// insightsCombinedDailyMetricsCTE combines archived UTC days from
+// dashboard_metric_daily with live minute samples from dashboard_metric_samples
+// using dashmetrics.DailyMetricRollupCTEs so the rollup math matches the
+// sampler exactly.
+//
+// Parameters:
+//   - $1: window start (timestamptz, UTC inclusive)
+//   - $2: window end (timestamptz, UTC exclusive)
+//   - $3: requested local start calendar date (YYYY-MM-DD)
+//   - $4: requested local end calendar date (YYYY-MM-DD, inclusive)
+//   - $5: dashmetrics.BytesPerKbpsMinute
+//
+// A UTC day uses the pre-aggregated archive when either the entire UTC day lies
+// inside [$1, $2) or raw minute samples for that day have already been pruned
+// (bounded to [$3, $4] so a non-UTC 1-day custom range never sums two full UTC
+// archive days). Remaining retained minutes are aggregated with exact [$1, $2)
+// sargable bounds on bucket.
+var insightsCombinedDailyMetricsCTE = `
 	WITH daily_archive AS (
 		SELECT
-			day,
-			peak_streams::bigint AS peak_streams,
-			peak_direct::bigint AS peak_direct,
-			peak_remux::bigint AS peak_remux,
-			peak_transcode::bigint AS peak_transcode,
-			peak_streams_direct::bigint AS peak_streams_direct,
-			peak_streams_remux::bigint AS peak_streams_remux,
-			peak_streams_transcode::bigint AS peak_streams_transcode,
-			peak_egress_kbps,
-			peak_download_kbps,
-			egress_bytes,
-			download_egress_bytes,
-			api_egress_bytes,
-			api_peak_egress_kbps,
-			peak_streams_at,
-			peak_egress_at
-		FROM dashboard_metric_daily
-		WHERE day >= $1::date AND day <= $2::date
-	),
-	raw_minutes AS (
-		SELECT
-			(s.bucket AT TIME ZONE 'UTC')::date AS day,
-			s.bucket,
-			MAX(s.streams_total)     FILTER (WHERE s.source = 'shared') AS streams_total,
-			MAX(s.streams_direct)    FILTER (WHERE s.source = 'shared') AS streams_direct,
-			MAX(s.streams_remux)     FILTER (WHERE s.source = 'shared') AS streams_remux,
-			MAX(s.streams_transcode) FILTER (WHERE s.source = 'shared') AS streams_transcode,
-			COALESCE(SUM(s.egress_kbps), 0)::bigint AS egress_kbps,
-			COALESCE(SUM(s.download_egress_kbps), 0)::bigint AS download_egress_kbps,
-			COALESCE(SUM(s.egress_kbps) FILTER (WHERE s.source LIKE 'proc:%'), 0)::bigint AS api_egress_kbps
-		FROM dashboard_metric_samples s
-		WHERE (s.bucket AT TIME ZONE 'UTC')::date >= $1::date
-		  AND (s.bucket AT TIME ZONE 'UTC')::date <= $2::date
-		  AND NOT EXISTS (
-			SELECT 1 FROM dashboard_metric_daily d WHERE d.day = (s.bucket AT TIME ZONE 'UTC')::date
+			d.day,
+			d.peak_streams::bigint AS peak_streams,
+			d.peak_direct::bigint AS peak_direct,
+			d.peak_remux::bigint AS peak_remux,
+			d.peak_transcode::bigint AS peak_transcode,
+			d.peak_streams_direct::bigint AS peak_streams_direct,
+			d.peak_streams_remux::bigint AS peak_streams_remux,
+			d.peak_streams_transcode::bigint AS peak_streams_transcode,
+			d.peak_egress_kbps,
+			d.peak_download_kbps,
+			d.egress_bytes,
+			d.download_egress_bytes,
+			d.api_egress_bytes,
+			d.api_peak_egress_kbps,
+			d.peak_streams_at,
+			d.peak_egress_at
+		FROM dashboard_metric_daily d
+		WHERE d.day >= LEAST(($1::timestamptz AT TIME ZONE 'UTC')::date, $3::date)
+		  AND d.day <= GREATEST(($2::timestamptz AT TIME ZONE 'UTC')::date, $4::date)
+		  AND (
+			((d.day::timestamp AT TIME ZONE 'UTC') >= $1::timestamptz
+				AND ((d.day + 1)::timestamp AT TIME ZONE 'UTC') <= $2::timestamptz)
+			OR (d.day >= $3::date AND d.day <= $4::date
+				AND NOT EXISTS (
+					SELECT 1 FROM dashboard_metric_samples s
+					WHERE s.bucket >= (d.day::timestamp AT TIME ZONE 'UTC')
+					  AND s.bucket < ((d.day + 1)::timestamp AT TIME ZONE 'UTC')
+				))
 		  )
-		GROUP BY 1, 2
-	),
-	raw_stream_peaks AS (
-		SELECT DISTINCT ON (day)
-			day,
-			COALESCE(streams_direct, 0)::bigint    AS peak_streams_direct,
-			COALESCE(streams_remux, 0)::bigint     AS peak_streams_remux,
-			COALESCE(streams_transcode, 0)::bigint AS peak_streams_transcode,
-			bucket AS peak_streams_at
-		FROM raw_minutes
-		WHERE streams_total IS NOT NULL
-		ORDER BY day, streams_total DESC, bucket ASC
-	),
-	raw_egress_peaks AS (
-		SELECT DISTINCT ON (day)
-			day,
-			bucket AS peak_egress_at
-		FROM raw_minutes
-		ORDER BY day, egress_kbps DESC, bucket ASC
-	),
-	live_daily AS (
-		SELECT
-			m.day,
-			COALESCE(MAX(m.streams_total), 0)::bigint AS peak_streams,
-			COALESCE(MAX(m.streams_direct), 0)::bigint AS peak_direct,
-			COALESCE(MAX(m.streams_remux), 0)::bigint AS peak_remux,
-			COALESCE(MAX(m.streams_transcode), 0)::bigint AS peak_transcode,
-			COALESCE(sp.peak_streams_direct, 0)::bigint AS peak_streams_direct,
-			COALESCE(sp.peak_streams_remux, 0)::bigint AS peak_streams_remux,
-			COALESCE(sp.peak_streams_transcode, 0)::bigint AS peak_streams_transcode,
-			COALESCE(MAX(m.egress_kbps), 0)::bigint AS peak_egress_kbps,
-			COALESCE(MAX(m.download_egress_kbps), 0)::bigint AS peak_download_kbps,
-			(COALESCE(SUM(m.egress_kbps), 0) * $3)::bigint AS egress_bytes,
-			(COALESCE(SUM(m.download_egress_kbps), 0) * $3)::bigint AS download_egress_bytes,
-			(COALESCE(SUM(m.api_egress_kbps), 0) * $3)::bigint AS api_egress_bytes,
-			COALESCE(MAX(m.api_egress_kbps), 0)::bigint AS api_peak_egress_kbps,
-			sp.peak_streams_at,
-			ep.peak_egress_at
-		FROM raw_minutes m
-		LEFT JOIN raw_stream_peaks sp ON sp.day = m.day
-		LEFT JOIN raw_egress_peaks ep ON ep.day = m.day
-		GROUP BY m.day, sp.peak_streams_direct, sp.peak_streams_remux, sp.peak_streams_transcode, sp.peak_streams_at, ep.peak_egress_at
-	),
+	),` + dashmetrics.DailyMetricRollupCTEs(
+	`s.bucket >= $1::timestamptz
+		AND s.bucket < $2::timestamptz
+		AND NOT EXISTS (SELECT 1 FROM daily_archive d WHERE d.day = (s.bucket AT TIME ZONE 'UTC')::date)`,
+	`$5`,
+) + `,
 	combined_daily AS (
 		SELECT * FROM daily_archive
 		UNION ALL
-		SELECT * FROM live_daily
+		SELECT * FROM _dm_daily
 	)`
 
-func utcDaySpanForWindow(win resolvedInsightsWindow) (fromDay, toDay string) {
-	fromDay = win.From.UTC().Format("2006-01-02")
-	inclusiveTo := win.To.Add(-time.Nanosecond).UTC()
-	if inclusiveTo.Before(win.From.UTC()) {
-		inclusiveTo = win.From.UTC()
+func localDaySpanForWindow(win resolvedInsightsWindow) (fromDay, toDay string) {
+	fromLocal := win.From.In(win.Loc)
+	inclusiveTo := win.To.Add(-time.Nanosecond).In(win.Loc)
+	if inclusiveTo.Before(fromLocal) {
+		inclusiveTo = fromLocal
 	}
-	return fromDay, inclusiveTo.Format("2006-01-02")
+	return fromLocal.Format("2006-01-02"), inclusiveTo.Format("2006-01-02")
 }
 
 // ---- Activity --------------------------------------------------------------
@@ -317,7 +292,7 @@ func queryInsightsActivityBuckets(ctx context.Context, tx pgx.Tx, win resolvedIn
 				h.play_method,
 				(%s) AS watch_sec,
 				(ep.content_id IS NOT NULL) AS is_episode,
-				(ep.content_id IS NULL AND mi.type = 'movie') AS is_movie
+				(ep.content_id IS NULL AND COALESCE(mi.type, '') = 'movie') AS is_movie
 			FROM admin_playback_history h
 			LEFT JOIN media_items mi ON mi.content_id = h.media_item_id
 			LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
@@ -389,7 +364,7 @@ func queryInsightsActivityHeatmap(ctx context.Context, tx pgx.Tx, win resolvedIn
 }
 
 func queryInsightsActivityPeakStreams(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, out *AdminInsightsActivity) error {
-	fromDay, toDay := utcDaySpanForWindow(win)
+	fromDay, toDay := localDaySpanForWindow(win)
 	rows, err := tx.Query(ctx, insightsCombinedDailyMetricsCTE+`
 		SELECT
 			to_char(day, 'YYYY-MM-DD') AS day_str,
@@ -398,7 +373,7 @@ func queryInsightsActivityPeakStreams(ctx context.Context, tx pgx.Tx, win resolv
 			peak_streams_at
 		FROM combined_daily
 		ORDER BY day ASC
-	`, fromDay, toDay, int64(bytesPerKbpsMinute))
+	`, win.From, win.To, fromDay, toDay, int64(dashmetrics.BytesPerKbpsMinute))
 	if err != nil {
 		return fmt.Errorf("querying insights peak streams: %w", err)
 	}
@@ -734,7 +709,7 @@ func compareTimePtr(a, b *time.Time) int {
 func normalizeHWAccelKey(raw string) string {
 	v := strings.ToLower(strings.TrimSpace(raw))
 	switch v {
-	case "":
+	case "", insightsHWAutoKey, insightsUnknownKey:
 		return insightsUnknownKey
 	case AdminTerminateDeliveryNone, insightsHWSoftwareKey, "cpu":
 		return insightsHWSoftwareKey
@@ -806,7 +781,7 @@ func queryInsightsDevicesSummary(ctx context.Context, tx pgx.Tx, whereSQL string
 			COUNT(*) FILTER (WHERE `+insightsPlayDirectSQL+`)::bigint,
 			COUNT(*) FILTER (WHERE `+insightsPlayRemuxSQL+`)::bigint,
 			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+`)::bigint,
-			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+` AND h.route_facts_recorded AND NULLIF(LOWER(BTRIM(COALESCE(h.transcode_hw_accel, ''))), '') IS NOT NULL AND LOWER(BTRIM(h.transcode_hw_accel)) NOT IN ('none', 'software', 'cpu'))::bigint,
+			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+` AND h.route_facts_recorded AND NULLIF(LOWER(BTRIM(COALESCE(h.transcode_hw_accel, ''))), '') IS NOT NULL AND LOWER(BTRIM(h.transcode_hw_accel)) NOT IN ('none', 'software', 'cpu', 'auto', 'unknown'))::bigint,
 			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+` AND h.route_facts_recorded AND LOWER(BTRIM(COALESCE(h.transcode_hw_accel, ''))) IN ('none', 'software', 'cpu'))::bigint,
 			COUNT(*) FILTER (WHERE h.subtitle->>'delivery' = 'burn_in')::bigint,
 			COUNT(*) FILTER (WHERE NULLIF(LOWER(BTRIM(COALESCE(h.tone_map_mode, ''))), '') IS NOT NULL)::bigint,
@@ -1144,12 +1119,12 @@ func queryAdminInsightsBandwidth(ctx context.Context, pool *pgxpool.Pool, q Admi
 	if err := tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM stream_nodes)`).Scan(&out.HasRemoteNodes); err != nil {
 		return nil, fmt.Errorf("checking stream nodes: %w", err)
 	}
-	fromDay, toDay := utcDaySpanForWindow(win)
-	pointIdx, apiBytes, apiPeak, err := queryInsightsBandwidthDaily(ctx, tx, fromDay, toDay, out)
+	fromDay, toDay := localDaySpanForWindow(win)
+	pointIdx, apiBytes, apiPeak, err := queryInsightsBandwidthDaily(ctx, tx, win, fromDay, toDay, out)
 	if err != nil {
 		return nil, err
 	}
-	nodeSources, err := queryInsightsBandwidthNodes(ctx, tx, fromDay, toDay, pointIdx, out)
+	nodeSources, err := queryInsightsBandwidthNodes(ctx, tx, win, fromDay, toDay, pointIdx, out)
 	if err != nil {
 		return nil, err
 	}
@@ -1166,7 +1141,7 @@ func queryAdminInsightsBandwidth(ctx context.Context, pool *pgxpool.Pool, q Admi
 	return out, nil
 }
 
-func queryInsightsBandwidthDaily(ctx context.Context, tx pgx.Tx, fromDay, toDay string, out *AdminInsightsBandwidth) (map[string]int, int64, int64, error) {
+func queryInsightsBandwidthDaily(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, fromDay, toDay string, out *AdminInsightsBandwidth) (map[string]int, int64, int64, error) {
 	rows, err := tx.Query(ctx, insightsCombinedDailyMetricsCTE+`
 		SELECT
 			to_char(day, 'YYYY-MM-DD') AS day_str,
@@ -1174,7 +1149,7 @@ func queryInsightsBandwidthDaily(ctx context.Context, tx pgx.Tx, fromDay, toDay 
 			peak_egress_kbps, peak_download_kbps, api_peak_egress_kbps, peak_egress_at
 		FROM combined_daily
 		ORDER BY day ASC
-	`, fromDay, toDay, int64(bytesPerKbpsMinute))
+	`, win.From, win.To, fromDay, toDay, int64(dashmetrics.BytesPerKbpsMinute))
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("querying insights bandwidth daily: %w", err)
 	}
@@ -1220,25 +1195,37 @@ func queryInsightsBandwidthDaily(ctx context.Context, tx pgx.Tx, fromDay, toDay 
 	return pointIdx, apiTotalBytes, apiPeakKbps, rows.Err()
 }
 
-func queryInsightsBandwidthNodes(ctx context.Context, tx pgx.Tx, fromDay, toDay string, pointIdx map[string]int, out *AdminInsightsBandwidth) (map[int]*AdminInsightsEgressSource, error) {
+func queryInsightsBandwidthNodes(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, fromDay, toDay string, pointIdx map[string]int, out *AdminInsightsBandwidth) (map[int]*AdminInsightsEgressSource, error) {
 	rows, err := tx.Query(ctx, `
-		WITH node_daily AS (
-			SELECT day, node_id, egress_bytes, peak_egress_kbps
-			FROM dashboard_node_egress_daily
-			WHERE day >= $1::date AND day <= $2::date
+		WITH archived_days AS (
+			SELECT DISTINCT d.day
+			FROM dashboard_node_egress_daily d
+			WHERE d.day >= LEAST(($1::timestamptz AT TIME ZONE 'UTC')::date, $3::date)
+			  AND d.day <= GREATEST(($2::timestamptz AT TIME ZONE 'UTC')::date, $4::date)
+			  AND (
+				((d.day::timestamp AT TIME ZONE 'UTC') >= $1::timestamptz
+					AND ((d.day + 1)::timestamp AT TIME ZONE 'UTC') <= $2::timestamptz)
+				OR (d.day >= $3::date AND d.day <= $4::date
+					AND NOT EXISTS (
+						SELECT 1 FROM dashboard_node_egress_samples s
+						WHERE s.bucket >= (d.day::timestamp AT TIME ZONE 'UTC')
+						  AND s.bucket < ((d.day + 1)::timestamp AT TIME ZONE 'UTC')
+					))
+			  )
+		),
+		node_daily AS (
+			SELECT d.day, d.node_id, d.egress_bytes, d.peak_egress_kbps
+			FROM dashboard_node_egress_daily d
+			INNER JOIN archived_days a ON a.day = d.day
 			UNION ALL
 			SELECT
 				(s.bucket AT TIME ZONE 'UTC')::date AS day,
 				s.node_id,
-				(COALESCE(SUM(s.egress_kbps), 0) * $3)::bigint AS egress_bytes,
+				(COALESCE(SUM(s.egress_kbps), 0) * $5)::bigint AS egress_bytes,
 				COALESCE(MAX(s.egress_kbps), 0)::bigint AS peak_egress_kbps
 			FROM dashboard_node_egress_samples s
-			WHERE (s.bucket AT TIME ZONE 'UTC')::date >= $1::date
-			  AND (s.bucket AT TIME ZONE 'UTC')::date <= $2::date
-			  AND NOT EXISTS (
-				SELECT 1 FROM dashboard_node_egress_daily d
-				WHERE d.day = (s.bucket AT TIME ZONE 'UTC')::date AND d.node_id = s.node_id
-			  )
+			WHERE s.bucket >= $1::timestamptz AND s.bucket < $2::timestamptz
+			  AND NOT EXISTS (SELECT 1 FROM archived_days a WHERE a.day = (s.bucket AT TIME ZONE 'UTC')::date)
 			GROUP BY 1, 2
 		)
 		SELECT
@@ -1251,7 +1238,7 @@ func queryInsightsBandwidthNodes(ctx context.Context, tx pgx.Tx, fromDay, toDay 
 		FROM node_daily nd
 		LEFT JOIN stream_nodes sn ON sn.id = nd.node_id
 		ORDER BY nd.day ASC, nd.node_id ASC
-	`, fromDay, toDay, int64(bytesPerKbpsMinute))
+	`, win.From, win.To, fromDay, toDay, int64(dashmetrics.BytesPerKbpsMinute))
 	if err != nil {
 		return nil, fmt.Errorf("querying insights node daily egress: %w", err)
 	}

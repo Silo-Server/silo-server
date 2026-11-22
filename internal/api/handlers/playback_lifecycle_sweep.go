@@ -381,10 +381,10 @@ func (h *PlaybackHandler) endLifecycleWith(ctx context.Context, pool *pgxpool.Po
 		if record.LastSample != nil {
 			session.Position = record.LastSample.Position
 		}
-		// The start row holds the subtitle the play began with; the attempt
-		// holds the one its last replan committed, which history keeps.
+		// The start row holds the delivery the play began with; the attempt
+		// holds the plan and frozen recipe its last replan committed.
 		if record.CurrentPlanID != "" {
-			session.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
+			applyAttemptPlanFacts(session, record)
 		}
 	}
 	if fill != nil {

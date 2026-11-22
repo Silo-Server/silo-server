@@ -358,6 +358,13 @@ func scanAdminPlaybackHistoryRow(rows pgx.Rows) (AdminPlaybackHistoryRow, error)
 	); err != nil {
 		return row, err
 	}
+	if row.SourceBitrateKbps != nil {
+		if norm := playback.NormalizeBitrateKbps(*row.SourceBitrateKbps); norm > 0 {
+			row.SourceBitrateKbps = &norm
+		} else {
+			row.SourceBitrateKbps = nil
+		}
+	}
 	if row.PlayMethod == string(playback.PlayDirect) || row.PlayMethod == legacyPlayMethodDirect {
 		row.AdaptationReasons = nil
 	} else {

@@ -1527,3 +1527,10 @@
 ./internal/plugins TestProvisionWriterReleasesHeldFieldsDB
 ./internal/plugins TestProvisionWriterRestartsAfterRestoreHoldDB
 ./internal/plugins TestAutomaticInstallHonorsRestoreHoldDB
+
+# Deep playback analytics: daily metric archive & lock-fenced pruning, atomic
+# route-fact snapshots on playback history finalization, and Insights queries
+# plus rich history filters.
+./internal/dashmetrics TestDownsampleCompletedDaysAndPruneDB
+./internal/api/handlers TestAdminPlaybackHistoryRouteFactsDB
+./internal/api/handlers TestAdminInsightsQueriesAndHistoryFiltersDB

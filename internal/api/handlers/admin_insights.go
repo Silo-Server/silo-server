@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -348,8 +349,11 @@ type AdminInsightsSource interface {
 	Invalidate()
 }
 
-// AdminInsightsProvider caches standard preset Insights reads in memory and
-// invalidates on admin/playback bus events.
+// AdminInsightsProvider caches standard preset Insights reads in memory for
+// 60 seconds and clears local entries on admin/playback bus events (the same
+// channels the sibling admin_stats_* providers subscribe to). A monotonic
+// generation counter prevents an in-flight read whose DB snapshot predates an
+// invalidation from repopulating the cache with stale results.
 type AdminInsightsProvider struct {
 	pool      *pgxpool.Pool
 	activity  *cache.TTLCache[*AdminInsightsActivity]
@@ -357,6 +361,7 @@ type AdminInsightsProvider struct {
 	devices   *cache.TTLCache[*AdminInsightsDevices]
 	bandwidth *cache.TTLCache[*AdminInsightsBandwidth]
 	ttl       time.Duration
+	gen       atomic.Uint64
 }
 
 var _ AdminInsightsSource = (*AdminInsightsProvider)(nil)
@@ -386,11 +391,14 @@ func NewAdminInsightsProvider(ctx context.Context, pool *pgxpool.Pool, bus cache
 	return p, nil
 }
 
-// Invalidate drops all cached Insights entries across all four tabs.
+// Invalidate drops all cached Insights entries across all four tabs and
+// advances the generation counter so concurrent in-flight reads do not
+// repopulate the cache with pre-invalidation snapshots.
 func (p *AdminInsightsProvider) Invalidate() {
 	if p == nil {
 		return
 	}
+	p.gen.Add(1)
 	if p.activity != nil {
 		p.activity.InvalidatePrefix(adminInsightsCacheKeyPrefix)
 	}
@@ -439,11 +447,14 @@ func (p *AdminInsightsProvider) Activity(ctx context.Context, q AdminInsightsWin
 	if v, ok := p.activity.Get(key); ok {
 		return v, nil
 	}
+	gen := p.gen.Load()
 	v, err := queryAdminInsightsActivity(ctx, p.pool, q)
 	if err != nil {
 		return nil, err
 	}
-	p.activity.Set(key, v, p.ttl)
+	if p.gen.Load() == gen {
+		p.activity.Set(key, v, p.ttl)
+	}
 	return v, nil
 }
 
@@ -458,11 +469,14 @@ func (p *AdminInsightsProvider) People(ctx context.Context, q AdminInsightsPeopl
 	if v, ok := p.people.Get(key); ok {
 		return v, nil
 	}
+	gen := p.gen.Load()
 	v, err := queryAdminInsightsPeople(ctx, p.pool, q)
 	if err != nil {
 		return nil, err
 	}
-	p.people.Set(key, v, p.ttl)
+	if p.gen.Load() == gen {
+		p.people.Set(key, v, p.ttl)
+	}
 	return v, nil
 }
 
@@ -477,11 +491,14 @@ func (p *AdminInsightsProvider) Devices(ctx context.Context, q AdminInsightsDevi
 	if v, ok := p.devices.Get(key); ok {
 		return v, nil
 	}
+	gen := p.gen.Load()
 	v, err := queryAdminInsightsDevices(ctx, p.pool, q)
 	if err != nil {
 		return nil, err
 	}
-	p.devices.Set(key, v, p.ttl)
+	if p.gen.Load() == gen {
+		p.devices.Set(key, v, p.ttl)
+	}
 	return v, nil
 }
 
@@ -496,11 +513,14 @@ func (p *AdminInsightsProvider) Bandwidth(ctx context.Context, q AdminInsightsBa
 	if v, ok := p.bandwidth.Get(key); ok {
 		return v, nil
 	}
+	gen := p.gen.Load()
 	v, err := queryAdminInsightsBandwidth(ctx, p.pool, q)
 	if err != nil {
 		return nil, err
 	}
-	p.bandwidth.Set(key, v, p.ttl)
+	if p.gen.Load() == gen {
+		p.bandwidth.Set(key, v, p.ttl)
+	}
 	return v, nil
 }
 

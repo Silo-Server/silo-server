@@ -191,6 +191,7 @@ func TestAdminInsightsQueriesAndHistoryFiltersDB(t *testing.T) {
 	t.Run("devices", func(t *testing.T) { assertInsightsDevicesDB(t, h) })
 	t.Run("bandwidth", func(t *testing.T) { assertInsightsBandwidthDB(t, h) })
 	t.Run("history_filters_and_detail", func(t *testing.T) { assertInsightsHistoryFiltersAndDetailDB(t, h, seed) })
+	t.Run("edge_cases", func(t *testing.T) { assertInsightsEdgeCasesDB(t, pool, h) })
 }
 
 func assertInsightsActivityDB(t *testing.T, h *AdminHandler, seed insightsTestSeed) {
@@ -276,5 +277,74 @@ func assertInsightsHistoryFiltersAndDetailDB(t *testing.T, h *AdminHandler, seed
 		detail.RoutingEgressNodeName == nil || *detail.RoutingEgressNodeName != "edge-eu-1" ||
 		!detail.IsJellyfinClient || detail.LibraryName == nil || *detail.LibraryName != "Movies" {
 		t.Fatalf("unexpected history detail: %+v, err=%v", detail, err)
+	}
+}
+
+func assertInsightsEdgeCasesDB(t *testing.T, pool *pgxpool.Pool, h *AdminHandler) {
+	t.Helper()
+	ctx := t.Context()
+
+	// 1. Legacy bps bitrate (> 10_000_000) normalizes to kbps in history detail.
+	var legacyFileID, userID int
+	if err := pool.QueryRow(ctx, `SELECT id FROM users WHERE username = 'alice'`).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO media_files (media_folder_id, file_path, content_id, container, codec_video, resolution, bitrate)
+		VALUES ((SELECT id FROM media_folders LIMIT 1), '/movies/legacy-bps.mkv', 'deleted-item-1', 'mkv', 'hevc', '4k', 60000000)
+		RETURNING id
+	`).Scan(&legacyFileID); err != nil {
+		t.Fatal(err)
+	}
+	deletedSess := "sess-del-" + uuid.NewString()
+	playAt := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -3).Add(10 * time.Hour)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_playback_history
+			(session_id, user_id, profile_id, profile_name, media_item_id, media_file_id, play_method, started_at, ended_at, watched_seconds, completed)
+		VALUES ($1, $2, 'p-alice', 'Alice', 'deleted-item-1', $3, 'direct', $4, $5, 600, TRUE)
+	`, deletedSess, userID, legacyFileID, playAt, playAt.Add(10*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	detail, err := h.ReadAdminPlaybackHistoryEntry(ctx, deletedSess)
+	if err != nil || detail == nil || detail.SourceBitrateKbps == nil || *detail.SourceBitrateKbps != 60000 {
+		t.Fatalf("legacy bps bitrate normalization failed: detail=%+v err=%v", detail, err)
+	}
+
+	// 2. Deleted catalog item counts identically under other_media in summary and buckets.
+	act, err := h.ReadAdminInsightsActivity(ctx, AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var bucketOther int64
+	for _, b := range act.Buckets {
+		bucketOther += b.OtherMedia
+	}
+	if act.Summary.OtherMedia != 1 || bucketOther != 1 {
+		t.Fatalf("deleted item other_media mismatch: summary=%d buckets=%d", act.Summary.OtherMedia, bucketOther)
+	}
+
+	// 3. Non-UTC 1-day custom range over retained minute samples respects exact
+	// [from, to) bounds instead of summing two full UTC days.
+	targetDate := time.Now().UTC().Truncate(24*time.Hour).AddDate(0, 0, -5)
+	dayStr := targetDate.Format("2006-01-02")
+	nyLoc, _ := time.LoadLocation("America/New_York")
+	nyStart := time.Date(targetDate.Year(), targetDate.Month(), targetDate.Day(), 0, 0, 0, 0, nyLoc).UTC()
+	outsideBefore := nyStart.Add(-2 * time.Hour)
+	inside := nyStart.Add(3 * time.Hour)
+	outsideAfter := nyStart.Add(26 * time.Hour)
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO dashboard_metric_samples (bucket, source, streams_total, streams_direct, egress_kbps)
+		VALUES ($1, 'shared', 50, 50, 100000), ($2, 'shared', 4, 4, 2000), ($3, 'shared', 60, 60, 200000)
+	`, outsideBefore, inside, outsideAfter); err != nil {
+		t.Fatal(err)
+	}
+	bw, err := h.ReadAdminInsightsBandwidth(ctx, AdminInsightsBandwidthQuery{
+		Range: InsightsRangeCustom, FromDate: dayStr, ToDate: dayStr, TZ: "America/New_York",
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bw.Summary.TotalEgressBytes != 2000*7500 || bw.Summary.PeakEgressKbps != 2000 {
+		t.Fatalf("non-UTC 1-day custom bandwidth = %+v, want bytes=%d peak=2000", bw.Summary, 2000*7500)
 	}
 }

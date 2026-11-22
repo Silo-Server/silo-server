@@ -666,9 +666,10 @@ func (h *PlaybackHandler) finishStop(ctx context.Context, record *playback.Attem
 		observeEndSample(session, time.Now())
 	}
 	if record.CurrentPlanID != "" {
-		// The attempt holds the plan the last replan committed. The live row
-		// can be gone after a restart, leaving only where the play started.
-		session.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
+		// The attempt holds the plan and frozen recipe the last replan
+		// committed. The live row can be gone after a restart, leaving only
+		// where the play started.
+		applyAttemptPlanFacts(session, record)
 	}
 	result := h.recordStopHistory(ctx, session, reason)
 	if result.WatchStateErr != nil {
@@ -702,6 +703,67 @@ func (h *PlaybackHandler) attemptSessionV2(ctx context.Context, record *playback
 		}
 	}
 	return session
+}
+
+// applyAttemptPlanFacts reconciles a detached session (whose live row may be
+// gone, leaving only start_facts) with the attempt's latest committed plan and
+// frozen recipe. When a replan changed the play method, runtime-only executor
+// fields from the earlier plan are cleared rather than attributed to the new
+// delivery.
+func applyAttemptPlanFacts(session *playback.Session, record *playback.AttemptRecordV3) {
+	if session == nil || record == nil || record.CurrentPlanID == "" {
+		return
+	}
+	session.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
+	recipe := record.FrozenRecipe
+	if recipe.PlanID != record.CurrentPlanID || recipe.PlayMethod == "" {
+		return
+	}
+	methodChanged := session.PlayMethod != "" && session.PlayMethod != recipe.PlayMethod
+	if methodChanged {
+		session.TranscodeHWAccel = ""
+		session.OutputContainer = ""
+		session.OutputProtocol = ""
+		session.RoutingExecution = ""
+		session.RoutingExecutionNodeID = 0
+		session.RoutingEgress = ""
+		session.RoutingEgressNodeID = 0
+	}
+	session.PlayMethod = recipe.PlayMethod
+	session.TranscodeAudio = recipe.TranscodeAudio
+	if recipe.PlayMethod == playback.PlayDirect {
+		session.TargetVideoCodec = ""
+		session.TargetResolution = ""
+		session.TargetAudioCodec = ""
+		session.TargetAudioChannels = 0
+		session.TargetBitrateKbps = 0
+		session.TranscodeHWAccel = ""
+		session.ToneMapMode = ""
+		session.AdaptationReasons = nil
+		if session.OutputProtocol == "" {
+			session.OutputProtocol = eventsSchemeHTTP
+		}
+		return
+	}
+	session.TargetVideoCodec = recipe.TargetVideoCodec
+	session.TargetResolution = recipe.TargetResolution
+	session.TargetAudioCodec = recipe.TargetAudioCodec
+	session.TargetAudioChannels = recipe.TargetAudioChannels
+	session.TargetBitrateKbps = recipe.TargetBitrateKbps
+	session.ToneMapMode = recipe.ToneMapMode
+	session.AdaptationReasons = playback.NormalizeAdaptationReasons(recipe.AdaptationReasons)
+	switch record.CurrentPlan.Delivery {
+	case playback.DeliveryRemuxHLSV3, playback.DeliveryTranscodeHLSV3:
+		session.OutputProtocol = "hls"
+		if seg := record.CurrentPlan.EffectiveRecipe.SegmentContainer; seg != "" {
+			session.OutputContainer = seg
+		}
+	case playback.DeliveryRemuxProgressiveV3:
+		session.OutputProtocol = eventsSchemeHTTP
+		if session.OutputContainer == "" {
+			session.OutputContainer = "mp4"
+		}
+	}
 }
 
 // ownedAttemptV2 loads the live attempt row for sessionID and checks it
