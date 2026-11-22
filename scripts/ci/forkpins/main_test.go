@@ -96,6 +96,15 @@ var forkPinCases = []struct {
 		upstream: pinnedModules, wantErr: "tailscale.com",
 	},
 	{
+		name: "shunpike pins a fork the server lacks", server: pinnedModules,
+		upstream: pinnedModules + "replace golang.zx2c4.com/wireguard => github.com/Silo-Server/wireguard v0.0.1-patch.1\n",
+		wantErr:  "golang.zx2c4.com/wireguard",
+	},
+	{
+		name: "server replaces shunpike", server: pinnedModules + "replace github.com/Silo-Server/shunpike => ../shunpike\n",
+		upstream: pinnedModules, wantErr: "must not replace github.com/Silo-Server/shunpike",
+	},
+	{
 		name: "malformed server module", server: "not a module file",
 		upstream: pinnedModules, wantErr: "silo-server go.mod",
 	},

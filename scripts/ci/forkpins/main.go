@@ -2,11 +2,13 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 
 	"golang.org/x/mod/modfile"
 	"golang.org/x/mod/module"
@@ -41,9 +43,13 @@ func run(ctx context.Context) error {
 			return fmt.Errorf("silo-server: %w", err)
 		}
 	}
-	out, err := exec.CommandContext(ctx, "go", "mod", "download", "-json", pin.String()).CombinedOutput() //nolint:gosec // The parsed module pin uses the checked org path and no shell.
+	cmd := exec.CommandContext(ctx, "go", "mod", "download", "-json", pin.String()) //nolint:gosec // The parsed module pin uses the checked org path and no shell.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	// Decode stdout alone: the go command may print toolchain or download notes on stderr.
+	out, err := cmd.Output()
 	if err != nil {
-		return fmt.Errorf("download %s: %w\n%s", pin, err, out)
+		return fmt.Errorf("download %s: %w\n%s%s", pin, err, out, stderr.Bytes())
 	}
 	var downloaded struct {
 		GoMod string
@@ -76,6 +82,11 @@ func shunpikePin(file *modfile.File) (module.Version, error) {
 	}
 	if version == "" {
 		return module.Version{}, fmt.Errorf("silo-server must require %s", shunpikePath)
+	}
+	for _, replacement := range file.Replace {
+		if replacement.Old.Path == shunpikePath {
+			return module.Version{}, fmt.Errorf("silo-server must not replace %s; require a release", shunpikePath)
+		}
 	}
 	return module.Version{Path: shunpikePath, Version: version}, nil
 }
@@ -112,7 +123,16 @@ func compareForkPins(server, upstream []byte) error {
 	if err != nil {
 		return err
 	}
-	for _, path := range forkPaths {
+	// Every module fork shunpike pins must reach silo-server too, since Go ignores
+	// a dependency's replace lines. Local directory replacements in shunpike are
+	// its own development shims and are not compared.
+	paths := slices.Clone(forkPaths[:])
+	for _, replacement := range upstreamFile.Replace {
+		if replacement.New.Version != "" && !slices.Contains(paths, replacement.Old.Path) {
+			paths = append(paths, replacement.Old.Path)
+		}
+	}
+	for _, path := range paths {
 		serverPin, err := forkReplacement(serverFile, path)
 		if err != nil {
 			return fmt.Errorf("silo-server: %w", err)
