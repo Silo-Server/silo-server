@@ -577,6 +577,7 @@ function LibraryTable({
               {rows.map((row) => {
                 const { library: lib, scan } = row;
                 const TypeIcon = findLibraryType(lib.type)?.icon ?? FolderOpen;
+                const singlePath = lib.paths.length === 1 ? lib.paths[0] : undefined;
                 const progressPct =
                   row.runningScanCount > 0 ? libraryScanProgressPercent(row.activeScans) : null;
 
@@ -601,12 +602,12 @@ function LibraryTable({
                               <button
                                 type="button"
                                 className="hover:text-foreground min-w-0 truncate text-start transition-colors"
-                                title={lib.paths.length === 1 ? lib.paths[0] : undefined}
+                                title={singlePath}
                                 onClick={row.editFolders}
                               >
-                                {lib.paths.length === 1 ? (
+                                {singlePath !== undefined ? (
                                   <span dir="ltr" className="font-mono text-[11px]">
-                                    <PathText path={lib.paths[0]} />
+                                    <PathText path={singlePath} />
                                   </span>
                                 ) : (
                                   t("web.admin.libraries.list.folderCount", {
