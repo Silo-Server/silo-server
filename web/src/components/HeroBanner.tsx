@@ -43,12 +43,15 @@ type Holds = Record<HoldReason, boolean>;
 
 /**
  * Ends one hold. The pointer leaving also ends a focus hold whose focus is no
- * longer inside. It never sets a hold, so holds Play cleared stay off.
+ * longer inside. It never sets a hold, so holds Play cleared stay off, and it
+ * returns `holds` itself when nothing changes.
  */
 function releaseHold(holds: Holds, reason: HoldReason, focusInside: boolean): Holds {
-  return reason === "hover"
-    ? { hover: false, focus: holds.focus && focusInside }
-    : { ...holds, focus: false };
+  const next =
+    reason === "hover"
+      ? { hover: false, focus: holds.focus && focusInside }
+      : { ...holds, focus: false };
+  return next.hover === holds.hover && next.focus === holds.focus ? holds : next;
 }
 
 interface HeroBannerProps {
@@ -222,11 +225,20 @@ export default function HeroBanner({
   const wantsPlay = choice === "play" || (choice === null && !reduceMotion);
   // What actually happens: drives the timer and the progress rail.
   const autoplaying = wantsPlay && !held;
-  // A mouse press while the pointer is over the hero ends the focus hold,
-  // and the focus that press moves onto a button does not start one, so the
-  // slideshow still resumes when the pointer leaves, as it did before hover
-  // and focus were split. `pressing` lasts from that press to the focus it
-  // causes, its release, its context menu, or the pointer leaving.
+  // Each time the slideshow starts running (a hold ends, or Play is pressed),
+  // playCycle bumps so the rail animation restarts at scaleX(0) in sync with
+  // the fresh 8s interval the effect below starts.
+  const [railRunning, setRailRunning] = useState(autoplaying);
+  if (railRunning !== autoplaying) {
+    setRailRunning(autoplaying);
+    if (autoplaying) setPlayCycle((c) => c + 1);
+  }
+  // A mouse press while the pointer is over the hero turns a focus hold into
+  // a hover hold, and the focus that press moves onto a button holds as hover
+  // too, so the slideshow stays held under the pointer and still resumes when
+  // the pointer leaves, as it did before hover and focus were split.
+  // `pressing` lasts from that press to the focus it causes, its release, its
+  // context menu, the end of a drag it starts, or the pointer leaving.
   const pressing = useRef(false);
   // Whether the pointer is over the hero. Unlike the hover hold, Play does
   // not clear it.
@@ -234,19 +246,18 @@ export default function HeroBanner({
   const hold = useCallback((reason: HoldReason) => {
     setHolds((h) => (h[reason] ? h : { ...h, [reason]: true }));
   }, []);
-  // Starting to play bumps playCycle so the rail animation restarts at
-  // scaleX(0) in sync with the fresh 8s interval started below.
-  const release = useCallback(
-    (reason: HoldReason) => {
-      // Firefox removes a focused control (Translate, once pressed) without
-      // a blur, so the pointer leaving rechecks where focus is.
-      const focusInside = !!sectionRef.current?.contains(document.activeElement);
-      const nextHolds = releaseHold(holds, reason, focusInside);
-      if (held && !nextHolds.hover && !nextHolds.focus && wantsPlay) setPlayCycle((c) => c + 1);
-      setHolds((h) => releaseHold(h, reason, focusInside));
-    },
-    [held, holds, wantsPlay],
-  );
+  const pressHold = useCallback(() => {
+    setHolds((h) => (h.focus ? { hover: true, focus: false } : h));
+  }, []);
+  const release = useCallback((reason: HoldReason) => {
+    // A browser can remove a focused control (Translate, once pressed)
+    // without a blur, so the pointer leaving rechecks where focus is.
+    const focusInside = !!sectionRef.current?.contains(document.activeElement);
+    setHolds((h) => releaseHold(h, reason, focusInside));
+  }, []);
+  const endPress = useCallback(() => {
+    pressing.current = false;
+  }, []);
   const togglePause = useCallback(() => {
     if (wantsPlay) {
       setChoice("pause");
@@ -255,7 +266,6 @@ export default function HeroBanner({
     // Pressing Play starts the slideshow now, even under the pointer.
     setChoice("play");
     setHolds({ hover: false, focus: false });
-    setPlayCycle((c) => c + 1);
   }, [wantsPlay]);
 
   // `activeIndex` is in the dep list so that manual navigation (prev/next
@@ -348,11 +358,15 @@ export default function HeroBanner({
       )}
       aria-roledescription="carousel"
       aria-label={t("web.home.hero.carouselLabel")}
-      onMouseEnter={() => {
+      // A touch has no hover, and its emulated mouse entry would hold the
+      // slideshow until the next tap elsewhere.
+      onPointerEnter={(e) => {
+        if (e.pointerType === "touch") return;
         pointerInside.current = true;
         hold("hover");
       }}
-      onMouseLeave={() => {
+      onPointerLeave={(e) => {
+        if (e.pointerType === "touch") return;
         pointerInside.current = false;
         pressing.current = false;
         release("hover");
@@ -361,17 +375,15 @@ export default function HeroBanner({
         // A screen reader's simulated click has no pointer over the hero.
         if (!pointerInside.current) return;
         pressing.current = true;
-        release("focus");
+        pressHold();
       }}
-      onMouseUp={() => {
-        pressing.current = false;
-      }}
-      onContextMenu={() => {
-        pressing.current = false;
-      }}
+      onMouseUp={endPress}
+      onContextMenu={endPress}
+      // A drag swallows the press's mouseup.
+      onDragEnd={endPress}
       onFocus={() => {
-        if (pressing.current) pressing.current = false;
-        else hold("focus");
+        hold(pressing.current ? "hover" : "focus");
+        pressing.current = false;
       }}
       onBlur={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget)) release("focus");
