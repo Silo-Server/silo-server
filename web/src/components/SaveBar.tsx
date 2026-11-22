@@ -73,8 +73,9 @@ export function SaveBar({
         {visible && (
           <>
             {/* In-flow scroll room for the bar and the playback bar it rises
-                above. The admin shell drops its playback padding at lg, so the
-                spacer can't rely on the shell to cover that part. */}
+                above. It counts the measured clearance itself rather than
+                trusting the shell's padding, which in the user shell is a fixed
+                size. */}
             <div aria-hidden="true" className="h-[calc(7rem+var(--playback-bar-clearance,0px))]" />
             <div
               aria-hidden="true"
@@ -149,20 +150,23 @@ export function SaveBar({
     <>
       {/* In-flow scroll room. The pill is fixed, so without this the last row of
           the page parks under it at full scroll and cannot be reached. Sized to
-          clear the pill (bottom 1.5rem + 3rem tall) with margin. */}
+          clear the pill (bottom 1.5rem + 3rem tall) with margin; the admin
+          shell's own padding covers the playback bar the pill rises above. */}
       <div aria-hidden="true" className="h-28" />
       {/* Scrim so page content dissolves under the pill instead of colliding.
-          Stops at the desktop sidebar so it never tints the nav. */}
+          Stops at the desktop sidebar so it never tints the nav. It and the
+          pill rise by `--playback-bar-clearance` above a background playback
+          bar. */}
       <div
         aria-hidden="true"
-        className="pointer-events-none fixed start-0 end-0 bottom-0 z-30 h-40 bg-gradient-to-t from-[var(--background)] via-[color-mix(in_srgb,var(--background)_72%,transparent)] to-transparent lg:start-[240px]"
+        className="pointer-events-none fixed start-0 end-0 bottom-(--playback-bar-clearance,0px) z-30 h-40 bg-gradient-to-t from-[var(--background)] via-[color-mix(in_srgb,var(--background)_72%,transparent)] to-transparent lg:start-[240px]"
       />
       {/* `lg:start-[240px]` matches AdminLayout's `lg:ms-[240px]`: the pill
           centers over the content column, not the whole viewport, and stays
           clear of the sidebar it would otherwise paint under. */}
       <div
         role="status"
-        className="pointer-events-none fixed start-0 end-0 bottom-6 z-40 flex justify-center px-4 lg:start-[240px]"
+        className="pointer-events-none fixed start-0 end-0 bottom-[calc(var(--playback-bar-clearance,0px)+1.5rem)] z-40 flex justify-center px-4 lg:start-[240px]"
       >
         <div className="glass pointer-events-auto flex max-w-full items-center gap-3 rounded-full py-2 ps-4 pe-2 shadow-2xl backdrop-blur-xl sm:gap-4 sm:ps-5">
           <span className="min-w-0 truncate text-[13px] font-medium">{text}</span>

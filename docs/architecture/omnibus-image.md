@@ -78,11 +78,19 @@ order:
 3. `init-config` lays out `/config`, decides which bundled services run, and
    exports the connection settings Silo reads for them: `DATABASE_URL`,
    `REDIS_URL`, and the search variables below. An explicit `DATABASE_URL` or
-   `REDIS_URL` turns the matching bundled service off. With the bundled
+   `REDIS_URL`, or its `_FILE` variant, turns the matching bundled service
+   off. A `SILO_MEILISEARCH_API_KEY_FILE`, like `SILO_MEILISEARCH_API_KEY`,
+   replaces the key Silo uses to reach Meilisearch, so the init exports none;
+   the bundled Meilisearch keeps its own master key. Silo reads a `_FILE`
+   variant itself, as the `silo` account at `PUID`, so unlike a `FILE__` path
+   the file must be readable by that account; it removes one trailing line
+   ending, where `FILE__` removes every trailing newline. Only the container's
+   environment counts here: the `.env` in `/config/silo` is read by Silo after
+   the init has chosen its services. With the bundled
    PostgreSQL it defaults `POSTGRES_TUNE` to `auto` with a 50% memory budget;
    a deployment's own database keeps Silo's default, tuning off. A proxy or
    transcode `MODE` turns them all off; a proxy `MODE` also requires both
-   URLs.
+   URLs, directly or as `_FILE` variants.
 4. `init-postgres` creates the cluster on first start and writes the image's
    settings and `pg_hba.conf` on every start; `svc-postgres` runs it;
    `init-postgres-db` creates the `silo` database and rebuilds
@@ -130,6 +138,8 @@ none of the init, so code in the binary must not rely on what the init does:
   storage refuses a root reached through the dangling `/var/lib/silo` link
   rather than writing somewhere else.
 - No bundled services, `FILE__` loading, GPU group discovery, or supervisor.
+  Silo's own `_FILE` variables (`DATABASE_URL_FILE`, `SECRET_KEY_FILE`, and
+  the rest) still work, since the binary reads them.
 - The working directory is `/`, and Docker sets `HOME` to `/` for a uid with no
   passwd entry. That is why the Jellyfin Web installer keeps npm's cache in its
   own workspace.
@@ -278,7 +288,9 @@ the node's own state.
 
 With `MODE=transcode`, Silo branches before it loads the bootstrap: the node
 needs only `SILO_CORE_URL`, the main server's URL, and `SILO_NODE_KEY`, the key
-an administrator issued it, and Silo refuses to start without a well-formed
+an administrator issued it or the main server's `SILO_TRANSCODE_NODES` declares
+for it ([declared nodes](transcode-nodes.md#declared-nodes)), and Silo refuses
+to start without a well-formed
 key. It opens no database or Redis and holds no `SECRET_KEY`: it reads its
 configuration from the main server and ignores `DATABASE_URL`, `REDIS_URL`,
 `SECRET_KEY`, `NODE_URL` and `NODE_NAME` with one warning, so a `.env` copied
@@ -395,6 +407,13 @@ here. It refuses, before anything is moved into place, when:
   earlier install behind unannounced. The message says to move
   `config/postgres/data` aside and start again if it holds nothing needed, or
   to delete the earlier stack's directories to keep it.
+- An earlier install is here and `.env` sets `DATABASE_URL_FILE` or
+  `REDIS_URL_FILE`, which hides the URL this step has to check. The variable
+  comes out of `.env` while the install moves. When the earlier stack's own
+  PostgreSQL or Redis held the data, nothing goes in its place, since the image
+  runs PostgreSQL itself, and Redis unless `ENABLE_REDIS=false`; when an
+  external service did, its URL goes in
+  `DATABASE_URL` or `REDIS_URL`, where this step checks it.
 - An earlier install is here and `.env` holds a `DATABASE_URL` or `REDIS_URL`
   naming the old services or `localhost` (the old file overrode them for Silo,
   and this one passes `.env` through), or a `SILO_MEILISEARCH_URL` naming the

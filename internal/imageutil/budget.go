@@ -1,8 +1,9 @@
+//go:build !silo_node
+
 package imageutil
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sync"
 	"time"
@@ -12,10 +13,6 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 )
-
-// ErrBusy reports that a source waited maxDecodeWait for room in the decode
-// budget and found none. The image may be fine; the caller can try again.
-var ErrBusy = errors.New("imageutil: image processing is busy")
 
 // maxSourcePixels is the largest source any node accepts. A file's size says
 // nothing about its raster: a PNG of a few hundred kilobytes can declare

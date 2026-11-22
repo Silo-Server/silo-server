@@ -43,12 +43,15 @@ func (in *AdminMediaRequestListInput) filterKey() string {
 	return strings.Join([]string{in.Status, in.Outcome, in.View, in.Q, in.MediaType, in.RequestedByUserID}, "|")
 }
 
-// AdminRequestCounts counts the requests in each queue view.
+// AdminRequestCounts counts the requests in each queue view and says whether
+// requests are switched on, so a monitoring key can tell an empty queue from a
+// disabled feature without reading the request settings.
 type AdminRequestCounts struct {
-	NeedsApproval int `json:"needs_approval" doc:"Pending requests waiting for an admin" example:"3"`
-	InProgress    int `json:"in_progress" doc:"Approved requests on their way to the library" example:"5"`
-	Failed        int `json:"failed" doc:"Failed requests; Retry sends them again" example:"1"`
-	Done          int `json:"done" doc:"Completed requests, and those closed by a decline or cancellation" example:"42"`
+	RequestsEnabled bool `json:"requests_enabled" doc:"Whether the server-wide requests switch is on; the queue still answers while it is off" example:"true"`
+	NeedsApproval   int  `json:"needs_approval" doc:"Pending requests waiting for an admin" example:"3"`
+	InProgress      int  `json:"in_progress" doc:"Approved requests on their way to the library" example:"5"`
+	Failed          int  `json:"failed" doc:"Failed requests; Retry sends them again" example:"1"`
+	Done            int  `json:"done" doc:"Completed requests, and those closed by a decline or cancellation" example:"42"`
 }
 
 type AdminRequestCountsOutput struct {
@@ -96,11 +99,16 @@ func (reg *Registry) getAdminRequestCounts(ctx context.Context, _ *struct{}) (*A
 	if p != nil {
 		return nil, p
 	}
-	c, err := s.CountAdminViews(ctx, adminRequestViewer(ctx))
+	viewer := adminRequestViewer(ctx)
+	c, err := s.CountAdminViews(ctx, viewer)
 	if err != nil {
 		return nil, requestProblem(err)
 	}
-	return &AdminRequestCountsOutput{Body: AdminRequestCounts{NeedsApproval: c.NeedsApproval, InProgress: c.InProgress, Failed: c.Failed, Done: c.Done}}, nil
+	settings, err := reg.deps.AdminRequests.GetSettings(ctx, viewer)
+	if err != nil {
+		return nil, requestProblem(err)
+	}
+	return &AdminRequestCountsOutput{Body: AdminRequestCounts{RequestsEnabled: settings.RequestsEnabled, NeedsApproval: c.NeedsApproval, InProgress: c.InProgress, Failed: c.Failed, Done: c.Done}}, nil
 }
 
 func (reg *Registry) listAdminRequestEvents(ctx context.Context, in *MediaRequestGetInput) (*AdminRequestEventsOutput, error) {

@@ -1,9 +1,9 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://raw.githubusercontent.com/Silo-Server/silo-server/main/contracts/plugins/provisioning/v1/schema.json",
-  "title": "Silo plugin provisioning",
+  "title": "Silo deployment configuration",
   "type": "object",
-  "required": ["apiVersion", "plugins"],
+  "required": ["apiVersion"],
   "additionalProperties": false,
   "properties": {
     "apiVersion": { "type": "integer", "const": 1 },
@@ -11,6 +11,11 @@
       "type": "object",
       "propertyNames": { "pattern": "^[a-z0-9]+([._-][a-z0-9]+)*$" },
       "additionalProperties": { "$ref": "#/$defs/plugin" }
+    },
+    "ai_providers": {
+      "type": "object",
+      "propertyNames": { "pattern": "^[a-z0-9][a-z0-9-]{0,63}$" },
+      "additionalProperties": { "$ref": "#/$defs/aiProvider" }
     }
   },
   "$defs": {
@@ -47,6 +52,35 @@
           }
         }
       }
+    },
+    "aiProvider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["openai", "gemini", "openrouter", "groq", "ollama", "whisper", "custom"] },
+        "name": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "base_url": { "type": "string", "minLength": 1 },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "enum": ["chat", "embeddings", "speech"] }
+        },
+        "api_key": { "$ref": "#/$defs/secretReference" }
+      }
+    },
+    "secretReference": {
+      "anyOf": [
+        {
+          "type": "object", "required": ["fromFile"], "additionalProperties": false,
+          "properties": { "fromFile": { "type": "string", "minLength": 1 } }
+        },
+        {
+          "type": "object", "required": ["fromEnv"], "additionalProperties": false,
+          "properties": { "fromEnv": { "type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$" } }
+        }
+      ]
     },
     "value": {
       "anyOf": [

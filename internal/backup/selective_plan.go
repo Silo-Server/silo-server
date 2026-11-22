@@ -84,7 +84,7 @@ type PreviewCollected struct {
 	UnknownItems int    `json:"unknown_items"`
 	LocalID      string `json:"local_id,omitempty"`
 	// TemplateID and BundleID name a template collection's template and
-	// bundle; Changes lists the admin's changes a restore writes.
+	// bundle; Changes the change codes of what a restore writes.
 	TemplateID string   `json:"template_id,omitempty"`
 	BundleID   string   `json:"bundle_id,omitempty"`
 	Changes    []string `json:"changes,omitempty"`
@@ -231,6 +231,50 @@ func (p *planner) planLibraries(ctx context.Context) ([]libraryPlan, error) {
 		out = append(out, plan)
 	}
 	return out, nil
+}
+
+// Change codes name what a restore replaces in a home or library page
+// section (PreviewHomeSection.Changes) or a template collection
+// (PreviewCollected.Changes). The API declares them; clients show each in
+// the interface language.
+const (
+	ChangeType               = "type"
+	ChangeTitle              = "title"
+	ChangeTitleTranslation   = "title_translation"
+	ChangePosition           = "position"
+	ChangeFeatured           = "featured"
+	ChangeItemLimit          = "item_limit"
+	ChangeEnabled            = "enabled"
+	ChangeWebOnly            = "web_only"
+	ChangeCollectionReplaced = "collection_replaced"
+	ChangeConfiguration      = "configuration"
+	// ChangeCollectionItems comes with the count of items the section's
+	// collection here lacks (PreviewHomeSection.MissingCollectionItems).
+	ChangeCollectionItems = "collection_items"
+
+	ChangeDescription  = "description"
+	ChangeVisibility   = "visibility"
+	ChangeSortOrder    = "sort_order"
+	ChangeItemSort     = "item_sort"
+	ChangeSource       = "source"
+	ChangeSyncSchedule = "sync_schedule"
+	ChangePoster       = "poster"
+	ChangeBackdrop     = "backdrop"
+	ChangeLibraries    = "libraries"
+)
+
+// changeWords is change codes as the English words of an item message:
+// "title, item limit, 3 collection items".
+func changeWords(codes []string, missingCollectionItems int) string {
+	words := make([]string, len(codes))
+	for i, code := range codes {
+		if code == ChangeCollectionItems {
+			words[i] = fmt.Sprintf("%d collection items", missingCollectionItems)
+		} else {
+			words[i] = strings.ReplaceAll(code, "_", " ")
+		}
+	}
+	return strings.Join(words, ", ")
 }
 
 // joinLabels joins labels as a list in a sentence: "a", "a and b",

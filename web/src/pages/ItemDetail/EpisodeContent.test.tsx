@@ -1,5 +1,10 @@
 import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryClientProvider,
+  QueryObserver,
+  onlineManager,
+} from "@tanstack/react-query";
 import { renderToStaticMarkup } from "react-dom/server";
 import { act, cleanup, render, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
@@ -493,6 +498,7 @@ describe("EpisodeContent", () => {
     });
     afterEach(() => {
       cleanup();
+      onlineManager.setOnline(true);
       vi.unstubAllGlobals();
     });
 
@@ -636,6 +642,36 @@ describe("EpisodeContent", () => {
         }),
       );
       unsubscribe();
+    });
+
+    it("shows an earlier pick that lands after a later offline pick was refused", async () => {
+      let releaseFirst!: () => void;
+      const firstHeld = new Promise<void>((resolve) => (releaseFirst = resolve));
+      const requests = stubWrites(async () => {
+        await firstHeld;
+        return new Response(null, { status: 204 });
+      });
+      renderWithTracks();
+
+      act(() => actionBar().onSelectAudioTrack(1));
+      await waitFor(() => expect(requests).toHaveLength(1));
+      onlineManager.setOnline(false);
+      act(() => actionBar().onSelectAudioTrack(0));
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "auto",
+          explicitAudioTrackIndex: null,
+        }),
+      );
+      onlineManager.setOnline(true);
+      releaseFirst();
+      await waitFor(() =>
+        expect(actionBar()).toMatchObject({
+          audioSelectionMode: "explicit",
+          explicitAudioTrackIndex: 1,
+        }),
+      );
+      expect(requests).toHaveLength(1);
     });
 
     it("puts the subtitle selector back to the saved pick when Off is not saved", async () => {

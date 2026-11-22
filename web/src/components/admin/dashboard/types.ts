@@ -63,7 +63,8 @@ export interface WidgetViewOptions {
  * Columns and rows are independent axes: `minSpan === maxSpan` pins the width,
  * `minRows === maxRows` pins the height, and a widget that pins both cannot be
  * resized at all. Rows are grid rows (`--admin-row-h` in app.css), not pixels,
- * and only apply from the lg breakpoint up.
+ * and only apply in the dashboard's 12-column layout (`.admin-widget-grid` in
+ * app.css).
  *
  * `ranges` is absent for widgets whose window is not the admin's to choose —
  * live tiles, lists that are not time-bounded, and the fixed-24h stats.

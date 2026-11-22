@@ -63,6 +63,7 @@ export function ProfilesCard({
             key={profile.id}
             leading={<InitialAvatar name={profile.name} seed={index} src={profile.avatar_url} />}
             title={profile.name}
+            titleDir="auto"
             trailing={
               watching.has(profile.id)
                 ? t("web.admin.users.detail.common.watchingNow")

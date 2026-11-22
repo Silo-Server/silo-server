@@ -161,7 +161,7 @@ func (r *Repo) List(ctx context.Context, opts ListOptions) (ListResult, error) {
 	}
 
 	query := fmt.Sprintf(`
-		SELECT id, timestamp, client_ip::text, user_id, impersonator_user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(request_id, ''), COALESCE(node_id, ''),
+		SELECT id, timestamp, host(client_ip), user_id, impersonator_user_id, COALESCE(session_id, ''), COALESCE(playback_session_id, ''), COALESCE(request_id, ''), COALESCE(node_id, ''),
 		       method, path, COALESCE(path_pattern, ''), COALESCE(status_code, 0), LEFT(COALESCE(user_agent, ''), %d), COALESCE(duration_ms, 0), action, target_type, target_id, changes
 		FROM activity_log
 		WHERE %s

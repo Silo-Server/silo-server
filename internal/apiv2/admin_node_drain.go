@@ -36,6 +36,9 @@ type AdminNodeCapabilities struct {
 	// EnvDeclarations is always true on a server that has the column: a node
 	// declares through its own database write or the node control plane.
 	EnvDeclarations bool `json:"env_declarations" doc:"Nodes can declare their own configuration from their environment: env_managed on node rows names the fields a node declares, and updateAdminNode refuses a change to them with field code managed_by_environment."`
+	// DeploymentNodes needs both key issuance and the configuration store:
+	// those are the two operations that refuse a deployment-managed node.
+	DeploymentNodes bool `json:"deployment_nodes" doc:"API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed. An API server that starts with a document no longer listing a node releases it (nodes: {} releases every node); one started with neither variable set changes nothing."`
 }
 type AdminNodeCapabilitiesOutput struct {
 	Status       int
@@ -65,7 +68,7 @@ func registerAdminNodeDrain(reg *Registry) {
 		if reg.deps.AdminNodeDrain == nil {
 			state = StateNotConfigured
 		}
-		return &AdminNodeCapabilitiesOutput{Body: AdminNodeCapabilities{Capability: Capability{State: state}, Drain: true, Summary: reg.deps.AdminNodesRead != nil, NodeKeys: reg.deps.AdminNodeKeys != nil, SourceAccess: reg.deps.AdminNodeConfiguration != nil, EnvDeclarations: reg.deps.AdminNodeConfiguration != nil}}, nil
+		return &AdminNodeCapabilitiesOutput{Body: AdminNodeCapabilities{Capability: Capability{State: state}, Drain: true, Summary: reg.deps.AdminNodesRead != nil, NodeKeys: reg.deps.AdminNodeKeys != nil, SourceAccess: reg.deps.AdminNodeConfiguration != nil, EnvDeclarations: reg.deps.AdminNodeConfiguration != nil, DeploymentNodes: reg.deps.AdminNodeKeys != nil && reg.deps.AdminNodeConfiguration != nil}}, nil
 	})
 
 	op := func(suffix, id, summary string) Operation {

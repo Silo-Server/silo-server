@@ -198,12 +198,22 @@ function S3Fields({
   const t = useT();
   const key = (name: string) => `s3.${prefix}_${name}`;
   const urlAuth = form.getValue(key("url_auth")) || "presigned";
+  // Link-mode settings show for the modes that use them. One the selected mode
+  // doesn't use stays, marked as changed, while it holds an unsaved edit, so
+  // Continue never saves a value the admin can't see.
+  const linkModeUses = (linkKey: string) =>
+    linkKey === "s3.public_read_endpoint"
+      ? urlAuth !== "presigned"
+      : urlAuth === "cloudflare_token";
+  const keptForEdit = (linkKey: string) => !linkModeUses(linkKey) && form.isDirty(linkKey);
+  const showsLinkSetting = (linkKey: string) => linkModeUses(linkKey) || form.isDirty(linkKey);
   return (
     <>
       <SettingField
         label={t("web.setup.storage.endpointLabel")}
         // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
         hint="https://s3.amazonaws.com"
+        dir="ltr"
         value={form.getValue(key("endpoint"))}
         onChange={(v) => form.setValue(key("endpoint"), v)}
         managedByEnv={form.envVar(key("endpoint"))}
@@ -276,43 +286,50 @@ function S3Fields({
             disabled={disabled}
             managedByEnv={form.envVar("s3.public_url_auth")}
           />
-          {urlAuth !== "presigned" ? (
+          {showsLinkSetting("s3.public_read_endpoint") ? (
             <SettingField
               label={t("web.setup.storage.readEndpointLabel")}
+              dirty={keptForEdit("s3.public_read_endpoint")}
               // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
               hint="https://cdn.example.com"
+              dir="ltr"
               value={form.getValue("s3.public_read_endpoint")}
               onChange={(v) => form.setValue("s3.public_read_endpoint", v)}
               managedByEnv={form.envVar("s3.public_read_endpoint")}
             />
           ) : null}
-          {urlAuth === "cloudflare_token" ? (
-            <>
-              <SettingField
-                label={t("web.setup.storage.tokenSecretLabel")}
-                type="password"
-                hint={t("web.setup.storage.tokenSecretHint")}
-                value={form.getValue("s3.public_token_secret")}
-                onChange={(v) => form.setValue("s3.public_token_secret", v)}
-                sensitiveConfigured={form.sensitiveConfigured.includes("s3.public_token_secret")}
-                managedByEnv={form.envVar("s3.public_token_secret")}
-              />
-              <SettingField
-                label={t("web.setup.storage.tokenParamLabel")}
-                description={t("web.setup.storage.tokenParamDescription")}
-                value={form.getValue("s3.public_token_param") || "verify"}
-                onChange={(v) => form.setValue("s3.public_token_param", v)}
-                managedByEnv={form.envVar("s3.public_token_param")}
-              />
-              <SettingField
-                label={t("web.setup.storage.tokenTtlLabel")}
-                type="number"
-                unit={t("web.setup.storage.seconds")}
-                value={form.getValue("s3.public_token_ttl") || "10800"}
-                onChange={(v) => form.setValue("s3.public_token_ttl", v)}
-                managedByEnv={form.envVar("s3.public_token_ttl")}
-              />
-            </>
+          {showsLinkSetting("s3.public_token_secret") ? (
+            <SettingField
+              label={t("web.setup.storage.tokenSecretLabel")}
+              dirty={keptForEdit("s3.public_token_secret")}
+              type="password"
+              hint={t("web.setup.storage.tokenSecretHint")}
+              value={form.getValue("s3.public_token_secret")}
+              onChange={(v) => form.setValue("s3.public_token_secret", v)}
+              sensitiveConfigured={form.sensitiveConfigured.includes("s3.public_token_secret")}
+              managedByEnv={form.envVar("s3.public_token_secret")}
+            />
+          ) : null}
+          {showsLinkSetting("s3.public_token_param") ? (
+            <SettingField
+              label={t("web.setup.storage.tokenParamLabel")}
+              dirty={keptForEdit("s3.public_token_param")}
+              description={t("web.setup.storage.tokenParamDescription")}
+              value={form.getValue("s3.public_token_param") || "verify"}
+              onChange={(v) => form.setValue("s3.public_token_param", v)}
+              managedByEnv={form.envVar("s3.public_token_param")}
+            />
+          ) : null}
+          {showsLinkSetting("s3.public_token_ttl") ? (
+            <SettingField
+              label={t("web.setup.storage.tokenTtlLabel")}
+              dirty={keptForEdit("s3.public_token_ttl")}
+              type="number"
+              unit={t("web.setup.storage.seconds")}
+              value={form.getValue("s3.public_token_ttl") || "10800"}
+              onChange={(v) => form.setValue("s3.public_token_ttl", v)}
+              managedByEnv={form.envVar("s3.public_token_ttl")}
+            />
           ) : null}
         </>
       ) : null}
@@ -510,6 +527,7 @@ export function StorageStep() {
             label={t("web.setup.storage.localPathLabel")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="/var/lib/silo/artwork"
+            dir="ltr"
             value={form.getValue("artwork.local_path")}
             onChange={(value) => form.setValue("artwork.local_path", value)}
             disabled={locationStatusUnavailable || artworkLocked}
