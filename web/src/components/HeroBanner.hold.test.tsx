@@ -139,16 +139,24 @@ describe("HeroBanner hover and focus hold", () => {
     expect(announced()).toBe("Slide 2");
   });
 
-  it("stays held when a screen reader clicks a focused control", async () => {
-    show();
-    await tabToNext(userEvent.setup());
+  it("keeps a focus hold when a screen reader clicks a focused control", async () => {
+    const hero = show();
+    const u = userEvent.setup();
+    await tabToNext(u);
     const nextButton = screen.getByRole("button", { name: "Next slide" });
     fireEvent.mouseDown(nextButton);
     fireEvent.mouseUp(nextButton);
     fireEvent.click(nextButton);
     expect(announced()).toBe("Slide 2");
+    // Still a focus hold: a mouse brushing across leaves it held, and
+    // tabbing out releases it.
+    pointerEnter(hero);
+    pointerLeave(hero);
     wait(20000);
     expect(announced()).toBe("Slide 2");
+    await u.tab();
+    wait(8100);
+    expect(announced()).toBe("Slide 3");
   });
 
   it("resumes when the pointer leaves after Play and a click on Next", async () => {
@@ -157,7 +165,7 @@ describe("HeroBanner hover and focus hold", () => {
     await u.click(screen.getByRole("button", { name: "Pause slideshow" }));
     await u.click(screen.getByRole("button", { name: "Play slideshow" }));
     // The pointer stays over the hero: press Next the way a browser does,
-    // with no new mouseenter.
+    // with no new pointerenter.
     const nextButton = screen.getByRole("button", { name: "Next slide" });
     fireEvent.mouseDown(nextButton);
     act(() => nextButton.focus());
@@ -232,5 +240,16 @@ describe("HeroBanner hover and focus hold", () => {
     pointerLeave(hero);
     wait(20000);
     expect(announced()).toBe("Slide 1");
+  });
+
+  it("resumes after a focused control goes without a blur and a press elsewhere", async () => {
+    show();
+    await tabToNext(userEvent.setup());
+    // Removing a focused element moves focus to the body with no blur.
+    const activeElement = vi.spyOn(document, "activeElement", "get").mockReturnValue(document.body);
+    fireEvent.pointerDown(document.body);
+    activeElement.mockRestore();
+    wait(8100);
+    expect(announced()).toBe("Slide 2");
   });
 });

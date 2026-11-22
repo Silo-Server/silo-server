@@ -250,8 +250,8 @@ export default function HeroBanner({
     setHolds((h) => (h.focus ? { hover: true, focus: false } : h));
   }, []);
   const release = useCallback((reason: HoldReason) => {
-    // A browser can remove a focused control (Translate, once pressed)
-    // without a blur, so the pointer leaving rechecks where focus is.
+    // A focused control can go without a blur (see the effect below), so
+    // the pointer leaving rechecks where focus is.
     const focusInside = !!sectionRef.current?.contains(document.activeElement);
     setHolds((h) => releaseHold(h, reason, focusInside));
   }, []);
@@ -267,6 +267,24 @@ export default function HeroBanner({
     setChoice("play");
     setHolds({ hover: false, focus: false });
   }, [wantsPlay]);
+
+  // A browser removes a focused control (Translate, once pressed) without a
+  // blur, leaving focus on the page body. While a focus hold is on, the next
+  // focus or press elsewhere ends it once focus is no longer inside.
+  useEffect(() => {
+    if (!holds.focus) return;
+    const releaseIfOutside = (event: Event) => {
+      const section = sectionRef.current;
+      if (!section || section.contains(event.target as Node)) return;
+      if (!section.contains(document.activeElement)) release("focus");
+    };
+    document.addEventListener("focusin", releaseIfOutside);
+    document.addEventListener("pointerdown", releaseIfOutside);
+    return () => {
+      document.removeEventListener("focusin", releaseIfOutside);
+      document.removeEventListener("pointerdown", releaseIfOutside);
+    };
+  }, [holds.focus, release]);
 
   // `activeIndex` is in the dep list so that manual navigation (prev/next
   // chevrons) also resets the 8s countdown — otherwise after clicking next at
