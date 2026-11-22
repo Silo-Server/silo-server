@@ -455,7 +455,9 @@ func compatScrobbleFallbackSession(
 	if compatSession == nil || playSession == nil || playSession.UpstreamSessionID == "" || !positionKnown {
 		return nil
 	}
-	source := compatScrobbleSource(playSession, nil, preferredSource)
+	// Only a source the play identifies names the file; a guess at the first
+	// listed one would make the stop scrobble judge credits of another cut.
+	source := identifiedScrobbleSource(playSession, nil, preferredSource)
 	fileID := 0
 	if source != nil {
 		fileID = source.FileID
