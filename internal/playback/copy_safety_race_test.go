@@ -111,7 +111,7 @@ func TestCopySafetyRaceDedupesInFlightScans(t *testing.T) {
 		race.RaceScan(100)
 	}
 	close(scanner.release)
-	time.Sleep(20 * time.Millisecond)
+	waitForRaceRetired(t, race, 100)
 	if got := scanner.scanCount(); got != 1 {
 		t.Fatalf("scans = %d, want 1 for the whole burst", got)
 	}
@@ -212,6 +212,22 @@ func waitForScans(t *testing.T, scanner *fakeCopySafetyScanner, want int) {
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("scans = %d, want %d", scanner.scanCount(), want)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// waitForRaceRetired waits until the race for fileID, follow-up passes
+// included, has let go of the file.
+func waitForRaceRetired(t *testing.T, race *CopySafetyRace, fileID int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		if _, running := race.inFlight.Load(fileID); !running {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("race for file %d still running", fileID)
 		}
 		time.Sleep(time.Millisecond)
 	}
