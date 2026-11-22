@@ -131,6 +131,22 @@ func TestParseVariantHintsEditionItemFolder(t *testing.T) {
 			wantSource:  "heuristic_folder",
 		},
 		{
+			name:        "season folder heuristic applies before show folder",
+			filePath:    "/tv/Friends/Season 01 Extended/Friends S01E01.mkv",
+			libraryType: "series",
+			roots:       []string{"/tv"},
+			wantKey:     "extended",
+			wantSource:  "heuristic_folder",
+		},
+		{
+			name:        "movie folder named like a disc-image folder is the item folder",
+			filePath:    "/movies/Remastered/Backup/Backup.mkv",
+			libraryType: "movies",
+			roots:       []string{"/movies"},
+			wantKey:     "",
+			wantSource:  "",
+		},
+		{
 			name:        "yearless filename title words are not its edition",
 			filePath:    "/movies/Uncut Gems (2019) Remastered/Uncut Gems.mkv",
 			libraryType: "movies",
