@@ -23,12 +23,17 @@ const BIDI_CONTROL = /[\u202a-\u202e\u2066-\u2069]/u;
 // What sets a name's direction for dir="auto": its first letter or directional mark.
 const FIRST_STRONG = /[\p{L}\u200e\u200f\u061c]/u;
 
-// The opening bracket each closing bracket pairs with.
-const OPENING: Record<string, string> = { ")": "(", "]": "[", "}": "{" };
 const OPENS = /^\p{Ps}$/u;
 const CLOSES = /^\p{Pe}$/u;
-// Format characters, such as a directional mark, which letters join across.
-const ENDS_FORMAT = /\p{Cf}+$/u;
+// Marks and format characters, such as a directional mark, which letters join
+// across; not the zero-width space or non-joiner, which break joining.
+const ENDS_TRANSPARENT = /(?:(?![\u200b\u200c])[\p{M}\p{Cf}])+$/u;
+
+/** Whether `closing` pairs with `opening`: "()" and "（）" are one code point apart, "[]" two. */
+function closes(closing: string, opening: string) {
+  const gap = closing.codePointAt(0)! - opening.codePointAt(0)!;
+  return gap === 1 || gap === 2;
+}
 
 /**
  * Whether a bracket opened in `head` is still open at its end, pairing brackets
@@ -40,7 +45,8 @@ function leavesBracketOpen(head: string) {
   for (const char of head) {
     if (OPENS.test(char)) open.push(char);
     else if (CLOSES.test(char)) {
-      const at = open.lastIndexOf(OPENING[char]);
+      let at = open.length - 1;
+      while (at >= 0 && !closes(char, open[at]!)) at--;
       if (at >= 0) open.length = at;
     }
   }
@@ -84,7 +90,7 @@ function nodeNameCut(name: string, rightToLeft: boolean) {
       leftToRightOnly ||
       (STARTS_WITH_LETTER.test(tail) &&
         STARTS_RIGHT_TO_LEFT.test(tail) === rightToLeft &&
-        !ENDS_RIGHT_TO_LEFT.test(head.replace(ENDS_FORMAT, "")) &&
+        !ENDS_RIGHT_TO_LEFT.test(head.replace(ENDS_TRANSPARENT, "")) &&
         !leavesBracketOpen(head))
     ) {
       return { head, tail };

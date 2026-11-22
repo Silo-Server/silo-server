@@ -38,6 +38,22 @@ describe("NodeName", () => {
     }
   });
 
+  it("cuts after a closed bracket or a non-joiner, not between joined letters", () => {
+    expect(pieces("gpu （אבג） transcode-rack-07")).toEqual({
+      dir: "ltr",
+      texts: ["gpu （אבג） trans", "code-rack-07"],
+    });
+    expect(pieces("سرور\u200cهای\u200cپخش\u200cفرانکفورت")).toEqual({
+      dir: "rtl",
+      texts: ["سرور\u200cهای\u200c", "پخش\u200cفرانکفورت"],
+    });
+    // A right-to-left mark doesn't stop two Arabic letters joining.
+    expect(pieces("خادم البث ب\u200fفرانكفورت ال")).toEqual({
+      dir: "rtl",
+      texts: ["خادم البث ", "ب\u200fفرانكفورت ال"],
+    });
+  });
+
   it("doesn't start the end piece with a zero-width joiner", () => {
     const name = "render-node-\u{1f468}\u200d\u{1f469}\u200d\u{1f467}-family-box";
     expect(pieces(name)).toEqual({
