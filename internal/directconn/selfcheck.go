@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/Silo-Server/shunpike/engine"
+	"github.com/darthShadow/shunpike/engine"
 
 	"github.com/Silo-Server/silo-server/internal/tuning"
 )
