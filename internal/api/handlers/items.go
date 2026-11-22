@@ -1424,6 +1424,23 @@ func (h *ItemsHandler) listUserSortMetrics(
 	}
 }
 
+// listSeriesViewedAt returns when the profile last finished an episode of
+// each series in items. Without the store's rollup, or when it fails, series
+// go undated but other titles still are.
+func listSeriesViewedAt(ctx context.Context, items []*models.MediaItem, store userstore.UserStore, profileID string) map[string]string {
+	seriesIDs := seriesItemIDs(items)
+	rollup, ok := store.(userstore.SeriesEpisodeRollupStore)
+	if len(seriesIDs) == 0 || !ok {
+		return nil
+	}
+	viewed, err := rollup.SeriesLatestViewedAt(ctx, profileID, seriesIDs)
+	if err != nil {
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "listing series viewed times", "component", "api", "error", err)
+		return nil
+	}
+	return viewed
+}
+
 // listViewedAtSortMetrics sets each item's latest finished play for a date
 // viewed sort. Plays are recorded against episodes, so a series takes the
 // latest of its episodes' plays, as the sort does (#4638).
@@ -1437,18 +1454,7 @@ func (h *ItemsHandler) listViewedAtSortMetrics(
 	ebookProgressMap map[string]EbookReaderProgress,
 	metrics map[string]*sortMetricsResponse,
 ) {
-	var seriesViewedAt map[string]string
-	if seriesIDs := seriesItemIDs(items); len(seriesIDs) > 0 {
-		// Without the store's rollup, series go undated but other titles
-		// still are.
-		if rollup, ok := store.(userstore.SeriesEpisodeRollupStore); ok {
-			viewed, err := rollup.SeriesLatestViewedAt(ctx, profileID, seriesIDs)
-			if err != nil {
-				slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "listing series viewed times", "component", "api", "error", err)
-			}
-			seriesViewedAt = viewed
-		}
-	}
+	seriesViewedAt := listSeriesViewedAt(ctx, items, store, profileID)
 	// One grouped read gives each item's latest visible play.
 	history, err := store.ListCompletedHistoryItems(ctx, userstore.CompletedHistoryItemQuery{
 		ProfileID:    profileID,
