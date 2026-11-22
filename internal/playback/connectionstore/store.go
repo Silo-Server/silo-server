@@ -33,10 +33,11 @@ const (
 	// Retention is how long a row survives without an update.
 	Retention = 30 * 24 * time.Hour
 	// ReadingContradictsRatio is how many times faster than a lowering the
-	// connection's current reading must be to contradict it. Wi-Fi congestion
-	// or a probe that overstated the link stays well within this; a link 50
-	// times faster than its lowering did not carry the stall, the server's
-	// storage or a failing route did.
+	// connection's current reading must be to contradict it. A margin chosen
+	// by judgement: a start that waited on a disk spinning up measured about
+	// 50 times below its reading. The reading is the best the connection did within the reading
+	// lifetime, so a link that really falls this far below it on the same key
+	// (weak Wi-Fi far from the access point) no longer learns a limit.
 	ReadingContradictsRatio = 10
 )
 

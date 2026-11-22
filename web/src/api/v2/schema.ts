@@ -31537,7 +31537,7 @@ export interface components {
       metered?: boolean;
       /**
        * Format: int64
-       * @description What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with, and learns, the lower of it and bandwidth_estimate_kbps.
+       * @description What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with the lower of it and bandwidth_estimate_kbps, and learns that figure unless the connection's current reading is more than 10 times higher.
        */
       observed_throughput_kbps?: number;
       /** @enum {string} */
@@ -32021,7 +32021,7 @@ export interface components {
       metered?: boolean;
       /**
        * Format: int64
-       * @description What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with, and learns, the lower of it and bandwidth_estimate_kbps.
+       * @description What the plan that kept buffering received, measured as plan_summary throughput_kbps. Only with bandwidth_estimate_source observed_rebuffer; the server plans with the lower of it and bandwidth_estimate_kbps, and learns that figure unless the connection's current reading is more than 10 times higher.
        */
       observed_throughput_kbps?: number;
       playback_attempt_id: string;

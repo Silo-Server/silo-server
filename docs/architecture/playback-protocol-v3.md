@@ -2585,12 +2585,14 @@ by default) still plans at its own figure, or at a lower stored limit, but
 records nothing and leaves any earlier limit as it was. A client cannot tell a
 stall the server caused from a slow link: a start that waited on a disk
 spinning up recorded a 2174 kbps limit on a link measured at 114 Mbps, and the
-next title played at 540p. Without a stored limit, that plan carries no
-`bandwidth_limit`. A link that really falls this far below its reading, such as
-weak Wi-Fi in another room, lowers again on each title until a **Test speed**
-result replaces the reading or the reading ages out; an automatic test does not
-clear the playback sample. A network-access provider path follows the device
-across networks, so its lowerings are always recorded.
+next title played at 540p. Unless a lower stored limit applies, that plan
+carries no `bandwidth_limit`. A link that really falls this far below its
+reading lowers again on each title until a **Test speed** result replaces the
+reading or the reading ages out; an automatic test does not clear the playback
+sample. That covers weak Wi-Fi in another room, and a device whose key stays
+the same on every network, such as one that reaches the server through a VPN
+address or an untrusted proxy. A network-access provider path follows the
+device across networks, so its lowerings are always recorded.
 
 An Auto start or replan without `bandwidth_estimate_kbps` plans with the
 connection's current reading, the one `GET /api/v2/playback/connection`
