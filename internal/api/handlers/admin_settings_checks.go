@@ -238,17 +238,17 @@ func textCheckFailed(ctx context.Context, err error, apiKey string) connectionCh
 	}
 	// A streamed ChatGPT or Responses API failure carries its cause only in
 	// the provider's error code, not in the error text.
-	attrs := []any{logComponentKey, "api", "error", redact(err.Error())}
+	attrs := []slog.Attr{slog.String(logComponentKey, "api"), slog.String("error", redact(err.Error()))}
 	if httpErr, ok := errors.AsType[*llm.HTTPError](err); ok {
 		// A failure reported inside a successful response has no HTTP status.
 		if httpErr.InResponse {
-			attrs = append(attrs, "in_response", true)
+			attrs = append(attrs, slog.Bool("in_response", true))
 		} else {
-			attrs = append(attrs, "status", httpErr.StatusCode)
+			attrs = append(attrs, slog.Int("status", httpErr.StatusCode))
 		}
-		attrs = append(attrs, "provider_code", redact(httpErr.Code), "provider_param", redact(httpErr.Param))
+		attrs = append(attrs, slog.String("provider_code", redact(httpErr.Code)), slog.String("provider_param", redact(httpErr.Param)))
 	}
-	slog.WarnContext(ctx, "text AI connection check failed", attrs...)
+	slog.LogAttrs(ctx, slog.LevelWarn, "text AI connection check failed", attrs...)
 	return checkFailed(textCheckFailureMessage(err))
 }
 
