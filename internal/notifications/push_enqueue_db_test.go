@@ -166,7 +166,10 @@ func TestPushRetentionKeepsTheLastChanceForAnExpiredAppleLoginDB(t *testing.T) {
 		INSERT INTO push_devices (id, user_id, profile_id, device_id, platform, provider, server_device_id,
 			apns_environment, apns_topic, apns_token_ciphertext, apns_token_hash, last_seen_at)
 			VALUES ('device', 7, 'default', 'phone', 'apple', 'silo_relay', 'server-phone',
-			'production', 'topic', 'sealed', 'hash-phone', now() - interval '1 day');`); err != nil {
+			'production', 'topic', 'sealed', 'hash-phone', now() - interval '1 day'),
+			-- The same phone's registration on another profile, which no delivery holds.
+			('device-free', 7, 'kid', 'phone', 'apple', 'silo_relay', 'server-phone-kid',
+			'production', 'topic', 'sealed', 'hash-phone-kid', now() - interval '1 day');`); err != nil {
 		t.Fatal(err)
 	}
 	devices := NewPushDeviceRepository(pool)
@@ -181,19 +184,34 @@ func TestPushRetentionKeepsTheLastChanceForAnExpiredAppleLoginDB(t *testing.T) {
 	})); err != nil {
 		t.Fatal(err)
 	}
-	// The delivery commits while the sweep waits to try again. Nothing shows
-	// that wait from outside, so this commits well inside its first pause; a
-	// commit before the first pass only makes the test pass without the skip.
+	// The sweep waits for the delivery rather than skip the registration.
+	type result struct {
+		removed int64
+		err     error
+	}
+	swept := make(chan result, 1)
 	go func() {
-		time.Sleep(200 * time.Millisecond) //nolint:forbidigo // lands inside pushNoLoginSweepRetry, which no state exposes
-		_ = tx.Commit(context.WithoutCancel(ctx))
+		removed, err := devices.DeleteRegistrationsWithNoLogin(ctx)
+		swept <- result{removed, err}
 	}()
-	sweepCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	removed, err := devices.DeleteRegistrationsWithNoLogin(sweepCtx)
-	if err != nil {
+	waitForLockWait(t, pool)
+	// The registrations nobody holds are gone already: the sweep waits one row
+	// at a time, not with a many-row delete that could deadlock with an enqueue.
+	var free bool
+	if err := pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM push_devices WHERE id = 'device-free')`).Scan(&free); err != nil {
 		t.Fatal(err)
 	}
+	if free {
+		t.Fatal("the sweep waits on the held registration before removing the free one")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	first := <-swept
+	if first.err != nil {
+		t.Fatal(first.err)
+	}
+	removed := first.removed
 	// Session cleanup, which runs right after notification retention.
 	if _, err := pool.Exec(ctx, `DELETE FROM auth_sessions WHERE expires_at < now()`); err != nil {
 		t.Fatal(err)
@@ -203,7 +221,7 @@ func TestPushRetentionKeepsTheLastChanceForAnExpiredAppleLoginDB(t *testing.T) {
 	} else {
 		removed += later
 	}
-	if removed != 1 {
-		t.Fatalf("retention removed %d registrations, want the expired login's 1", removed)
+	if removed != 2 {
+		t.Fatalf("retention removed %d registrations, want the expired login's 2", removed)
 	}
 }

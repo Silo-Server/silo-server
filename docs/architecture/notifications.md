@@ -684,8 +684,9 @@ to the plugin service, so neither package imports the other.
   retention sweeps of web push subscriptions and push registrations skip a
   row a delivery holds instead of waiting on it, which could deadlock with an
   enqueue, and take it on a later run. The sweep of push registrations with no
-  recorded login comes back for a skipped row within the same run, since its
-  Apple evidence, an ended login, can be gone by the next one. All of a
+  recorded login then deletes each row it skipped on its own, waiting for the
+  delivery, since its Apple evidence, an ended login, can be gone by the next
+  run; a statement that locks one row can't deadlock with an enqueue. All of a
   transaction's attempts go in one `INSERT ... SELECT FROM unnest(...)` with
   four parameters, so a
   fanout of any size stays under the protocol's parameter limit. A delivery

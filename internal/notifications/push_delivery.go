@@ -433,16 +433,6 @@ const pushDeviceUnboundWithoutLogin = `d.login_session_id IS NULL
 	                     WHERE s.user_id = d.user_id AND s.device_id IS NULL AND ` + authSessionLive + `))
 	  )`
 
-// A registration DeleteRegistrationsWithNoLogin skips because a delivery
-// holds it is tried again this often, this long apart, before the sweep
-// returns. The Apple evidence is an ended login's row, which session cleanup
-// deletes right after notification retention once its expiry has passed, so
-// a login that expired since the last run gets only this run to match.
-const (
-	pushNoLoginSweepTries = 5
-	pushNoLoginSweepRetry = time.Second
-)
-
 // DeleteRegistrationsWithNoLogin removes registrations with no recorded login
 // whose device has no live login. Such a registration predates login_session_id,
 // and a phone already signed out can never supply one, so it would otherwise
@@ -454,38 +444,40 @@ const (
 // phone it misses keeps delivering. docs/notifications-push-api.md lists what
 // it misses.
 //
-// Like the other retention sweeps it skips a registration a delivery holds
-// rather than wait on it, but it comes back for it shortly (see
-// pushNoLoginSweepTries) instead of on the next run, when the evidence may be
-// gone.
+// It first removes every registration no other transaction holds, skipping
+// the rest as the other retention sweeps do. It then removes each one it
+// skipped on its own, waiting for the delivery that holds it, instead of on
+// the next run like the other sweeps: the Apple evidence is an ended login's
+// row, which session cleanup deletes right after notification retention once
+// its expiry has passed, so a login that expired since the last run gets only
+// this run to match. A statement that locks one registration can't deadlock
+// with an enqueue, which is what skipping avoids for the many-row pass.
 func (r *PushDeviceRepository) DeleteRegistrationsWithNoLogin(ctx context.Context) (int64, error) {
-	var removed int64
-	for try := 1; ; try++ {
-		tag, err := r.pool.Exec(ctx, `
-			DELETE FROM push_devices WHERE id IN (
-				SELECT d.id FROM push_devices d WHERE `+pushDeviceUnboundWithoutLogin+`
-				FOR UPDATE OF d SKIP LOCKED)`, PushPlatformApple)
+	tag, err := r.pool.Exec(ctx, `
+		DELETE FROM push_devices WHERE id IN (
+			SELECT d.id FROM push_devices d WHERE `+pushDeviceUnboundWithoutLogin+`
+			FOR UPDATE OF d SKIP LOCKED)`, PushPlatformApple)
+	if err != nil {
+		return 0, fmt.Errorf("delete registrations with no login: %w", err)
+	}
+	removed := tag.RowsAffected()
+	rows, err := r.pool.Query(ctx, `SELECT d.id FROM push_devices d WHERE `+pushDeviceUnboundWithoutLogin, PushPlatformApple)
+	if err != nil {
+		return removed, fmt.Errorf("list held registrations with no login: %w", err)
+	}
+	held, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return removed, fmt.Errorf("list held registrations with no login: %w", err)
+	}
+	for _, id := range held {
+		tag, err := r.pool.Exec(ctx, `DELETE FROM push_devices d WHERE d.id = $2 AND `+pushDeviceUnboundWithoutLogin,
+			PushPlatformApple, id)
 		if err != nil {
-			return removed, fmt.Errorf("delete registrations with no login: %w", err)
+			return removed, fmt.Errorf("delete held registration with no login: %w", err)
 		}
 		removed += tag.RowsAffected()
-		if try == pushNoLoginSweepTries {
-			return removed, nil
-		}
-		var skipped bool
-		if err := r.pool.QueryRow(ctx, `SELECT EXISTS (
-			SELECT 1 FROM push_devices d WHERE `+pushDeviceUnboundWithoutLogin+`)`, PushPlatformApple).Scan(&skipped); err != nil {
-			return removed, fmt.Errorf("check registrations with no login: %w", err)
-		}
-		if !skipped {
-			return removed, nil
-		}
-		select {
-		case <-ctx.Done():
-			return removed, ctx.Err()
-		case <-time.After(pushNoLoginSweepRetry):
-		}
 	}
+	return removed, nil
 }
 
 func (r *PushDeviceRepository) RecordPushSuccess(ctx context.Context, deviceID string) error {
