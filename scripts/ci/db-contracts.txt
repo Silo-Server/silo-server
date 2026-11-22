@@ -606,6 +606,13 @@
 ./internal/notifications TestFanoutSkipsProfilesThatMutedTheSeries
 ./internal/notifications TestSeriesMutesList
 ./internal/notifications TestSeriesMutesUnmuteAndPurge
+./internal/notifications TestWebhookRejectionsAutoDisableDB
+./internal/notifications TestWebhookRejectionsNeverOutrunFailuresDB
+./internal/notifications TestWebhookFinishIsAtomicDB
+./internal/notifications TestWebhookExhaustedScheduleDisablesOnceDB
+./internal/notifications TestWebhookRetryAfterIsAMinimumDB
+./internal/notifications TestWebhookLateFinishAfterReclaimCountsOnceDB
+./internal/notifications TestWebhookSkipsSendWithoutEnoughLeaseDB
 ./internal/metadata TestCanonicalizeMediaItemReferencesMergesNotificationMutesPostgres
 ./internal/catalog/reattribute TestMovePairsMovesNotificationMutesDB
 ./internal/catalog/reattribute TestMovedHistoryKeepsItsCutoffsDB
