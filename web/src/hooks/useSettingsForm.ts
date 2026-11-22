@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useId, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { t } from "@/i18n";
 import { captureProfileRequestContext, isCapturedProfileAuthorityActive } from "@/api/client";
 import {
   adminSettingsKey,
   captureSettingsBaseline,
+  isSettingsSaveConflict,
   type ChatGPTSettingsChange,
+  type SettingsValues,
 } from "@/api/v2/adminSettingsSnapshot";
 import type { AdminSettingsConnectionCheckRequest } from "@/api/types";
 import {
@@ -14,6 +16,17 @@ import {
   useAdminSensitiveStatus,
 } from "@/hooks/queries/admin/settings";
 import { useReportUnsavedChanges } from "@/hooks/useUnsavedChanges";
+import { REDIS_KEYS } from "@/pages/admin-settings/redisDraft";
+
+/**
+ * What the snapshot showed for a setting when an edit of it began: its value,
+ * undefined when the snapshot leaves the setting out, and whether it was a
+ * secret that was set.
+ */
+interface EditedOver {
+  value: string | undefined;
+  secretSet: boolean;
+}
 
 interface UseSettingsFormOptions {
   /** Setting keys this section manages */
@@ -21,22 +34,54 @@ interface UseSettingsFormOptions {
 }
 
 export function useSettingsForm({ keys }: UseSettingsFormOptions) {
-  const { data: settings, isLoading, isError: loadError, refetch } = useAdminServerSettings();
+  // Like the status below: only a snapshot that never loaded is an error. A
+  // failed re-read (a reload after a refused save) keeps the page and drafts.
+  const {
+    data: settings,
+    isLoading,
+    isLoadingError: loadError,
+    refetch,
+  } = useAdminServerSettings();
   // Only a list that never loaded leaves the status unknown. A failed re-read
   // keeps the last list, so a page keeps its editor and the drafts in it.
-  const { data: sensitiveData, isLoadingError: sensitiveStatusError } = useAdminSensitiveStatus();
+  const {
+    data: sensitiveData,
+    isLoadingError: sensitiveStatusError,
+    refetch: refetchSensitiveStatus,
+  } = useAdminSensitiveStatus();
   const editBaseline = useRef<Record<string, string> | undefined>(undefined);
+  // Which secrets were set when that baseline was taken, since its snapshot
+  // can't show them. Undefined when the status hadn't loaded yet.
+  const baselineConfigured = useRef<string[] | undefined>(undefined);
   const [, setBaselineRevision] = useState(0);
   const saveEpoch = useRef(0);
   const savePending = useRef(false);
   // The snapshot the last acknowledged save was made over. Until a newer one
   // arrives, it no longer shows what is saved.
   const savedOver = useRef<Record<string, string> | undefined>(undefined);
-  const updateSettings = useUpdateServerSettings(editBaseline.current ?? settings);
+  // The form reports a refused save itself, with a way to reload.
+  const updateSettings = useUpdateServerSettings(editBaseline.current ?? settings, false);
+  const conflictToastId = useId();
+  const conflictShown = useRef(false);
+  // Bumped whenever the drafts are thrown away (Discard, a profile switch), so
+  // a reload or refused save that settles afterwards leaves the form alone.
+  const draftGeneration = useRef(0);
+  const mounted = useRef(true);
+  const reloading = useRef(false);
+  const editedOver = useRef(new Map<string, EditedOver>());
+  const dismissConflict = useCallback(() => {
+    if (!conflictShown.current) return;
+    conflictShown.current = false;
+    toast.dismiss(conflictToastId);
+  }, [conflictToastId]);
 
   const [localValues, setLocalValues] = useState<Record<string, string>>({});
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [restartRequired, setRestartRequired] = useState(false);
+  // Counts the times the drafts were settled or thrown away from outside a
+  // field: a save, Discard, a profile switch, or a reload that undid them.
+  // State a page keeps beside the drafts resets when it changes.
+  const [resetRevision, setResetRevision] = useState(0);
   const editVersions = useRef(new Map<string, number>());
   const dirtyRef = useRef(dirty);
   const context = captureProfileRequestContext();
@@ -51,10 +96,20 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     editBaseline.current = undefined;
     savedOver.current = undefined;
     dirtyRef.current = new Set();
+    editedOver.current.clear();
+    draftGeneration.current++;
+    setResetRevision((revision) => revision + 1);
   }
   useEffect(() => {
     dirtyRef.current = dirty;
   }, [dirty]);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      dismissConflict();
+    };
+  }, [dismissConflict]);
 
   // The server refuses a whole save that writes a key the environment sets,
   // and that key's field is disabled. A server can restart with the variable
@@ -71,6 +126,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
       )
     : [];
   if (envLockedDrafts.length > 0) {
+    for (const key of envLockedDrafts) editedOver.current.delete(key);
     setDirty((prev) => {
       const next = new Set(prev);
       for (const key of envLockedDrafts) next.delete(key);
@@ -92,6 +148,13 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     () => (keySignature === "" ? [] : keySignature.split("\u0000")),
     [keySignature],
   );
+  // Every setting the page shows: its keys, including ones it adds later, and
+  // any other it reads through the form. A reload after a refused save checks
+  // all of them.
+  const shownKeys = useRef(new Set<string>());
+  useEffect(() => {
+    for (const key of stableKeys) shownKeys.current.add(key);
+  }, [stableKeys]);
 
   // Sync from server when settings load
   useEffect(() => {
@@ -114,11 +177,20 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   }, [settings, stableKeys]);
 
   const getValue = useCallback(
-    (key: string) => localValues[key] ?? settings?.[key] ?? "",
+    (key: string) => {
+      shownKeys.current.add(key);
+      return localValues[key] ?? settings?.[key] ?? "";
+    },
     [localValues, settings],
   );
 
-  const getPersistedValue = useCallback((key: string) => settings?.[key] ?? "", [settings]);
+  const getPersistedValue = useCallback(
+    (key: string) => {
+      shownKeys.current.add(key);
+      return settings?.[key] ?? "";
+    },
+    [settings],
+  );
 
   /**
    * Stages a value. A value equal to the saved one undoes the edit instead,
@@ -127,7 +199,19 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
    */
   const setValue = useCallback(
     (key: string, value: string, { stage = false }: { stage?: boolean } = {}) => {
-      if (!editBaseline.current) editBaseline.current = settings;
+      if (!editBaseline.current) {
+        editBaseline.current = settings;
+        baselineConfigured.current = sensitiveData?.configured;
+      }
+      // An edit begins when the key has no record; every path that ends one
+      // (save, revert, reset, reload, Discard, a profile switch) drops it.
+      if (!editedOver.current.has(key)) {
+        editedOver.current.set(key, {
+          value: settings && Object.hasOwn(settings, key) ? settings[key] : undefined,
+          // Before the status arrives, a secret may be set.
+          secretSet: sensitiveData == null || (sensitiveData.configured ?? []).includes(key),
+        });
+      }
       editVersions.current.set(key, (editVersions.current.get(key) ?? 0) + 1);
       setLocalValues((prev) => ({ ...prev, [key]: value }));
       // The snapshot leaves secrets out, so a key it lacks (a staged secret
@@ -141,6 +225,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         settings !== savedOver.current &&
         Object.hasOwn(settings, key) &&
         settings[key] === value;
+      if (reverted) editedOver.current.delete(key);
       setDirty((prev) => {
         const next = new Set(prev);
         if (reverted) next.delete(key);
@@ -148,7 +233,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         return next;
       });
     },
-    [settings],
+    [sensitiveData, settings],
   );
 
   // Revert one staged field without disturbing other edits. This is also how
@@ -157,6 +242,7 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
   const resetValue = useCallback(
     (key: string) => {
       editVersions.current.set(key, (editVersions.current.get(key) ?? 0) + 1);
+      editedOver.current.delete(key);
       setLocalValues((prev) => ({ ...prev, [key]: settings?.[key] ?? "" }));
       setDirty((prev) => {
         const next = new Set(prev);
@@ -169,8 +255,11 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
 
   const dirtyCount = dirty.size;
   useEffect(() => {
-    if (dirtyCount === 0) editBaseline.current = undefined;
-  }, [dirtyCount]);
+    if (dirtyCount > 0) return;
+    editBaseline.current = undefined;
+    // Nothing is left to save, so a refused save no longer needs a reload.
+    dismissConflict();
+  }, [dirtyCount, dismissConflict]);
   const dirtyKeys = useMemo(() => Array.from(dirty), [dirty]);
 
   // The shared registry guards tab close and reload. `UnsavedChangesGuard`
@@ -242,6 +331,100 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     };
   }, []);
 
+  // After a refused save, the admin asked for the settings as they are now.
+  // The edits are kept only if nothing on this page changed meanwhile (an
+  // edited setting still shows what it showed when its edit began, the others
+  // what the edits' baseline showed) and none is a saved password or key,
+  // which no snapshot shows. Otherwise all of them are undone. Edits on a
+  // page go together (a server address and its password, a search provider
+  // and its connection), so keeping some could save a mix nobody entered.
+  // Reads refs and fresh results only, so a toast holding an old copy still
+  // reconciles the drafts as they are when it runs.
+  const reloadAfterConflict = useCallback(async () => {
+    if (reloading.current || savePending.current) return;
+    const generation = draftGeneration.current;
+    const epoch = saveEpoch.current;
+    const baseline = editBaseline.current;
+    const secretsThen = baselineConfigured.current;
+    reloading.current = true;
+    try {
+      // The status is read after the settings, so a secret set by the time of
+      // that read shows in it. A later change only makes the next save refused
+      // again. A refetch another read cancels settles with that newer read.
+      const settingsResult = await refetch();
+      const statusResult = await refetchSensitiveStatus();
+      // Discard, a profile switch, unmount, a save started meanwhile (even
+      // one already refused, whose toast offers Reload again), or a baseline
+      // another path advanced: this result no longer applies.
+      if (
+        !mounted.current ||
+        generation !== draftGeneration.current ||
+        saveEpoch.current !== epoch ||
+        editBaseline.current !== baseline
+      )
+        return;
+      if (dirtyRef.current.size === 0) {
+        dismissConflict();
+        return;
+      }
+      const fresh = settingsResult.isError ? undefined : settingsResult.data;
+      const configured = statusResult.isError ? undefined : statusResult.data?.configured;
+      // Without the status, unset settings and secrets look alike, and a
+      // passing read error shouldn't cost every edit: keep them and retry.
+      if (!fresh || !validatorOf(fresh) || !configured) {
+        toast.error(t("web.admin.settings.hooks.settings.conflict.reloadFailed"));
+        return;
+      }
+      const valueIn = (values: SettingsValues | undefined, key: string) =>
+        values && Object.hasOwn(values, key) ? values[key] : undefined;
+      const changed = (key: string) => {
+        const was = editedOver.current.get(key);
+        const now = valueIn(fresh, key);
+        if (!was || was.value !== now) return true;
+        return now === undefined && (was.secretSet || configured.includes(key));
+      };
+      // The Redis database number is read from a saved URL no snapshot shows.
+      const unverifiable = (key: string) =>
+        changed(key) || (REDIS_KEYS.includes(key) && configured.includes("redis.url"));
+      const drafts = [...dirtyRef.current];
+      // A setting on this page that nobody here edited, changed since the
+      // edits' baseline: they were made against a page that is gone, even when
+      // a background read or a failed reload already shows the change. Without
+      // the secret status from then, the page can't be vouched for.
+      const pageChanged =
+        !secretsThen ||
+        [...shownKeys.current].some(
+          (key) =>
+            !dirtyRef.current.has(key) &&
+            (valueIn(baseline, key) !== valueIn(fresh, key) ||
+              secretsThen.includes(key) !== configured.includes(key)),
+        );
+      const replaced = pageChanged || drafts.some(unverifiable) ? drafts : [];
+      // Retire a ChatGPT sign-in callback that started before this reload.
+      saveEpoch.current++;
+      for (const key of replaced) {
+        editVersions.current.set(key, (editVersions.current.get(key) ?? 0) + 1);
+        editedOver.current.delete(key);
+      }
+      // Without a draft the field shows the settings cache, which a background
+      // read may have moved past `fresh`; the next edit's baseline comes from
+      // the same cache.
+      setLocalValues((previous) => {
+        const next = { ...previous };
+        for (const key of replaced) delete next[key];
+        return next;
+      });
+      setDirty((previous) => new Set([...previous].filter((key) => !replaced.includes(key))));
+      editBaseline.current = fresh;
+      baselineConfigured.current = configured;
+      setBaselineRevision((revision) => revision + 1);
+      if (replaced.length > 0) setResetRevision((revision) => revision + 1);
+      dismissConflict();
+    } finally {
+      reloading.current = false;
+    }
+  }, [dismissConflict, refetch, refetchSensitiveStatus]);
+
   const save = useCallback(
     async (selectedKeys?: string[]) => {
       const submittedKeys = Array.from(dirty).filter((key) => selectedKeys?.includes(key) ?? true);
@@ -257,22 +440,92 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         toast.error(error.message);
         throw error;
       }
+      const generation = draftGeneration.current;
       saveEpoch.current++;
       savePending.current = true;
       let result;
       try {
         result = await updateSettings.mutateAsync(values);
+      } catch (error) {
+        // 412: settings changed after editing began. The drafts stay, and
+        // every later save is refused the same way until the admin reloads, so
+        // the toast stays until then (or Discard, or no edits left).
+        if (
+          isSettingsSaveConflict(error) &&
+          mounted.current &&
+          generation === draftGeneration.current &&
+          dirtyRef.current.size > 0
+        ) {
+          conflictShown.current = true;
+          const closed = () => {
+            conflictShown.current = false;
+          };
+          toast.error(t("web.admin.settings.hooks.settings.conflict.title"), {
+            id: conflictToastId,
+            description: t("web.admin.settings.hooks.settings.conflict.description"),
+            duration: Infinity,
+            action: {
+              label: t("web.admin.settings.hooks.settings.conflict.reload"),
+              onClick: (event) => {
+                // Stay up while the reload runs, so a failed one can be retried.
+                event.preventDefault();
+                void reloadAfterConflict();
+              },
+            },
+            onDismiss: closed,
+            onAutoClose: closed,
+          });
+        }
+        throw error;
       } finally {
         savePending.current = false;
       }
-      // An acknowledged save changes the validator even when newer local edits
-      // remain dirty. Reconcile only with a refresh matching that write's revision;
-      // background reads and failed writes never advance this draft baseline.
-      if (result.settingsSnapshot) editBaseline.current = result.settingsSnapshot;
-      savedOver.current = settings;
+      // Discard during the save threw these drafts away, so what it wrote no
+      // longer describes an edit on screen.
+      if (generation !== draftGeneration.current) {
+        if (result.restart_required) setRestartRequired(true);
+        return;
+      }
+      // The save went through, so a refusal shown before it no longer applies.
+      dismissConflict();
+      setResetRevision((revision) => revision + 1);
       const settledKeys = submittedKeys.filter(
         (key) => (editVersions.current.get(key) ?? 0) === submittedVersions.get(key),
       );
+      // Edits still staged once this save settles: newer ones made during it.
+      // An edit taken back during the save (Keep saved) isn't one of them.
+      const stillStaged = [...dirtyRef.current].filter((key) => !settledKeys.includes(key));
+      // An acknowledged save changes the validator even when newer local edits
+      // remain dirty. Reconcile only with a refresh matching that write's revision;
+      // background reads and failed writes never advance this draft baseline.
+      // With nothing left staged, the next edit starts its own baseline.
+      if (result.settingsSnapshot && stillStaged.length > 0) {
+        editBaseline.current = result.settingsSnapshot;
+        // The save was accepted over the old baseline, so the secrets set now
+        // are the ones set then, as this save changed them. The server trims
+        // what it stores, and its values leave out the secrets this save set.
+        const secretsThen = baselineConfigured.current;
+        if (secretsThen) {
+          const secretsNow = new Set(secretsThen);
+          for (const key of submittedKeys) {
+            if ((values[key] ?? "").trim() === "") secretsNow.delete(key);
+            else if (!Object.hasOwn(result.values, key)) secretsNow.add(key);
+          }
+          baselineConfigured.current = [...secretsNow];
+        }
+      }
+      savedOver.current = settings;
+      for (const key of submittedKeys) {
+        // A later edit of a key this save wrote began over the written value,
+        // which secrets only show as set. The values leave out every secret,
+        // including one this save cleared.
+        if (!stillStaged.includes(key)) editedOver.current.delete(key);
+        else
+          editedOver.current.set(key, {
+            value: result.values[key],
+            secretSet: (values[key] ?? "").trim() !== "" && !Object.hasOwn(result.values, key),
+          });
+      }
       setLocalValues((previous) => {
         const next = { ...previous };
         for (const key of settledKeys) {
@@ -296,7 +549,15 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
         setRestartRequired(true);
       }
     },
-    [dirty, localValues, settings, updateSettings],
+    [
+      conflictToastId,
+      dirty,
+      dismissConflict,
+      localValues,
+      reloadAfterConflict,
+      settings,
+      updateSettings,
+    ],
   );
 
   const discard = useCallback(() => {
@@ -308,6 +569,9 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     }
     setLocalValues((prev) => ({ ...prev, ...reset }));
     editBaseline.current = undefined;
+    editedOver.current.clear();
+    draftGeneration.current++;
+    setResetRevision((revision) => revision + 1);
     setDirty(new Set());
   }, [settings, keys]);
 
@@ -353,8 +617,22 @@ export function useSettingsForm({ keys }: UseSettingsFormOptions) {
     sensitiveManagedByEnv,
     envVar,
     sensitiveStatusReady: sensitiveData != null,
+    /** Changes when the drafts were settled or thrown away from outside a field. */
+    resetRevision,
     sensitiveStatusError,
     buildConnectionCheckRequest,
     beginSettingsTransition,
   };
+}
+
+/**
+ * The validator a guarded save over `values` would send, or undefined when the
+ * record has none or belongs to a profile that is no longer acting.
+ */
+function validatorOf(values: SettingsValues | undefined) {
+  try {
+    return captureSettingsBaseline(values).etag;
+  } catch {
+    return undefined;
+  }
 }

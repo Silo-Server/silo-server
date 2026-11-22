@@ -30,14 +30,17 @@ export function ServerStep() {
 
   // Offer the URL the admin is looking at as the public URL. It is staged,
   // not saved, so an install behind a reverse proxy can still clear it.
+  // It waits for the secret status too: the first edit records which secrets
+  // were set, which a reload after a refused save compares against.
   const { loaded, getPersistedValue, setValue } = form;
+  const statusSettled = form.sensitiveStatusReady || form.sensitiveStatusError;
   useEffect(() => {
-    if (prefilled.current || !loaded) return;
+    if (prefilled.current || !loaded || !statusSettled) return;
     prefilled.current = true;
     if (getPersistedValue("server.public_url") === "" && currentOrigin() !== "") {
       setValue("server.public_url", currentOrigin());
     }
-  }, [loaded, getPersistedValue, setValue]);
+  }, [loaded, statusSettled, getPersistedValue, setValue]);
 
   useStepSummary("server", serverName.trim() || undefined);
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   ConnectionCheckAction,
@@ -46,17 +46,19 @@ export function FeaturesStep() {
   const { handleSubmit, busy } = useStepSubmit("features", form, t("web.setup.wizard.saveFailed"));
   const recsCheck = useConnectionCheck("recommendations_embedding", form, RECS_KEYS);
   const [showDisclosure, setShowDisclosure] = useState(false);
-  const sharePrefilled = useRef(false);
 
   // A new server shares markers by default only once this choice is saved,
-  // so stage the switch's on default while nothing is stored. Continuing
-  // saves it; leaving the step unsaved keeps sharing off.
+  // so stage the switch's on default while nothing is stored, again after a
+  // reload undoes the drafts. Continuing saves it; leaving the step unsaved
+  // keeps sharing off. It waits for the secret status too: the first edit
+  // records which secrets were set, which that reload compares against.
   const { loaded, getPersistedValue, setValue } = form;
+  const statusSettled = form.sensitiveStatusReady || form.sensitiveStatusError;
+  const shareStaged = form.isDirty(SHARE_MARKERS_KEY);
   useEffect(() => {
-    if (sharePrefilled.current || !loaded) return;
-    sharePrefilled.current = true;
+    if (!loaded || !statusSettled || shareStaged) return;
     if (getPersistedValue(SHARE_MARKERS_KEY) === "") setValue(SHARE_MARKERS_KEY, "true");
-  }, [loaded, getPersistedValue, setValue]);
+  }, [loaded, statusSettled, shareStaged, getPersistedValue, setValue]);
 
   // Both push keys are written together; either still on means push is on.
   // The snapshot carries the server default (on) for a fresh install, so the

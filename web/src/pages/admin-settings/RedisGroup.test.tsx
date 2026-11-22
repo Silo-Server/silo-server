@@ -65,6 +65,48 @@ describe("RedisGroup", () => {
     expect(screen.getByText("0 staged")).toBeInTheDocument();
   });
 
+  it("keeps Use Redis on while the admin types the database number back, with another edit staged", async () => {
+    render(<Harness />);
+    await userEvent.type(screen.getByLabelText("Other setting"), "https://media.example.com");
+    const useRedis = screen.getByRole("switch", { name: "Use Redis" });
+    await userEvent.click(useRedis);
+    const database = screen.getByLabelText("Database number");
+    await userEvent.clear(database);
+    await userEvent.type(database, "2");
+    await userEvent.clear(database);
+    await userEvent.type(database, "0");
+
+    expect(useRedis).toBeChecked();
+    expect(screen.getByLabelText("Connection URL")).toBeInTheDocument();
+  });
+
+  it("follows a URL another admin saves after Use Redis went on and back off", async () => {
+    const { rerender } = render(<Harness />);
+    const useRedis = screen.getByRole("switch", { name: "Use Redis" });
+    await userEvent.click(useRedis);
+    await userEvent.type(screen.getByLabelText("Connection URL"), "redis://cache:6379");
+    await userEvent.click(useRedis);
+
+    sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
+    rerender(<Harness />);
+
+    expect(screen.getByRole("switch", { name: "Use Redis" })).toBeChecked();
+  });
+
+  it("follows a URL another admin removes after a switch-off was taken back", async () => {
+    sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
+    const { rerender } = render(<Harness />);
+    const useRedis = screen.getByRole("switch", { name: "Use Redis" });
+    await userEvent.click(useRedis);
+    await userEvent.click(useRedis);
+    expect(screen.getByText("0 staged")).toBeInTheDocument();
+
+    sensitiveStatus.current = { configured: [], managed_by_env: [] };
+    rerender(<Harness />);
+
+    expect(screen.getByRole("switch", { name: "Use Redis" })).not.toBeChecked();
+  });
+
   it("shows the connection REDIS_URL sets once it takes over a staged switch-off", async () => {
     sensitiveStatus.current = { configured: ["redis.url"], managed_by_env: [] };
     const { rerender } = render(<Harness />);
