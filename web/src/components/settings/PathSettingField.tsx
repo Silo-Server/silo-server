@@ -69,6 +69,7 @@ export function PathSettingField({
         <Input
           id={controlId}
           type="text"
+          dir="ltr"
           value={value}
           placeholder={defaultValue}
           onChange={(e) => onChange(e.target.value)}

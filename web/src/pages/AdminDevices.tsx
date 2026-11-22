@@ -1,5 +1,5 @@
 import { DeviceConnections } from "@/components/admin/DeviceConnections";
-import { useMemo, useState, type ReactNode } from "react";
+import { Children, isValidElement, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link, useParams, useSearchParams } from "react-router";
 import {
   Activity,
@@ -489,7 +489,7 @@ export default function AdminDevices() {
                     count: filteredDevices.length,
                     count_text: filteredDevices.length,
                     total: devices.length,
-                    muted: (chunks) => <span className="text-muted-foreground/60">{chunks}</span>,
+                    muted: (chunks) => <span className="text-muted-foreground/80">{chunks}</span>,
                   })
                 : t("web.admin.devices.list.count", {
                     count: filteredDevices.length,
@@ -507,7 +507,10 @@ export default function AdminDevices() {
             )}
           </div>
 
-          <div className="overlay-scroll max-h-[calc(100vh-22rem)] flex-1 overflow-y-auto lg:max-h-[calc(100vh-18rem)]">
+          <div
+            data-device-list
+            className="overlay-scroll max-h-[max(calc(100vh-22rem),10rem)] flex-1 overflow-y-auto lg:max-h-[max(calc(100vh-18rem),10rem)]"
+          >
             {isLoading ? (
               <div className="space-y-1.5 p-2.5">
                 {Array.from({ length: 5 }).map((_, i) => (
@@ -587,48 +590,43 @@ function FleetPulse({
 
   return (
     <div className="surface-panel-subtle text-muted-foreground flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl px-4 py-3 text-[12px]">
-      <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
+      <SeparatedRow wide separatorClassName="text-muted-foreground/30">
         <Stat
           label={t("web.admin.devices.stats.users", { count: totalUsers })}
           value={totalUsers}
         />
-        <Dot />
         <Stat
           label={t("web.admin.devices.stats.devices", { count: totalDevices })}
           value={totalDevices}
         />
-        <Dot />
         <Stat
           label={t("web.admin.devices.stats.profiles", { count: totalProfiles })}
           value={totalProfiles}
         />
-        <Dot />
         <Stat
           label={t("web.admin.devices.stats.overrides", { count: totalOverrides })}
           value={totalOverrides}
         />
         {anomalyCount > 0 && (
-          <>
-            <Dot />
-            <Stat
-              label={t("web.admin.devices.stats.anomalies", { count: anomalyCount })}
-              value={anomalyCount}
-              tone="destructive"
-            />
-          </>
+          <Stat
+            label={t("web.admin.devices.stats.anomalies", { count: anomalyCount })}
+            value={anomalyCount}
+            tone="destructive"
+          />
         )}
-      </div>
+      </SeparatedRow>
 
       <div className="text-muted-foreground/80 flex items-center gap-2 font-mono text-[10px] tracking-[0.06em] uppercase">
-        <span className="hidden md:inline">{t("web.admin.devices.stats.density")}</span>
+        <span>{t("web.admin.devices.stats.density")}</span>
         <Histogram counts={sortedCounts} max={maxCount} />
       </div>
 
       <div className="ms-auto flex flex-wrap items-center justify-end gap-2">
-        <span className="text-muted-foreground/70 text-[10px] tracking-[0.08em] uppercase">
+        <span className="text-muted-foreground text-[10px] tracking-[0.08em] uppercase">
           {t("web.admin.devices.groupBy.label")}
         </span>
         <SegmentedControl
+          label={t("web.admin.devices.groupBy.label")}
           value={groupBy}
           onChange={onGroupByChange}
           options={[
@@ -662,13 +660,11 @@ function DeviceScopeControl({
         aria-pressed={!overridesOnly}
         className={cn(
           "inline-flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium transition-colors",
-          !overridesOnly
-            ? "bg-surface-hover/70 text-foreground"
-            : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+          segmentClass(!overridesOnly),
         )}
       >
         <span>{t("web.admin.devices.scope.allDevices")}</span>
-        <span className="font-mono text-[11.5px] tabular-nums opacity-70">
+        <span className="text-muted-foreground font-mono text-[11.5px] tabular-nums">
           {numberText(totalDevices)}
         </span>
       </button>
@@ -678,13 +674,11 @@ function DeviceScopeControl({
         aria-pressed={overridesOnly}
         className={cn(
           "border-border/60 inline-flex items-center gap-2 border-s px-3.5 py-2 text-[13px] font-medium transition-colors",
-          overridesOnly
-            ? "bg-surface-hover/70 text-foreground"
-            : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+          segmentClass(overridesOnly),
         )}
       >
         <span>{t("web.admin.devices.scope.withOverrides")}</span>
-        <span className="font-mono text-[11.5px] tabular-nums opacity-70">
+        <span className="text-muted-foreground font-mono text-[11.5px] tabular-nums">
           {devicesWithOverrides}
         </span>
       </button>
@@ -733,13 +727,11 @@ function SettingsScopeControl({
         aria-pressed={showAllSettings}
         className={cn(
           "inline-flex items-center gap-1.5 px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-not-allowed",
-          showAllSettings
-            ? "bg-surface-hover/70 text-foreground"
-            : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+          segmentClass(showAllSettings),
         )}
       >
         <span>{t("web.admin.devices.settingsScope.allSettings")}</span>
-        <span className="font-mono text-[10.5px] tabular-nums opacity-70">
+        <span className="text-muted-foreground font-mono text-[10.5px] tabular-nums">
           {numberText(totalSettings)}
         </span>
       </button>
@@ -752,13 +744,11 @@ function SettingsScopeControl({
         aria-pressed={!showAllSettings}
         className={cn(
           "border-border/60 inline-flex items-center gap-1.5 border-s px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-          !showAllSettings
-            ? "bg-surface-hover/70 text-foreground"
-            : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+          segmentClass(!showAllSettings),
         )}
       >
         <span>{t("web.admin.devices.settingsScope.overrides")}</span>
-        <span className="font-mono text-[10.5px] tabular-nums opacity-70">
+        <span className="text-muted-foreground font-mono text-[10.5px] tabular-nums">
           {numberText(overrideCount)}
         </span>
       </button>
@@ -777,16 +767,58 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: "de
       >
         {value}
       </span>
-      <span className="text-muted-foreground/70 text-[10px] tracking-[0.08em] uppercase">
-        {label}
-      </span>
+      <span className="text-muted-foreground text-[10px] tracking-[0.08em] uppercase">{label}</span>
     </span>
   );
 }
 
-function Dot() {
+/**
+ * A wrapping row with a separator between its items. Each item carries the
+ * separator before it, and the row starts one separator slot outside a
+ * clipped box, so the separator that would lead a line is hidden and none
+ * ends one. The slot has a fixed width so the offset always matches it; a
+ * wider separator (the pseudo-locale's) is centred and clipped to the slot.
+ * The padding and matching negative margin on the clip box keep a focus ring
+ * at a line start visible. The admin user header lays out its meta line the
+ * same way.
+ */
+function SeparatedRow({
+  wide = false,
+  separatorClassName,
+  className,
+  children,
+}: {
+  /** A wider slot around each separator, for spaced-out stats. */
+  wide?: boolean;
+  separatorClassName: string;
+  className?: string;
+  children: ReactNode;
+}) {
   const t = useT();
-  return <span className="text-muted-foreground/30">{t("web.admin.devices.separator")}</span>;
+  return (
+    <div className={cn("-mx-1 min-w-0 overflow-x-clip px-1", className)}>
+      <div className={cn("flex flex-wrap items-baseline gap-y-1", wide ? "-ms-9" : "-ms-5")}>
+        {Children.toArray(children).map((child, i) => (
+          <span
+            key={isValidElement(child) ? child.key : i}
+            className="inline-flex max-w-full min-w-0 items-baseline"
+          >
+            <span
+              aria-hidden
+              className={cn(
+                "inline-flex shrink-0 justify-center overflow-hidden whitespace-nowrap",
+                wide ? "w-9" : "w-5",
+                separatorClassName,
+              )}
+            >
+              {t("web.admin.devices.separator")}
+            </span>
+            <span className="min-w-0 wrap-anywhere">{child}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function Histogram({ counts, max }: { counts: number[]; max: number }) {
@@ -825,30 +857,48 @@ function Histogram({ counts, max }: { counts: number[]; max: number }) {
   );
 }
 
+/**
+ * A segment of one of the page's segmented controls. The chosen one carries a
+ * foreground bar along its bottom edge: a fill alone sits within 1.5:1 of its
+ * neighbours, and in high contrast every label is the same colour. Forced
+ * colors drops the shadow, so there the label is underlined instead.
+ */
+function segmentClass(selected: boolean) {
+  return selected
+    ? "bg-surface-hover text-foreground shadow-[inset_0_-2px_0_var(--foreground)] forced-colors:underline forced-colors:decoration-2 forced-colors:underline-offset-2"
+    : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground";
+}
+
 function SegmentedControl<T extends string>({
+  label,
   value,
   onChange,
   options,
 }: {
+  /** The group's accessible name. */
+  label: string;
   value: T;
   onChange: (v: T) => void;
   options: { value: T; label: string }[];
 }) {
   return (
-    <div className="border-border/70 bg-background/40 inline-flex overflow-hidden rounded-md border">
+    <div
+      role="group"
+      aria-label={label}
+      className="border-border/70 bg-background/40 inline-flex overflow-hidden rounded-md border"
+    >
       {options.map((opt, i) => {
         const active = value === opt.value;
         return (
           <button
             key={opt.value}
             type="button"
+            aria-pressed={active}
             onClick={() => onChange(opt.value)}
             className={cn(
               "px-2.5 py-1 text-[11.5px] transition-colors",
               i > 0 && "border-border/60 border-s",
-              active
-                ? "bg-surface-hover/70 text-foreground"
-                : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
+              segmentClass(active),
             )}
           >
             {opt.label}
@@ -1023,7 +1073,7 @@ function FilterGroup({
 }) {
   return (
     <div>
-      <div className="text-muted-foreground/70 mb-2 flex items-center justify-between px-1 text-[10px] font-semibold tracking-[0.12em] uppercase">
+      <div className="text-muted-foreground mb-2 flex items-center justify-between px-1 text-[10px] font-semibold tracking-[0.12em] uppercase">
         <span>{label}</span>
         {action}
       </div>
@@ -1074,7 +1124,7 @@ function SavedViewRow({
       <span
         className={cn(
           "font-mono text-[10.5px] tabular-nums",
-          active ? "text-foreground/80" : "text-muted-foreground/60",
+          active ? "text-foreground" : "text-muted-foreground",
         )}
       >
         {numberText(count)}
@@ -1106,7 +1156,7 @@ function FacetCheckbox({
       <span className="flex items-center gap-2">
         <input
           type="checkbox"
-          className="border-border/80 bg-background/60 checked:bg-foreground checked:border-foreground checked:text-background h-3 w-3 cursor-pointer appearance-none rounded-[3px] border transition-colors checked:bg-[image:url('data:image/svg+xml;utf8,<svg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2012%2012%22%20fill=%22none%22%20stroke=%22%23141417%22%20stroke-width=%222.4%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22><polyline%20points=%222.5,6.5%205,9%209.5,3.5%22/></svg>')] checked:bg-[length:9px_9px] checked:bg-center checked:bg-no-repeat"
+          className="border-input bg-background/60 checked:bg-foreground checked:border-foreground checked:text-background h-3 w-3 cursor-pointer appearance-none rounded-[3px] border transition-colors checked:bg-[image:url('data:image/svg+xml;utf8,<svg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2012%2012%22%20fill=%22none%22%20stroke=%22%23141417%22%20stroke-width=%222.4%22%20stroke-linecap=%22round%22%20stroke-linejoin=%22round%22><polyline%20points=%222.5,6.5%205,9%209.5,3.5%22/></svg>')] checked:bg-[length:9px_9px] checked:bg-center checked:bg-no-repeat"
           checked={checked}
           onChange={onToggle}
         />
@@ -1115,7 +1165,7 @@ function FacetCheckbox({
       <span
         className={cn(
           "font-mono text-[10.5px] tabular-nums",
-          checked ? "text-foreground/80" : "text-muted-foreground/60",
+          checked ? "text-foreground" : "text-muted-foreground",
         )}
       >
         {numberText(count)}
@@ -1244,7 +1294,7 @@ function DeviceGroup({
 
   return (
     <section>
-      <header className="bg-surface/60 border-border/40 sticky top-0 z-10 flex items-baseline justify-between gap-2 border-b px-3 py-2 backdrop-blur">
+      <header className="bg-surface border-border/40 sticky top-0 z-10 flex items-baseline justify-between gap-2 border-b px-3 py-2">
         <button
           type="button"
           onClick={() => setOpen((v) => !v)}
@@ -1272,12 +1322,12 @@ function DeviceGroup({
             </Link>
           )}
           {groupAnomalies > 0 && (
-            <span className="text-destructive bg-destructive/10 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] tracking-[0.04em]">
+            <span className="text-destructive-label bg-destructive/10 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] tracking-[0.04em]">
               <AlertTriangle className="h-2.5 w-2.5" />
               {groupAnomalies}
             </span>
           )}
-          <span className="text-muted-foreground/70 font-mono text-[10.5px] tabular-nums">
+          <span className="text-muted-foreground font-mono text-[10.5px] tabular-nums">
             {t("web.admin.devices.group.meta", {
               devices: group.meta.devices,
               profiles: group.meta.profiles,
@@ -1304,6 +1354,18 @@ function DeviceGroup({
   );
 }
 
+/** How long after a pointer press or release a row's focus counts as coming from it. */
+const POINTER_FOCUS_WINDOW_MS = 1000;
+
+/** Scrolls the device list so its group's sticky header no longer covers `row`. */
+function revealRowUnderHeader(row: HTMLElement) {
+  const header = row.closest("section")?.querySelector("header");
+  const list = row.closest<HTMLElement>("[data-device-list]");
+  if (!header || !list) return;
+  const overlap = header.getBoundingClientRect().bottom - row.getBoundingClientRect().top;
+  if (overlap > 0) list.scrollTop -= overlap;
+}
+
 function DeviceRow({
   device,
   isAnomaly,
@@ -1316,6 +1378,8 @@ function DeviceRow({
   activeProfileId: string | null;
 }) {
   const t = useT();
+  const lastPointerDown = useRef(Number.NEGATIVE_INFINITY);
+  const lastPointerUp = useRef(Number.NEGATIVE_INFINITY);
   const kind = classifyPlatform(device.device_platform);
   const profileSuffix = activeProfileId ? `?profile=${encodeURIComponent(activeProfileId)}` : "";
   const href = `/admin/devices/${device.user_id}/${encodeURIComponent(device.device_id)}${profileSuffix}`;
@@ -1324,8 +1388,33 @@ function DeviceRow({
   return (
     <Link
       to={href}
+      // The margin keeps a row that keyboard focus scrolls to clear of its
+      // group's sticky header. Firefox doesn't scroll a partly covered row on
+      // focus, and a larger minimum font can make the header taller than the
+      // margin, so move the row out from under the header here. Not for a
+      // pointer press: it focuses on mousedown (or on a tap), and moving the
+      // row then would land the release elsewhere and lose the click. Times,
+      // not a flag: a touch held longer than the window still focuses just
+      // after its release, and a press that never focuses (a right-click, a
+      // press on the focused row) ages out instead of blocking the keyboard.
+      onPointerDown={() => {
+        lastPointerDown.current = performance.now();
+      }}
+      onPointerUp={() => {
+        lastPointerUp.current = performance.now();
+      }}
+      onFocus={(e) => {
+        const now = performance.now();
+        if (
+          now - lastPointerDown.current < POINTER_FOCUS_WINDOW_MS ||
+          now - lastPointerUp.current < POINTER_FOCUS_WINDOW_MS
+        ) {
+          return;
+        }
+        revealRowUnderHeader(e.currentTarget);
+      }}
       className={cn(
-        "group relative flex items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors",
+        "group relative flex scroll-mt-10 items-center gap-2.5 rounded-md px-2 py-1.5 transition-colors",
         active ? "bg-surface-hover/70" : "hover:bg-surface-hover/40",
       )}
     >
@@ -1339,7 +1428,7 @@ function DeviceRow({
       <PlatformTile kind={kind} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span className="text-foreground truncate text-[13px] font-medium">
+          <span dir="auto" className="text-foreground truncate text-[13px] font-medium">
             {device.device_name || t("web.admin.devices.unnamedDevice")}
           </span>
           {isAnomaly && (
@@ -1353,13 +1442,7 @@ function DeviceRow({
         <div className="text-muted-foreground/80 mt-0.5 flex items-center gap-1.5 truncate text-[11px]">
           <span className="truncate">{platformLabel(device.device_platform)}</span>
           <span className="text-muted-foreground/40">{t("web.admin.devices.separator")}</span>
-          <span
-            className={cn(
-              "tabular-nums",
-              recency === "<24h" && "text-success/80",
-              recency === ">30d" && "text-muted-foreground/60",
-            )}
-          >
+          <span className={cn("tabular-nums", recency === "<24h" && "text-success/80")}>
             {formatRelative(device.last_updated)}
           </span>
         </div>
@@ -1389,11 +1472,7 @@ function OverrideGauge({ count, active }: { count: number; active: boolean }) {
       <span
         className={cn(
           "min-w-[14px] text-end font-mono text-[11px] tabular-nums",
-          active
-            ? "text-foreground"
-            : count === 0
-              ? "text-muted-foreground/50"
-              : "text-muted-foreground/85",
+          active ? "text-foreground" : "text-muted-foreground/85",
         )}
       >
         {numberText(count)}
@@ -1738,17 +1817,18 @@ function DeviceDetailPanel({
                 {data.device_name || t("web.admin.devices.unnamedDevice")}
               </h2>
               {isAnomaly && (
-                <span className="text-destructive border-destructive/30 bg-destructive/10 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] tracking-[0.04em] uppercase">
+                <span className="text-destructive-label border-destructive/30 bg-destructive/10 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] tracking-[0.04em] uppercase">
                   <AlertTriangle className="h-3 w-3" />
                   {t("web.admin.devices.detail.anomalyBadge")}
                 </span>
               )}
             </div>
-            <div className="text-muted-foreground flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
+            <SeparatedRow
+              separatorClassName="text-muted-foreground/40"
+              className="text-muted-foreground text-[12px]"
+            >
               <span className="text-foreground/80 font-mono">{data.device_id}</span>
-              <span className="text-muted-foreground/40">{t("web.admin.devices.separator")}</span>
               <span>{platformLabel(data.device_platform)}</span>
-              <span className="text-muted-foreground/40">{t("web.admin.devices.separator")}</span>
               <Link
                 to={`/admin/users/${data.user_id}`}
                 className="text-foreground/85 hover:text-foreground inline-flex items-center gap-0.5 font-medium transition-colors"
@@ -1756,17 +1836,16 @@ function DeviceDetailPanel({
                 {data.username}
                 <ArrowUpRight className="h-3 w-3" />
               </Link>
-              <span className="text-muted-foreground/40">{t("web.admin.devices.separator")}</span>
               <span>
                 {t("web.admin.devices.detail.updated", {
                   time: formatRelative(data.last_updated),
                 })}
               </span>
-            </div>
+            </SeparatedRow>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <SettingsScopeControl
             showAllSettings={effectiveShowAllSettings}
             totalSettings={
@@ -1916,7 +1995,7 @@ function ReadoutCell({
 }) {
   return (
     <div className="min-w-0">
-      <div className="text-muted-foreground/70 text-[10px] font-semibold tracking-[0.12em] uppercase">
+      <div className="text-muted-foreground text-[10px] font-semibold tracking-[0.12em] uppercase">
         {label}
       </div>
       <div
@@ -1933,10 +2012,7 @@ function ReadoutCell({
         {value}
       </div>
       {sub && (
-        <div
-          className="text-muted-foreground/70 mt-0.5 truncate text-[11px]"
-          title={subTitle ?? sub}
-        >
+        <div className="text-muted-foreground mt-0.5 truncate text-[11px]" title={subTitle ?? sub}>
           {sub}
         </div>
       )}

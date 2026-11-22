@@ -1,0 +1,10 @@
+{
+  "items": [
+    {
+      "plugin_id": "silo.auth.oidc",
+      "version": "0.1.2",
+      "state": "pending",
+      "detail": ""
+    }
+  ]
+}

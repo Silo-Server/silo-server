@@ -7,6 +7,11 @@ export type EngineTransfer = "sdr" | "pq" | "hlg";
  */
 export interface EngineSourceSpec {
   url: string;
+  /**
+   * The URL the parallel range reader stripes on. Absent means the engine
+   * reads `url` with the stock source.
+   */
+  parallelRangeUrl?: string;
   headers: Record<string, string>;
   /** Server container name: `mkv` (Matroska and WebM) or `mp4`. */
   container: string;

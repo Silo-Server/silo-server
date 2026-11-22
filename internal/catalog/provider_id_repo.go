@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -234,7 +235,7 @@ func normalizeDurableProviderIDs(providerIDs map[string]string) []models.MediaIt
 		}
 		entries = append(entries, models.MediaItemProviderID{
 			Provider:   provider,
-			ProviderID: providerID,
+			ProviderID: bookid.CanonicalProviderID(provider, providerID),
 		})
 	}
 
@@ -360,6 +361,14 @@ func (r *ProviderIDRepository) GetByContentIDs(ctx context.Context, contentIDs [
 // item, leaving unmanaged providers (excludedProviderIDs, e.g. the scanner's
 // manga_series identity anchor) intact.
 func (r *ProviderIDRepository) ReplaceByContentID(ctx context.Context, contentID string, providerIDs map[string]string) error {
+	return r.inItemLockedTx(ctx, contentID, func(tx pgx.Tx, itemType string) error {
+		return r.ReplaceByContentIDTx(ctx, tx, contentID, itemType, providerIDs)
+	})
+}
+
+// inItemLockedTx runs write in a transaction holding the item's row lock and
+// commits it. write gets the item's type.
+func (r *ProviderIDRepository) inItemLockedTx(ctx context.Context, contentID string, write func(tx pgx.Tx, itemType string) error) error {
 	if strings.TrimSpace(contentID) == "" {
 		return fmt.Errorf("content_id is required")
 	}
@@ -381,7 +390,7 @@ func (r *ProviderIDRepository) ReplaceByContentID(ctx context.Context, contentID
 		return fmt.Errorf("loading item type for %s: %w", contentID, err)
 	}
 
-	if err := r.ReplaceByContentIDTx(ctx, tx, contentID, itemType, providerIDs); err != nil {
+	if err := write(tx, itemType); err != nil {
 		return err
 	}
 
@@ -406,8 +415,26 @@ func (r *ProviderIDRepository) ReplaceByContentIDTx(
 	if itemType == "" {
 		return fmt.Errorf("item_type is required")
 	}
-	entries := normalizeDurableProviderIDs(providerIDs)
+	return replaceDurableProviderIDsTx(ctx, tx, contentID, itemType, durableEditionIDs(itemType, providerIDs))
+}
 
+// durableEditionIDs returns the entries of providerIDs that ReplaceByContentIDTx
+// stores for an item of itemType. A book's work-level keys are claims
+// (media_item_work_ids), never durable IDs; the table's CHECK rejects them.
+func durableEditionIDs(itemType string, providerIDs map[string]string) []models.MediaItemProviderID {
+	editionIDs, _ := bookid.SplitWorkIDs(itemType, providerIDs)
+	return normalizeDurableProviderIDs(editionIDs)
+}
+
+// replaceDurableProviderIDsTx replaces the item's managed provider ID rows with
+// entries.
+func replaceDurableProviderIDsTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	contentID string,
+	itemType string,
+	entries []models.MediaItemProviderID,
+) error {
 	// Preserve providers Replace does not manage (see excludedProviderIDs):
 	// query-only inputs and the scanner's manga_series identity anchor.
 	if _, err := tx.Exec(ctx, `

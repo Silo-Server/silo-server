@@ -173,7 +173,7 @@ type Registration struct {
 	Group                            *string `json:"group,omitempty"`
 	MaxJobs                          *int    `json:"max_jobs,omitempty"`
 	SourceAccess                     *string `json:"source_access,omitempty" enum:"local,core"`
-	HWAccelOverride                  *string `json:"hw_accel_override,omitempty" enum:"auto,qsv,vaapi,nvenc,none"`
+	HWAccelOverride                  *string `json:"hw_accel_override,omitempty" enum:"auto,qsv,vaapi,nvenc,videotoolbox,none"`
 	HWDeviceOverride                 *string `json:"hw_device_override,omitempty"`
 	DownloadArtifactDirOverride      *string `json:"download_artifact_dir_override,omitempty"`
 	DownloadArtifactMaxBytesOverride *int64  `json:"download_artifact_max_bytes_override,omitempty"`

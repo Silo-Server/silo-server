@@ -62,6 +62,7 @@ func TestAPIKeyScopesAllow(t *testing.T) {
 		{"monitor request counts", monitor, http.MethodGet, "/api/v2/admin/requests/counts", true},
 		{"monitor request capabilities", monitor, http.MethodGet, "/api/v2/admin/requests/capabilities", true},
 		{"monitor request events", monitor, http.MethodGet, "/api/v2/admin/requests/1834729/events", true},
+		{"monitor request poster", monitor, http.MethodGet, "/api/v2/admin/requests/1834729/poster", true},
 		{"monitor denies request actions", monitor, http.MethodPost, "/api/v2/admin/requests/1834729/approve", false},
 		{"monitor denies request integrations", monitor, http.MethodGet, "/api/v2/admin/request-integrations", false},
 		{"monitor denies request settings", monitor, http.MethodGet, "/api/v2/admin/request-settings", false},

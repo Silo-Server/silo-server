@@ -21,6 +21,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -116,7 +117,7 @@ type EnrichmentRunResult struct {
 
 type ebookProviderIDRepository interface {
 	GetByContentIDs(ctx context.Context, contentIDs []string) (map[string][]*models.MediaItemProviderID, error)
-	ReplaceByContentID(ctx context.Context, contentID string, providerIDs map[string]string) error
+	ReplaceByContentIDWithWorkClaims(ctx context.Context, contentID string, providerIDs map[string]string, claims []bookid.WorkClaims) error
 	FindContentIDByProviderIDs(
 		ctx context.Context,
 		providerIDs map[string]string,
@@ -1184,8 +1185,8 @@ func (e *Enricher) persist(ctx context.Context, contentID string, providerIDs ma
 	}
 
 	providerIDs = filterEbookProviderIDs(providerIDs)
-	if e.providerIDs != nil && len(providerIDs) > 0 {
-		if err := e.providerIDs.ReplaceByContentID(ctx, contentID, providerIDs); err != nil {
+	if e.providerIDs != nil && (len(providerIDs) > 0 || len(result.WorkClaims) > 0) {
+		if err := e.providerIDs.ReplaceByContentIDWithWorkClaims(ctx, contentID, providerIDs, result.WorkClaims); err != nil {
 			return fmt.Errorf("persisting ebook provider IDs: %w", err)
 		}
 	}

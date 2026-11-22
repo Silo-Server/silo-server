@@ -26,6 +26,10 @@ function usePrePlayTrackSelection<S>(contentId: string, fileId: number | undefin
   // Bumped with each file or title change, so a save for the previous one
   // that lands later cannot repopulate savedRef.
   const fileGenerationRef = useRef(0);
+  // The choice whose failure put the selector back to savedRef, if it is still
+  // showing. A choice refused offline fails at once, ahead of an earlier one
+  // still in flight; when that one lands, the selector shows it.
+  const rolledBackChoiceRef = useRef(0);
 
   const [prevContentId, setPrevContentId] = useState(contentId);
   const [prevFileId, setPrevFileId] = useState(fileId);
@@ -52,10 +56,14 @@ function usePrePlayTrackSelection<S>(contentId: string, fileId: number | undefin
     setValue(next);
     save?.().then(
       () => {
-        if (fileGenerationRef.current === generation) savedRef.current = next;
+        if (fileGenerationRef.current !== generation) return;
+        savedRef.current = next;
+        if (rolledBackChoiceRef.current === latestChoiceRef.current) setValue(next);
       },
       () => {
-        if (latestChoiceRef.current === choice) setValue(savedRef.current);
+        if (latestChoiceRef.current !== choice) return;
+        rolledBackChoiceRef.current = choice;
+        setValue(savedRef.current);
       },
     );
   };

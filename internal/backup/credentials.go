@@ -16,6 +16,12 @@ import (
 type secretHandling int
 
 const (
+	tablePluginProvisionOwnership = "plugin_provision_ownership"
+	tablePluginAuthBindings       = "plugin_auth_bindings"
+	tablePluginAuthIdentities     = "plugin_auth_identities"
+)
+
+const (
 	// secretLeftOut tables hold short-lived secrets (sessions, sign-in flows,
 	// reset and verification tokens): the dump leaves their rows out, so a
 	// restore brings none back and every client signs in again.
@@ -155,7 +161,7 @@ func grantCarried(table string) string {
 
 // pluginInstalled is the SQL condition, over the live row r, that its
 // plugin installation is in the restored data.
-const pluginInstalled = `EXISTS (SELECT 1 FROM plugin_installations i WHERE i.id = r.plugin_installation_id)`
+const pluginInstalled = `EXISTS (SELECT 1 FROM carried_plugins i WHERE i.id = r.plugin_installation_id)`
 
 // profileOf is the SQL condition that the account in the account column has
 // the profile in the profile column in the restored data. A profile id is
@@ -259,7 +265,7 @@ var secretTables = []secretTable{
 
 	// Links and providers that sign people in: one removed since the backup
 	// would let its external account sign in again.
-	{name: "plugin_auth_identities", handling: secretCarried, why: "external sign-in links (OIDC, LDAP) of accounts", carry: &carrySpec{
+	{name: tablePluginAuthIdentities, handling: secretCarried, why: "external sign-in links (OIDC, LDAP) of accounts", carry: &carrySpec{
 		key: "id", same: []string{"id", columnInstallation, "external_subject", columnUserID}, credential: everyRow,
 		owners: []string{columnUserID}, owned: ownerCarried(columnUserID) + ` AND ` + pluginInstalled,
 		describe: `format('sign-in link %s %L (account %s)', r.id, r.username, r.user_id)`,
@@ -269,10 +275,10 @@ var secretTables = []secretTable{
 	// would create gets no wider a policy under the restored data than live
 	// (carried_grants). Otherwise it is carried with account creation off,
 	// so the people already linked still sign in.
-	{name: "plugin_auth_bindings", handling: secretCarried, why: "sign-in providers", carry: &carrySpec{
+	{name: tablePluginAuthBindings, handling: secretCarried, why: "sign-in providers", carry: &carrySpec{
 		key: "id", same: []string{"id", columnInstallation, "capability_id"}, credential: everyRow, owned: pluginInstalled,
 		describe: `format('sign-in provider %s (%s)', r.id, r.capability_id)`,
-		limit: &carryLimit{column: columnAutoProvision, keep: grantCarried("plugin_auth_bindings"),
+		limit: &carryLimit{column: columnAutoProvision, keep: grantCarried(tablePluginAuthBindings),
 			why: "account creation turned off: a new account would get more access under the backup's access groups than here"},
 	}},
 
@@ -347,6 +353,10 @@ var secretTables = []secretTable{
 	{name: "plugin_runtime_configs", handling: secretCarried, why: "plugin configuration, with the keys and tokens plugins present to outside services", carry: &carrySpec{
 		key: "id", same: []string{"id", columnInstallation, "config_key"}, credential: everyRow, owned: pluginInstalled,
 		describe: `format('configuration %L of plugin installation %s', r.config_key, r.plugin_installation_id)`,
+	}},
+	{name: tablePluginProvisionOwnership, handling: secretCarried, why: "deployment plugin ownership", carry: &carrySpec{
+		key: columnInstallation, same: []string{columnInstallation}, credential: everyRow, owned: pluginInstalled,
+		describe: `format('deployment ownership of plugin installation %s', r.plugin_installation_id)`,
 	}},
 	{name: "plugin_instance_state", handling: secretCarried, why: "plugin state, which may hold an outside account's tokens", carry: &carrySpec{
 		key: "plugin_installation_id, host_scope, state_key", same: []string{columnInstallation, "host_scope", "state_key"}, credential: everyRow, owned: pluginInstalled,
@@ -424,11 +434,15 @@ func leftOutTables() []string {
 // carriedKinds is what the restore output calls the carried tables.
 const carriedKinds = "API keys, pending invitations, invite codes, autoscan webhook tokens, audiobook RSS feed links, " +
 	"Plex and Jellyfin webhook sync secrets, external sign-in links and providers, watch-provider connections, " +
-	"plugin configuration and state, and notification destinations " +
+	"plugin configuration, state and deployment ownership, and notification destinations " +
 	"(push registrations, webhooks, plugin destinations, email addresses, Discord links, server channels)"
 
 // CarriedCredentials is what DatabaseLoader.CarryCredentials did.
 type CarriedCredentials struct {
+	// pluginProvisionRestricted records a release or sign-in restriction
+	// that a declaration must not override.
+	pluginProvisionRestricted bool
+
 	// Kept counts the live rows kept, by table.
 	Kept map[string]int
 	// Dropped names the live credentials left out because their owner is
@@ -454,14 +468,14 @@ type CarriedCredentials struct {
 // carryCredentials replaces the restored database's credentials with the
 // live server's (liveURL), or with none when liveURL is "", and prints
 // what it kept and dropped.
-func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, out io.Writer) error {
+func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, out io.Writer) (bool, error) {
 	carriedRows, err := loader.CarryCredentials(ctx, dbURL, liveURL)
 	if err != nil {
-		return fmt.Errorf("replacing the restored %s: %w", carriedKinds, err)
+		return false, fmt.Errorf("replacing the restored %s: %w", carriedKinds, err)
 	}
 	if liveURL == "" {
 		_, _ = fmt.Fprintf(out, "Left out the backup's %s; create new ones after Silo starts.\n", carriedKinds)
-		return nil
+		return carriedRows.pluginProvisionRestricted, nil
 	}
 	if len(carriedRows.Absent) > 0 {
 		_, _ = fmt.Fprintf(out, "The backup's schema predates %s; this server's rows of them are not carried.\n", strings.Join(carriedRows.Absent, ", "))
@@ -491,7 +505,7 @@ func carryCredentials(ctx context.Context, loader DatabaseLoader, dbURL, liveURL
 		kept := counted(len(carriedRows.Stricter), "security switch as this server has it", "security switches as this server has them")
 		_, _ = fmt.Fprintf(out, "Kept %s, stricter than the backup: %s\n", kept, strings.Join(carriedRows.Stricter, ", "))
 	}
-	return nil
+	return carriedRows.pluginProvisionRestricted, nil
 }
 
 // CarryCredentials replaces the carried secretTables rows of dbURL with
@@ -504,7 +518,7 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string) (
 	for i := range live {
 		live[i] = "[]"
 	}
-	liveState := liveCredentials{scrubbed: slices.Repeat([]string{"[]"}, len(scrubbed))}
+	liveState := liveCredentials{plugins: "[]", scrubbed: slices.Repeat([]string{"[]"}, len(scrubbed))}
 	if liveURL != "" {
 		var err error
 		if liveState, err = readLiveCredentials(ctx, liveURL, tables, live); err != nil {
@@ -518,6 +532,9 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string) (
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 	result := CarriedCredentials{Kept: map[string]int{}}
 	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
+		if err := preparePluginCredentialCarry(ctx, tx, liveState); err != nil {
+			return err
+		}
 		// A backup of an older schema may predate a table.
 		present, presentErr := tablesPresent(ctx, tx, append(slices.Clone(tables), scrubbed...))
 		if presentErr != nil {
@@ -536,8 +553,7 @@ func (l PGLoader) CarryCredentials(ctx context.Context, dbURL, liveURL string) (
 		// is the restored server's as it will start: an account kept
 		// disabled, a library deleted since restored disabled.
 		if liveURL != "" {
-			var err error
-			if result.Stricter, err = keepStricterFlags(ctx, tx, liveState.stricter); err != nil {
+			if err := keepStricterFlags(ctx, tx, liveState.stricter, &result); err != nil {
 				return err
 			}
 		}
@@ -634,6 +650,10 @@ func carriedGrants(ctx context.Context, tx pgx.Tx, tables []secretTable, live []
 // authority of the accounts they belong to, and the policy each row that
 // grants an account would give it.
 type liveCredentials struct {
+	plugins            string
+	pluginOwnership    bool
+	pluginCallbackMode bool
+
 	authority map[int]accountAuthority
 	grants    map[grantKey]grantPolicy
 	// stricter is each stricterFlags entry's live rows.
@@ -652,7 +672,13 @@ func readLiveCredentials(ctx context.Context, liveURL string, tables []secretTab
 	}
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 	err = pgx.BeginTxFunc(ctx, conn, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, func(tx pgx.Tx) error {
+		if err := readPluginCredentialState(ctx, tx, &state); err != nil {
+			return err
+		}
 		for i, table := range tables {
+			if table.name == tablePluginProvisionOwnership && !state.pluginOwnership {
+				continue
+			}
 			sql := fmt.Sprintf(`SELECT coalesce(json_agg(t), '[]')::text FROM %s t WHERE %s`, table.name, table.carry.credential)
 			if err := tx.QueryRow(ctx, sql).Scan(&into[i]); err != nil {
 				return fmt.Errorf("%s: %w", table.name, err)
@@ -788,10 +814,26 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 	}
 	result.Dropped = append(result.Dropped, dropped...)
 	same := slices.DeleteFunc(slices.Clone(c.same), func(col string) bool { return !slices.Contains(columns, col) })
-	if _, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s t WHERE %s AND NOT EXISTS (
+	deleted, err := tx.Exec(ctx, fmt.Sprintf(`DELETE FROM %s t WHERE %s AND NOT EXISTS (
 		SELECT 1 FROM %s WHERE (%s) AND (%s) = (%s))`,
-		t.name, c.credential, rows, owned, prefixed("r.", same), prefixed("t.", same)), live); err != nil {
+		t.name, c.credential, rows, owned, prefixed("r.", same), prefixed("t.", same)), live)
+	if err != nil {
 		return err
+	}
+	signIn := t.name == tablePluginAuthBindings || t.name == tablePluginAuthIdentities
+	if signIn && (len(dropped) > 0 || deleted.RowsAffected() > 0) {
+		result.pluginProvisionRestricted = true
+	}
+	if t.name == tablePluginAuthBindings && !result.pluginProvisionRestricted {
+		sql := fmt.Sprintf(`SELECT EXISTS (
+			SELECT 1 FROM %s JOIN plugin_auth_bindings t USING (id)
+			WHERE (%s) AND t.plugin_installation_id = r.plugin_installation_id
+				AND t.capability_id = r.capability_id
+				AND ((t.enabled AND NOT r.enabled) OR (t.auto_provision AND NOT r.auto_provision))
+		)`, rows, owned)
+		if err := tx.QueryRow(ctx, sql, live).Scan(&result.pluginProvisionRestricted); err != nil {
+			return err
+		}
 	}
 	var set []string
 	for _, col := range columns {
@@ -807,6 +849,9 @@ func (t secretTable) carryInto(ctx context.Context, tx pgx.Tx, live string, resu
 			limited, err := collectStrings(ctx, tx, fmt.Sprintf(`SELECT %s FROM %s WHERE (%s) AND r.%s AND NOT (%s)`, c.describe, rows, owned, col, l.keep), live)
 			if err != nil {
 				return err
+			}
+			if signIn && len(limited) > 0 {
+				result.pluginProvisionRestricted = true
 			}
 			for _, row := range limited {
 				result.Limited = append(result.Limited, row+": "+l.why)

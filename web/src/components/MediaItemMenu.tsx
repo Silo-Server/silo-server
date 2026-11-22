@@ -449,7 +449,8 @@ function MediaItemActionSheet({
         showCloseButton={false}
         className="max-h-[80svh] gap-0 overflow-y-auto rounded-t-2xl p-0 pb-[env(safe-area-inset-bottom)]"
       >
-        <SheetHeader className="px-5 pt-4 pb-2">
+        {/* No close button in this sheet, so the title keeps its full width. */}
+        <SheetHeader className="px-5 pt-4 pb-2 *:data-[slot=sheet-title]:pe-0">
           <SheetTitle className="truncate text-start text-base">
             {title ?? t("web.item.menu.sheetTitle")}
           </SheetTitle>

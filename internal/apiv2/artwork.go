@@ -22,6 +22,9 @@ const (
 	artworkRangeHeader  = "Range"
 	artworkIntegerType  = "integer"
 	artworkBinaryFormat = "binary"
+	// artworkImageProtocol names the raw protocol of routes that answer with
+	// image bytes.
+	artworkImageProtocol = "artwork-image"
 	// artworkImageMediaType is the media type artwork answers document.
 	artworkImageMediaType = "image/*"
 )
@@ -57,7 +60,7 @@ func registerArtwork(reg *Registry) {
 			responses["206"].Content = responses["200"].Content
 		}
 		op.Responses = responses
-		RegisterRaw(reg, RawOperation{Operation: op, WildcardParam: fieldKey, Protocol: "artwork-image", Reason: "Artwork bytes and range semantics bypass JSON encoding."}, http.HandlerFunc(reg.serveArtwork))
+		RegisterRaw(reg, RawOperation{Operation: op, WildcardParam: fieldKey, Protocol: artworkImageProtocol, Reason: "Artwork bytes and range semantics bypass JSON encoding."}, http.HandlerFunc(reg.serveArtwork))
 	}
 }
 

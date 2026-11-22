@@ -91,6 +91,15 @@ export function authBindingOf(installation: PluginInstallation): PluginAuthBindi
   return installation.auth_bindings?.find((entry) => entry.capability_id === capability?.id);
 }
 
+/** Binding fields the deployment controls, including before a binding exists. */
+export function authBindingFieldIsManaged(
+  installation: PluginInstallation,
+  field: string,
+): boolean {
+  const capability = authCapabilityOf(installation);
+  return capability?.env_managed?.includes(field) === true;
+}
+
 /** Whether the installation creates accounts for people it signs in; on until saved off. */
 export function savedAutoProvision(installation: PluginInstallation): boolean {
   return authBindingOf(installation)?.auto_provision ?? true;

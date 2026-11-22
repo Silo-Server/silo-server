@@ -105,6 +105,11 @@ func (s *RepositoryStore) GetByID(ctx context.Context, id int) (*Repository, err
 	return scanRepository(s.pool.QueryRow(ctx, query, id))
 }
 
+func (s *RepositoryStore) getByManagedKey(ctx context.Context, key string) (*Repository, error) {
+	query := `SELECT ` + repositoryColumns + ` FROM plugin_repositories WHERE managed_key = $1`
+	return scanRepository(s.pool.QueryRow(ctx, query, key))
+}
+
 func (s *RepositoryStore) List(ctx context.Context) ([]*Repository, error) {
 	query := `SELECT ` + repositoryColumns + ` FROM plugin_repositories ORDER BY id ASC`
 	rows, err := s.pool.Query(ctx, query)

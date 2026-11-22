@@ -54,8 +54,8 @@ func (c *ArchiveCache) checksPlatform(trustVerified bool) bool {
 
 // loadForHostPlatform is load, persisting, that rehydrates this host's
 // build when the stored archive holds another platform's.
-func (c *ArchiveCache) loadForHostPlatform(ctx context.Context, installation *Installation, trustVerified bool, archives archiveStore) (*pluginv1.PluginManifest, error) {
-	manifest, err := c.load(ctx, installation, trustVerified, archives, true)
+func (c *ArchiveCache) loadForHostPlatform(ctx context.Context, installation *Installation, read archiveRead, trustVerified bool, archives archiveStore) (*pluginv1.PluginManifest, error) {
+	manifest, err := c.load(ctx, installation, read, trustVerified, archives, true)
 	foreign, ok := errors.AsType[*foreignBuildError](err)
 	if !ok || c.platforms == nil {
 		return manifest, err
@@ -64,7 +64,7 @@ func (c *ArchiveCache) loadForHostPlatform(ctx context.Context, installation *In
 	if err != nil {
 		return nil, err
 	}
-	manifest, _, err = c.rehydrate(ctx, installation, trustVerified, archive)
+	manifest, _, err = c.rehydrate(ctx, installation, read, trustVerified, archive)
 	return manifest, err
 }
 

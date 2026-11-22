@@ -37,7 +37,11 @@ import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
 import { usePGSSubtitles } from "../hooks/usePGSSubtitles";
 import type { EngineCapabilities } from "../engine/capabilities";
-import { resolveOriginalPlaybackRoute, type NativeOriginalSupport } from "../engine/routing";
+import {
+  pageOriginProtocol,
+  resolveOriginalPlaybackRoute,
+  type NativeOriginalSupport,
+} from "../engine/routing";
 import type { BrowserEngineSession } from "../engine";
 import { ENGINE_READ_FAILED, ENGINE_STARTUP_TIMEOUT } from "../engine/protocol";
 import { useSubtitleSync } from "../hooks/useSubtitleSync";
@@ -3274,6 +3278,15 @@ export function VideoPlayer({
                 },
                 engine: routeInput.browserEngine,
                 audioTracks: routeInput.audioTracks,
+                navigationProtocol: pageOriginProtocol(
+                  (
+                    performance.getEntriesByType?.("navigation")[0] as
+                      | PerformanceNavigationTiming
+                      | undefined
+                  )?.nextHopProtocol ?? "",
+                  (performance.getEntriesByType?.("resource") ?? []) as PerformanceResourceTiming[],
+                  location.origin,
+                ),
               })
             : ({ kind: "native" } as const);
         if (route.kind === "unsupported") {
@@ -3295,16 +3308,17 @@ export function VideoPlayer({
             if (destroyed || !surface) return;
             startupGuardRef.current?.dispose();
             const meter = meterMedia(false);
-            // The engine numbers its reads from 0 on each attach, and a
+            // The engine numbers its requests from 0 on each attach, and a
             // transport rebuilt for the plan measures into the same meter, so
-            // this attach's reads get keys of their own.
+            // this attach's requests get keys of their own. A striped read is
+            // one request, whatever its ranges; a stock read is one per fetch.
             const reads: object[] = [];
             engineSession = attachBrowserEngine({
               video,
               surface,
               source: { ...route.source, startSeconds: Math.max(0, streamStartPosition()) },
-              onMediaData: (request, bytes, first, last) => {
-                if (!destroyed) meter.received((reads[request] ??= {}), bytes, first, last);
+              onMediaData: (request, bytes, first, last, spans) => {
+                if (!destroyed) meter.received((reads[request] ??= {}), bytes, first, last, spans);
               },
               onFailure: (failure) => {
                 if (destroyed) return;

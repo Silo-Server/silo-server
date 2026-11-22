@@ -8,6 +8,7 @@ import { formatRelativeTime } from "@/lib/date";
 import { SectionError } from "../feedback";
 import { formatLocale } from "@/lib/appLocale";
 import { useT } from "@/i18n";
+import { leadingGraphemes } from "@/lib/text";
 
 /**
  * Connection and 24h sync status for every watch provider.
@@ -79,7 +80,7 @@ function ProviderRow({ provider }: { provider: WatchProviderStats }) {
         )}
       </span>
       {errors > 0 ? (
-        <span className="bg-destructive/10 text-destructive flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums">
+        <span className="bg-destructive/10 text-destructive-label flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums">
           {t("web.admin.dashboard.widgets.watchProviders.errorCount", {
             count: errors,
             count_text: errors.toLocaleString(formatLocale()),
@@ -153,7 +154,7 @@ function ProviderActivity({ provider }: { provider: WatchProviderStats }) {
  */
 function ProviderMark({ provider }: { provider: WatchProviderStats }) {
   const source = provider.display_name || provider.provider;
-  const initials = source.slice(0, 2).toUpperCase();
+  const initials = leadingGraphemes(source, 2).toUpperCase();
 
   return (
     <span

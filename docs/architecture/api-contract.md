@@ -1108,6 +1108,23 @@ and plugin pages use the server's own origin, while Apple, Android, and other na
 not governed by browser CORS. The narrow plugin launch cookie remains same-origin and path-scoped;
 it does not authorize cross-origin API access.
 
+Three kinds of native media response are readable cross-origin, each with
+`Access-Control-Allow-Origin: *` and no credentials:
+
+- The original-file stream route, `/api/v2/stream/{session_id}`. `GET` and `HEAD` set
+  `RawOperation.CrossOrigin`, so every answer, authorization refusals included, carries the
+  wildcard, allows the `Range` request header and exposes `Content-Range`; the web player reads ranges from the administrator's
+  media origin. The `OPTIONS` preflight is answered by the router's `playbackMediaCORS`
+  middleware with `204`, before authentication. Authorization stays in the URL's `token` and
+  `st`.
+- The HLS manifest and segment routes (`/api/v2/playback/transcode/{session_id}/...`), through
+  `RawOperation.CrossOrigin`, with the same wildcard and the `Range` request header allowed on
+  every answer. They answer no preflight.
+- Subtitle sidecar responses (`/api/v2/stream/{session_id}/subtitles/{track}`), which send the
+  wildcard from their handler; a refusal before the handler runs carries no CORS header.
+
+Every other native `/api/v2` route answers without CORS headers.
+
 Media proxy routes retain their explicit cross-origin behavior because a browser player can fetch
 streams from a separate proxy or transcode-node origin. Those routes still perform their normal
 token or bearer authorization and do not enable credentialed wildcard CORS; CORS is never an
@@ -1434,6 +1451,25 @@ profile that is not an admin may add a new row of a recipe is that recipe's `adm
 an `admin_only` recipe (Editor's picks, `admin_curated_list`); a row of that kind already saved on
 the page is kept and may change. The refusal is `403 permission_denied` saying only an admin can
 add an Editor's picks row. Every profile mutation in the section is demo-restricted (v1's demo guard listed none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
+
+`getProfileSectionBaseline` (added after the port, with no v1 counterpart) serves home layout
+export and import. For one page (`scope`, `library_id`) it returns `section_tokens`, opaque
+tokens for the server rows on the page in libraries the acting profile is allowed: every stored
+row, enabled or disabled, and, when no stored row is enabled, the default rows the page falls
+back to as well. Libraries the profile only hid from its own browsing still count. It also
+returns `visible_sections`, the active server rows the profile may see before its own overrides,
+each with its `token`. Rows tied to libraries the profile isn't allowed are left out of both, so
+a restricted profile learns nothing about them. A token is an HMAC of the profile, page, and
+section ID keyed by the server's JWT secret: another profile's export matches nothing, tokens
+recorded before the secret rotated match nothing, and tokens identify rows, not servers (the
+client checks the server identity separately). The web client records `section_tokens` in an
+export. When it imports that file on the same server, it offers to hide visible rows whose
+tokens the export lacks, but only if at least one visible row's token is in the export;
+otherwise, or for a file without tokens, it offers nothing and imports the page as before.
+`getProfileSectionFlags` reports `home_layout_baseline: true` on servers that serve it.
+`getProfileSectionSettings` and the admin view of a profile's settings fall back to the default
+rows when no stored row on the page is enabled, the same rows the Home and library feeds show
+there, so a profile can hide or reorder them.
 
 **Settings section (Phase 4).** Operations: `getSettingsContract` (replaced both v1
 `/settings/contract` and `/settings/manifest`), `getSettingsContractCapabilities` (replaced v1

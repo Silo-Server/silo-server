@@ -1,7 +1,6 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import {
-  AlertTriangle,
-  CheckCircle2,
+  ChevronRight,
   Clock,
   History,
   ListChecks,
@@ -12,14 +11,10 @@ import {
   X,
 } from "lucide-react";
 import type {
-  AutoscanChangeOutcome,
   AutoscanEvent,
-  AutoscanEventChange,
-  AutoscanEventScanRun,
   AutoscanEventStatus,
   AutoscanRunningPoll,
   AutoscanScan,
-  AutoscanScanResult,
   AutoscanScanStatus,
   Library,
   ScanRun,
@@ -46,7 +41,7 @@ import {
 } from "@/components/ui/table";
 import { useEventChannel } from "@/components/realtimeEventsContext";
 import { useDebounce } from "@/hooks/useDebounce";
-import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
+import { useT } from "@/i18n";
 import {
   useAutoscanConnections,
   useAutoscanEvents,
@@ -66,185 +61,35 @@ import {
   formatActiveScanTrigger,
 } from "@/lib/scanRuns";
 import { cn } from "@/lib/utils";
-import { formatTime as formatTimePreferred, preferredDateLocale } from "@/lib/datetime";
 
-import { eventSourceName } from "./sourceDisplay";
-import { formatLocale } from "@/lib/appLocale";
-import { formatDecimal } from "@/lib/numberFormat";
+import {
+  NO_VALUE,
+  SEPARATOR,
+  eventDetailsSummary,
+  formatDuration,
+  formatTime,
+  formatTimestamp,
+  libraryName,
+  pollEventDuration,
+  pollEventTimestamp,
+  pollSourceName,
+  rawCountValues,
+  scanSourceName,
+} from "./pollEventDisplay";
+import {
+  DeliveryBadge,
+  PollMetricStrip,
+  PollStatusBadge,
+  ScanResultText,
+  ScanStatusBadge,
+} from "./PollActivityBadges";
+import { PollEventInspectorSheet } from "./PollEventInspectorSheet";
 
 const HISTORY_PAGE_SIZE_OPTIONS = [25, 50, 100];
 const DEFAULT_HISTORY_PAGE_SIZE = 25;
 const QUEUE_PAGE_SIZE = 8;
-/** Shown where a time or result is not known yet. */
-const NO_VALUE = "-";
-const SEPARATOR = " · ";
 
 type HistoryView = "scans" | "polls";
-
-function formatTime(value: string | undefined): string {
-  if (!value) return NO_VALUE;
-  return formatTimePreferred(value, { hour: "2-digit" });
-}
-
-function formatTimestamp(value: string | undefined): string {
-  if (!value) return NO_VALUE;
-  const day = new Date(value).toLocaleDateString(preferredDateLocale(), {
-    month: "short",
-    day: "numeric",
-  });
-  return `${day}, ${formatTimePreferred(value, { hour: "2-digit" })}`;
-}
-
-function formatDuration(t: Translate, ms: number): string {
-  if (ms < 1000) return t("web.admin.autoscan.activity.duration.milliseconds", { value: ms });
-  if (ms < 60_000)
-    return t("web.admin.autoscan.activity.duration.seconds", {
-      value: formatDecimal(Math.round(ms / 100) / 10, 1, 0),
-    });
-  const minutes = Math.floor(ms / 60_000);
-  const seconds = Math.round((ms % 60_000) / 1000);
-  return t("web.admin.autoscan.activity.duration.minutesSeconds", {
-    minutes: minutes,
-    seconds: seconds,
-  });
-}
-
-function pollEventDuration(t: Translate, event: AutoscanEvent): string {
-  if (event.status !== "running") {
-    return formatDuration(t, event.duration_ms);
-  }
-  const elapsed = Math.max(0, Date.now() - new Date(event.started_at).getTime());
-  return formatDuration(t, elapsed);
-}
-
-function pollEventTimestamp(event: AutoscanEvent): string {
-  return formatTimestamp(event.status === "running" ? event.started_at : event.completed_at);
-}
-
-function eventStatusTone(status: AutoscanEventStatus): {
-  label: MessageKey;
-  icon: typeof CheckCircle2;
-  className: string;
-} {
-  switch (status) {
-    case "success":
-      return {
-        label: "web.admin.autoscan.activity.pollStatus.success",
-        icon: CheckCircle2,
-        className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
-      };
-    case "running":
-      return {
-        label: "web.admin.autoscan.activity.pollStatus.running",
-        icon: RefreshCw,
-        className: "border-primary/30 bg-primary/10 text-primary",
-      };
-    case "unresolved":
-      return {
-        label: "web.admin.autoscan.activity.pollStatus.unresolved",
-        icon: AlertTriangle,
-        className: "border-amber-500/30 bg-amber-500/10 text-amber-500",
-      };
-    case "error":
-      return {
-        label: "web.admin.autoscan.activity.pollStatus.error",
-        icon: AlertTriangle,
-        className: "border-destructive/30 bg-destructive/10 text-destructive",
-      };
-  }
-}
-
-function scanStatusClass(status: AutoscanEventScanRun["status"] | ScanRun["status"]): string {
-  switch (status) {
-    case "completed":
-      return "border-emerald-500/30 bg-emerald-500/10 text-emerald-500";
-    case "failed":
-      return "border-destructive/30 bg-destructive/10 text-destructive";
-    case "running":
-      return "border-sky-500/30 bg-sky-500/10 text-sky-500";
-    case "accepted":
-      return "border-muted-foreground/25 bg-muted/60 text-muted-foreground";
-    case "cancelled":
-      return "border-amber-500/30 bg-amber-500/10 text-amber-500";
-  }
-}
-
-// Lowercase: the badge capitalizes the first letter with CSS.
-const SCAN_STATUS_LABELS: Record<AutoscanScanStatus | ScanRun["status"], MessageKey> = {
-  accepted: "web.admin.autoscan.activity.scanStatus.queued",
-  running: "web.admin.autoscan.activity.scanStatus.running",
-  completed: "web.admin.autoscan.activity.scanStatus.completed",
-  failed: "web.admin.autoscan.activity.scanStatus.failed",
-  cancelled: "web.admin.autoscan.activity.scanStatus.cancelled",
-};
-
-// Name every Activity row the way the Sources list titles the source, so the
-// two tabs agree on what a source is called.
-type PollSourceRef = {
-  source_id?: string | null;
-  plugin_id?: string | null;
-  capability_id?: string;
-};
-
-function pollSourceName(t: Translate, event: PollSourceRef, lookups: SourceLabelLookups): string {
-  return (
-    eventSourceName(event, lookups) ||
-    event.plugin_id ||
-    event.capability_id ||
-    t("web.admin.autoscan.activity.sourceFallback")
-  );
-}
-
-function scanSourceName(t: Translate, scan: AutoscanScan, lookups: SourceLabelLookups): string {
-  return eventSourceName(scan, lookups) || t("web.admin.autoscan.activity.sourceFallback");
-}
-
-function libraryName(t: Translate, librariesByID: Map<number, Library>, libraryID: number): string {
-  return (
-    librariesByID.get(libraryID)?.name ??
-    t("web.admin.autoscan.activity.libraryFallback", { id: libraryID })
-  );
-}
-
-function PollStatusBadge({ status }: { status: AutoscanEventStatus }) {
-  const t = useT();
-  const tone = eventStatusTone(status);
-  const Icon = tone.icon;
-  return (
-    <Badge variant="outline" className={tone.className}>
-      <Icon className={cn("h-3.5 w-3.5", status === "running" && "animate-spin")} />
-      {t(tone.label)}
-    </Badge>
-  );
-}
-
-function ScanStatusBadge({ status }: { status: AutoscanScanStatus | ScanRun["status"] }) {
-  const t = useT();
-  return (
-    <Badge variant="outline" className={cn("capitalize tabular-nums", scanStatusClass(status))}>
-      {Object.hasOwn(SCAN_STATUS_LABELS, status) ? t(SCAN_STATUS_LABELS[status]) : status}
-    </Badge>
-  );
-}
-
-/**
- * Marks webhook-delivered events (with the arr event type when known) so they
- * read distinctly from poll cycles. Poll events render nothing — poll is the
- * default and labeling every row would be noise.
- */
-function DeliveryBadge({ event }: { event: AutoscanEvent }) {
-  const t = useT();
-  if (event.delivery_mode !== "webhook") return null;
-  return (
-    <Badge variant="secondary" className="text-xs">
-      {event.provider_event_type
-        ? t("web.admin.autoscan.activity.delivery.webhookEvent", {
-            event_type: event.provider_event_type,
-          })
-        : t("web.admin.autoscan.activity.delivery.webhook")}
-    </Badge>
-  );
-}
 
 // Shared desktop table chrome so the queue, scan history, and poll log read as
 // one family: clipped rounded border, muted sticky-feeling header band.
@@ -257,437 +102,6 @@ function DataTable({ head, children }: { head: ReactNode; children: ReactNode })
         </TableHeader>
         <TableBody>{children}</TableBody>
       </Table>
-    </div>
-  );
-}
-
-type ScanResultSummary = { text: string; tone: "skipped" | "errors" | "changes" | "none" };
-
-/** Plural values for a count shown with the locale's digit grouping. */
-function countValues(count: number) {
-  return { count, count_text: count.toLocaleString(formatLocale()) };
-}
-
-/**
- * Summarizes a completed run's counters. A skipped run did no work because an
- * overlapping scan of the same scope was already running, which must not read
- * like a run that found nothing.
- */
-function summarizeScanResult(
-  t: Translate,
-  result: AutoscanScanResult | undefined,
-): ScanResultSummary | null {
-  if (!result) return null;
-  if (result.skipped > 0) {
-    return { text: t("web.admin.autoscan.activity.result.skipped"), tone: "skipped" };
-  }
-  const parts: string[] = [];
-  if (result.new > 0)
-    parts.push(t("web.admin.autoscan.activity.result.new", countValues(result.new)));
-  if (result.updated > 0)
-    parts.push(t("web.admin.autoscan.activity.result.updated", countValues(result.updated)));
-  if (result.missing > 0)
-    parts.push(t("web.admin.autoscan.activity.result.missing", countValues(result.missing)));
-  if (result.files_deleted > 0)
-    parts.push(
-      t("web.admin.autoscan.activity.result.filesRemoved", countValues(result.files_deleted)),
-    );
-  // A scan can drop catalog items whose files were already gone.
-  if (result.items_deleted > 0)
-    parts.push(
-      t("web.admin.autoscan.activity.result.itemsRemoved", countValues(result.items_deleted)),
-    );
-  // A scoped scan can drop a title from this library without deleting it.
-  if (result.memberships_removed > 0)
-    parts.push(
-      t(
-        "web.admin.autoscan.activity.result.titlesRemoved",
-        countValues(result.memberships_removed),
-      ),
-    );
-  if (result.missing_skipped_protected > 0)
-    parts.push(
-      t(
-        "web.admin.autoscan.activity.result.keptOffline",
-        countValues(result.missing_skipped_protected),
-      ),
-    );
-  if (result.errors > 0)
-    parts.push(t("web.admin.autoscan.activity.result.errors", countValues(result.errors)));
-  if (parts.length === 0) {
-    return {
-      text:
-        result.unchanged > 0
-          ? t(
-              "web.admin.autoscan.activity.result.noChangesUnchanged",
-              countValues(result.unchanged),
-            )
-          : t("web.admin.autoscan.activity.result.noChanges"),
-      tone: "none",
-    };
-  }
-  return { text: parts.join(SEPARATOR), tone: result.errors > 0 ? "errors" : "changes" };
-}
-
-function ScanResultText({
-  result,
-  className,
-}: {
-  result: AutoscanScanResult | undefined;
-  className?: string;
-}) {
-  const t = useT();
-  const summary = summarizeScanResult(t, result);
-  if (!summary) return null;
-  return (
-    <span
-      className={cn(
-        "text-xs tabular-nums",
-        summary.tone === "skipped" && "text-amber-500",
-        summary.tone === "errors" && "text-destructive",
-        summary.tone === "changes" && "text-foreground",
-        summary.tone === "none" && "text-muted-foreground",
-        className,
-      )}
-    >
-      {summary.text}
-    </span>
-  );
-}
-
-function RunList({ runs, joinedRuns }: { runs: AutoscanEventScanRun[]; joinedRuns: number }) {
-  const t = useT();
-  if (runs.length === 0) {
-    return (
-      <span className="text-muted-foreground text-xs">
-        {joinedRuns > 0
-          ? t("web.admin.autoscan.activity.runs.noneJoined")
-          : t("web.admin.autoscan.activity.runs.none")}
-      </span>
-    );
-  }
-  return (
-    <div className="space-y-2">
-      {runs.map((run) => (
-        <div
-          key={run.id}
-          className="border-border/70 bg-background/40 grid gap-1 rounded-md border px-3 py-2 text-xs sm:grid-cols-[auto_1fr_auto] sm:items-center"
-        >
-          <ScanStatusBadge status={run.status} />
-          <div className="min-w-0">
-            <div className="font-medium">{run.mode}</div>
-            <div className="text-muted-foreground [overflow-wrap:anywhere]">
-              {run.path || t("web.admin.autoscan.activity.entireLibrary")}
-            </div>
-            <ScanResultText result={run.result} className="mt-0.5 block" />
-          </div>
-          <div className="text-muted-foreground whitespace-nowrap tabular-nums">
-            {formatTime(run.completed_at ?? run.started_at ?? run.requested_at)}
-          </div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const CHANGE_OUTCOME_TONES: Record<
-  AutoscanChangeOutcome,
-  { label: MessageKey; className: string }
-> = {
-  queued: {
-    label: "web.admin.autoscan.activity.outcome.queued",
-    className: "border-emerald-500/30 bg-emerald-500/10 text-emerald-500",
-  },
-  joined: {
-    label: "web.admin.autoscan.activity.outcome.joined",
-    className: "border-sky-500/30 bg-sky-500/10 text-sky-500",
-  },
-  suppressed: {
-    label: "web.admin.autoscan.activity.outcome.suppressed",
-    className: "border-muted-foreground/25 bg-muted/60 text-muted-foreground",
-  },
-  unresolved: {
-    label: "web.admin.autoscan.activity.outcome.unresolved",
-    className: "border-amber-500/30 bg-amber-500/10 text-amber-500",
-  },
-  ignored: {
-    label: "web.admin.autoscan.activity.outcome.ignored",
-    className: "border-muted-foreground/25 bg-muted/60 text-muted-foreground",
-  },
-  error: {
-    label: "web.admin.autoscan.activity.outcome.error",
-    className: "border-destructive/30 bg-destructive/10 text-destructive",
-  },
-};
-
-function isKnownChangeOutcome(outcome: string): outcome is AutoscanChangeOutcome {
-  return Object.prototype.hasOwnProperty.call(CHANGE_OUTCOME_TONES, outcome);
-}
-
-// An outcome added by a newer server shows its raw value in a neutral badge.
-function ChangeOutcomeBadge({ outcome }: { outcome: AutoscanEventChange["outcome"] }) {
-  const t = useT();
-  const tone = isKnownChangeOutcome(outcome)
-    ? { ...CHANGE_OUTCOME_TONES[outcome], label: t(CHANGE_OUTCOME_TONES[outcome].label) }
-    : { label: outcome, className: "border-muted-foreground/25 bg-muted/60 text-muted-foreground" };
-  return (
-    <Badge variant="outline" className={cn("whitespace-nowrap", tone.className)}>
-      {tone.label}
-    </Badge>
-  );
-}
-
-// Plain-language explanations for the resolver's reason codes. Unknown codes
-// fall back to the server's detail text so a new reason still reads sensibly.
-const CHANGE_REASON_TEXT: Record<string, MessageKey> = {
-  no_library_match: "web.admin.autoscan.activity.reason.noLibraryMatch",
-  subtree_outside_library: "web.admin.autoscan.activity.reason.subtreeOutsideLibrary",
-  path_outside_library: "web.admin.autoscan.activity.reason.pathOutsideLibrary",
-  path_ambiguous: "web.admin.autoscan.activity.reason.pathAmbiguous",
-  library_disabled: "web.admin.autoscan.activity.reason.libraryDisabled",
-  library_root_offline: "web.admin.autoscan.activity.reason.libraryRootOffline",
-  unsupported_extension: "web.admin.autoscan.activity.reason.unsupportedExtension",
-  path_permission_denied: "web.admin.autoscan.activity.reason.pathPermissionDenied",
-  path_not_inspectable: "web.admin.autoscan.activity.reason.pathNotInspectable",
-  path_not_file_or_dir: "web.admin.autoscan.activity.reason.pathNotFileOrDir",
-  path_required: "web.admin.autoscan.activity.reason.pathRequired",
-  path_ignored: "web.admin.autoscan.activity.reason.pathIgnored",
-  resolves_to_library: "web.admin.autoscan.activity.reason.resolvesToLibrary",
-  enqueue_failed: "web.admin.autoscan.activity.reason.enqueueFailed",
-};
-
-function changeReasonText(t: Translate, reason: string | undefined): string | undefined {
-  if (!reason || !Object.prototype.hasOwnProperty.call(CHANGE_REASON_TEXT, reason)) return;
-  return t(CHANGE_REASON_TEXT[reason]!);
-}
-
-function changeScopeLabel(t: Translate, change: AutoscanEventChange): string {
-  const mode = change.target_mode
-    ? formatActiveScanMode({ mode: change.target_mode as ScanRun["mode"] })
-    : t("web.admin.autoscan.activity.change.scanFallback");
-  return t("web.admin.autoscan.activity.change.scope", {
-    mode,
-    path: change.target_path || t("web.admin.autoscan.activity.entireLibrary"),
-  });
-}
-
-/** The explanation of a queued or joined change, without and with its library. */
-function changeScanKeys(change: AutoscanEventChange): [MessageKey, MessageKey] {
-  if (change.outcome === "queued")
-    return [
-      "web.admin.autoscan.activity.change.queued",
-      "web.admin.autoscan.activity.change.queuedInLibrary",
-    ];
-  if (change.reason === "follow_up_scan")
-    return [
-      "web.admin.autoscan.activity.change.followUp",
-      "web.admin.autoscan.activity.change.followUpInLibrary",
-    ];
-  return [
-    "web.admin.autoscan.activity.change.joined",
-    "web.admin.autoscan.activity.change.joinedInLibrary",
-  ];
-}
-
-function ChangeExplanation({
-  change,
-  librariesByID,
-}: {
-  change: AutoscanEventChange;
-  librariesByID: Map<number, Library>;
-}) {
-  const t = useT();
-  const library = change.library_id ? libraryName(t, librariesByID, change.library_id) : null;
-  switch (change.outcome) {
-    case "queued":
-    case "joined": {
-      const [plain, inLibrary] = changeScanKeys(change);
-      const scope = changeScopeLabel(t, change);
-      return (
-        <>
-          <div className="text-muted-foreground [overflow-wrap:anywhere]">
-            {library ? t(inLibrary, { scope, library }) : t(plain, { scope })}
-          </div>
-          {change.scan_run_id ? (
-            <div className="text-muted-foreground font-mono text-[11px] [overflow-wrap:anywhere]">
-              {change.scan_run_id}
-            </div>
-          ) : null}
-        </>
-      );
-    }
-    case "suppressed":
-      return (
-        <div className="text-muted-foreground [overflow-wrap:anywhere]">
-          {change.target_path
-            ? t("web.admin.autoscan.activity.change.suppressedPath", { path: change.target_path })
-            : t("web.admin.autoscan.activity.change.suppressed")}
-        </div>
-      );
-    case "error":
-      return (
-        <div className="text-destructive [overflow-wrap:anywhere]">
-          {change.reason === "resolve_failed"
-            ? change.detail
-              ? t("web.admin.autoscan.activity.change.resolveFailedDetail", {
-                  detail: change.detail,
-                })
-              : t("web.admin.autoscan.activity.change.resolveFailed")
-            : (changeReasonText(t, change.reason) ??
-              change.detail ??
-              t("web.admin.autoscan.activity.change.processingFailed"))}
-        </div>
-      );
-    default: {
-      const text =
-        changeReasonText(t, change.reason) ??
-        change.detail ??
-        change.reason ??
-        t("web.admin.autoscan.activity.change.notScanned");
-      return (
-        <div
-          className={cn(
-            "[overflow-wrap:anywhere]",
-            change.outcome === "unresolved" ? "text-amber-500" : "text-muted-foreground",
-          )}
-        >
-          {library ? t("web.admin.autoscan.activity.change.withLibrary", { text, library }) : text}
-        </div>
-      );
-    }
-  }
-}
-
-function ChangeList({
-  event,
-  librariesByID,
-}: {
-  event: AutoscanEvent;
-  librariesByID: Map<number, Library>;
-}) {
-  const t = useT();
-  if (event.changes.length === 0) {
-    return (
-      <span className="text-muted-foreground text-xs">
-        {event.changes_returned > 0
-          ? t("web.admin.autoscan.activity.changes.notRecorded")
-          : t("web.admin.autoscan.activity.changes.none")}
-      </span>
-    );
-  }
-  return (
-    <div className="space-y-2">
-      {event.changes.map((change, index) => (
-        <div
-          key={`${index}:${change.source_path}`}
-          className="border-border/70 bg-background/40 grid gap-1.5 rounded-md border px-3 py-2 text-xs sm:grid-cols-[auto_1fr] sm:items-start"
-        >
-          <ChangeOutcomeBadge outcome={change.outcome} />
-          <div className="min-w-0 space-y-0.5">
-            <div className="font-mono [overflow-wrap:anywhere]">{change.source_path}</div>
-            {change.rewritten_path && change.rewritten_path !== change.source_path ? (
-              <div className="text-muted-foreground font-mono [overflow-wrap:anywhere]">
-                {t("web.admin.autoscan.activity.change.rewrittenTo", {
-                  path: change.rewritten_path,
-                  label: (chunks) => <span className="font-sans">{chunks}</span>,
-                })}
-              </div>
-            ) : null}
-            <ChangeExplanation change={change} librariesByID={librariesByID} />
-          </div>
-        </div>
-      ))}
-      {event.changes_truncated ? (
-        <p className="text-muted-foreground text-xs">
-          {t("web.admin.autoscan.activity.changes.truncated", {
-            ...countValues(event.changes_returned),
-            shown: event.changes.length.toLocaleString(formatLocale()),
-          })}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
-function EventDetails({
-  event,
-  librariesByID,
-}: {
-  event: AutoscanEvent;
-  librariesByID: Map<number, Library>;
-}) {
-  const t = useT();
-  return (
-    <div className="space-y-3">
-      <div className="space-y-1.5">
-        <div className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
-          {t("web.admin.autoscan.activity.details.paths")}
-        </div>
-        <ChangeList event={event} librariesByID={librariesByID} />
-      </div>
-      <div className="space-y-1.5">
-        <div className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase">
-          {t("web.admin.autoscan.activity.details.scansCreated")}
-        </div>
-        <RunList runs={event.scan_runs} joinedRuns={joinedRunCount(event)} />
-      </div>
-    </div>
-  );
-}
-
-/** Runs the event's changes joined that another event created. */
-function joinedRunCount(event: AutoscanEvent): number {
-  const created = new Set(event.scan_runs.map((run) => run.id));
-  const joined = new Set<string>();
-  for (const change of event.changes) {
-    if (change.outcome === "joined" && change.scan_run_id && !created.has(change.scan_run_id))
-      joined.add(change.scan_run_id);
-  }
-  return joined.size;
-}
-
-function eventDetailsSummary(t: Translate, event: AutoscanEvent): string {
-  const linked = event.scan_runs.length + joinedRunCount(event);
-  // Joined runs are only known from recorded changes, so a truncated log can
-  // omit some; the count is then a lower bound.
-  const paths = t(
-    "web.admin.autoscan.activity.details.pathCount",
-    countValues(event.changes_returned),
-  );
-  const linkedText = t("web.admin.autoscan.activity.details.linkedCount", {
-    count: linked,
-    count_text: `${numberText(linked)}${event.changes_truncated ? "+" : ""}`,
-  });
-  return [paths, linkedText].join(SEPARATOR);
-}
-
-/** Plural values for a count printed without digit grouping. */
-function rawCountValues(count: number) {
-  return { count, count_text: count };
-}
-
-function PollMetricStrip({ event }: { event: AutoscanEvent }) {
-  const t = useT();
-  return (
-    <div className="text-muted-foreground flex flex-wrap gap-x-4 gap-y-1 text-xs tabular-nums">
-      <span>
-        {t("web.admin.autoscan.activity.metrics.changes", rawCountValues(event.changes_returned))}
-      </span>
-      <span>
-        {t("web.admin.autoscan.activity.metrics.targets", rawCountValues(event.targets_claimed))}
-      </span>
-      <span>
-        {t("web.admin.autoscan.activity.metrics.created", rawCountValues(event.scans_created))}
-      </span>
-      <span>
-        {t("web.admin.autoscan.activity.metrics.reused", rawCountValues(event.scans_reused))}
-      </span>
-      <span>
-        {t(
-          "web.admin.autoscan.activity.metrics.suppressed",
-          rawCountValues(event.scans_suppressed),
-        )}
-      </span>
     </div>
   );
 }
@@ -1064,17 +478,25 @@ export function ScanHistoryTable({
 function PollEventCard({
   event,
   lookups,
-  librariesByID,
+  selected,
+  onInspect,
 }: {
   event: AutoscanEvent;
   lookups: SourceLabelLookups;
-  librariesByID: Map<number, Library>;
+  selected: boolean;
+  onInspect: (event: AutoscanEvent, trigger?: HTMLElement | null) => void;
 }) {
   const t = useT();
+  const hasActivity = event.changes_returned > 0 || event.scan_runs.length > 0;
   return (
-    <div className="border-border rounded-lg border p-4">
+    <div
+      className={cn(
+        "border-border rounded-lg border p-4 transition-colors",
+        selected && "border-foreground/25 bg-muted/40",
+      )}
+    >
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 space-y-1">
+        <div className="min-w-0 space-y-1.5">
           <div className="flex flex-wrap items-center gap-2">
             <PollStatusBadge status={event.status} />
             <span className="font-medium">{pollSourceName(t, event, lookups)}</span>
@@ -1088,18 +510,25 @@ function PollEventCard({
         </div>
       </div>
       {event.error_message ? (
-        <p className="text-destructive mt-3 text-xs [overflow-wrap:anywhere]">
+        <p className="text-destructive mt-3 line-clamp-2 text-xs [overflow-wrap:anywhere]">
           {event.error_message}
         </p>
       ) : null}
-      <details className="mt-3">
-        <summary className="text-muted-foreground cursor-pointer text-xs">
-          {eventDetailsSummary(t, event)}
-        </summary>
-        <div className="mt-2">
-          <EventDetails event={event} librariesByID={librariesByID} />
-        </div>
-      </details>
+      <button
+        type="button"
+        onClick={(mouseEvent) => onInspect(event, mouseEvent.currentTarget)}
+        aria-haspopup="dialog"
+        className={cn(
+          "border-border/70 bg-muted/25 hover:bg-surface-hover focus-visible:ring-ring mt-3 flex w-full items-center justify-between gap-2 rounded-md border px-3 py-2 text-xs transition-colors focus-visible:ring-2 focus-visible:outline-none",
+          hasActivity ? "text-foreground font-medium" : "text-muted-foreground",
+        )}
+      >
+        <span className="truncate tabular-nums">{eventDetailsSummary(t, event)}</span>
+        <ChevronRight
+          className="text-muted-foreground h-3.5 w-3.5 shrink-0 rtl:-scale-x-100"
+          aria-hidden="true"
+        />
+      </button>
     </div>
   );
 }
@@ -1114,6 +543,33 @@ export function PollEventTable({
   librariesByID: Map<number, Library>;
 }) {
   const t = useT();
+  const [inspected, setInspected] = useState<{ id: number; snapshot: AutoscanEvent } | null>(null);
+  const returnFocusRef = useRef<HTMLElement | null>(null);
+
+  // Prefer the live event from the current page and keep the fallback snapshot
+  // up to date so scan statuses and results do not revert if pagination or a
+  // later refresh moves the inspected poll off-page.
+  const liveEvent = inspected ? events.find((event) => event.id === inspected.id) : undefined;
+  if (inspected && liveEvent && liveEvent !== inspected.snapshot) {
+    setInspected({ id: inspected.id, snapshot: liveEvent });
+  }
+  const selectedEvent = inspected ? (liveEvent ?? inspected.snapshot) : null;
+
+  function openInspector(event: AutoscanEvent, trigger?: HTMLElement | null) {
+    returnFocusRef.current =
+      trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setInspected({ id: event.id, snapshot: event });
+  }
+
+  function handleRowClick(mouseEvent: MouseEvent<HTMLTableRowElement>, event: AutoscanEvent) {
+    if (window.getSelection()?.toString()) return;
+    if ((mouseEvent.target as HTMLElement).closest("button, a, input, select, textarea")) return;
+    const trigger = mouseEvent.currentTarget.querySelector<HTMLElement>(
+      "[data-poll-details-trigger]",
+    );
+    openInspector(event, trigger);
+  }
+
   return (
     <>
       <div className="space-y-3 lg:hidden">
@@ -1122,7 +578,8 @@ export function PollEventTable({
             key={event.id}
             event={event}
             lookups={lookups}
-            librariesByID={librariesByID}
+            selected={selectedEvent?.id === event.id}
+            onInspect={openInspector}
           />
         ))}
       </div>
@@ -1138,46 +595,78 @@ export function PollEventTable({
           </>
         }
       >
-        {events.map((event) => (
-          <TableRow key={event.id}>
-            <TableCell>
-              <PollStatusBadge status={event.status} />
-            </TableCell>
-            <TableCell className="font-medium">
-              <div className="flex flex-wrap items-center gap-1.5">
-                {pollSourceName(t, event, lookups)}
-                <DeliveryBadge event={event} />
-              </div>
-            </TableCell>
-            <TableCell>
-              <PollMetricStrip event={event} />
-              {/* Table cells default to nowrap; the error must wrap within its cap. */}
-              {event.error_message ? (
-                <div className="text-destructive mt-1 max-w-md text-xs [overflow-wrap:anywhere] whitespace-normal">
-                  {event.error_message}
+        {events.map((event) => {
+          const isSelected = selectedEvent?.id === event.id;
+          const hasActivity = event.changes_returned > 0 || event.scan_runs.length > 0;
+          return (
+            <TableRow
+              key={event.id}
+              data-state={isSelected ? "selected" : undefined}
+              onClick={(mouseEvent) => handleRowClick(mouseEvent, event)}
+              className="group hover:bg-surface-hover cursor-pointer"
+            >
+              <TableCell>
+                <PollStatusBadge status={event.status} />
+              </TableCell>
+              <TableCell className="font-medium">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {pollSourceName(t, event, lookups)}
+                  <DeliveryBadge event={event} />
                 </div>
-              ) : null}
-            </TableCell>
-            <TableCell>
-              <details>
-                <summary className="text-muted-foreground cursor-pointer text-xs whitespace-nowrap">
-                  {eventDetailsSummary(t, event)}
-                </summary>
-                {/* Table cells default to nowrap; paths and explanations must wrap. */}
-                <div className="mt-2 max-w-[32rem] min-w-[16rem] whitespace-normal">
-                  <EventDetails event={event} librariesByID={librariesByID} />
-                </div>
-              </details>
-            </TableCell>
-            <TableCell className="whitespace-nowrap tabular-nums">
-              {pollEventDuration(t, event)}
-            </TableCell>
-            <TableCell className="text-muted-foreground whitespace-nowrap tabular-nums">
-              {pollEventTimestamp(event)}
-            </TableCell>
-          </TableRow>
-        ))}
+              </TableCell>
+              <TableCell>
+                <PollMetricStrip event={event} />
+                {event.error_message ? (
+                  <div className="text-destructive mt-1 max-w-md truncate text-xs">
+                    {event.error_message}
+                  </div>
+                ) : null}
+              </TableCell>
+              <TableCell>
+                <button
+                  type="button"
+                  data-poll-details-trigger
+                  onClick={(mouseEvent) => openInspector(event, mouseEvent.currentTarget)}
+                  aria-haspopup="dialog"
+                  className={cn(
+                    "focus-visible:ring-ring -ms-2 inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs whitespace-nowrap tabular-nums transition-colors focus-visible:ring-2 focus-visible:outline-none",
+                    hasActivity
+                      ? "text-foreground font-medium"
+                      : "text-muted-foreground group-hover:text-foreground",
+                  )}
+                >
+                  <span>{eventDetailsSummary(t, event)}</span>
+                  <ChevronRight
+                    className="text-muted-foreground/70 group-hover:text-foreground h-3.5 w-3.5 shrink-0 transition-colors rtl:-scale-x-100"
+                    aria-hidden="true"
+                  />
+                </button>
+              </TableCell>
+              <TableCell className="whitespace-nowrap tabular-nums">
+                {pollEventDuration(t, event)}
+              </TableCell>
+              <TableCell className="text-muted-foreground whitespace-nowrap tabular-nums">
+                {pollEventTimestamp(event)}
+              </TableCell>
+            </TableRow>
+          );
+        })}
       </DataTable>
+
+      <PollEventInspectorSheet
+        event={selectedEvent}
+        lookups={lookups}
+        librariesByID={librariesByID}
+        onClose={() => setInspected(null)}
+        onCloseAutoFocus={(closeEvent) => {
+          const target = returnFocusRef.current;
+          returnFocusRef.current = null;
+          if (target?.isConnected) {
+            closeEvent.preventDefault();
+            target.focus();
+          }
+        }}
+      />
     </>
   );
 }

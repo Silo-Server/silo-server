@@ -45,9 +45,9 @@ func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T
 		// A binary has nowhere to carry assets, so its stored archive is
 		// refused after the download passed its checks.
 		{name: "manifest declares an asset", withAsset: true, wantEvents: []string{}, wantVersion: "1.0.0", wantEnabled: true},
-		{name: "accepted package", wantEvents: []string{"stop", "update"}, wantVersion: "2.0.0", wantEnabled: true},
-		{name: "disabled during download", toggleTo: new(false), wantEvents: []string{"stop", "update"}, wantVersion: "2.0.0"},
-		{name: "enabled during download", installedOff: true, toggleTo: new(true), wantEvents: []string{"stop", "update"}, wantVersion: "2.0.0", wantEnabled: true},
+		{name: "accepted package", wantEvents: []string{"update", "stop"}, wantVersion: "2.0.0", wantEnabled: true},
+		{name: "disabled during download", toggleTo: new(false), wantEvents: []string{"update", "stop"}, wantVersion: "2.0.0"},
+		{name: "enabled during download", installedOff: true, toggleTo: new(true), wantEvents: []string{"update", "stop"}, wantVersion: "2.0.0", wantEnabled: true},
 		// The package was prepared against 1.0.0, so it must not replace the
 		// 3.0.0 another install wrote meanwhile, nor stop its process.
 		{name: "replaced during download", replacedBy: "3.0.0", wantEvents: []string{}, wantVersion: "3.0.0", wantEnabled: true},
@@ -117,6 +117,8 @@ func TestServiceInstallCatalogStopsPluginOnlyForAnAcceptedPackageDB(t *testing.T
 				installer:     NewInstaller(store, InstallerOptions{BaseDir: t.TempDir(), HTTPClient: server.Client()}),
 				host:          &fakeServiceHost{events: &events},
 			}
+
+			service.running.store(7, runtimeOf(store.byID[7]))
 
 			var result *InstallResult
 			if tc.viaUpdate {
