@@ -286,6 +286,21 @@ func TestLintSeededFailures(t *testing.T) {
 			},
 			want: "components.schemas.SystemInfo.modes.additionalProperties: nullable enum does not list null",
 		},
+		"oneOf variants that share a tag value": {
+			seed: func(doc map[string]any) {
+				variant := func(kinds ...any) map[string]any {
+					return map[string]any{"type": "object", "properties": map[string]any{"kind": map[string]any{"type": "string", "enum": kinds}}}
+				}
+				schemas(doc)["PathDefault"] = variant("default", "provider")
+				schemas(doc)["PathProvider"] = variant("provider")
+				props := schemas(doc)["SystemInfo"].(map[string]any)["properties"].(map[string]any)
+				props["path"] = map[string]any{"oneOf": []any{
+					map[string]any{"$ref": "#/components/schemas/PathDefault"},
+					map[string]any{"$ref": "#/components/schemas/PathProvider"},
+				}}
+			},
+			want: "components.schemas.SystemInfo.path: oneOf variants share values of every tag (kind), so a response can match more than one",
+		},
 		"missing security scheme": {
 			seed: func(doc map[string]any) { delete(doc["components"].(map[string]any), "securitySchemes") },
 			want: "components.securitySchemes.bearerAuth is missing",

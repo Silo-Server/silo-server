@@ -52,7 +52,8 @@ type Change struct {
 // contract policy (docs/architecture/api-contract.md) calls additive: response
 // enums gain values and clients keep an unknown fallback. Request enums stay
 // closed, so their removals keep oasdiff's level; their additions are already
-// INFO.
+// INFO. Existing values are never renamed, so Diff keeps an addition breaking
+// when the same response property loses a value in the same diff.
 var additiveRules = map[string]checker.Level{
 	checker.ResponsePropertyEnumValueAddedId: checker.INFO,
 }
@@ -77,13 +78,25 @@ func Diff(base, revision []byte) ([]Change, error) {
 		return nil, err
 	}
 	findings := checker.CheckBackwardCompatibilityUntilLevel(checker.NewConfig(checker.GetAllChecks(), checker.WithSeverityLevels(additiveRules)), report, sources, checker.INFO)
+	// oasdiff rates a removed response enum value INFO, so a rename (one value
+	// removed, one added) is breaking only through the addition.
+	renamed := map[string]bool{}
+	for _, f := range findings {
+		if f.GetId() == checker.ResponsePropertyEnumValueRemovedId {
+			renamed[enumPropertyKey(f)] = true
+		}
+	}
 	localizer := checker.NewDefaultLocalizer()
 	out := make([]Change, 0, len(findings))
 	for _, f := range findings {
+		level := f.GetLevel()
+		if f.GetId() == checker.ResponsePropertyEnumValueAddedId && renamed[enumPropertyKey(f)] {
+			level = checker.ERR
+		}
 		c := Change{
 			ID:          f.GetId(),
-			Level:       f.GetLevel().String(),
-			Breaking:    f.GetLevel().IsBreaking(),
+			Level:       level.String(),
+			Breaking:    level.IsBreaking(),
 			Method:      f.GetOperation(),
 			Path:        f.GetPath(),
 			OperationID: f.GetOperationId(),
@@ -106,6 +119,17 @@ func Diff(base, revision []byte) ([]Change, error) {
 		return a.Text < b.Text
 	})
 	return out, nil
+}
+
+// enumPropertyKey names the operation, response property and status of a
+// response enum finding; its arguments are the value, the property and the
+// status.
+func enumPropertyKey(f checker.Change) string {
+	args := f.GetArgs()
+	if len(args) < 3 {
+		return ""
+	}
+	return fmt.Sprint(f.GetOperation(), " ", f.GetPath(), " ", args[1], " ", args[2])
 }
 
 func fingerprint(c Change, args []any) string {

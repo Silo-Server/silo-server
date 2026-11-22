@@ -271,8 +271,11 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   `contracts/api/v2/breaking-approvals.json`; once `contracts/api/v2/LOCKED` exists no entry
   applies. A new value on a response enum is additive under the enum rules below, so the policy
   reports oasdiff's `response-property-enum-value-added` as information that needs no entry,
-  before and after the lock; a request enum stays closed, and removing one of its values is
-  still breaking. An approval lives only on the pull request that needs it: an entry matching no
+  before and after the lock. Two cases stay breaking: an addition paired with a removal on the
+  same response property, which is a rename, and a value removed from a request enum, which
+  stays closed. The spec lint also requires the variants
+  of a `oneOf` to keep a shared tag (such as `kind`) disjoint, so a new tag value can't make a
+  response match two variants. An approval lives only on the pull request that needs it: an entry matching no
   change in the diff fails the gate, so the next pull request removes entries that have
   merged (the record is the file's history and the entry's `approved_in`), and a push whose
   merge base is the commit itself compares identical documents and consults no approval.

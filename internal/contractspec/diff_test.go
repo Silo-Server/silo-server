@@ -140,6 +140,19 @@ func TestResponseEnumValueAddedIsAdditive(t *testing.T) {
 		}
 	}
 
+	// A rename removes one value and adds another; the removal alone is
+	// informational, so the addition stays breaking.
+	renamed, err := Diff(seedDocument(t), mutate(t, func(doc map[string]any) {
+		prop := schemas(doc)["Profile"].(map[string]any)["properties"].(map[string]any)["avatar_source"].(map[string]any)
+		prop["enum"] = []any{"none", "preset", "uploaded"}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Policy(renamed, &ApprovalsFile{}, true); !errors.Is(err, ErrBreaking) || !strings.Contains(err.Error(), "response-property-enum-value-added") {
+		t.Fatalf("locked contract accepted a response enum value rename: %v", err)
+	}
+
 	removed, err := Diff(seedDocument(t), mutate(t, func(doc map[string]any) {
 		prop := schemas(doc)["ProfileUpdate"].(map[string]any)["properties"].(map[string]any)["max_playback_quality"].(map[string]any)
 		prop["enum"] = []any{"1080p", nil}
