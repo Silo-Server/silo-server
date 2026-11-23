@@ -59,6 +59,12 @@ export default function AdminDashboard() {
   const pageActivity = usePageActivity();
   const layout = useDashboardLayout();
   const manualRefreshStartedAtRef = useRef<number | null>(null);
+  // Refreshes can overlap (a slow automatic one, then a resume or a Refresh
+  // click), and their stats can answer out of order. Each refresh takes a
+  // number when it starts, and its stats apply only if no later-started
+  // refresh has applied its own yet.
+  const refreshSequenceRef = useRef(0);
+  const appliedRefreshSequenceRef = useRef(0);
   const wasDashboardPollingPausedRef = useRef(!pageActivity.canPollDashboard);
   const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
   const [lastDashboardUpdatedAt, setLastDashboardUpdatedAt] = useState<number | null>(null);
@@ -118,6 +124,7 @@ export default function AdminDashboard() {
     async ({ manual }: { manual: boolean }) => {
       const profileContext = captureProfileRequestContext();
       if (!profileContext) return;
+      const sequence = ++refreshSequenceRef.current;
       if (manual) {
         manualRefreshStartedAtRef.current = Date.now();
         setIsManualRefreshPending(true);
@@ -138,6 +145,8 @@ export default function AdminDashboard() {
         ]);
         const nextStats = await fetchAdminStats({ refresh: true, profileContext });
         if (!isCapturedProfileAuthorityActive(profileContext)) return;
+        if (sequence < appliedRefreshSequenceRef.current) return;
+        appliedRefreshSequenceRef.current = sequence;
         queryClient.setQueryData(adminStatsKey(profileContext), nextStats);
         await Promise.all([refetchSessions(), refetchLibraries(), refetchUsers()]);
         const refreshedAt = Date.now();
