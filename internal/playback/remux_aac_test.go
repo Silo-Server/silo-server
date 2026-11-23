@@ -1,6 +1,7 @@
 package playback
 
 import (
+	"bytes"
 	"context"
 	"os/exec"
 	"path/filepath"
@@ -111,9 +112,12 @@ func TestAudioOnlyRemuxStreamsShortFragments(t *testing.T) {
 	}
 
 	args := buildRemuxArgsWithLeadingPictureDropV3(sourcePath, "mp4", 0, true, -1, 0, false, true, 1, 2, 128, false, "", nil)
-	output, err := exec.CommandContext(ctx, ffmpegPath, args...).Output()
+	var stderr bytes.Buffer
+	remux := exec.CommandContext(ctx, ffmpegPath, args...)
+	remux.Stderr = &stderr
+	output, err := remux.Output()
 	if err != nil {
-		t.Fatalf("ffmpeg remux failed: %v", err)
+		t.Fatalf("ffmpeg remux failed: %v\n%s", err, stderr.Bytes())
 	}
 	boxes, err := fmp4Boxes(output)
 	if err != nil {
