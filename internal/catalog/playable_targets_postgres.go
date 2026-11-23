@@ -19,10 +19,13 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 	// completed_progress. Any other episode, such as one of a local series,
 	// keeps the single-row lookup. CASE tests completion before the file
 	// lookup, so a long-running series skips the file lookups for every
-	// episode the profile has finished. The set is unnested from an array so
-	// the planner always hashes it: it expects a few rows from unnest whatever
-	// the profile's history, while a large estimate for the set itself turns
-	// membership into a rescan of the whole set for every episode.
+	// episode the profile has finished. The set is unnested from an array
+	// because PostgreSQL estimates a few rows for unnest of a computed array
+	// whatever the profile's history, so it plans a hashed subplan; a large
+	// estimate for the set itself turns membership into a rescan of the whole
+	// set for every episode. TestPlayableTargetResolverAnchoredCompletedRangePlan
+	// checks the hash at minimum work_mem. The hashed set and the array hold
+	// the requested series' completed IDs in memory, outside work_mem.
 	unwatchedSQL := fmt.Sprintf(`CASE WHEN episode.content_id = ANY (SELECT unnest((SELECT array_agg(completed.media_item_id) FROM completed_progress completed WHERE completed.completed)))
 			OR (NOT (scope.series_id LIKE 'series-%%' AND starts_with(episode.content_id, `+seriesEpisodePrefixSQL+` || '-'))
 				AND EXISTS (
