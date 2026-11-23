@@ -43,10 +43,11 @@ dated at the run; see
 ## Sync with providers
 
 Each connection has one setting, `sync_dropped_enabled`. It is off for new connections
-until the profile turns it on. It is on for existing connections that sync anything, so
-the first sync after the feature
-ships imports drops already on the provider; a connection with every sync setting off
-stays paused. A provider takes part when it advertises the `sync_dropped` capability.
+until the profile turns it on. The migration that added it turned it on for connections
+that synced anything, so the first sync after the feature shipped imported drops already
+on the provider, and left it off for connections with every sync setting off. After that,
+each connection keeps its stored value, including through a reconnect. A provider takes
+part when it advertises the `sync_dropped` capability.
 The v2 watch-provider connection responses expose the setting and capability.
 
 `watch_provider_dropped_items` records, per connection, the series Silo and the provider
