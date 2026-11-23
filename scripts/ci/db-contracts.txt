@@ -1424,6 +1424,7 @@
 ./internal/watchstate TestPluginSourcedPlaysDB
 ./internal/usercollections TestCollectionImportRemapsLibrariesDB
 ./internal/usercollections TestCarriedCollectionsMapToTheImportingProfileDB
+./internal/usercollections TestLibraryTabCollectionsFollowSavedOrderDB
 
 # Accounts and profile imports: one connection, and statements that do not grow with a document.
 ./internal/backup TestAccountsAndImportOnOneConnectionDB
