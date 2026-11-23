@@ -1,19 +1,9 @@
 import { createContext, Fragment, useContext, type ReactNode } from "react";
 
+import { nameFloor } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 
 const SEPARATOR = " · ";
-
-/** Up to this many characters a part is kept whole, as the impersonation banner keeps a name. */
-const SHORT_NAME = 3;
-
-/**
- * The least a part keeps once the line is cut: a letter and "…", or all of a
- * short text, since a floor wider than the text would leave a gap after it.
- */
-function floor(text: string) {
-  return [...text].length <= SHORT_NAME ? "min-w-max" : "min-w-[2em]";
-}
 
 /**
  * A part that ends a line of several takes only the room the others leave, so it
@@ -28,12 +18,16 @@ const EndsLine = createContext(true);
  * User text inside a `MetaLine` phrase (a person's name, a note), passed to
  * `t()` as the value. It reads in its own direction, so a cut one keeps its
  * start, and keeps a letter and "…" when the line is cut. `align-with-page`
- * keeps text narrower than its box against the phrase's words.
+ * keeps text narrower than its box against the phrase's words. A metadata title
+ * in a line of translated words is a `LineTitle` (`TitleLine.tsx`) instead.
  */
 export function LineName({ name }: { name: string }) {
   const endsLine = useContext(EndsLine);
   return (
-    <span dir="auto" className={cn("align-with-page truncate", floor(name), endsLine && ENDS_LINE)}>
+    <span
+      dir="auto"
+      className={cn("align-with-page truncate", nameFloor(name), endsLine && ENDS_LINE)}
+    >
       {name}
     </span>
   );
@@ -77,7 +71,7 @@ export function MetaLine({ parts, className }: { parts: ReactNode[]; className?:
           <Fragment key={index}>
             {index > 0 ? <span className="shrink-0">{SEPARATOR}</span> : null}
             {typeof group === "string" ? (
-              <span className={cn("truncate", floor(group), index === lastIndex && ENDS_LINE)}>
+              <span className={cn("truncate", nameFloor(group), index === lastIndex && ENDS_LINE)}>
                 {group}
               </span>
             ) : (

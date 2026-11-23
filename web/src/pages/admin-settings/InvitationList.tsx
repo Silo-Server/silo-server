@@ -1,4 +1,5 @@
 import { Ellipsis, Link2, MailPlus, RotateCw, Trash2, type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 import type { AdminInvitation as Invitation, InvitationDeliveryChoice } from "@/api/v2/invitations";
 import {
@@ -90,11 +91,12 @@ function useInvitationRow(
       : "";
   const note = shared ? invitation.note : undefined;
   const inviter = invitation.invited_by_name;
-  const details = [
+  // The card and the table row show the same details; `user` wraps the user text.
+  const detailParts = (user: (text: string) => ReactNode) => [
     joinedByLink,
-    note ? t("web.admin.settings.invitations.row.note", { note }) : "",
-    inviter ? t("web.admin.settings.invitations.row.invitedBy", { name: inviter }) : "",
-  ].filter(Boolean);
+    note ? t("web.admin.settings.invitations.row.note", { note: user(note) }) : "",
+    inviter ? t("web.admin.settings.invitations.row.invitedBy", { name: user(inviter) }) : "",
+  ];
 
   const actions: InvitationAction[] = [];
   if (showResend) {
@@ -139,7 +141,9 @@ function useInvitationRow(
     // invitation's label follows the page.
     recipientDir: link ? undefined : emailDir(invitation.email),
     /** The details as one string, for the card, where they wrap. */
-    details: details.join(" · "),
+    details: detailParts((text) => text)
+      .filter(Boolean)
+      .join(" · "),
     /**
      * The details for the table row, cut short on one line. The note and the
      * inviter's name each read in their own direction, so a cut one keeps its
@@ -148,19 +152,9 @@ function useInvitationRow(
     detailsLine: (
       <MetaLine
         className="text-muted-foreground text-xs"
-        parts={[
-          joinedByLink,
-          note
-            ? t("web.admin.settings.invitations.row.note", {
-                note: <LineName name={note} />,
-              })
-            : "",
-          inviter
-            ? t("web.admin.settings.invitations.row.invitedBy", {
-                name: <LineName name={inviter} />,
-              })
-            : "",
-        ]}
+        parts={detailParts((text) => (
+          <LineName name={text} />
+        ))}
       />
     ),
     badge: STATUS_BADGES[invitation.status],
