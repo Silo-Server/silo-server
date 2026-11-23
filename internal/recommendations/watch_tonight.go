@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"slices"
 	"sort"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -34,7 +35,7 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 		limit = 20
 	}
 
-	byID := make(map[string]ScoredItem, limit*3)
+	pool := newWatchTonightPool(limit * 3)
 	read := r.newRowRead(userID, profileID, filter)
 
 	// With recommendations disabled no personal row is served, even one
@@ -45,7 +46,7 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 		if err != nil {
 			return WatchTonightResult{}, err
 		}
-		mergeScored(byID, forYouItems, 0.80, 1.00)
+		pool.merge(forYouItems, 0.80, 1.00)
 
 		// 2. Because-you-watched — mid band (0.55–0.75).
 		anchors, err := anchorItemIDs(ctx, r.signalReader(), r.ratingsRepo, userID, profileID, BecauseYouWatchedAnchors)
@@ -57,7 +58,7 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 			if err != nil {
 				return WatchTonightResult{}, err
 			}
-			mergeScored(byID, items, 0.55, 0.75)
+			pool.merge(items, 0.55, 0.75)
 		}
 
 		// 3. Similar-users-liked — lower band (0.35–0.55).
@@ -65,13 +66,13 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 		if err != nil {
 			return WatchTonightResult{}, err
 		}
-		mergeScored(byID, similarItems, 0.35, 0.55)
+		pool.merge(similarItems, 0.35, 0.55)
 	}
 
 	// The personal candidates are filtered before the fallback is chosen:
 	// a cache holding only titles the viewer cannot be served, such as books
 	// cached before they left personal rows, is as cold as an empty one.
-	items, err := read.rankWatchTonight(ctx, byID)
+	items, err := read.rankWatchTonight(ctx, pool)
 	if err != nil {
 		return WatchTonightResult{}, err
 	}
@@ -79,20 +80,22 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 
 	// 4. Cold-start fallback: popular + recently-added.
 	if isCold {
-		byID = make(map[string]ScoredItem, limit*2)
+		pool = newWatchTonightPool(limit * 2)
 		popular, err := r.repo.GetRecommendationCache(ctx, GlobalCacheUserID, GlobalCacheProfileID, RecTypePopular, "")
 		if err != nil {
 			return WatchTonightResult{}, err
 		}
-		mergeScored(byID, popular, 0.20, 0.40)
+		pool.merge(popular, 0.20, 0.40)
 
 		recentlyAdded, err := read.defaultRow(ctx, RecTypeRecentlyAdded, limit)
 		if err != nil {
 			return WatchTonightResult{}, err
 		}
-		mergeScored(byID, recentlyAdded.Items, 0.15, 0.35)
+		// Its score is the time added in Unix seconds, all within a sliver
+		// of the largest, so it is scored by rank to spread across its band.
+		pool.merge(rankScored(recentlyAdded.Items), 0.15, 0.35)
 
-		if items, err = read.rankWatchTonight(ctx, byID); err != nil {
+		if items, err = read.rankWatchTonight(ctx, pool); err != nil {
 			return WatchTonightResult{}, err
 		}
 	}
@@ -103,17 +106,27 @@ func (r *Reader) GetWatchTonight(ctx context.Context, userID int, profileID stri
 	return WatchTonightResult{Items: items, IsCold: isCold}, nil
 }
 
-// rankWatchTonight sorts byID's candidates by descending score and filters
-// them for the viewer, keeping every survivor; the caller trims.
-func (rr *rowRead) rankWatchTonight(ctx context.Context, byID map[string]ScoredItem) ([]ScoredItem, error) {
-	if len(byID) == 0 {
+// watchTonightPool holds Watch Tonight candidates in the order they were
+// merged: higher bands first, each source in its own rank order. That order
+// breaks score ties, so a read answers the same list every time.
+type watchTonightPool struct {
+	items []ScoredItem
+	seen  map[string]struct{}
+}
+
+func newWatchTonightPool(capacity int) *watchTonightPool {
+	return &watchTonightPool{items: make([]ScoredItem, 0, capacity), seen: make(map[string]struct{}, capacity)}
+}
+
+// rankWatchTonight sorts pool's candidates by descending score, ties in merge
+// order, and filters them for the viewer, keeping every survivor; the caller
+// trims.
+func (rr *rowRead) rankWatchTonight(ctx context.Context, pool *watchTonightPool) ([]ScoredItem, error) {
+	if len(pool.items) == 0 {
 		return []ScoredItem{}, nil
 	}
-	items := make([]ScoredItem, 0, len(byID))
-	for _, item := range byID {
-		items = append(items, item)
-	}
-	sort.Slice(items, func(i, j int) bool {
+	items := slices.Clone(pool.items)
+	sort.SliceStable(items, func(i, j int) bool {
 		return items[i].Score > items[j].Score
 	})
 	rows, err := rr.filter(ctx, []ForYouRow{{
@@ -130,9 +143,19 @@ func (rr *rowRead) rankWatchTonight(ctx context.Context, byID map[string]ScoredI
 	return rows[0].Items, nil
 }
 
-// mergeScored normalizes raw ScoredItem scores into the given band and merges
-// them into byID. First-seen (higher-band) items win on collision.
-func mergeScored(byID map[string]ScoredItem, items []ScoredItem, bandMin, bandMax float64) {
+// rankScored copies items, best first, scored by rank: the first n of n
+// items scores n, the last 1.
+func rankScored(items []ScoredItem) []ScoredItem {
+	out := slices.Clone(items)
+	for i := range out {
+		out[i].Score = float64(len(out) - i)
+	}
+	return out
+}
+
+// merge normalizes raw ScoredItem scores into the given band and appends
+// them to the pool. First-seen (higher-band) items win on collision.
+func (p *watchTonightPool) merge(items []ScoredItem, bandMin, bandMax float64) {
 	if len(items) == 0 {
 		return
 	}
@@ -148,11 +171,11 @@ func mergeScored(byID map[string]ScoredItem, items []ScoredItem, bandMin, bandMa
 	}
 
 	for _, item := range items {
-		if _, exists := byID[item.MediaItemID]; exists {
+		if _, exists := p.seen[item.MediaItemID]; exists {
 			continue
 		}
-		normalized := bandMin + (item.Score/maxRaw)*(bandMax-bandMin)
-		item.Score = normalized
-		byID[item.MediaItemID] = item
+		p.seen[item.MediaItemID] = struct{}{}
+		item.Score = bandMin + (item.Score/maxRaw)*(bandMax-bandMin)
+		p.items = append(p.items, item)
 	}
 }
