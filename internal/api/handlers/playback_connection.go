@@ -201,8 +201,16 @@ func markLearnedLimit(result *playback.PlannerResultV3, limit *playback.Bandwidt
 		request.BandwidthCapKbps = new(serverCap)
 	}
 	baseline := playback.ResolveQualityPolicyV3(request, descriptor)
+	baselineKbps := baseline.BitrateKbps
+	// Under Auto with a bandwidth cap, lowerBufferedVersion may pick a stored
+	// sibling up to the cap rather than transcode the source to a lower ladder
+	// bitrate; the caller's unlimited-plan comparison then confirms whether the
+	// learned limit actually lowered delivery.
+	if request.QualityPreference == playback.QualityAutoV3 && request.AllowsAlternateVersions() && request.BandwidthCapKbps != nil && *request.BandwidthCapKbps > baselineKbps {
+		baselineKbps = *request.BandwidthCapKbps
+	}
 	delivered := deliveredKbpsV3(result.Plan)
-	if original > playback.StreamBudgetKbpsV3(limit.Kbps) && delivered > 0 && delivered < original && delivered < baseline.BitrateKbps {
+	if original > playback.StreamBudgetKbpsV3(limit.Kbps) && delivered > 0 && delivered < original && delivered < baselineKbps {
 		result.Plan.BandwidthLimit = limit
 	}
 }
@@ -227,13 +235,13 @@ func withoutObservedEstimateV3(req playback.StartRequestV3) playback.StartReques
 }
 
 // An Auto budget, whatever set it (a speed test, the connection's reading, a
-// stall or a learned limit), first tries a lower original of the same edition:
-// it costs the server nothing and keeps its picture. Of the versions within
-// the budget it tries those that keep the source's dynamic range first, so an
-// HDR source stays HDR when a lower HDR version plays as it is, then the
-// highest bitrate. Candidate planning proves that the client can copy the
-// video, including HDR, audio and subtitle constraints; a matching bitrate
-// alone is insufficient.
+// viewer's bitrate cap, a stall, or a learned limit), first tries a lower
+// original of the same edition: it costs the server nothing and keeps its
+// picture. Of the versions within the budget it tries those that keep the
+// source's dynamic range first, so an HDR source stays HDR when a lower HDR
+// version plays as it is, then the highest bitrate. Candidate planning proves
+// that the client can copy the video, including HDR, audio and subtitle
+// constraints; a matching bitrate alone is insufficient.
 func (h *PlaybackHandler) lowerBufferedVersion(r *http.Request, req playback.StartRequestV3, base *models.MediaFile, audio int, settings playback.PlannerSettingsV3) (*models.MediaFile, playback.StartRequestV3, int) {
 	return h.lowerBufferedVersionForIntent(r, req, base, base, audio, settings, nil)
 }
@@ -243,18 +251,27 @@ func (h *PlaybackHandler) lowerBufferedVersion(r *http.Request, req playback.Sta
 // subtitle. The mounted file supplies the bitrate and track context, and the
 // requested edition anchors discovery if playback is already on an alias.
 func (h *PlaybackHandler) lowerBufferedVersionForIntent(r *http.Request, req playback.StartRequestV3, base, edition *models.MediaFile, audio int, settings playback.PlannerSettingsV3, desired *playback.DesiredTracksV3) (*models.MediaFile, playback.StartRequestV3, int) {
-	if req.QualityPreference != playback.QualityAutoV3 || req.BandwidthEstimateKbps == nil || !req.AllowsAlternateVersions() {
+	if req.QualityPreference != playback.QualityAutoV3 || !req.AllowsAlternateVersions() {
 		return base, req, audio
 	}
-	budget := playback.StreamBudgetKbpsV3(*req.BandwidthEstimateKbps)
-	if req.BandwidthCapKbps != nil {
-		budget = min(budget, *req.BandwidthCapKbps)
+	var budget int
+	if req.BandwidthEstimateKbps != nil {
+		budget = playback.StreamBudgetKbpsV3(*req.BandwidthEstimateKbps)
+	}
+	if req.BandwidthCapKbps != nil && *req.BandwidthCapKbps > 0 {
+		if budget <= 0 || *req.BandwidthCapKbps < budget {
+			budget = *req.BandwidthCapKbps
+		}
+	}
+	if budget <= 0 {
+		return base, req, audio
 	}
 	if serverCap := serverBitrateCapV3(r.Context()); serverCap > 0 {
 		budget = min(budget, serverCap)
 	}
 	source := playback.SourceDescriptorFromFileV3(base, audio)
-	if source.BitrateKbps <= budget {
+	unknownVideoRate := source.BitrateKbps <= 0 && source.VideoCodec != ""
+	if !unknownVideoRate && source.BitrateKbps <= budget {
 		return base, req, audio
 	}
 	filter := requestAccessFilter(r)

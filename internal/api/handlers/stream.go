@@ -74,12 +74,6 @@ type StreamHandler struct {
 	// PlaybackConfig returns the current playback config; read it through
 	// ffmpegPath(). May be nil (tests).
 	PlaybackConfig func() config.PlaybackConfig
-	// CopySafetyRacer gates and covers a revived progressive remux: it answers
-	// whether this replica already condemns a video stream-copy of the source,
-	// and re-engages the copy-safety race for one whose verdict is still open.
-	// Optional — without it a revived remux is gated on the persisted row alone
-	// and no race is started here.
-	CopySafetyRacer PlaybackCopySafetyRacer
 	// SubtitleCache stores complete embedded subtitle extracts under the transcode
 	// dir so repeat selections skip the whole-file ffmpeg demux. May be nil
 	// (tests / minimal setups) — extraction then always streams uncached.
@@ -175,7 +169,7 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		// from a recipe whose route was never checked against a clean miss.
 		loadCard = nil
 	}
-	session, status, reconstructed := h.TM.LoadOrReconstructSessionDetail(r.Context(), h.sessionMgr.GetSession, sessionID, userID, loadCard)
+	session, status, _ := h.TM.LoadOrReconstructSessionDetail(r.Context(), h.sessionMgr.GetSession, sessionID, userID, loadCard)
 	switch status {
 	case playback.SessionMissing:
 		writePlaybackSessionNotFound(w)
@@ -223,22 +217,6 @@ func (h *StreamHandler) HandleStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	attachPlaybackSession(r.Context(), session, claims)
-
-	// A reconstructed remux replays a recipe committed before the copy-safety
-	// verdict existed, and no notifier can reach it — see playback_copy_safety.go.
-	// One that the verdict does not condemn re-engages the race here, which is
-	// what gives the single long response below something able to withdraw it.
-	// Starting that race before the abort watcher is registered is safe: a
-	// verdict fast enough to stop the session first leaves WatchTransportStop
-	// with no session to watch, and it reports the stop it missed.
-	if reconstructed && session.PlayMethod == playback.PlayRemux &&
-		videoCopyRevivalRefused(r.Context(), h.CopySafetyRacer, file, sessionID) {
-		// The reconstruct already registered the session; tear it down again so
-		// the refusal leaves no half-live session behind the client's replan.
-		h.abortPlaybackSession(r.Context(), session)
-		writePlaybackSessionNotFound(w)
-		return
-	}
 
 	switch session.PlayMethod {
 	case playback.PlayDirect:

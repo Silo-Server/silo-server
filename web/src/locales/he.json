@@ -521,6 +521,12 @@
       "value": "סשן ההפעלה הזה הסתיים. יש להתחיל את ההפעלה מחדש."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "ההזרמה הזו הוחלפה. ההפעלה ממשיכה בהזרמה הנוכחית."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -73985,6 +73991,12 @@
     {
       "type": 0,
       "value": "סימון כנצפה אחרי"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "פריטים עם סימון של כתוביות הסיום נחשבים כנצפו גם כשההפעלה מגיעה לכתוביות הסיום."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

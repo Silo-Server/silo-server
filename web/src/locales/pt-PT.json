@@ -521,6 +521,12 @@
       "value": "Esta sessão de reprodução terminou. Inicie a reprodução novamente."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Esta transmissão foi substituída. A reprodução continua na transmissão atual."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -74865,6 +74871,12 @@
     {
       "type": 0,
       "value": "Marcar como visto aos"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Os títulos com um marcador de créditos também contam como vistos quando a reprodução chega aos créditos."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

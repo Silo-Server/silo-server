@@ -1259,9 +1259,17 @@ func watchEventFromScrobble(event ScrobbleEvent, operation pluginv1.WatchSyncOpe
 	if operation == pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SCROBBLE_PAUSE {
 		eventID += fmt.Sprintf(":%.3f", event.PositionSeconds)
 	}
+	// Silo decides whether a stop finishes the item: past its watched
+	// threshold or inside the end credits. A finished stop reaches providers
+	// as a play to the end, so one that judges completion from progress
+	// (Trakt records a play at 80%) records it too.
+	position := event.PositionSeconds
+	if operation == pluginv1.WatchSyncOperation_WATCH_SYNC_OPERATION_SCROBBLE_STOP && event.Completed && event.DurationSeconds > 0 {
+		position = event.DurationSeconds
+	}
 	completion := 0.0
 	if event.DurationSeconds > 0 {
-		completion = event.PositionSeconds / event.DurationSeconds * 100
+		completion = position / event.DurationSeconds * 100
 	}
 	return &pluginv1.WatchSyncEvent{
 		EventId:           eventID,
@@ -1270,7 +1278,7 @@ func watchEventFromScrobble(event ScrobbleEvent, operation pluginv1.WatchSyncOpe
 		OccurredAt:        timestamppb.New(event.OccurredAt),
 		WatchHistoryId:    event.HistoryID,
 		PlaybackSessionId: event.PlaybackSessionID,
-		PositionSeconds:   event.PositionSeconds,
+		PositionSeconds:   position,
 		DurationSeconds:   event.DurationSeconds,
 		CompletionPercent: completion,
 		Completed:         event.Completed,
