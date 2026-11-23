@@ -22,7 +22,7 @@ export function RecentActivityWidget() {
         </CardTitle>
         <Link
           to="/admin/activity"
-          className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
+          className="text-muted-foreground hover:text-primary text-[0.6875rem] transition-colors"
         >
           {t("web.admin.dashboard.widgets.recentActivity.viewAll")}
         </Link>
@@ -39,9 +39,9 @@ export function RecentActivityWidget() {
         ) : (
           <div className="space-y-0">
             {sessions.slice(0, 10).map((s) => {
-              const isEp = s.series_name && s.season_number != null && s.episode_number != null;
+              const isEp = s.series_title && s.season_number != null && s.episode_number != null;
               const title = isEp
-                ? s.episode_name ||
+                ? s.media_title ||
                   t("web.admin.dashboard.widgets.recentActivity.episodeFallback", {
                     season: String(s.season_number),
                     episode: String(s.episode_number),
@@ -99,7 +99,7 @@ export function RecentActivityWidget() {
                         },
                       )}
                     </div>
-                    <div className="text-muted-foreground mt-0.5 text-[10px]">{meta}</div>
+                    <div className="text-muted-foreground mt-0.5 text-[0.625rem]">{meta}</div>
                   </div>
                   <div className="flex-shrink-0">
                     <AdminSessionActions session={s} compact />

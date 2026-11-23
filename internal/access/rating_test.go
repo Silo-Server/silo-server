@@ -79,6 +79,52 @@ func TestAgeForCeilingAdmitsTheWholeUSTier(t *testing.T) {
 	}
 }
 
+// TestNormalizeCountryPrefix pins both ways a country code is attached to a
+// rating: Kodi/Radarr write "DE:16", Jellyfin writes "DE-16" and "SE-7". The
+// dashed form must not swallow the rungs that are themselves written with a
+// dash after two letters (TV-MA, PG-13, NC-17, MA-15+, UA-13+).
+func TestNormalizeCountryPrefix(t *testing.T) {
+	cases := []normalizeCase{
+		{"SE-7", systemAge, 7},
+		{"se-15", systemAge, 15},
+		{"SE - 11", systemAge, 11},
+		{"DE-16", systemFSK, 16},
+		{"DEU-16", systemFSK, 16},
+		{"GB-12A", systemBBFC, 12},
+		{"US-PG-13", systemMPAA, 13},
+		{"US-TV-MA", systemUSTV, 17},
+		{"AU-M", systemACB, 15},
+		{"MA-15+", systemACB, 15},
+		{"UA-13+", systemCBFC, 13},
+		{"PG-12", systemEirin, 12},
+		{"UA-18", systemAge, 18},
+		{"MA-16", systemAge, 16},
+		{"FR-–16", systemCNC, 16},
+	}
+	for _, tc := range cases {
+		system, age, ok := Normalize(tc.raw)
+		if !ok || age == nil || system != tc.system || *age != tc.age {
+			t.Errorf("Normalize(%q) = (%q, %v, %v), want (%q, %d, true)", tc.raw, system, age, ok, tc.system, tc.age)
+		}
+	}
+
+	// Each of these would resolve to a younger age than it means if the dash
+	// were stripped carelessly, so it must stay unrecognized:
+	//   - "PG-15": PG opens dashed rungs, so this is a rating, not Papua New Guinea.
+	//   - "NZ-M": New Zealand's M is 16; another country's ladder must not answer
+	//     for it (Australia's M is 15).
+	//   - "GB-AA": the old British AA was 14; Mexico's AA means all ages.
+	//   - "ZZ-7": ZZ is no country, so 7 is not known to be an age.
+	//   - "HK-第3級": Hong Kong's Category III is adults only; folding away the
+	//     letters Silo cannot read would leave a bare 3.
+	//   - "DE-1６": dropping the full-width digit would leave a bare 1.
+	for _, raw := range []string{"PG-15", "NZ-M", "GB-AA", "ZZ-7", "HK-第3級", "DE-1６"} {
+		if _, age, ok := Normalize(raw); ok {
+			t.Errorf("Normalize(%q) = (%v, true), want unrecognized", raw, age)
+		}
+	}
+}
+
 func TestRatingAllowed(t *testing.T) {
 	cases := []struct {
 		rating  string

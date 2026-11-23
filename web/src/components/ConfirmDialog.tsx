@@ -77,7 +77,7 @@ export function ConfirmDialog({
       >
         {isPending ? (
           <>
-            <span className="me-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent" />
+            <span className="me-2 inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent" />
             {confirmText}
           </>
         ) : (
@@ -115,10 +115,17 @@ export function ConfirmDialog({
         ) : null}
         {irreversible ? (
           <AlertDialogFooter className="items-center sm:justify-between">
-            <p id={noteId} className="text-muted-foreground text-sm">
+            <p id={noteId} className="text-muted-foreground text-sm sm:grow sm:basis-32">
               {t("web.shell.confirmDialog.irreversible")}
             </p>
-            <div className="flex gap-2">{buttons}</div>
+            {/* Below sm the buttons stack at full width, as in the default footer,
+                so a long label can't push one past the dialog's edge. From sm up
+                they sit at the end beside the note, which keeps at least 8rem:
+                with less room the buttons move below it instead of squeezing it,
+                and wrap onto a second line when they don't fit side by side. */}
+            <div className="flex w-full flex-col-reverse gap-2 sm:ms-auto sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
+              {buttons}
+            </div>
           </AlertDialogFooter>
         ) : (
           <AlertDialogFooter>{buttons}</AlertDialogFooter>

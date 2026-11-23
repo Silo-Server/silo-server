@@ -196,3 +196,17 @@ func TestFinishWebOperationDoesNotClearDifferentLock(t *testing.T) {
 	}
 	clearWebInstallState(root)
 }
+
+// The CPU-limit preload keeps the host's own NODE_OPTIONS (the container image
+// sets --use-openssl-ca) and survives an install root Node would otherwise
+// split or misread: Node takes a double-quoted value with backslash escapes.
+func TestWebBuildNodeOptions(t *testing.T) {
+	for _, tc := range []struct{ existing, path, want string }{
+		{"", "/config/jf/silo-build-cpu-limit.cjs", `--require "/config/jf/silo-build-cpu-limit.cjs"`},
+		{"--use-openssl-ca", `/my "web" dir\x/p.cjs`, `--use-openssl-ca --require "/my \"web\" dir\\x/p.cjs"`},
+	} {
+		if got := webBuildNodeOptions(tc.existing, tc.path); got != tc.want {
+			t.Errorf("webBuildNodeOptions(%q, %q) = %q, want %q", tc.existing, tc.path, got, tc.want)
+		}
+	}
+}

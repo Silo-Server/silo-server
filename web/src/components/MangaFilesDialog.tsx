@@ -47,7 +47,7 @@ export default function MangaFilesDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[85vh] gap-4 sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle className="truncate pe-6">
+          <DialogTitle className="truncate">
             {title
               ? t("web.item.mangaFiles.titleWithName", { title })
               : t("web.item.mangaFiles.title")}

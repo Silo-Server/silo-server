@@ -770,7 +770,7 @@ export function AccessGroupEditor({
                   void remove();
                 }}
                 disabled={deleteGroup.isPending || conflict || reloading}
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                variant="destructive"
               >
                 {t("web.admin.access.groups.delete.confirm")}
               </AlertDialogAction>

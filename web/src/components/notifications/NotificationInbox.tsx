@@ -270,7 +270,7 @@ function InboxEntryRow({
             {notificationTitle(t, newest)}
           </span>
           {grouped && unread.length > 0 && (
-            <span className="bg-secondary text-foreground shrink-0 rounded-md px-1.5 py-0.5 text-[11px] font-semibold">
+            <span className="bg-secondary text-foreground shrink-0 rounded-md px-1.5 py-0.5 text-[0.6875rem] font-semibold">
               {t("web.notifications.inbox.newCount", {
                 count: unread.length,
                 count_text: String(unread.length),
@@ -278,13 +278,13 @@ function InboxEntryRow({
             </span>
           )}
           {isRequest && (
-            <span className="bg-secondary text-muted-foreground hidden shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium sm:inline-flex">
+            <span className="bg-secondary text-muted-foreground hidden shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[0.6875rem] font-medium sm:inline-flex">
               <Film className="h-3 w-3" />
               {t("web.notifications.inbox.requestTag")}
             </span>
           )}
         </div>
-        <div className="text-muted-foreground mt-0.5 truncate text-[13px]">
+        <div className="text-muted-foreground mt-0.5 truncate text-[0.8125rem]">
           {grouped ? episodeRange(t, entry.notifications) : notificationDescription(t, newest)}
         </div>
       </div>
@@ -398,7 +398,7 @@ function InboxEntryRow({
               </>
             );
             const lineClass =
-              "hover:bg-muted/60 flex h-9 items-center gap-3 rounded-lg px-2 text-[13px]";
+              "hover:bg-muted/60 flex h-9 items-center gap-3 rounded-lg px-2 text-[0.8125rem]";
             return (
               <li key={notification.id} className="relative">
                 {lineHref ? (

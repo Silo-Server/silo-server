@@ -30,6 +30,7 @@ import {
   overlaySuppressedBy,
   OVERLAY_REGISTRY,
   POSITION_OPTIONS,
+  readableTextOn,
   type CardOverlayPrefs,
   type OverlayId,
   type OverlayImage,
@@ -138,11 +139,11 @@ function BadgeAdjust({
           </div>
           <div className="space-y-1">
             <p className="text-sm font-medium">{t("web.settings.cardOverlay.position")}</p>
-            <p className="text-muted-foreground text-[13px] leading-relaxed">
+            <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
               {t("web.settings.cardOverlay.positionHint")}
             </p>
             {shortcutsOn && config.position.startsWith("bottom") ? (
-              <p className="text-muted-foreground text-[13px] leading-relaxed">
+              <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
                 {t("web.settings.cardOverlay.positionShortcutsHint")}
               </p>
             ) : null}
@@ -184,7 +185,7 @@ function BadgeAdjust({
                   <Check
                     aria-hidden="true"
                     className="absolute inset-0 m-auto h-3.5 w-3.5"
-                    style={{ color: swatch.value === "#ffffff" ? "black" : "white" }}
+                    style={{ color: readableTextOn(swatch.value) }}
                   />
                 ) : null}
               </button>
@@ -253,8 +254,8 @@ function BadgeRow({
         <Label htmlFor={switchId} className="text-sm font-medium">
           {def.label}
         </Label>
-        <p className="text-muted-foreground text-[13px] leading-relaxed">{def.description}</p>
-        {hint ? <p className="text-muted-foreground text-[13px] italic">{hint}</p> : null}
+        <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">{def.description}</p>
+        {hint ? <p className="text-muted-foreground text-[0.8125rem] italic">{hint}</p> : null}
       </div>
       {config.enabled ? (
         <BadgeAdjust

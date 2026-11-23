@@ -181,7 +181,7 @@ export function DeviceList({
           aria-label={t("web.settings.deviceList.searchLabel")}
           // text-base on mobile: iOS Safari zooms the viewport when a focused
           // input's font is under 16px, and the zoom does not undo itself.
-          className="h-11 ps-8 text-base xl:h-9 xl:text-[13px]"
+          className="h-11 ps-8 text-base xl:h-9 xl:text-[0.8125rem]"
         />
       </div>
 
@@ -216,7 +216,7 @@ export function DeviceList({
       ) : null}
 
       {sections.length === 0 ? (
-        <p className="text-muted-foreground px-2 py-6 text-center text-[13px]">
+        <p className="text-muted-foreground px-2 py-6 text-center text-[0.8125rem]">
           {devices.length === 0
             ? t("web.settings.deviceList.emptyNone")
             : searching
@@ -257,7 +257,7 @@ export function DeviceList({
         <button
           type="button"
           onClick={() => setShowDormant((shown) => !shown)}
-          className="text-muted-foreground hover:text-foreground mt-1 inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl text-[13px] transition-colors xl:min-h-9"
+          className="text-muted-foreground hover:text-foreground mt-1 inline-flex min-h-11 w-full items-center justify-center gap-1 rounded-xl text-[0.8125rem] transition-colors xl:min-h-9"
         >
           {showDormant
             ? t("web.settings.deviceList.hideUnused")
@@ -335,7 +335,7 @@ function ProfileChip({
         count_text: count,
       })}
       className={cn(
-        "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium whitespace-nowrap transition-colors xl:min-h-0 xl:px-2.5 xl:py-1 xl:text-[12px]",
+        "inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[0.8125rem] font-medium whitespace-nowrap transition-colors xl:min-h-0 xl:px-2.5 xl:py-1 xl:text-[0.75rem]",
         active
           ? "border-foreground/25 bg-surface-raised text-foreground"
           : "border-border/60 text-muted-foreground hover:bg-surface-hover hover:text-foreground",
@@ -377,10 +377,10 @@ function DeviceRow({
         <PlatformIcon kind={kind} className="h-4 w-4 xl:h-3.5 xl:w-3.5" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-sm font-medium xl:text-[13px]">
+        <span className="block truncate text-sm font-medium xl:text-[0.8125rem]">
           {deviceDisplayName(device)}
         </span>
-        <span className="text-muted-foreground block truncate text-[13px]">
+        <span className="text-muted-foreground block truncate text-[0.8125rem]">
           {device.is_current_device
             ? t("web.settings.deviceList.thisDevice")
             : lastSeenLabel(device.last_seen_at, now)}

@@ -112,29 +112,29 @@ func (m *TaskManager) claimFiring(ctx context.Context, w *taskWorker, fired Trig
 	if claims == nil {
 		return true
 	}
-	var trigger TriggerConfig
+	trigger := fired.Config()
 	firedAt := time.Now()
-	if fired != nil {
-		trigger = fired.Config()
-		// A timer that wakes late (a paused process, a clock jump) still
-		// names the firing it was armed for, not the slot of the late
-		// wake-up, which another server's claim window may no longer cover.
-		// A due time in the future means a run rearmed the trigger since it
-		// fired; keep the wake-up. A startup trigger has no due time.
-		if due := fired.NextRunTime(); !due.IsZero() && !due.After(firedAt) {
-			firedAt = due
-		}
+	// A timer that wakes late (a paused process, a clock jump) still names
+	// the firing it was armed for, not the slot of the late wake-up, which
+	// another server's claim window may no longer cover. A due time in the
+	// future means a run rearmed the trigger since it fired; keep the
+	// wake-up. A startup trigger has no due time.
+	if due := fired.NextRunTime(); !due.IsZero() && !due.After(firedAt) {
+		firedAt = due
 	}
 	slot, window, ok := FiringSlot(trigger, firedAt)
 	if !ok {
-		// No trigger fired (a schedule change woke the loop), or its slot
-		// isn't one every server would compute: running here could repeat on
-		// another server, so skip.
+		// Its slot isn't one every server would compute: running here
+		// could repeat on another server, so skip.
 		m.logger.WarnContext(ctx, "scheduled task firing has no cluster-wide slot; skipping it",
 			"task", w.task.Key(), "trigger", trigger.Type)
 		return false
 	}
-	won, err := claims.ClaimFiring(ctx, w.task.Key(), slot, window, firedAt)
+	// A waiting claim holds this worker's admission lock. Bound how long a
+	// database stall can delay a task edit or retirement.
+	claimCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	won, err := claims.ClaimFiring(claimCtx, w.task.Key(), slot, window, firedAt)
 	if err != nil {
 		m.logger.WarnContext(ctx, "claiming scheduled task firing failed; skipping it",
 			"task", w.task.Key(), "error", err)

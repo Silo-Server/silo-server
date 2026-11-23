@@ -107,7 +107,7 @@ export function SubtitleAppearancePanelView({
                 <div className="text-xs font-semibold tracking-[0.22em] text-white/65 uppercase">
                   {eyebrow}
                 </div>
-                <DialogPrimitive.Title className="text-[17px] font-semibold tracking-tight text-white">
+                <DialogPrimitive.Title className="text-[1.0625rem] font-semibold tracking-tight text-white">
                   {t("web.settings.subtitlePanel.title")}
                 </DialogPrimitive.Title>
               </div>
@@ -243,7 +243,7 @@ export function SubtitleAppearancePanelView({
                 <button
                   type="button"
                   onClick={onReset}
-                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[13px] text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
+                  className="inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[0.8125rem] text-white/70 transition-colors hover:bg-white/10 hover:text-white focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none"
                 >
                   <RotateCcw className="h-3.5 w-3.5" />
                   {resetLabel}
@@ -278,7 +278,7 @@ function Section({ label, children }: { label: string; children: ReactNode }) {
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-      <div className="text-[13px] text-white/80 sm:w-24 sm:shrink-0">{label}</div>
+      <div className="text-[0.8125rem] text-white/80 sm:w-24 sm:shrink-0">{label}</div>
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   );
@@ -313,7 +313,7 @@ function PillGroup<T extends string>({
             role="radio"
             aria-checked={active}
             onClick={() => onChange(option.value)}
-            className={`inline-flex items-center rounded-full px-3 py-1 text-[13px] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
+            className={`inline-flex items-center rounded-full px-3 py-1 text-[0.8125rem] font-medium transition-colors focus-visible:ring-2 focus-visible:ring-white/70 focus-visible:outline-none ${
               active
                 ? "bg-white text-black"
                 : "bg-white/[0.06] text-white/75 hover:bg-white/10 hover:text-white"
@@ -397,9 +397,9 @@ function PercentField({
         onKeyDown={(e) => {
           if (e.key === "Enter" && !isImeComposing(e)) e.currentTarget.blur();
         }}
-        className="w-14 [appearance:textfield] rounded-md border border-white/15 bg-white/[0.06] px-2 py-1 text-end text-[13px] text-white outline-none focus-visible:ring-2 focus-visible:ring-white/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        className="w-14 [appearance:textfield] rounded-md border border-white/15 bg-white/[0.06] px-2 py-1 text-end text-[0.8125rem] text-white outline-none focus-visible:ring-2 focus-visible:ring-white/70 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
       />
-      <span className="text-[13px] text-white/60">{PERCENT_SIGN}</span>
+      <span className="text-[0.8125rem] text-white/60">{PERCENT_SIGN}</span>
     </div>
   );
 }

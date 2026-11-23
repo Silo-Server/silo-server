@@ -271,7 +271,7 @@ function ClaimForm({ token }: { token: string }) {
       <Card className="auth-card glass panel-border w-full max-w-sm border-0">
         <CardHeader>
           {invitation.inviter_name && (
-            <p className="text-muted-foreground font-mono text-[11px] font-semibold tracking-[0.1em] uppercase">
+            <p className="text-muted-foreground font-mono text-[0.6875rem] font-semibold tracking-[0.1em] uppercase">
               {t("web.auth.invite.invitedBy", { inviter: invitation.inviter_name })}
             </p>
           )}

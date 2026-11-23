@@ -107,9 +107,16 @@ export interface EnginePlayerOptions {
   /**
    * A read from the file received data: `request` has `bytes` in all, its
    * first at `first` and its latest at `last`, on the page's
-   * `performance.now()` clock.
+   * `performance.now()` clock. `spans` is the time it was receiving, one
+   * `[first, last]` per response, on the same clock.
    */
-  onMediaData?: (request: number, bytes: number, first: number, last: number) => void;
+  onMediaData?: (
+    request: number,
+    bytes: number,
+    first: number,
+    last: number,
+    spans: [number, number][],
+  ) => void;
 }
 
 function clampRate(value: number): number {
@@ -579,6 +586,10 @@ export class EnginePlayer {
           message.bytes,
           message.first - performance.timeOrigin,
           message.last - performance.timeOrigin,
+          message.spans.map(([first, last]) => [
+            first - performance.timeOrigin,
+            last - performance.timeOrigin,
+          ]),
         );
         return;
       case "error":

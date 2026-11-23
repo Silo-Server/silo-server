@@ -15,6 +15,7 @@ import { useProfiles } from "@/hooks/queries/profiles";
 import { isHouseholdSetupDone, setHouseholdSetupDone } from "@/lib/onboarding";
 import { canAddProfile } from "@/lib/profile-management";
 import { useT } from "@/i18n";
+import { getInitial } from "@/lib/text";
 
 /**
  * The "Who's watching?" onboarding step, shown once right after an invite is
@@ -107,13 +108,13 @@ export default function HouseholdSetup() {
                   <Avatar className="border-border group-hover:border-primary size-20 rounded-2xl border transition-colors">
                     {p.avatar_url ? <AvatarImage src={p.avatar_url} alt="" /> : null}
                     <AvatarFallback className="rounded-2xl text-2xl font-bold">
-                      {p.name.slice(0, 1).toUpperCase()}
+                      {getInitial(p.name)}
                     </AvatarFallback>
                   </Avatar>
                   {(p.is_child || p.has_pin) && (
                     <Badge
                       variant="outline"
-                      className="bg-background absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0 font-mono text-[9px] tracking-wider uppercase"
+                      className="bg-background absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0 font-mono text-[0.5625rem] tracking-wider uppercase"
                     >
                       {p.is_child
                         ? t("web.onboarding.householdSetup.kidsBadge")

@@ -25,7 +25,7 @@ export function SideNavSection({ label, id, idPrefix, children }: SideNavSection
     <div role="group" aria-labelledby={headingId}>
       <h3
         id={headingId}
-        className="text-muted-foreground mb-2 px-2 text-[10px] font-semibold tracking-[0.18em] uppercase"
+        className="text-muted-foreground mb-2 px-2 text-[0.625rem] font-semibold tracking-[0.18em] uppercase"
       >
         {label}
       </h3>
@@ -63,7 +63,7 @@ export function SideNavItem({
   onIntent,
 }: SideNavItemProps) {
   const className = cn(
-    "relative flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-start text-[13px] font-medium transition-colors duration-150",
+    "relative flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-start text-[0.8125rem] font-medium transition-colors duration-150",
     active
       ? "text-primary bg-accent"
       : "text-muted-foreground hover:text-foreground hover:bg-accent/70",
@@ -79,8 +79,16 @@ export function SideNavItem({
       <span className="flex w-[18px] flex-shrink-0 items-center justify-center">
         <Icon className="h-[18px] w-[18px]" />
       </span>
-      <span className="line-clamp-2 min-w-0 break-words">{label}</span>
-      {badge && <span className="ms-auto">{badge}</span>}
+      {/* Wraps so a badge that grows with the text size moves under the label
+          instead of splitting the label or itself across lines. Beside the
+          label the badge sits at the row's end; alone on its line it starts
+          under the label. The flex wrapper keeps the badge one box, so text
+          too long even for its own line wraps inside the pill; the tighter
+          leading keeps a one-line badge within the label's line height. */}
+      <span className="flex min-w-0 flex-1 flex-wrap items-center justify-between gap-x-2.5 gap-y-1">
+        <span className="line-clamp-2 min-w-0 break-words">{label}</span>
+        {badge && <span className="flex max-w-full leading-tight wrap-anywhere">{badge}</span>}
+      </span>
     </>
   );
   const ariaCurrent = active ? "page" : undefined;
@@ -162,7 +170,7 @@ export function SideNavTopic({
         aria-controls={listId}
         onClick={onToggle}
         className={cn(
-          "hover:text-foreground hover:bg-accent/70 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-start text-[13px] font-medium transition-colors duration-150",
+          "hover:text-foreground hover:bg-accent/70 flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-start text-[0.8125rem] font-medium transition-colors duration-150",
           open ? "text-foreground" : "text-muted-foreground",
         )}
       >
@@ -210,7 +218,7 @@ export function SideNavSubItem({
   onIntent,
 }: SideNavSubItemProps) {
   const className = cn(
-    "relative flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-start text-[12.5px] transition-colors duration-150",
+    "relative flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-start text-[0.78125rem] transition-colors duration-150",
     active
       ? "text-primary bg-accent font-medium"
       : "text-muted-foreground hover:text-foreground hover:bg-accent/70",

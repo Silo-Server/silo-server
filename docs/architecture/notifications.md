@@ -26,10 +26,9 @@ whose metadata lands a few days after the file.
 
 The detector also stores that decision on the availability row: an episode's
 `episode_availability.released_at` is set when it was recorded as a release
-(seeded library, inside the window), even while release events are turned off,
-and stays empty for back catalog and late matches. A profile that turns on
-`ui.next_up_new_releases_first` (off by default) gets Next Up ranked by the
-later of when it finished a series' previous episode and the `released_at` of
+(seeded library, inside the window), and stays empty for back catalog and late
+matches. A profile that turns on `ui.next_up_new_releases_first` (off by
+default) gets Next Up ranked by the later of when it finished a series' previous episode and the `released_at` of
 the next episode (earliest availability row in the libraries the viewer can
 reach), so a caught-up series moves to the front when a new episode or season
 arrives. Changing what counts as a release changes that order too.
@@ -45,7 +44,7 @@ Event kinds:
 
 An event can be suppressed instead of fanned out, with the reason recorded on
 the row. Fanout writes one reason, `stale`: the event aged past the fanout
-staleness horizon (extended downtime, fanout disabled for a stretch), and
+staleness horizon (72 hours; extended downtime, or no node running fanout), and
 delivering it long after the fact would be noise. Older rows can also carry
 `series_burst`, written by a per-series burst cap that profile fanout no
 longer has; the value stays readable (`SuppressedReasonSeriesBurst`). A season
@@ -126,10 +125,14 @@ What follows from the rule:
   episode to arrive there notifies. If E07 arrives before E06 is listed at
   all, E07 notifies, and E06 arriving later does not:
   `last_notified_episode_key` is already E07.
-- The rule reads the catalog when fanout runs, after the release settle delay
-  (`notifications.fanout.settle_seconds`, 30 seconds by default), so episodes
-  linked by one scan are all listed by the time any of them is evaluated,
-  whatever order the scan linked them in.
+- The rule reads the catalog when fanout runs. One ingest records all its
+  events in one transaction, so episodes linked by one scan are all listed by
+  the time any of them is evaluated, whatever order the scan linked them in.
+  For separate imports, fanout waits 30 seconds before it can claim each
+  event. If E07 arrives first and the catalog lists E06 by the time fanout
+  evaluates E07, E07 stays silent and E06 can notify when its file is
+  available. If E06's file arrives during the delay but the catalog still
+  has no entry for E06 when fanout evaluates E07, E07 can notify.
 
 Fanout never moves the cursor. It changes only when the interest recompute
 runs, which profile activity queues (see "Next Up cursor" below).
@@ -318,6 +321,10 @@ recomputes them. Under the new rule that cursor behaves like a current one for
 a profile that is caught up.
 
 ## Release-event retention
+
+Retention runs daily with fixed windows: read deliveries are kept 90 days,
+unread ones 180 days, processed release events 30 days, and unprocessed
+events past the 72-hour staleness horizon are deleted.
 
 Release events and inbox deliveries have independent lifetimes. Pruning an old
 release event clears `notification_deliveries.release_event_id` through its
@@ -515,15 +522,18 @@ line, which also counts items past the 10-embed cap.
 ### Generic payload and HMAC signing
 
 Generic webhooks receive canonical Silo JSON: event name, delivery and
-webhook IDs, timestamp, `version`, `test` flag, profile ID, delivery type,
-`reason_flags`, and the series/episode (or request) content blocks.
+webhook IDs, timestamp, `version`, `test` flag, profile ID, library ID
+(left out of request notifications), delivery type, `reason_flags`, and the
+series/episode (or request) content blocks.
 `reason_flags` is `{"next_up": <bool>}`; Next Up is the only reason an
 episode notifies for. A `watchlist.available` payload names the arrived item
 in the series block and the watchlisted title in a `watchlist` block,
 `{"tmdb_id", "media_type"}` (`movie` or `series`; `tmdb_id` is left out when
 the title has none), and its `reason_flags` read `{"next_up": false}`.
 
-Each request is signed with the webhook's per-destination 32-byte secret:
+Each request is signed with the webhook's per-destination signing secret: 32
+random bytes, base64-encoded into the 44-character string the API returns.
+The HMAC key is that string's bytes as returned, not the decoded 32 bytes.
 
 - Headers: `X-Silo-Event`, `X-Silo-Webhook-Id`, `X-Silo-Delivery-Id`,
   `X-Silo-Timestamp` (Unix epoch seconds), and
@@ -552,10 +562,22 @@ Non-retryable 4xx responses (everything except 408, 425, and 429) are
 deterministic destination-side rejections: the attempt fails immediately
 without walking the schedule. Auto-disable on that path requires three
 *consecutive* deliveries to fail with a non-retryable 4xx, because
-destination-side WAF/CDN blips intermittently 4xx valid webhooks. 429 honors
-`Retry-After` when present. Auto-disable posts a `webhook.auto_disabled`
-notice to the profile's inbox — a type that is itself excluded from webhook
-dispatch so a broken webhook cannot loop.
+destination-side WAF/CDN blips intermittently 4xx valid webhooks. The webhook
+row counts that streak (`consecutive_rejections`); a success, re-enabling, or
+a new URL resets it. On a 429, a `Retry-After` header can lengthen the wait
+before the next attempt but never shortens the schedule; other statuses ignore
+it. Auto-disable posts a
+`webhook.auto_disabled` notice to the profile's inbox — a type that is itself
+excluded from webhook dispatch so a broken webhook cannot loop. The disable
+and its notice commit with the attempt's outcome and the streaks, and only
+the worker that turns the webhook off writes the notice.
+
+A claimed attempt carries a 90-second lease. Only the worker that still
+holds the claim records the send's outcome, so a send that outlived its lease
+and was reclaimed counts once. A worker starts a send only with at least 25
+seconds of lease left (up to 10 seconds of artwork resolution, the 10-second
+request, and slack), and retry sweeps claim no more attempts than fit in one
+lease.
 
 Inbox retention keeps a delivery while one of its webhook or plugin
 destination attempts is still pending or retrying: deleting the delivery
@@ -564,6 +586,34 @@ keeps it always while the attempt is claimed or scheduled (`retrying` with
 `next_retry_at` ahead), and otherwise only while the delivery is younger than
 the plugin attempt age cap (36 hours, `pluginAttemptMaxAge`), so a stranded
 attempt (webhooks turned off server-wide, for example) releases its row.
+
+### Revisions and guarded deletion
+
+`notification_webhooks.revision` is a server-owned bigint allocated from a
+non-cycling PostgreSQL sequence (migration
+`20260906145619_webhook_conditional_revision`). The insert/update trigger
+assigns it for every write, including configuration updates, signing-secret
+rotation, delivery success/failure bookkeeping, and disabling a destination. It
+does not depend on transaction timestamps. Gaps are expected, and a recreated
+row receives a new revision even if its ID or supplied revision repeats.
+Sequence exhaustion fails writes rather than reusing a validator. Every writer
+goes through the trigger; trigger bypass, a manual sequence reset and
+independently restored divergent databases are outside this guarantee.
+
+The repository's guarded deletion seam locks the profile-owned row, invokes the
+caller's precondition check on its current revision, and deletes within the
+same transaction. A mismatch returns without deleting the row or cascading its
+attempts. Missing and foreign-profile rows report not found. Concurrent writers
+serialize through the same row lock; an editor that wins first makes the
+original deletion revision stale. A writer that loses to a committed deletion
+cannot update that deleted row.
+
+The revision covers operational metadata as well as configuration, so a
+provider outcome may invalidate an editor's validator. This is conservative
+lost-update protection, not a configuration-only version. A database deletion
+cannot recall an external request already sent. The `/api/v2` transport owns
+validator rendering and conditional-header evaluation; the storage package does
+not interpret HTTP headers.
 
 ## Plugin destinations
 
@@ -655,8 +705,9 @@ to the plugin service, so neither package imports the other.
   one included. The insert key-share locks only the account row, the row an
   account deletion locks before its cascade reaches the profile and its
   destinations, so the two wait on each other instead of deadlocking. A
-  profile purge locks the profile's destinations, and its webhooks, in id
-  order before deleting them, the order an enqueue locks them.
+  profile purge locks the profile's destinations, and its webhooks, web push
+  subscriptions and push registrations, in id order before deleting them, the
+  order an enqueue locks them.
 - **Enqueue.** Like webhooks, attempts are enqueued in the fanout
   transaction, filtered by the destination's switch for the delivery
   (`notify_next_up` for an episode, `notify_requests` for a watchlist
@@ -669,8 +720,15 @@ to the plugin service, so neither package imports the other.
   exist and key-share locks them, in id order, until the delivery commits, so a
   destination deleted after it was listed drops its attempt instead of
   aborting the delivery, inbox row and other channels included, on the
-  foreign key; webhooks enqueue the same way. All of a transaction's attempts
-  go in one `INSERT ... SELECT FROM unnest(...)` with four parameters, so a
+  foreign key; webhooks, web push and mobile push enqueue the same way. The
+  retention sweeps of web push subscriptions and push registrations skip a
+  row a delivery holds instead of waiting on it, which could deadlock with an
+  enqueue, and take it on a later run. The sweep of push registrations with no
+  recorded login then deletes each row it skipped on its own, waiting for the
+  delivery, since its Apple evidence, an ended login, can be gone by the next
+  run; a statement that locks one row can't deadlock with an enqueue. All of a
+  transaction's attempts go in one `INSERT ... SELECT FROM unnest(...)` with
+  four parameters, so a
   fanout of any size stays under the protocol's parameter limit. A delivery
   the insert's `RETURNING` names is marked (`InsertedDelivery.pluginAttempts`),
   and only those reach the plugin destination dispatcher, so other deliveries

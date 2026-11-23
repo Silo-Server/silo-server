@@ -82,6 +82,12 @@ func (i SocketIdentity) holdsAuthority() bool {
 
 var ErrSocketTicket = errors.New("invalid or unavailable realtime credential")
 
+// ErrSocketAuthorityUnavailable reports that the credential behind a socket
+// could not be checked (a lookup failed or timed out). It says nothing about
+// whether the credential still holds, so it never wraps ErrSocketTicket: the
+// client should retry later with the same credential.
+var ErrSocketAuthorityUnavailable = errors.New("realtime authority could not be checked")
+
 type SocketTicketStore struct {
 	redis    *redis.Client
 	audience string

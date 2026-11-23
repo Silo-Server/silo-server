@@ -1,4 +1,4 @@
-import { createRef } from "react";
+import { createRef, useLayoutEffect } from "react";
 import { act, cleanup, render } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BrowseItem } from "@/api/types";
@@ -162,6 +162,25 @@ describe("ItemGrid scroll anchoring", () => {
     window.removeEventListener("scroll", onScroll);
 
     expect(savedGridIndex("list")).toBe(expected);
+  });
+
+  it("stays at the top a new page scrolled to before the grid mounted", () => {
+    // The previous page was scrolled; the route's scroll-to-top runs in a
+    // layout effect after the grid has rendered but before it attaches.
+    act(() => scrollTo(355));
+    function ScrollToTop() {
+      useLayoutEffect(() => window.scrollTo(0, 0), []);
+      return null;
+    }
+
+    render(
+      <>
+        <ScrollToTop />
+        <ItemGrid items={items} />
+      </>,
+    );
+
+    expect(window.scrollY).toBe(0);
   });
 
   it("anchors a replacement entry while the grid stays put", () => {

@@ -31,10 +31,12 @@ import { RowPreview } from "./RowPreview";
 import { RuleBuilder, RuleSortField } from "./RuleBuilder";
 import { ShowsSummary } from "./ShowsSummary";
 import { VariantChoice } from "./VariantChoice";
+import type { RowOrigin } from "../RowOriginBadge";
 
 export interface ShowsLine {
   label: string;
   sentence: string;
+  origin?: RowOrigin;
   onChange?: () => void;
 }
 
@@ -248,12 +250,12 @@ export function RowForm({
         <Label htmlFor={nameId}>{t("web.home.addRow.form.rowName")}</Label>
         <Input
           id={nameId}
-          className="h-10 text-[15px]"
+          className="h-10 text-[0.9375rem]"
           value={draft.title}
           placeholder={savedTitle({ ...draft, title: "" }, catalog, fallbackTitle)}
           onChange={(event) => onChange(withTitle(draft, event.target.value))}
         />
-        {nameHelp ? <p className="text-muted-foreground text-[13px]">{nameHelp}</p> : null}
+        {nameHelp ? <p className="text-muted-foreground text-[0.8125rem]">{nameHelp}</p> : null}
       </div>
       {libraryPages ? (
         <LibraryPageChips
