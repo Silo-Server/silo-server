@@ -157,7 +157,8 @@ Proxy hosts are commanded over the signed worker routes
 `POST /network-access/{provider}/disconnect` on the proxy listener, each
 bounded by the same ten seconds; the proxy answers the state its own
 instance reached. A proxy's overlay origin then reaches stream URL selection
-through the node's `/health` report on the next sweep (see
+through the node's health report (`GET /api/v1/health`, which the core polls) on the
+next sweep (see
 `network_access` in [docs/admin-api.md](admin-api.md)).
 
 ## Related surfaces

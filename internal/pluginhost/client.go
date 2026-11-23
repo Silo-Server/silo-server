@@ -10,6 +10,7 @@ import (
 	"google.golang.org/protobuf/proto"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	sdkmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
 	sdkruntime "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/runtime"
 )
 
@@ -104,6 +105,18 @@ type NetworkAccessProviderClient struct {
 	ingressToken string
 	client       pluginv1.NetworkAccessProviderClient
 	timeout      time.Duration
+}
+
+// ConfigurationChecksClient drives a plugin's ConfigurationChecks service.
+type ConfigurationChecksClient struct {
+	client  pluginv1.ConfigurationChecksClient
+	timeout time.Duration
+}
+
+// NewConfigurationChecksClient wraps a configuration checks connection with
+// the default timeout for tests outside pluginhost.
+func NewConfigurationChecksClient(client pluginv1.ConfigurationChecksClient) *ConfigurationChecksClient {
+	return &ConfigurationChecksClient{client: client, timeout: DefaultConfigurationCheckTimeout}
 }
 
 // IngressToken identifies the process that answers these provider RPCs.
@@ -276,6 +289,31 @@ func (c *Client) NetworkAccessProvider(capabilityID string) (*NetworkAccessProvi
 		ingressToken: c.ingressToken,
 		timeout:      DefaultNetworkAccessTimeout,
 	}, nil
+}
+
+// ConfigurationChecks returns the typed client for the plugin's
+// ConfigurationChecks service when its manifest declares support.
+func (c *Client) ConfigurationChecks() (*ConfigurationChecksClient, error) {
+	c.mu.RLock()
+	unhealthy := c.unhealthy
+	c.mu.RUnlock()
+	if unhealthy {
+		return nil, ErrPluginUnhealthy
+	}
+	if !sdkmanifest.SupportsConfigurationCheck(c.manifest) {
+		return nil, fmt.Errorf("%w: %s", ErrCapabilityNotFound, sdkmanifest.ConfigurationCheckKey)
+	}
+	return &ConfigurationChecksClient{
+		client:  c.rpc.ConfigurationChecks(),
+		timeout: DefaultConfigurationCheckTimeout,
+	}, nil
+}
+
+// TestConfiguration asks the plugin to validate staged global configuration.
+func (c *ConfigurationChecksClient) TestConfiguration(ctx context.Context, req *pluginv1.TestConfigurationRequest) (*pluginv1.TestConfigurationResponse, error) {
+	callCtx, cancel := ensureDeadline(ctx, c.timeout)
+	defer cancel()
+	return c.client.TestConfiguration(callCtx, req)
 }
 
 func (c *Client) markUnhealthy() {

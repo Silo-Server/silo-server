@@ -7,7 +7,7 @@ import {
   isCapturedProfileAuthorityActive,
   StaleApiRequestContextError,
 } from "@/api/client";
-import { v2 } from "@/api/v2/request";
+import { readableErrorText, v2 } from "@/api/v2/request";
 import type { PrePlaySubtitleSelection } from "@/player/types";
 import { derivePersistedSubtitleMode } from "@/player/utils/subtitleMode";
 import type {
@@ -20,7 +20,7 @@ import type {
 } from "@/api/types";
 
 import { settingsKeys, subtitleKeys } from "./keys";
-import { settingWriteOptions } from "./settingWriteOffline";
+import { settingWriteOptions, toastSettingWriteError } from "./settingWriteOffline";
 import { invalidateItemDetails, runOrderedPreferenceWrite } from "./trackPreferences";
 import { canonicalLanguageWireValue } from "@/lib/languageNames";
 
@@ -196,9 +196,7 @@ export function useDeleteSubtitlePreference() {
       void queryClient.invalidateQueries({ queryKey: [...settingsKeys.all, "values"] });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.subtitles.resetPreferenceFailed"),
-      );
+      toastSettingWriteError(err, t("web.common.toast.subtitles.resetPreferenceFailed"));
     },
   });
 }
@@ -253,9 +251,7 @@ export function useSetSubtitlePreference() {
       void invalidateItemDetails(queryClient);
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.subtitles.savePreferenceFailed"),
-      );
+      toastSettingWriteError(err, t("web.common.toast.subtitles.savePreferenceFailed"));
     },
   });
 }
@@ -275,9 +271,7 @@ export function useDownloadSubtitle() {
     },
     onError: (err) => {
       if (!(err instanceof StaleApiRequestContextError))
-        toast.error(
-          err instanceof Error ? err.message : t("web.common.toast.subtitles.downloadFailed"),
-        );
+        toast.error(readableErrorText(err, t("web.common.toast.subtitles.downloadFailed")));
     },
   });
 }
@@ -297,9 +291,7 @@ export function useUploadSubtitle() {
     },
     onError: (err) => {
       if (!(err instanceof StaleApiRequestContextError))
-        toast.error(
-          err instanceof Error ? err.message : t("web.common.toast.subtitles.uploadFailed"),
-        );
+        toast.error(readableErrorText(err, t("web.common.toast.subtitles.uploadFailed")));
     },
   });
 }

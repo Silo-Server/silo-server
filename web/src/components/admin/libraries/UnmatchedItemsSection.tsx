@@ -48,7 +48,7 @@ import { cn } from "@/lib/utils";
 // intentionally unmatched.
 const IGNORABLE_UNMATCHED_TYPES = new Set(["movie", "series"]);
 
-export function UnmatchedItemsSection() {
+export function UnmatchedItemsSection({ embedded = false }: { embedded?: boolean } = {}) {
   const t = useT();
   const showTable = useLibrariesTableLayout();
   const [open, setOpen] = useState(false);
@@ -70,10 +70,8 @@ export function UnmatchedItemsSection() {
   // The listing is an infinite query that retains each loaded page's cursor:
   // `page` indexes the loaded pages, Next fetches only when the next page is
   // not loaded yet, and a refetch refreshes the loaded pages in place.
-  const { data, hasNextPage, fetchNextPage, isFetching } = useUnmatchedLibraryItems(
-    debouncedSearch,
-    ignoredView,
-  );
+  const { data, hasNextPage, fetchNextPage, isFetching, isError, refetch } =
+    useUnmatchedLibraryItems(debouncedSearch, ignoredView);
   // Unfiltered totals of both views, for the header count and for hiding the
   // section; each shares its cache entry with the listing while no search
   // is active.
@@ -111,17 +109,20 @@ export function UnmatchedItemsSection() {
   };
 
   // Hide the section only while it is closed and nothing is unmatched or
-  // ignored. Once open it stays mounted, so the search box and the empty
-  // states stay put while a search or an Ignore refetches the listings.
-  if (!open && !awaitingTotal && !ignoredTotal && search.trim() === "") return null;
+  // ignored. Once open (or when embedded in Catalog Health) it stays mounted,
+  // so the search box and empty states stay put while refetches run.
+  if (!embedded && !open && !awaitingTotal && !ignoredTotal && search.trim() === "") return null;
 
-  const emptyMessage = ignoredView
-    ? search.trim()
-      ? t("web.admin.libraries.unmatched.emptyIgnoredSearch")
-      : t("web.admin.libraries.unmatched.emptyIgnored")
-    : search.trim()
-      ? t("web.admin.libraries.unmatched.emptyAwaitingSearch")
-      : t("web.admin.libraries.unmatched.emptyAwaiting");
+  const isInitialLoading = data === undefined && isFetching;
+  const emptyMessage = isInitialLoading
+    ? t("common.loading")
+    : ignoredView
+      ? search.trim()
+        ? t("web.admin.libraries.unmatched.emptyIgnoredSearch")
+        : t("web.admin.libraries.unmatched.emptyIgnored")
+      : search.trim()
+        ? t("web.admin.libraries.unmatched.emptyAwaitingSearch")
+        : t("web.admin.libraries.unmatched.emptyAwaiting");
 
   // The row's Match and Ignore/Restore actions, sized by the layout showing them.
   const rowActions = (u: UnmatchedLibraryItem, buttonClassName: string) => (
@@ -187,15 +188,8 @@ export function UnmatchedItemsSection() {
     </>
   );
 
-  return (
-    <CollapsibleDiagnosticsSection
-      title={t("web.admin.libraries.unmatched.title")}
-      description={t("web.admin.libraries.unmatched.description")}
-      count={awaitingTotal}
-      icon={<Search className="h-4 w-4 text-amber-500" />}
-      open={open}
-      onOpenChange={setOpen}
-    >
+  const body = (
+    <>
       <div className="mb-2 flex flex-col gap-2 sm:flex-row">
         <Select
           value={view}
@@ -237,7 +231,17 @@ export function UnmatchedItemsSection() {
           }}
         />
       </div>
-      {showTable ? (
+      {data === undefined && isError ? (
+        <div
+          role="alert"
+          className="border-border/40 bg-background/40 text-destructive flex flex-col items-center gap-3 rounded-xl border px-4 py-8 text-center text-sm"
+        >
+          <span>{t("web.admin.common.diagnosticsSection.countError")}</span>
+          <Button variant="outline" size="sm" onClick={() => void refetch()}>
+            {t("common.retry")}
+          </Button>
+        </div>
+      ) : showTable ? (
         <div className="border-border/40 bg-background/40 overflow-x-auto rounded-xl border">
           <Table>
             <TableHeader>
@@ -331,6 +335,33 @@ export function UnmatchedItemsSection() {
           }}
         />
       )}
+    </>
+  );
+
+  if (embedded) {
+    return (
+      <section className="surface-panel space-y-3 rounded-2xl border-0 p-4 sm:p-5">
+        <div className="space-y-0.5">
+          <h2 className="text-sm font-semibold">{t("web.admin.libraries.unmatched.title")}</h2>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.libraries.unmatched.description")}
+          </p>
+        </div>
+        {body}
+      </section>
+    );
+  }
+
+  return (
+    <CollapsibleDiagnosticsSection
+      title={t("web.admin.libraries.unmatched.title")}
+      description={t("web.admin.libraries.unmatched.description")}
+      count={awaitingTotal}
+      icon={<Search className="h-4 w-4 text-amber-500" />}
+      open={open}
+      onOpenChange={setOpen}
+    >
+      {body}
     </CollapsibleDiagnosticsSection>
   );
 }

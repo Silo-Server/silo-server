@@ -323,9 +323,9 @@ func (e *PlaybackProbeEnsurer) EnsureProbeOnly(ctx context.Context, file *models
 //
 // An unknown verdict is left unknown: VideoTrack.MultiplePPS stays nil and
 // VideoCopyUnsafe stays false, which the planner reads as "stream copy is
-// allowed". That is the optimistic half of the race — the caller is expected to
-// kick off ScanCopySafety asynchronously and switch live sessions off the copy
-// route if the scan comes back multi-PPS.
+// allowed". The caller is expected to kick off ScanCopySafety asynchronously so
+// the verdict reaches the row the download policy and the planner's strict web
+// decoder check read.
 func (e *PlaybackProbeEnsurer) EnsureCopySafetyCached(ctx context.Context, file *models.MediaFile) (*models.MediaFile, error) {
 	current, err := e.ensureProbeRepair(ctx, file)
 	if err != nil || current == nil || e == nil {
@@ -378,10 +378,8 @@ func (e *PlaybackProbeEnsurer) ScanCopySafety(ctx context.Context, file *models.
 //
 // It exists because "unknown" and "known but unpersisted" are different states
 // that the media_files row cannot tell apart. A verdict whose write failed is
-// authoritative on this replica and invisible everywhere else, so the paths
-// that gate a revived stream-copy — and the race that withdraws one — have to
-// be able to ask this process what it already knows rather than only asking the
-// row.
+// authoritative on this replica and invisible everywhere else, so the race
+// calls this to land that write on the row the replans read.
 func (e *PlaybackProbeEnsurer) KnownCopySafetyVerdict(ctx context.Context, file *models.MediaFile) (bool, bool) {
 	if e == nil || file == nil {
 		return false, false
