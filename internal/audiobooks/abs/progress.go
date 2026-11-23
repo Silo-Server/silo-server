@@ -598,23 +598,25 @@ func (h *Handler) audiobookVisible(ctx context.Context, a ctxAuth, contentID str
 func progressRowToABS(p ProgressRow) map[string]any {
 	lastMs := p.UpdatedAt.UnixMilli()
 	out := map[string]any{
-		"id":                        p.UserID + "-" + p.ContentID,
-		"userId":                    p.UserID,
-		"libraryItemId":             p.ContentID,
-		"episodeId":                 nil,
-		"mediaItemId":               p.ContentID,
-		"mediaItemType":             "book",
-		"currentTime":               p.CurrentSeconds,
-		"duration":                  p.DurationSeconds,
-		"isFinished":                p.IsFinished,
-		"hideFromContinueListening": p.HideFromContinue,
-		"progress":                  p.ProgressPct,
-		"ebookLocation":             nil,
-		"ebookProgress":             0,
-		"startedAt":                 lastMs,
-		"finishedAt":                nil,
-		"lastUpdate":                lastMs,
+		"id":            p.UserID + "-" + p.ContentID,
+		"libraryItemId": p.ContentID,
+		"mediaItemId":   p.ContentID,
+		"currentTime":   p.CurrentSeconds,
+		"duration":      p.DurationSeconds,
+		"isFinished":    p.IsFinished,
+		"progress":      p.ProgressPct,
+		"startedAt":     lastMs,
+		"finishedAt":    nil,
+		"lastUpdate":    lastMs,
 	}
+	// The rest of real ABS MediaProgress.getOldMediaProgress's key set, so
+	// strict clients decode the rows the user object carries.
+	out["userId"] = p.UserID
+	out["episodeId"] = nil
+	out["mediaItemType"] = LibraryMediaType
+	out["hideFromContinueListening"] = p.HideFromContinue
+	out["ebookLocation"] = nil
+	out["ebookProgress"] = 0
 	if p.IsFinished {
 		out["finishedAt"] = lastMs
 	}
