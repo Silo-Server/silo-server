@@ -48,6 +48,7 @@ import {
 import {
   KEYS,
   MARKER_KEYS,
+  PAUSED_PLAYBACK_KEYS,
   PREVIEW_ADVANCED_KEYS,
   PREVIEW_IMAGE_KEYS,
   PREVIEW_PLACEMENT_KEYS,
@@ -275,6 +276,21 @@ export default function PlaybackSettings() {
             value={form.getValue("playback.min_resume_threshold")}
             onChange={(v) => form.setValue("playback.min_resume_threshold", v)}
             restartRequired={restartKeys.has("playback.min_resume_threshold")}
+          />
+        </FieldGroup>
+
+        <FieldGroup
+          label={t("web.admin.settings.playback.pausedPlayback.group")}
+          restartAll={allRestart(PAUSED_PLAYBACK_KEYS)}
+        >
+          <SettingField
+            label={t("web.admin.settings.playback.pausedPlayback.timeout")}
+            type="number"
+            unit={t("web.admin.settings.playback.unitMinutes")}
+            description={t("web.admin.settings.playback.pausedPlayback.timeoutDescription")}
+            value={form.getValue("playback.paused_session_timeout_minutes")}
+            onChange={(v) => form.setValue("playback.paused_session_timeout_minutes", v)}
+            restartRequired={restartKeys.has("playback.paused_session_timeout_minutes")}
           />
         </FieldGroup>
 
