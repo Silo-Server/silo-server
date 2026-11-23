@@ -262,6 +262,7 @@ export default function PlaybackSettings() {
             label={t("web.admin.settings.playback.watch.markWatched")}
             type="number"
             unit={t("web.admin.common.units.percent")}
+            description={t("web.admin.settings.playback.watch.markWatchedDescription")}
             value={form.getValue("playback.watched_threshold")}
             onChange={(v) => form.setValue("playback.watched_threshold", v)}
             restartRequired={restartKeys.has("playback.watched_threshold")}

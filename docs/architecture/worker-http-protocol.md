@@ -27,10 +27,7 @@ bearer failures remain `text/plain`; they are not native API Problem Details.
 Hardware capability responses use the existing `playback.HWAccelInfo` shape.
 
 Describing a worker operation does not change its routing, middleware, execution,
-or delivery authorization. It does not ratify a migration row or authorize a
-fleet cutover. The migration ledger separately records outstanding descriptions,
-review state, exclusions, and required accountable-owner decisions. Root probe
-readiness and wire-generation acceptance remain separate from hardware capability
+or delivery authorization. Root probe readiness and wire-generation acceptance remain separate from hardware capability
 hashes and capacity checks.
 
 The six retained admin commands are declared by `ProtocolControls` on each
@@ -216,6 +213,19 @@ delayed acknowledgement cannot advance a reconstructed session or new timeline.
 Repeating the exact acknowledgement is naturally idempotent; this is not a
 durable completion receipt and the generation header is never forwarded to the
 end client. Runtime acknowledgement and pruning behavior remain unchanged.
+
+The transcode `GET /transcode/{session_id}/output-bound` answers
+`{"output_bound": bool}` for a transport the node runs: `true` while a restart
+replaces its FFmpeg, or while FFmpeg runs (or has failed) and the client has
+fetched every produced segment but at most the newest, so playback is paced by
+the encoder. Those fetches are the acknowledgements
+above, so the answer is the same whichever relay delivered the segments. A
+progressive remux answers `false`, and the core does not ask about one. A
+transport the node does not run is 404; the read reconstructs nothing and does
+not refresh the session's idle timer. The core reads it before it learns a
+bandwidth limit from a stall (see [learned limits](playback-protocol-v3.md)).
+An older node without the route also answers 404, so the core learns no limit
+from stalls on its transcodes until the node is upgraded.
 
 The retained transcode `POST /downloads/prepare` synchronously prepares or reuses
 an MP4 on that node. It requires node bearer authorization and a source grant
@@ -640,6 +650,5 @@ acknowledgment. No new durable availability, runtime execution, reconstruction
 authority, generic retry contract or native v2 alias is introduced.
 
 The forty described worker registrations exclude health, readiness, metrics and
-the legacy health alias on each worker listener. Those eight probe registrations
-remain separate operational/exclusion evidence gates. Description coverage alone
-is not review acceptance, release ratification or consumer compatibility evidence.
+the legacy health alias on each worker listener; those eight probe registrations
+are not described.

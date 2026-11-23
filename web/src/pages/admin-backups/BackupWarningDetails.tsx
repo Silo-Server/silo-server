@@ -49,7 +49,7 @@ function OmittedName({ label }: { label: string }) {
 /** One section's headline: the only amber line, with the warning icon. */
 function Headline({ children }: { children: ReactNode }) {
   return (
-    <p className="flex items-start gap-1.5 text-[13px] text-amber-600 dark:text-amber-400">
+    <p className="flex items-start gap-1.5 text-[0.8125rem] text-amber-600 dark:text-amber-400">
       <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
       <span className="min-w-0">{children}</span>
     </p>
@@ -68,7 +68,7 @@ function OmissionGroupRow({ group }: { group: OmissionGroup }) {
   const [sampleRef, sampleOverflows] = useOverflowsInline<HTMLParagraphElement>(sample);
   return (
     <li className="min-w-0 space-y-1">
-      <p className="text-[13px]">{omissionGroupTitle(group)}</p>
+      <p className="text-[0.8125rem]">{omissionGroupTitle(group)}</p>
       <p
         title={group.detail}
         className={cn(
@@ -166,7 +166,7 @@ function MissingGroupRow({ group }: { group: MissingFileGroup }) {
   return (
     <li className="min-w-0 space-y-1">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-[13px]">{missingGroupTitle(group)}</span>
+        <span className="text-[0.8125rem]">{missingGroupTitle(group)}</span>
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
           {t(
             open

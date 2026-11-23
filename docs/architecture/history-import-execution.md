@@ -40,7 +40,7 @@ establish media identity. Watch provider sync and webhook sync use the same matc
 ### Continue Watching row
 
 A provider that reports its source's own Continue Watching row
-(`ContinueWatchingRowReporter`, Emby today) gets a final pass after the run's records,
+(`ContinueWatchingRowReporter`, which the Emby provider implements) gets a final pass after the run's records,
 before the run completes. Since Emby 4.6 merged Next Up into Continue Watching, the row
 lists one episode per show: the one in progress, or the next unstarted one. The pass drops,
 for the profile, each show the run imported episodes of that Silo would surface in Continue

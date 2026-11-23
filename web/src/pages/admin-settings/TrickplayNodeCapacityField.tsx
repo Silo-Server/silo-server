@@ -23,7 +23,7 @@ export function TrickplayNodeCapacityField({
       type="number"
       description={t("web.admin.settings.playback.previews.trickplayNodeCapacityDescription")}
       dirty={form.isDirty(KEY)}
-      value={form.getValue(KEY) || "1"}
+      value={form.getValue(KEY)}
       onChange={(v) => form.setValue(KEY, v)}
       restartRequired={restartKeys.has(KEY)}
     />

@@ -112,6 +112,18 @@ func TestEpisodeSearchPostgresAndDocumentSource(t *testing.T) {
 	if expected := fmt.Sprintf(`"_vectors":{"%s":null}`, DefaultMeilisearchEmbedder); !strings.Contains(string(encoded), expected) {
 		t.Fatalf("episode document missing serialized vector opt-out %s: %s", expected, encoded)
 	}
+	// type_rank puts the series ahead of its same-titled episodes; both send
+	// it, since Meilisearch leaves a custom rule undefined without it.
+	if !strings.Contains(string(encoded), `"type_rank":1`) {
+		t.Fatalf("episode document missing type_rank 1: %s", encoded)
+	}
+	series, err := indexer.LoadDocumentsByIDs(ctx, []string{seriesID}, nil, DefaultMeilisearchEmbedder, false, false)
+	if err != nil || len(series) != 1 {
+		t.Fatalf("series documents = %+v, err %v", series, err)
+	}
+	if encoded, err := json.Marshal(series[0]); err != nil || !strings.Contains(string(encoded), `"type_rank":0`) {
+		t.Fatalf("series document missing type_rank 0: %s (err %v)", encoded, err)
+	}
 }
 
 func TestEpisodeSearchOverviewVectorRefreshesOnOverviewUpdate(t *testing.T) {

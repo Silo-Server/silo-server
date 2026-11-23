@@ -35,7 +35,7 @@ reads (`Host.Running`, which backs the admin `runtime.state`) are not use.
   when the manifest is not resident; the host never decides this by itself.
 - Config test runs (negative installation IDs), which their caller stops.
 - A process that opened a `silo.plugin.v1` stream. Every capability RPC is
-  unary today. A streaming one has to count as in flight until it closes
+  unary. A streaming one has to count as in flight until it closes
   before its plugin can be stopped.
 
 ## Invariants

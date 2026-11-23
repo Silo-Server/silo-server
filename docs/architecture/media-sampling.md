@@ -62,7 +62,7 @@ it. Rules:
   `thumbnail`. A `Runner.Exec` replacement, which tests set, starts no
   process and records nothing.
 
-Supported today:
+Supported:
 
 | Part | Values |
 |---|---|

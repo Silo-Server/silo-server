@@ -23,6 +23,13 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+// Direct connection settings control the hidden self-check, not a running engine.
+const (
+	DirectConnectionsEnabledSettingKey     = "direct_connections.enabled"
+	DirectConnectionsPortMappingSettingKey = "direct_connections.port_mapping"
+	DirectConnectionsSTUNServersSettingKey = "direct_connections.stun_servers"
+)
+
 const (
 	cloudflareURLMode                  = "cloudflare_token"
 	playbackSegmentRetentionSettingKey = "playback.segment_retention_seconds"
@@ -402,15 +409,18 @@ const ServerSettingsMutationLock = "silo:server_settings:mutation"
 //
 //nolint:goconst
 var adminSettingDefaults = map[string]string{
-	"auth.access_token_expiry":  "8h",
-	"auth.refresh_token_expiry": "30d",
-	"server.log_level":          "info",
-	"server.log_quiet":          "",
-	"server.public_url":         "",
-	"branding.server_name":      "Silo",
-	"branding.login_subtitle":   "Sign in with an existing account.",
-	"clientip.trusted_proxies":  "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128",
-	"theme.catalog_url":         DefaultThemeCatalogURL,
+	DirectConnectionsEnabledSettingKey:     "false",
+	DirectConnectionsPortMappingSettingKey: "true",
+	DirectConnectionsSTUNServersSettingKey: "stun.cloudflare.com:3478,stun.l.google.com:19302",
+	"auth.access_token_expiry":             "8h",
+	"auth.refresh_token_expiry":            "30d",
+	"server.log_level":                     "info",
+	"server.log_quiet":                     "",
+	"server.public_url":                    "",
+	"branding.server_name":                 "Silo",
+	"branding.login_subtitle":              "Sign in with an existing account.",
+	"clientip.trusted_proxies":             "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128",
+	"theme.catalog_url":                    DefaultThemeCatalogURL,
 
 	ServerLANDiscoverySettingKey:              "true",
 	ServerLocalURLSettingKey:                  "",
@@ -753,7 +763,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 
 	switch key {
-	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey, PlaybackPreferLowerVersionTranscodeSettingKey,
+	case DirectConnectionsEnabledSettingKey, DirectConnectionsPortMappingSettingKey, "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey, PlaybackPreferLowerVersionTranscodeSettingKey,
 		PlaybackKeyframePlaylistSettingKey, PlaybackBandwidthProbeAutomaticSettingKey,
 		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
@@ -793,6 +803,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminURL(key, value)
 	case BackupS3KeyPrefixSettingKey:
 		return strings.Trim(value, "/"), nil
+	case DirectConnectionsSTUNServersSettingKey:
+		return normalizeSTUNServers(key, value)
 
 	case AuthProviderRecheckIntervalSettingKey:
 		parsed, err := parseDuration(value)
@@ -1607,4 +1619,62 @@ func normalizeAdminURL(key, value string) (string, error) {
 		return "", fmt.Errorf("%s must use http or https", key)
 	}
 	return strings.TrimRight(value, "/"), nil
+}
+
+func normalizeSTUNServers(key, value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	entries := strings.Split(value, ",")
+	if len(entries) > 8 {
+		return "", fmt.Errorf("%s accepts at most 8 entries", key)
+	}
+	out := make([]string, 0, len(entries))
+	seen := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		host, port, err := net.SplitHostPort(strings.ToLower(strings.TrimSpace(entry)))
+		if err != nil {
+			return "", fmt.Errorf("%s requires host:port entries: %w", key, err)
+		}
+		n, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || n == 0 {
+			return "", fmt.Errorf("%s requires ports between 1 and 65535", key)
+		}
+		ip := net.ParseIP(host)
+		// The prober gives an IPv4-mapped literal no IPv4 attempt; the plain
+		// endpoint probes the same address and deduplicates against it.
+		if v4 := ip.To4(); v4 != nil {
+			host = v4.String()
+		}
+		if ip == nil && !validSTUNHostName(host) {
+			return "", fmt.Errorf("%s contains an invalid IP address or DNS host", key)
+		}
+		normalized := net.JoinHostPort(host, strconv.FormatUint(n, 10))
+		if !seen[normalized] {
+			seen[normalized] = true
+			out = append(out, normalized)
+		}
+	}
+	return strings.Join(out, ","), nil
+}
+
+// validSTUNHostName reports whether host is a lowercase DNS name. A
+// top-level label is never all digits, so a host such as 192.168.1.256 is a
+// mistyped IP address, not a DNS name.
+func validSTUNHostName(host string) bool {
+	if len(host) == 0 || len(host) > 253 {
+		return false
+	}
+	labels := strings.Split(strings.TrimSuffix(host, "."), ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+				return false
+			}
+		}
+	}
+	return strings.Trim(labels[len(labels)-1], "0123456789") != ""
 }

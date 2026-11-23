@@ -219,7 +219,7 @@ function PluginsBoard() {
           <TabsTrigger value="installed">
             {t("web.admin.plugins.page.installedTab")}
             {installations.length > 0 && (
-              <Badge variant="secondary" className="ms-1.5 text-[10px]">
+              <Badge variant="secondary" className="ms-1.5 text-[0.625rem]">
                 {installations.length}
               </Badge>
             )}
@@ -227,7 +227,7 @@ function PluginsBoard() {
           <TabsTrigger value="catalog">
             {t("web.admin.plugins.page.catalogTab")}
             {catalog.length > 0 && (
-              <Badge variant="secondary" className="ms-1.5 text-[10px]">
+              <Badge variant="secondary" className="ms-1.5 text-[0.625rem]">
                 {catalog.length}
               </Badge>
             )}
@@ -478,9 +478,9 @@ function CatalogTab({
       ) : (
         groups.map((group) => (
           <section key={group.kind} className="space-y-2.5" aria-label={t(group.titleKey)}>
-            <h2 className="flex items-baseline gap-2 text-[15px] font-semibold">
+            <h2 className="flex items-baseline gap-2 text-[0.9375rem] font-semibold">
               {t(group.titleKey)}
-              <span className="text-muted-foreground text-[13.5px] font-medium tabular-nums">
+              <span className="text-muted-foreground text-[0.84375rem] font-medium tabular-nums">
                 {group.entries.length}
               </span>
             </h2>

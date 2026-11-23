@@ -76,7 +76,10 @@ lint:
 lint-changed:
 	BASE_REF=$(BASE_REF) scripts/lint-changed.sh
 
-.PHONY: verify-actionlint verify-shellcheck
+.PHONY: verify-fork-pins verify-actionlint verify-shellcheck
+verify-fork-pins:
+	go run ./scripts/ci/forkpins
+
 verify-actionlint:
 	@test "$$(actionlint -version | head -n 1)" = 1.7.12 || { echo 'actionlint 1.7.12 is required' >&2; exit 1; }
 	actionlint

@@ -63,7 +63,7 @@ export function SettingFieldStatus({
   return (
     <span
       className={cn(
-        "inline-flex items-start gap-1.5 text-[13px] leading-snug wrap-anywhere has-[>svg]:pt-[max(0px,calc((0.875rem-1lh)/2))] [&>svg]:mt-[calc((1lh-0.875rem)/2)]",
+        "inline-flex items-start gap-1.5 text-[0.8125rem] leading-snug wrap-anywhere has-[>svg]:pt-[max(0px,calc((0.875rem-1lh)/2))] [&>svg]:mt-[calc((1lh-0.875rem)/2)]",
         tone === "ok" && "text-green-600 dark:text-green-400",
         tone === "warn" && "text-amber-600 dark:text-amber-400",
         tone === "muted" && "text-muted-foreground",
@@ -140,19 +140,28 @@ export function SettingFieldRow({
     >
       <div className="min-w-0 flex-1 sm:max-w-[520px]">
         <div className="flex flex-wrap items-center gap-2">
-          {dirty ? (
-            <span
-              className="size-1.5 shrink-0 rounded-full bg-[var(--settings-accent)]"
-              title={t("web.admin.settings.fields.unsavedChange")}
-            />
-          ) : null}
-          <Label htmlFor={htmlFor} className="text-sm font-medium">
-            {label}
-          </Label>
+          {/* The dot stays beside the label's first line when a long label
+              wraps: its box is one line of the label (text-sm) tall. */}
+          <span className="flex min-w-0 items-start gap-2">
+            {dirty ? (
+              <span className="flex h-5 shrink-0 items-center">
+                <span
+                  className="size-1.5 rounded-full bg-[var(--settings-accent)]"
+                  title={t("web.admin.settings.fields.unsavedChange")}
+                />
+              </span>
+            ) : null}
+            <Label htmlFor={htmlFor} className="text-sm font-medium">
+              {label}
+            </Label>
+          </span>
           {restartRequired && !groupSaysRestart && <RestartBadge />}
         </div>
         {description ? (
-          <p id={descriptionId} className="text-muted-foreground mt-1 text-[13px] leading-relaxed">
+          <p
+            id={descriptionId}
+            className="text-muted-foreground mt-1 text-[0.8125rem] leading-relaxed text-pretty"
+          >
             {description}
           </p>
         ) : null}
@@ -177,7 +186,7 @@ export function SettingFieldRow({
           {children}
         </div>
         {unit ? (
-          <span className="text-muted-foreground shrink-0 text-[13px] whitespace-nowrap sm:w-[var(--settings-unit-w)]">
+          <span className="text-muted-foreground shrink-0 text-[0.8125rem] whitespace-nowrap sm:w-[var(--settings-unit-w)]">
             {unit}
           </span>
         ) : (
@@ -197,7 +206,8 @@ interface SettingFieldProps {
   label: string;
   /** The field has an unsaved edit; drive it from `form.isDirty(key)`. */
   dirty?: boolean;
-  type?: "text" | "number" | "password" | "toggle" | "duration" | "select";
+  /** A secret uses `SecretField`, which keeps the saved value when emptied. */
+  type?: "text" | "number" | "toggle" | "duration" | "select";
   /**
    * Placeholder for `text`, description for every other type. Prefer
    * `description` for new call sites.
@@ -212,7 +222,6 @@ interface SettingFieldProps {
   value: string;
   onChange: (value: string) => void;
   options?: SelectOption[];
-  sensitiveConfigured?: boolean;
   disabled?: boolean;
   /** Marks the field with a restart badge; drive it from `useRestartKeys`. */
   restartRequired?: boolean;
@@ -234,14 +243,12 @@ export function SettingField({
   value,
   onChange,
   options,
-  sensitiveConfigured,
   disabled: disabledProp,
   restartRequired,
   managedByEnv,
   dir,
   className,
 }: SettingFieldProps) {
-  const t = useT();
   const disabled = disabledProp || managedByEnv != null;
   const controlId = useId();
   const hintId = useId();
@@ -300,25 +307,6 @@ export function SettingField({
           ))}
         </SelectContent>
       </Select>,
-    );
-  }
-
-  if (type === "password") {
-    return row(
-      <Input
-        id={controlId}
-        type="password"
-        placeholder={
-          sensitiveConfigured
-            ? t("web.admin.settings.fields.passwordConfigured")
-            : (hint ?? t("web.admin.settings.fields.passwordNotConfigured"))
-        }
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        disabled={disabled}
-        className={cn("border-muted-foreground/25", SETTINGS_CONTROL_WIDTH)}
-        aria-describedby={describedBy}
-      />,
     );
   }
 

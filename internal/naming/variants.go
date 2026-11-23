@@ -16,6 +16,9 @@ var (
 	variantCleanupSepRe   = regexp.MustCompile(`[.\-_]+`)
 	variantWhitespaceRe   = regexp.MustCompile(`\s+`)
 	editionApostrophes    = strings.NewReplacer("’", "'", "‘", "'", "ʼ", "'")
+	// A movie's disc, part, or disc-image folder that holds its video belongs
+	// to the movie folder above it and names no edition of its own.
+	movieStructuralDirRe  = regexp.MustCompile(`(?i)^(?:(?:cd|disc|disk|dvd|part|pt)[ ._-]*\d{1,2}|bdmv|stream|video_ts)$`)
 	variantQualityTokenRe = regexp.MustCompile(`(?i)\b(?:hdr|dv|sdr|3d|remux|web[ ._-]?dl|webrip|bluray|bdrip|brrip|2160p|1080p|720p|480p|x264|x265|h\.?264|h\.?265|hevc|av1|aac|ac3|eac3|dts|truehd|atmos|proper|repack|multi|dual|vff|german|internal|criterion|custom|hybrid)\b`)
 )
 
@@ -129,44 +132,43 @@ func parseVariantHints(filePath string, libraryType string, libraryRoots ...stri
 	}
 
 	hints := &VariantHints{}
-	parts := strings.Split(cleanPath, "/")
 	baseName := path.Base(cleanPath)
 	baseNoExt := strings.TrimSuffix(baseName, path.Ext(baseName))
-	parentBase := ""
-	if len(parts) > 1 {
-		parentBase = parts[len(parts)-2]
-	}
 
-	for i := len(parts) - 2; i >= 0; i-- {
-		if match := plexEditionTagRe.FindStringSubmatch(parts[i]); match != nil {
-			hints.EditionRaw = strings.TrimSpace(match[1])
-			hints.EditionKey = normalizeEditionKey(hints.EditionRaw)
-			hints.EditionSource = "plex_tag_folder"
-			hints.EditionConfidence = floatPtr(1.0)
-			break
-		}
+	seriesLibrary := normalizeInferLibraryType(libraryType) == seriesContentType
+	libraryRoot := deepestContainingLibraryRoot(cleanPath, libraryRoots)
+	directories := directorySegmentsWithinRoot(cleanPath, libraryRoot)
+
+	// Scope folder edition checks to directories below the containing library
+	// root. When no containing root is known, check only the immediate parent
+	// directory so ancestor mount paths cannot stamp editions onto items.
+	var editionDirs []string
+	if libraryRoot != "" {
+		editionDirs = directories
+	} else if parent := path.Dir(cleanPath); parent != "." && parent != "/" {
+		editionDirs = []string{path.Base(parent)}
+	}
+	itemFolder, seasonFolder := editionItemFolder(baseNoExt, editionDirs, seriesLibrary, libraryRoot != "")
+
+	if raw, key := plexEditionTag(baseNoExt); key != "" {
+		hints.EditionRaw = raw
+		hints.EditionKey = key
+		hints.EditionSource = "plex_tag_file"
+		hints.EditionConfidence = floatPtr(1.0)
 	}
 	if hints.EditionKey == "" {
-		if match := plexEditionTagRe.FindStringSubmatch(baseNoExt); match != nil {
-			hints.EditionRaw = strings.TrimSpace(match[1])
-			hints.EditionKey = normalizeEditionKey(hints.EditionRaw)
-			hints.EditionSource = "plex_tag_file"
-			hints.EditionConfidence = floatPtr(1.0)
-		}
-	}
-	if hints.EditionKey == "" {
-		for i := len(parts) - 2; i >= 0; i-- {
-			if raw, key := parseEditionHeuristic(parts[i], "", 0); key != "" {
+		for i := len(editionDirs) - 1; i >= 0; i-- {
+			if raw, key := plexEditionTag(editionDirs[i]); key != "" {
 				hints.EditionRaw = raw
 				hints.EditionKey = key
-				hints.EditionSource = "heuristic_folder"
-				hints.EditionConfidence = floatPtr(0.7)
+				hints.EditionSource = "plex_tag_folder"
+				hints.EditionConfidence = floatPtr(1.0)
 				break
 			}
 		}
 	}
 	if hints.EditionKey == "" {
-		folderTitle, folderYear, _ := parseInferFolderTitleYear(parentBase)
+		folderTitle, folderYear, _ := parseInferFolderTitleYear(itemFolder)
 		if raw, key := parseEditionHeuristic(baseNoExt, folderTitle, folderYear); key != "" {
 			hints.EditionRaw = raw
 			hints.EditionKey = key
@@ -175,7 +177,7 @@ func parseVariantHints(filePath string, libraryType string, libraryRoots ...stri
 		}
 	}
 	if hints.EditionKey == "" {
-		folderTitle, folderYear, _ := parseInferFolderTitleYear(parentBase)
+		folderTitle, folderYear, _ := parseInferFolderTitleYear(itemFolder)
 		if stem := parseInferMovieStem(baseNoExt, folderTitle, folderYear); stem.Title != "" {
 			if _, raw, key, ok := comparisonSafeEditionSuffix(stem.Title); ok {
 				hints.EditionRaw = raw
@@ -185,10 +187,21 @@ func parseVariantHints(filePath string, libraryType string, libraryRoots ...stri
 			}
 		}
 	}
+	// Limit folder heuristics to the item's own folders (a season folder, then
+	// the movie or show folder) so grouping folders inside a library (such as
+	// "Film Noir") do not label unrelated items.
+	for _, folder := range []string{seasonFolder, itemFolder} {
+		if hints.EditionKey != "" || folder == "" {
+			continue
+		}
+		if raw, key := parseEditionHeuristic(folder, "", 0); key != "" {
+			hints.EditionRaw = raw
+			hints.EditionKey = key
+			hints.EditionSource = "heuristic_folder"
+			hints.EditionConfidence = floatPtr(0.7)
+		}
+	}
 
-	seriesLibrary := normalizeInferLibraryType(libraryType) == seriesContentType
-	libraryRoot := deepestContainingLibraryRoot(cleanPath, libraryRoots)
-	directories := directorySegmentsWithinRoot(cleanPath, libraryRoot)
 	allowNumericSeason := seriesLibrary && (libraryRoot == "" || len(directories) > 1)
 	if token, ok := parseEpisodeToken(baseNoExt, directories, libraryRoot != "", allowNumericSeason, seriesLibrary); ok && token.episodeEnd > token.episode {
 		hints.PresentationKind = "multi_episode"
@@ -212,6 +225,37 @@ func parseVariantHints(filePath string, libraryType string, libraryRoots ...stri
 	return hints
 }
 
+// plexEditionTag returns the first {edition-...} tag in name that names an
+// edition, skipping empty ones such as {edition- }.
+func plexEditionTag(name string) (string, string) {
+	for _, match := range plexEditionTagRe.FindAllStringSubmatch(name, -1) {
+		raw := strings.TrimSpace(match[1])
+		if key := normalizeEditionKey(raw); key != "" {
+			return raw, key
+		}
+	}
+	return "", ""
+}
+
+// editionItemFolder returns the folder that names the item a file belongs to,
+// the closest folder that is not a movie's disc or disc-image folder, and, in
+// a series library, the season folder below the show folder. Folders above
+// the item folder group items and name no edition.
+func editionItemFolder(baseNoExt string, dirs []string, seriesLibrary, rootRelative bool) (item, season string) {
+	for len(dirs) > 0 && movieStructuralDirRe.MatchString(strings.TrimSpace(dirs[len(dirs)-1])) {
+		dirs = dirs[:len(dirs)-1]
+	}
+	if len(dirs) == 0 {
+		return "", ""
+	}
+	if seriesLibrary {
+		if _, ok, showDirectory := folderSeason(baseNoExt, dirs, rootRelative, true); ok {
+			return showDirectory, dirs[len(dirs)-1]
+		}
+	}
+	return dirs[len(dirs)-1], ""
+}
+
 func editionHeuristicSurface(baseNoExt string, folderTitle string, folderYear int) string {
 	surface := stripFolderTags(baseNoExt)
 	surface = stripVariantReleaseGroup(surface)
@@ -220,9 +264,28 @@ func editionHeuristicSurface(baseNoExt string, folderTitle string, folderYear in
 		surface = stem.Remainder
 	} else if m := inferTitleYearRe.FindStringSubmatch(surface); m != nil {
 		surface = strings.TrimSpace(strings.TrimPrefix(surface, m[0]))
+	} else {
+		surface = trimFolderTitle(surface, folderTitle)
 	}
 	surface = variantQualityTokenRe.ReplaceAllString(surface, " ")
 	return collapseWhitespace(strings.NewReplacer(".", " ", "_", " ", "-", " ").Replace(surface))
+}
+
+// trimFolderTitle drops the folder's title from the start of a yearless file
+// name, so a title word ("Uncut Gems" in "Uncut Gems (2019) Remastered") is
+// not read as the file's edition.
+func trimFolderTitle(surface, folderTitle string) string {
+	want := normalizeInferComparable(folderTitle)
+	if want == "" {
+		return surface
+	}
+	words := strings.Fields(strings.NewReplacer(".", " ", "_", " ", "-", " ").Replace(surface))
+	for i := len(words); i > 0; i-- {
+		if normalizeInferComparable(strings.Join(words[:i], " ")) == want {
+			return strings.Join(words[i:], " ")
+		}
+	}
+	return surface
 }
 
 func parseEditionHeuristic(surface string, folderTitle string, folderYear int) (string, string) {

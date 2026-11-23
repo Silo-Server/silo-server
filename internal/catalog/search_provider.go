@@ -48,7 +48,7 @@ const (
 	// (catalogSearchMeilisearchIndexSettings: searchable, filterable or
 	// displayed attributes, ranking rules, typo tolerance, pagination); the
 	// sync task applies those in place.
-	SearchMeilisearchSchemaVersion = 4
+	SearchMeilisearchSchemaVersion = 5
 
 	DefaultMeilisearchSyncBatchSize    = 500
 	DefaultMeilisearchRebuildBatchSize = 5000
