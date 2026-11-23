@@ -134,8 +134,6 @@ type PausedAttemptExpirerV3 interface {
 	ExpirePausedAttempt(ctx context.Context, sessionID, stopID string, timeout time.Duration) (bool, error)
 }
 
-var _ PausedAttemptExpirerV3 = (*MemoryPlanStoreV3)(nil)
-
 type AttemptRecordV3 struct {
 	PlaybackAttemptID      string
 	SessionID              string
@@ -285,10 +283,7 @@ type MemoryPlanStoreV3 struct {
 	attempts     map[string]AttemptRecordV3
 	replans      map[string]memoryReplanV3
 	stopReceipts map[string]StopReceiptV3
-	// pausedSince is when each live session's accepted samples turned
-	// paused, the memory store's stand-in for the lifecycle row.
-	pausedSince map[string]time.Time
-	events      []RouteEventRecordV3
+	events       []RouteEventRecordV3
 }
 
 func NewMemoryPlanStoreV3() *MemoryPlanStoreV3 {
@@ -357,7 +352,6 @@ func (s *MemoryPlanStoreV3) deleteAttemptLocked(attemptID string) {
 		return
 	}
 	delete(s.stopReceipts, record.SessionID)
-	delete(s.pausedSince, record.SessionID)
 	for key := range s.replans {
 		if strings.HasPrefix(key, record.SessionID+":") {
 			delete(s.replans, key)
@@ -529,19 +523,9 @@ func (s *MemoryPlanStoreV3) ApplyProgress(_ context.Context, sessionID string, s
 	}
 	if sample.Sequence > record.LastSequence {
 		applied := sample
-		wasPaused := record.LastSample != nil && record.LastSample.IsPaused
 		record.LastSequence, record.LastSample = sample.Sequence, &applied
 		record.LastSampleAt = time.Now()
 		s.attempts[attemptID] = *record
-		switch {
-		case !sample.IsPaused:
-			delete(s.pausedSince, sessionID)
-		case !wasPaused:
-			if s.pausedSince == nil {
-				s.pausedSince = make(map[string]time.Time)
-			}
-			s.pausedSince[sessionID] = record.LastSampleAt
-		}
 		return ProgressReceiptV3{Outcome: ProgressAppliedV3, Accepted: &sample}, nil
 	}
 	return ResolveUnappliedProgressV3(record.LastSequence, record.LastSample, sample)
@@ -590,7 +574,6 @@ func (s *MemoryPlanStoreV3) StopAttempt(_ context.Context, sessionID, stopID str
 	record.StopID = stopID
 	record.LastSampleAt = now
 	s.attempts[attemptID] = *record
-	delete(s.pausedSince, sessionID)
 	receipt := StopReceiptV3{StopID: stopID}
 	if record.LastSample != nil {
 		accepted := *record.LastSample
@@ -601,30 +584,6 @@ func (s *MemoryPlanStoreV3) StopAttempt(_ context.Context, sessionID, stopID str
 	}
 	s.stopReceipts[sessionID] = receipt
 	return receipt, true, nil
-}
-
-func (s *MemoryPlanStoreV3) ExpirePausedAttempt(_ context.Context, sessionID, stopID string, timeout time.Duration) (bool, error) {
-	if _, err := uuid.Parse(stopID); err != nil {
-		return false, ErrInvalidStopIDV3
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	attemptID, record := s.findAttemptLocked(sessionID)
-	since, paused := s.pausedSince[sessionID]
-	if timeout <= 0 || record == nil || record.StoppedAt != nil || record.LastSample == nil || !record.LastSample.IsPaused ||
-		!paused || time.Since(since) < timeout {
-		return false, nil
-	}
-	now := time.Now()
-	record.StoppedAt, record.StopID, record.LastSampleAt = &now, stopID, now
-	s.attempts[attemptID] = *record
-	accepted := *record.LastSample
-	if s.stopReceipts == nil {
-		s.stopReceipts = make(map[string]StopReceiptV3)
-	}
-	s.stopReceipts[sessionID] = StopReceiptV3{StopID: stopID, Accepted: &accepted}
-	delete(s.pausedSince, sessionID)
-	return true, nil
 }
 
 func (s *MemoryPlanStoreV3) RecordStopReceipt(_ context.Context, sessionID string, receipt StopReceiptV3) error {
