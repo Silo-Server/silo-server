@@ -155,7 +155,7 @@ function SettingRow({
         <Trash2 className="h-3.5 w-3.5" />
       </Button>
       <div className="min-w-0">
-        <div className="text-muted-foreground text-[11px] font-medium">
+        <div className="text-muted-foreground text-[0.6875rem] font-medium">
           {definition
             ? categoryTitle(definition.category)
             : t("web.admin.users.detail.preferences.row.notInVersion")}
@@ -340,7 +340,7 @@ export function LevelSettings({
         {level.entries.length === 0 ? (
           <div className="px-5 py-10 text-center">
             <p className="text-sm font-medium">{empty.title}</p>
-            <p className="text-muted-foreground mt-1 text-[13px]">{empty.detail}</p>
+            <p className="text-muted-foreground mt-1 text-[0.8125rem]">{empty.detail}</p>
             {picker ? <div className="mt-3 flex justify-center">{picker}</div> : null}
           </div>
         ) : (

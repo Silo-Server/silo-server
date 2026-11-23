@@ -78,11 +78,11 @@ export function EgressWidget() {
           // Secondary to the peak: when the header is too narrow for both
           // beside the range picker, the total is dropped rather than
           // truncated. CardHeader is the `card-header` container.
-          <span className="text-muted-foreground hidden text-[11px] whitespace-nowrap tabular-nums @md/card-header:inline">
+          <span className="text-muted-foreground hidden text-[0.6875rem] whitespace-nowrap tabular-nums @md/card-header:inline">
             {t("web.admin.dashboard.widgets.egress.total", { value: formatDataTotal(totalBytes) })}
           </span>
         ) : null}
-        <span className="text-muted-foreground text-[11px] whitespace-nowrap tabular-nums">
+        <span className="text-muted-foreground text-[0.6875rem] whitespace-nowrap tabular-nums">
           {t("web.admin.dashboard.widgets.egress.peak", { value: formatMbps(peak) })}
         </span>
         {bands ? (

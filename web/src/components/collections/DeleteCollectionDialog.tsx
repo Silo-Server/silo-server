@@ -126,7 +126,7 @@ export function DeleteCollectionDialog({
                     aria-label={t("web.collections.deleteDialog.openRowNamed", {
                       title: row.title,
                     })}
-                    className="shrink-0 text-[13px] font-medium underline underline-offset-4"
+                    className="shrink-0 text-[0.8125rem] font-medium underline underline-offset-4"
                   >
                     {openRow()}
                   </Link>

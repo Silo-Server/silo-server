@@ -627,7 +627,7 @@ export default function HistoryImportSettings() {
                       <div className="text-sm font-medium">
                         {t("web.settings.historyImport.finishingPlexSignIn")}
                       </div>
-                      <p className="text-muted-foreground text-[13px]">
+                      <p className="text-muted-foreground text-[0.8125rem]">
                         {t("web.settings.historyImport.plexContinue")}
                       </p>
                     </div>

@@ -1033,7 +1033,7 @@ function SourceBar({
                 <SelectItem key={s.id} value={String(s.id)}>
                   <span className="flex items-center gap-2">
                     {s.name}
-                    <Badge variant="outline" className="text-[10px] capitalize">
+                    <Badge variant="outline" className="text-[0.625rem] capitalize">
                       {s.source_type}
                     </Badge>
                   </span>
@@ -1465,11 +1465,11 @@ function RunsSection({ sourceId }: { sourceId: number }) {
                           })}
                         </p>
                         {run.connection_mode === "admin_token" ? (
-                          <Badge variant="outline" className="text-[10px]">
+                          <Badge variant="outline" className="text-[0.625rem]">
                             {t("web.admin.historyImport.runs.badgeAdmin")}
                           </Badge>
                         ) : (
-                          <Badge variant="secondary" className="text-[10px]">
+                          <Badge variant="secondary" className="text-[0.625rem]">
                             {t("web.admin.historyImport.runs.badgeSelf")}
                           </Badge>
                         )}

@@ -249,7 +249,9 @@ export default function Collections() {
             onChange={changeShow}
           />
         ) : null}
-        {emptyMessage ? <p className="text-muted-foreground text-[13px]">{emptyMessage}</p> : null}
+        {emptyMessage ? (
+          <p className="text-muted-foreground text-[0.8125rem]">{emptyMessage}</p>
+        ) : null}
         {/* The personal cards' place while they load; the server's don't wait for them. */}
         {personalLoading ? <PosterGridSkeleton /> : null}
         <Wall
@@ -274,7 +276,7 @@ export default function Collections() {
         />
         {serverLoading && !personalLoading ? <PosterGridSkeleton /> : null}
         {show === "mine" && canReorder && own.length > 1 ? (
-          <p className="text-muted-foreground flex items-center gap-2 text-[13px]">
+          <p className="text-muted-foreground flex items-center gap-2 text-[0.8125rem]">
             <GripVertical aria-hidden className="size-3.5" />
             {t("web.collections.page.reorderHint")}
           </p>
