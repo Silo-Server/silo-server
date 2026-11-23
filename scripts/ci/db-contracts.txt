@@ -487,6 +487,10 @@
 ./internal/metadata TestLocalArtworkCopiedOnDiscoveryDB
 ./internal/metadata TestLocalArtworkRetriesWithoutLibraryRootDB
 
+# A manual refresh of a job waiting for a full artwork store starts its wait
+# over at the short delay, whether or not the wait has run out.
+./internal/metadata TestLocalArtworkWaitsForStorageSpaceDB
+
 # A re-cached sidecar leaves its old copy to the reference-checked revision
 # GC, which keeps a copy published again since the re-cache.
 ./internal/metadata TestRecachedSidecarRetiresTheOldCopyThroughRevisionGCDB
