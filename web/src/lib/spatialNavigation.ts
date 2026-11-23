@@ -156,7 +156,6 @@ function isTextEntry(el: Element): boolean {
 // rest step a number or a date or time segment.
 const INPUTS_OWNING_ALL_ARROWS = new Set([
   "radio",
-  "range",
   "number",
   "date",
   "time",
@@ -165,8 +164,17 @@ const INPUTS_OWNING_ALL_ARROWS = new Set([
   "week",
 ]);
 
-// Inputs with a caret, which keep Left and Right to move it.
-const INPUTS_WITH_CARET = new Set(["text", "search", "email", "url", "tel", "password"]);
+// Inputs that keep Left and Right to move a caret or step a slider. A slider
+// hands Up and Down on, because they are a remote's only way off it.
+const INPUTS_OWNING_LEFT_RIGHT = new Set([
+  "text",
+  "search",
+  "email",
+  "url",
+  "tel",
+  "password",
+  "range",
+]);
 
 /**
  * Whether the focused element uses this arrow itself. A text field keeps Left
@@ -179,7 +187,7 @@ function ownsArrow(el: Element, direction: NavDirection): boolean {
   if (el instanceof HTMLMediaElement) return true;
   if (el instanceof HTMLInputElement) {
     if (INPUTS_OWNING_ALL_ARROWS.has(el.type)) return true;
-    if (INPUTS_WITH_CARET.has(el.type)) return direction === "left" || direction === "right";
+    if (INPUTS_OWNING_LEFT_RIGHT.has(el.type)) return direction === "left" || direction === "right";
   }
   return false;
 }

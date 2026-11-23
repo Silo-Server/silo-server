@@ -11,6 +11,7 @@ import "@/styles/player-hud.css";
 import { useCoarsePointer } from "../hooks/useCoarsePointer";
 import { useT } from "@/i18n";
 import { readingArrowKey } from "@/lib/direction";
+import { isRemoteBack } from "@/hooks/useRemoteBackKey";
 
 interface PlayerMenuSurfaceProps {
   children: ReactNode;
@@ -144,7 +145,8 @@ export function PlayerMenuSurface({
 
   useEffect(() => {
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
+      // A remote may send Back as Backspace or GoBack rather than Escape.
+      if (isRemoteBack(event)) onClose();
     };
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
