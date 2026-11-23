@@ -940,6 +940,10 @@
 ./internal/plugins TestProvisionPackageCommitAndRollbackDB
 ./internal/plugins TestAutoUpdateClearsWithdrawnNoticeDB
 
+# An update check records its offer only while the plugin still holds the
+# release it read, so a stale offer can't land on a newer install.
+./internal/plugins TestNotifyPluginUpdateDropsAnOfferForAReplacedReleaseDB
+
 # A plugin build stored for another platform is served only for the package it
 # was fetched for, and a fetch that an update overtook stores nothing.
 ./internal/plugins TestPlatformArchiveFollowsTheInstalledPackageDB

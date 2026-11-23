@@ -476,8 +476,12 @@ func (s *Service) UpdateToAvailableVersion(ctx context.Context, installationID i
 	if err != nil {
 		return nil, err
 	}
-	if installation.AvailableVersion == nil || *installation.AvailableVersion == "" {
-		return nil, fmt.Errorf("no update available for plugin %q", installation.PluginID)
+	// A recorded version that isn't newer than the installed one is a stale
+	// offer, such as one recorded after an admin installed a newer release:
+	// installing it would downgrade the plugin (#4518).
+	if installation.AvailableVersion == nil || *installation.AvailableVersion == "" ||
+		compareVersions(*installation.AvailableVersion, installation.Version) <= 0 {
+		return nil, fmt.Errorf("%w %q", ErrNoUpdateAvailable, installation.PluginID)
 	}
 
 	targetVersion := *installation.AvailableVersion
@@ -495,14 +499,9 @@ func (s *Service) UpdateToAvailableVersion(ctx context.Context, installationID i
 		return nil, fmt.Errorf("update plugin %q to %s: %w", installation.PluginID, targetVersion, err)
 	}
 
-	// Clear available_version now that we've updated.
-	empty := ""
-	if err := s.installations.Update(ctx, installationID, UpdateInstallationInput{
-		AvailableVersion: &empty,
-	}); err != nil {
-		slog.WarnContext(ctx, "failed to clear available_version after update", "component", "plugins",
-			"installation_id", installationID, "error", err)
-	}
+	// The replacement cleared available_version in its own transaction. A
+	// second clear here would erase a newer release an update check recorded
+	// since (#4518).
 
 	// Reload and return the updated installation.
 	return s.installations.GetByID(ctx, installationID)

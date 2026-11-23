@@ -207,6 +207,14 @@ func TestAutoUpdateClearsWithdrawnNoticeDB(t *testing.T) {
 		t.Fatalf("clearing the old notice after a concurrent check returned %v", err)
 	}
 	checkNotice(newNotice, 1)
+
+	// A notice no newer than the installed release, as a stale check could
+	// record before #4518, is cleared: applying it is refused (409), so
+	// keeping it would leave an Update button that can never succeed.
+	if _, err := pool.Exec(ctx, `UPDATE plugin_installations SET version = '2.0.0' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	checkNotice("", 2)
 }
 
 func newProvisionCommitFixture(t *testing.T, pool *pgxpool.Pool) (*CatalogService, *Installer) {
