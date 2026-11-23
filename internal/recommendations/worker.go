@@ -106,8 +106,11 @@ type Worker struct {
 	profileRefreshPending map[string]struct{}
 	// profileRefreshAgain holds pending profiles whose signals changed while
 	// their refresh ran; see runProfileRefresh.
-	profileRefreshAgain  map[string]struct{}
-	refreshesNow         atomic.Int32 // RefreshProfileNow refreshes running
+	profileRefreshAgain map[string]struct{}
+	refreshesNow        atomic.Int32 // RefreshProfileNow refreshes running
+	// embedMissingAgain records a catch-up pass EmbedMissingNow asked for
+	// while an embeddings job ran here; the job runs it before it ends.
+	embedMissingAgain    bool
 	readRefreshes        refreshThrottle
 	cancelFunc           context.CancelFunc
 	embeddingsJobTimeout time.Duration
@@ -272,13 +275,53 @@ func (w *Worker) embedMissingJob() job {
 	}
 }
 
-// EmbedMissingNow starts the catch-up pass in the background unless an
-// embedding run holds the job here or on another server. Startup calls it
-// when items need embeddings, so an interrupted backfill resumes at once.
+// EmbedMissingNow starts the catch-up pass in the background. Startup calls
+// it when items need embeddings, so an interrupted backfill resumes at once.
+// When an embeddings job is already running on this server, it asks that job
+// to run the catch-up pass again before it ends: content IDs are not ordered
+// by age, so the running pass can have walked past items added since it
+// started. Requests made during one run come to one more pass. When the job
+// runs on another server, the request is dropped; that run and the next
+// catch-up tick cover the items. So is a request that lands as a run here
+// finishes, after it last checked.
 func (w *Worker) EmbedMissingNow() {
-	if err := w.runJob(w.embedMissingJob(), true); err != nil {
-		slog.Info("embedding catch-up not started", "component", "recommendations", "reason", err)
+	for {
+		err := w.runJob(w.embedMissingJob(), true)
+		if errors.Is(err, ErrJobRunning) {
+			if w.askEmbedMissingAgain() {
+				slog.Info("embedding run in progress; catch-up pass queued after it", "component", "recommendations")
+				return
+			}
+			continue // the run ended in between: start one
+		}
+		if err != nil {
+			slog.Info("embedding catch-up not started", "component", "recommendations", "reason", err)
+		}
+		return
 	}
+}
+
+// askEmbedMissingAgain asks the embeddings job running on this server to run
+// the catch-up pass again before it ends. It reports false when none is
+// running.
+func (w *Worker) askEmbedMissingAgain() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.running[JobEmbeddings] {
+		return false
+	}
+	w.embedMissingAgain = true
+	return true
+}
+
+// takeEmbedMissingAgain reports whether a catch-up pass was asked for since
+// the last call, and clears the request.
+func (w *Worker) takeEmbedMissingAgain() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	again := w.embedMissingAgain
+	w.embedMissingAgain = false
+	return again
 }
 
 // embedMissingLoop runs the catch-up pass every embedMissingInterval.
@@ -596,13 +639,31 @@ func newEmbeddingsResult(counts EmbedCounts, err error, missingOnly bool) embedd
 }
 
 func (w *Worker) doEmbeddings(ctx context.Context, held clusterLock) (embeddingsResult, error) {
-	counts, err := w.engine.embed(ctx, held, true)
+	counts, err := w.embedAsked(ctx, held, true)
 	return newEmbeddingsResult(counts, err, false), err
 }
 
 func (w *Worker) doEmbedMissing(ctx context.Context, held clusterLock) (embeddingsResult, error) {
-	counts, err := w.engine.embed(ctx, held, false)
+	counts, err := w.embedAsked(ctx, held, false)
 	return newEmbeddingsResult(counts, err, true), err
+}
+
+// embedAsked runs one embedding run, then the catch-up pass again for as long
+// as EmbedMissingNow asked for one during the last pass, and adds up their
+// counts. A pass that fails ends it. A request made before the run started is
+// served by it.
+func (w *Worker) embedAsked(ctx context.Context, held clusterLock, includeTextStale bool) (EmbedCounts, error) {
+	w.takeEmbedMissingAgain()
+	counts, err := w.engine.embed(ctx, held, includeTextStale)
+	for err == nil && w.takeEmbedMissingAgain() {
+		var more EmbedCounts
+		more, err = w.engine.embed(ctx, held, false)
+		counts.Embedded += more.Embedded
+		counts.Truncated += more.Truncated
+		counts.Failed += more.Failed
+		counts.Skipped += more.Skipped
+	}
+	return counts, err
 }
 
 type tasteProfilesResult struct {

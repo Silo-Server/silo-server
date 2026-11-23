@@ -41,7 +41,7 @@ connection for its locks.
 | Job | When | What |
 | --- | --- | --- |
 | Embeddings | `recommendations.embeddings_cron` (03:00) | Pass 1 then Pass 2, below |
-| Embedding catch-up | every 15 minutes, and at startup when items need it | Pass 1 only, under the embeddings job's claim; idle runs are not recorded, failed ones are |
+| Embedding catch-up | every 15 minutes, and at startup when items need it | Pass 1 only, under the embeddings job's claim; a request made while an embedding run holds the job on the same server runs Pass 1 again before that job ends; idle runs are not recorded, failed ones are |
 | Taste profiles | `recommendations.taste_profiles_cron` (04:00) | Rebuild every profile with signals or a taste row |
 | Co-watch | `recommendations.cowatch_cron` (04:30) | Rebuild `item_cowatch`, pruning pairs the run did not rewrite |
 | Cache | `recommendations.recommendations_cron` (05:00) | Global rows, then the rows of every profile with a taste-profile row, oldest For You row first (profiles without one first) |
