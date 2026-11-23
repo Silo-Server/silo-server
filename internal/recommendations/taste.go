@@ -1,12 +1,14 @@
 package recommendations
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
 	"maps"
 	"math"
 	"slices"
+	"strings"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -371,7 +373,10 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		}
 	}
 
-	embMap, err := e.repo.GetBatchEmbeddings(ctx, allIDs)
+	// Only the heaviest positive titles shape the vector and its clusters, so
+	// a long history costs at most tasteMaxTitles embeddings in memory and in
+	// k-means; time decay leaves the rest of it little weight.
+	embMap, err := e.repo.GetBatchEmbeddings(ctx, heaviestPositiveTitles(signals, tasteMaxTitles))
 	if err != nil {
 		return false, fmt.Errorf("get batch embeddings: %w", err)
 	}
@@ -422,6 +427,39 @@ func ratingSignal(rating int) (float64, string) {
 	default:
 		return WeightRatedLow, signalKindRatedLow
 	}
+}
+
+// tasteMaxTitles is the most titles a taste profile and its clusters are
+// built from.
+const tasteMaxTitles = 2000
+
+// heaviestPositiveTitles returns up to limit of the titles positiveTasteItems
+// would keep, heaviest combined weight first, ties by ID.
+func heaviestPositiveTitles(signals map[string]*canonicalWeightComponents, limit int) []string {
+	type weighted struct {
+		id     string
+		weight float64
+	}
+	var titles []weighted
+	for id, s := range signals {
+		if s.NotInterested {
+			continue
+		}
+		if w := combineCanonicalWeight(s.Rating, s.ExplicitWeight, s.ImplicitWeight, s.IntentWeight); w > 0 {
+			titles = append(titles, weighted{id, w})
+		}
+	}
+	slices.SortFunc(titles, func(a, b weighted) int {
+		if c := cmp.Compare(b.weight, a.weight); c != 0 {
+			return c
+		}
+		return strings.Compare(a.id, b.id)
+	})
+	ids := make([]string, 0, min(limit, len(titles)))
+	for _, t := range titles[:min(limit, len(titles))] {
+		ids = append(ids, t.id)
+	}
+	return ids
 }
 
 // positiveTasteItems returns the titles that shape the taste vector and its

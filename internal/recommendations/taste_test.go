@@ -682,3 +682,30 @@ func TestTasteProfileSummaryGenresComeFromTheClustersPostgres(t *testing.T) {
 		t.Fatalf("top genres = %v, want %v", summary.TopGenres, want)
 	}
 }
+
+// A long history builds the taste profile from its heaviest positive titles
+// alone: Not interested and non-positive titles never count, and ties keep a
+// stable order, so the cap drops the lightest of the decayed tail.
+func TestHeaviestPositiveTitlesKeepsTheHeaviestUpToTheLimit(t *testing.T) {
+	signals := map[string]*canonicalWeightComponents{
+		"light":    {ImplicitWeight: 0.2},
+		"heavy":    {ImplicitWeight: 3},
+		"tie-b":    {ImplicitWeight: 1},
+		"tie-a":    {ImplicitWeight: 1},
+		"marked":   {ImplicitWeight: 9, NotInterested: true},
+		"disliked": {ImplicitWeight: -1},
+	}
+	tests := []struct {
+		limit int
+		want  []string
+	}{
+		{limit: 10, want: []string{"heavy", "tie-a", "tie-b", "light"}},
+		{limit: 2, want: []string{"heavy", "tie-a"}},
+		{limit: 0, want: []string{}},
+	}
+	for _, tt := range tests {
+		if got := heaviestPositiveTitles(signals, tt.limit); !slices.Equal(got, tt.want) {
+			t.Errorf("heaviestPositiveTitles(limit %d) = %v, want %v", tt.limit, got, tt.want)
+		}
+	}
+}
