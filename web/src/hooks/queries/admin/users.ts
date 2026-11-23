@@ -168,10 +168,12 @@ function invalidateAdminDeviceCaches(
 ) {
   // Device overrides derive from the canonical values list, which lives under
   // the userSettings key.
-  queryClient.invalidateQueries({
-    queryKey: [...adminUsersKey(adminUserScope(authority)), "settings", userId],
-  });
-  queryClient.invalidateQueries({ queryKey: adminKeys.devices() });
+  return Promise.all([
+    queryClient.invalidateQueries({
+      queryKey: [...adminUsersKey(adminUserScope(authority)), "settings", userId],
+    }),
+    queryClient.invalidateQueries({ queryKey: adminKeys.devices() }),
+  ]);
 }
 
 export const adminUsersKey = (scope = adminUserScope()) => [...adminKeys.users(), scope];
@@ -471,10 +473,13 @@ export function useUpdateAdminUserDeviceSetting() {
       ),
     onSuccess: (_data, variables) => {
       toast.success(t("web.admin.common.users.deviceOverrideUpdated"));
-      invalidateAdminDeviceCaches(queryClient, variables.userId, authority);
       queryClient.invalidateQueries({
         queryKey: adminKeys.deviceDetail(variables.userId, variables.deviceId),
       });
+      // Settle once the device rows show the save: the subtitle appearance
+      // editor builds each save on that row, and a reopened editor starts
+      // from it.
+      return invalidateAdminDeviceCaches(queryClient, variables.userId, authority);
     },
     onError: (err) => {
       toastSettingWriteError(err, t("web.admin.common.users.deviceOverrideSaveFailed"));

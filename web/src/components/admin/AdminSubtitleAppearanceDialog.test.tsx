@@ -106,3 +106,22 @@ it("doesn't send a queued change after the editor closes", async () => {
 
   expect(onSave).toHaveBeenCalledTimes(1);
 });
+
+it("reopens on the change still saving and sends the next one after it", async () => {
+  const first = deferred();
+  const onSave = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+  const { unmount } = renderDialog(onSave);
+
+  fireEvent.click(radio("Large"));
+  unmount();
+  // The device list hasn't refreshed yet, so the reopened editor gets the old row.
+  renderDialog(onSave);
+
+  expect(radio("Large")).toHaveAttribute("aria-checked", "true");
+  fireEvent.click(radio("Monospace"));
+  expect(onSave).toHaveBeenCalledTimes(1);
+  await act(async () => first.resolve());
+
+  expect(onSave).toHaveBeenCalledTimes(2);
+  expect(savedValue(onSave, 1)).toMatchObject({ fontSize: "large", fontFamily: "monospace" });
+});

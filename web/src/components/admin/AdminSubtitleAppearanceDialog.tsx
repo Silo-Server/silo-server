@@ -7,7 +7,8 @@ import type { AdminDeviceSetting } from "@/hooks/queries/admin/users";
 interface AdminSubtitleAppearanceDialogProps {
   /**
    * The setting being edited. The parent mounts the dialog only while it is
-   * open, so each open starts its draft from this value. The setting may be a
+   * open, so each open starts its draft from this value, unless a save from
+   * an earlier open is still in flight; then it continues from that save. The setting may be a
    * real override or a synthesized default-row from the manifest;
    * `isOverride` decides whether the reset action is offered.
    */
@@ -47,7 +48,11 @@ export function AdminSubtitleAppearanceDialog({
   onReset,
 }: AdminSubtitleAppearanceDialogProps) {
   const t = useT();
-  const draft = useAutosavedDraft(parseSubtitleAppearance(setting.value));
+  // Keyed by the stored value, so reopening during a save continues from it.
+  const draft = useAutosavedDraft(
+    parseSubtitleAppearance(setting.value),
+    JSON.stringify([setting.user_id, setting.profile_id, setting.device_id, setting.key]),
+  );
 
   const handleChange = (patch: Partial<SubtitleAppearance>) =>
     draft.edit(patch, (next) => onSave(setting, JSON.stringify(next)));
