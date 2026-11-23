@@ -458,9 +458,12 @@ where its response is buffered; a raw registration's or a v2 middleware's is
 caught by `recoverRaw` (`internal/apiv2/observe.go`). Either way the panic is
 logged once as `apiv2 handler panic`, with its value masked by
 `logredact.SanitizeText`. If nothing was written yet, the client gets the
-`internal_error` problem, recorded as a 5xx. A raw response that already sent
-its status, or a hijacked connection, is broken with `http.ErrAbortHandler`
-instead and recorded as aborted.
+`internal_error` problem, recorded as a 5xx; a raw handler's representation
+headers are dropped and the listener's and route's headers (CORS, `nosniff`)
+kept. A raw response that already sent its status is broken with
+`http.ErrAbortHandler` instead and recorded as aborted. A hijacked connection
+is recorded as aborted too, but net/http leaves it open: the handler that
+hijacked it must close it.
 
 ## Jellyfin-compatible listener
 

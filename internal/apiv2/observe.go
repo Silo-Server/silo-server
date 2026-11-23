@@ -182,9 +182,11 @@ func observe(next http.Handler) http.Handler {
 // registration or from a v2 chi middleware. Without it the panic would unwind
 // past observe unrecorded, to the listener-wide recoverer, whose empty 500
 // differs from the internal_error problem every Huma operation answers with.
-// A response that is already committed (or a hijacked connection) cannot be
-// replaced, so it is broken with http.ErrAbortHandler and recorded as aborted,
-// as a handler that aborts itself is. That sentinel passes through untouched.
+// A response that is already committed cannot be replaced, so it is broken
+// with http.ErrAbortHandler and recorded as aborted, as a handler that aborts
+// itself is. A hijacked connection is recorded the same way, but it belongs to
+// the handler: net/http does not close it, so the handler's own cleanup must.
+// That sentinel passes through untouched.
 func recoverRaw(next http.Handler, sw *statusRecorder) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		defer func() {
@@ -199,19 +201,27 @@ func recoverRaw(next http.Handler, sw *statusRecorder) http.Handler {
 			if sw.status != 0 || sw.hijacked {
 				panic(http.ErrAbortHandler)
 			}
-			// Drop the half-built raw response's headers, keeping the request
-			// ID, as bufferResponse does for a Huma operation. Raw
-			// registrations carry no retirement headers.
+			// Drop the headers that describe the handler's unsent body. The
+			// rest stay: the listener's and the route's (request ID, nosniff,
+			// media CORS), so a cross-origin player can still read the problem.
 			h := w.Header()
-			requestID := h[RequestIDHeader] //nolint:staticcheck // exact contract spelling
-			clear(h)
-			if len(requestID) > 0 {
-				h[RequestIDHeader] = requestID
+			for _, name := range rawRepresentationHeaders {
+				h.Del(name)
 			}
 			writeProblem(w, r, NewProblem(TypeInternalError, "An unexpected error occurred."))
 		}()
 		next.ServeHTTP(w, r)
 	})
+}
+
+// rawRepresentationHeaders describe a raw handler's own body. writeProblem
+// replaces Content-Type and Cache-Control itself.
+//
+//nolint:goconst // plain header names; the package's constants are named for other features
+var rawRepresentationHeaders = []string{
+	"Accept-Ranges", "Content-Disposition", "Content-Encoding", "Content-Language",
+	"Content-Length", "Content-Range", "Content-Security-Policy", "ETag",
+	"Last-Modified", "Location", "Trailer",
 }
 
 // logHandlerPanic logs a recovered v2 handler panic with its stack. The panic

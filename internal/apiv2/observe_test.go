@@ -320,6 +320,7 @@ func TestObservedRawPanicIsAnsweredAndRecorded(t *testing.T) {
 			before := counterValue(t, requestsTotal, labels)
 			h := observe(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Length", "99")
+				w.Header().Set("Access-Control-Allow-Origin", "*")
 				if tc.write {
 					_, _ = w.Write([]byte("partial"))
 				}
@@ -338,7 +339,7 @@ func TestObservedRawPanicIsAnsweredAndRecorded(t *testing.T) {
 			if rec != wantRec {
 				t.Fatalf("recovered %v, want %v", rec, wantRec)
 			}
-			if !tc.write && (rr.Code != http.StatusInternalServerError || rr.Header().Get("Content-Type") != problemContentType || rr.Header().Get("Content-Length") != "" || !strings.Contains(rr.Body.String(), TypeInternalError.ID)) {
+			if !tc.write && (rr.Code != http.StatusInternalServerError || rr.Header().Get("Content-Type") != problemContentType || rr.Header().Get("Content-Length") != "" || rr.Header().Get("Access-Control-Allow-Origin") != "*" || !strings.Contains(rr.Body.String(), TypeInternalError.ID)) {
 				t.Fatalf("response = %d %v %s, want the internal_error problem", rr.Code, rr.Header(), rr.Body.String())
 			}
 			if got := counterValue(t, requestsTotal, labels) - before; got != 1 {
