@@ -87,9 +87,32 @@ export function rangePhrase(range: WidgetRange): string {
   return t(RANGE_PHRASES[range]);
 }
 
-/** "Playback activity · last 24 h" — one format for every ranged widget. */
+/** Stands in for the title while the translated frame around it is formatted. */
+const TITLE_MARK = "\ue000";
+
+/**
+ * "Playback activity · last 24 h" — one format for every ranged widget.
+ *
+ * A narrow card wraps the title, so the translated window ("· last 24 h") is
+ * joined with no-break spaces and the line can only break between it and the
+ * widget's name: the space next to the title stays a normal one.
+ */
 export function rangeTitle(title: string, range: WidgetRange): string {
-  return t(RANGE_TITLES[range], { title });
+  const frame = t(RANGE_TITLES[range], { title: TITLE_MARK });
+  const at = frame.indexOf(TITLE_MARK);
+  if (at < 0) {
+    return t(RANGE_TITLES[range], { title });
+  }
+  const before = frame.slice(0, at);
+  const after = frame.slice(at + TITLE_MARK.length);
+  // The last space before the title and the first one after it stay breakable.
+  const lead = before.replace(/ +(?=.* )/gsu, nonBreaking);
+  const trail = after.replace(/(?<= .*) +/gsu, nonBreaking);
+  return lead + title + trail;
+}
+
+function nonBreaking(spaces: string): string {
+  return "\u00a0".repeat(spaces.length);
 }
 
 /** Axis edges: how far back the window starts, and where it ends. */
