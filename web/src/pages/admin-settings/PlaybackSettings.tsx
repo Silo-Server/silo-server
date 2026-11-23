@@ -29,6 +29,7 @@ import { SaveBar } from "@/components/SaveBar";
 import { useT } from "@/i18n";
 import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
+import { PausedPlaybackGroup } from "./PausedPlaybackGroup";
 import { TrickplayNodeCapacityField } from "./TrickplayNodeCapacityField";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
@@ -48,7 +49,6 @@ import {
 import {
   KEYS,
   MARKER_KEYS,
-  PAUSED_PLAYBACK_KEYS,
   PREVIEW_ADVANCED_KEYS,
   PREVIEW_IMAGE_KEYS,
   PREVIEW_PLACEMENT_KEYS,
@@ -279,20 +279,7 @@ export default function PlaybackSettings() {
           />
         </FieldGroup>
 
-        <FieldGroup
-          label={t("web.admin.settings.playback.pausedPlayback.group")}
-          restartAll={allRestart(PAUSED_PLAYBACK_KEYS)}
-        >
-          <SettingField
-            label={t("web.admin.settings.playback.pausedPlayback.timeout")}
-            type="number"
-            unit={t("web.admin.settings.playback.unitMinutes")}
-            description={t("web.admin.settings.playback.pausedPlayback.timeoutDescription")}
-            value={form.getValue("playback.paused_session_timeout_minutes")}
-            onChange={(v) => form.setValue("playback.paused_session_timeout_minutes", v)}
-            restartRequired={restartKeys.has("playback.paused_session_timeout_minutes")}
-          />
-        </FieldGroup>
+        <PausedPlaybackGroup form={form} />
 
         <FieldGroup
           label={t("web.admin.settings.playback.transcoding.group")}
