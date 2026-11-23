@@ -259,13 +259,29 @@ func carriedServerSpecific(key string) bool {
 	return ok && kind == SettingKindServerSpecific && !rotated && key != plugins.ProvisionRestoreHoldKey
 }
 
-// ServerSpecificSettingKeys lists the server-specific settings liveURL
-// holds that CarryServerSpecificSettings gives a restored database, sorted.
-func (l PGLoader) ServerSpecificSettingKeys(ctx context.Context, liveURL string) ([]string, error) {
+// ServerSpecificSettingKeys lists, sorted, the server-specific settings
+// liveURL holds a value for that CarryServerSpecificSettings gives a
+// restored database. An empty value, and an AI provider registry with no
+// providers (which a server's first start writes), supply nothing and are
+// left out. cipher (nil for none) opens the encrypted ones; one it cannot
+// open is listed.
+func (l PGLoader) ServerSpecificSettingKeys(ctx context.Context, liveURL string, cipher *secret.Cipher) ([]string, error) {
 	live, err := allSettingsAt(ctx, liveURL, carriedServerSpecific)
 	if err != nil {
 		return nil, fmt.Errorf("reading the live server's settings: %w", err)
 	}
+	maps.DeleteFunc(live, func(key, value string) bool {
+		if cipher != nil {
+			if plain, err := cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key)); err == nil {
+				value = plain
+			}
+		}
+		if key == config.AIProvidersSettingKey {
+			registry, err := config.ParseAIProviderRegistry(value)
+			return err == nil && len(registry.Providers) == 0
+		}
+		return strings.TrimSpace(value) == ""
+	})
 	return slices.Sorted(maps.Keys(live)), nil
 }
 

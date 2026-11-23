@@ -26,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/backup/backuptest"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/s3client/s3test"
@@ -1691,7 +1692,7 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 	}
 	// The restore's report leaves out exactly the settings the carry takes
 	// from the live server.
-	liveOwn, err := (PGLoader{}).ServerSpecificSettingKeys(ctx, liveURL)
+	liveOwn, err := (PGLoader{}).ServerSpecificSettingKeys(ctx, liveURL, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1707,6 +1708,42 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 	slices.Sort(fromLive)
 	if !slices.Equal(liveOwn, fromLive) {
 		t.Errorf("ServerSpecificSettingKeys = %v, want the settings the carry takes from the live server %v", liveOwn, fromLive)
+	}
+	// A server that never set one up still holds an empty AI provider
+	// registry, which its first start writes, and empty search settings:
+	// they supply nothing, so the report still lists what the backup loses.
+	cipher, err := secret.New([]byte("server-specific-test-key-0123456789"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	seal := func(key, value string) string {
+		t.Helper()
+		sealed, err := cipher.Encrypt(value, secret.SettingsAAD(key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sealed
+	}
+	noProviders, _, _ := config.PlanAIProviderConversion(nil)
+	oneProvider := `{"version":2,"providers":[{"id":"custom-now","type":"custom","name":"Now","base_url":"http://ai.now.invalid/v1","capabilities":["chat"]}]}`
+	for registry, want := range map[string][]string{
+		noProviders[config.AIProvidersSettingKey]: {"notifications.web_push.vapid_keypair"},
+		oneProvider: {config.AIProvidersSettingKey, "notifications.web_push.vapid_keypair"},
+	} {
+		empty, emptyURL := open()
+		for key, value := range map[string]string{
+			config.AIProvidersSettingKey:           seal(config.AIProvidersSettingKey, registry),
+			catalog.SearchSettingMeilisearchURL:    "",
+			catalog.SearchSettingMeilisearchAPIKey: "",
+			"notifications.web_push.vapid_keypair": seal("notifications.web_push.vapid_keypair", "pair"),
+		} {
+			if _, err := empty.Exec(ctx, `INSERT INTO server_settings VALUES ($1, $2)`, key, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if got, err := (PGLoader{}).ServerSpecificSettingKeys(ctx, emptyURL, cipher); err != nil || !slices.Equal(got, want) {
+			t.Errorf("ServerSpecificSettingKeys with registry %s = %v (%v), want %v", registry, got, err, want)
+		}
 	}
 	for i, key := range keys {
 		var got *string

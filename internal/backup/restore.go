@@ -620,8 +620,9 @@ type DatabaseLoader interface {
 	// settings and returns how many it changed.
 	CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string) (int, error)
 	// ServerSpecificSettingKeys lists the server-specific settings liveURL
-	// holds that CarryServerSpecificSettings gives a restored database.
-	ServerSpecificSettingKeys(ctx context.Context, liveURL string) ([]string, error)
+	// holds a value for that CarryServerSpecificSettings gives a restored
+	// database. cipher (nil for none) opens the encrypted ones.
+	ServerSpecificSettingKeys(ctx context.Context, liveURL string, cipher *secret.Cipher) ([]string, error)
 	// CarryOutboundSettings gives dbURL liveURL's outbound settings, each
 	// bundle as a unit, clearing the secrets of one liveURL lacks ("" for
 	// none), and returns the bundles carried and cleared. cipher (nil for

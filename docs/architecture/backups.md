@@ -1874,7 +1874,8 @@ another key needs `--accept-lost-credentials`: its encrypted settings and creden
 read with this key. Silo refuses to start on a setting it cannot decrypt, so
 after verification such a restore deletes, in the restored database, every
 encrypted `server_settings` row this key cannot open and prints their key
-names (never values) for the admin to enter again. Rows are only deleted,
+names (never values) for the admin to enter again, except, on a replace, the
+server-specific ones the live server supplies (below). Rows are only deleted,
 never renamed: a value is bound to its key name.
 
 ### Connections to outside services
@@ -1902,7 +1903,8 @@ full restore then takes the list and bindings from the live server with its
 server-specific settings (below), so it lists a cleared unit with a setting
 the live server supplies that way as kept, not for re-entry, and leaves the
 settings it supplies out of the list of those the key cannot read
-(`ServerSpecificSettingKeys`). `TestEveryCredentialSettingIsDecided`
+(`ServerSpecificSettingKeys`). An empty value, or a provider list with no
+providers as a server's first start writes it, supplies nothing. `TestEveryCredentialSettingIsDecided`
 fails on an encrypted setting that is neither in a unit nor this server's
 own (signing keys, storage, Redis, the web push key pair).
 

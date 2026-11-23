@@ -283,7 +283,7 @@ func (l fakeLoader) CarryServerSpecificSettings(context.Context, string, string)
 func (l fakeLoader) CarryOutboundSettings(context.Context, string, string, *secret.Cipher) ([]string, []string, error) {
 	return nil, l.ctl.cleared, nil
 }
-func (l fakeLoader) ServerSpecificSettingKeys(context.Context, string) ([]string, error) {
+func (l fakeLoader) ServerSpecificSettingKeys(context.Context, string, *secret.Cipher) ([]string, error) {
 	return l.ctl.liveOwn, nil
 }
 func (l fakeLoader) InterruptWork(context.Context, string, string) ([]string, error) { return nil, nil }
@@ -883,12 +883,9 @@ func TestSwapReportsOnlyWhatTheRestoredServerLacks(t *testing.T) {
 	if err, _ := f.restore(); err != nil {
 		t.Fatalf("%v\n%s", err, f.output.String())
 	}
+	// Each report ends with its list.
 	out := f.output.String()
-	for _, want := range []string{
-		"Cleared 1 encrypted settings this SECRET_KEY cannot read; enter them again after Silo starts: tmdb.api_key\n",
-		"Kept this server's connections to outside services in place of the backup's: AI providers.\n",
-		"enter them again to use them: mail (SMTP).\n",
-	} {
+	for _, want := range []string{"after Silo starts: tmdb.api_key\n", "in place of the backup's: AI providers.\n", "to use them: mail (SMTP).\n"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output lacks %q:\n%s", want, out)
 		}

@@ -182,7 +182,7 @@ func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl Co
 	post := newPostLoad(m, opts.Validate, out)
 	// The live server's own settings replace the backup's after the steps
 	// below clear what they cannot keep, so those steps do not report them.
-	if post.liveOwn, err = loader.ServerSpecificSettingKeys(ctx, opts.LiveURL); err != nil {
+	if post.liveOwn, err = loader.ServerSpecificSettingKeys(ctx, opts.LiveURL, opts.Cipher); err != nil {
 		return discard(fmt.Errorf("reading this server's own settings: %w", err))
 	}
 	// New signing keys first, so the lost-settings pass does not list them.
