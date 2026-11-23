@@ -4635,37 +4635,38 @@ func main() {
 	}); err != nil {
 		slog.Error("playback cleanup did not finish before shutdown deadline", "error", err)
 	}
-	if stopErr := streamTelemetryRegistry.Stop(shutdownCtx); stopErr != nil {
-		slog.Error("stream telemetry shutdown error", "error", stopErr)
-	}
+	// The cleanup steps below get their own deadline each: when a request
+	// never finishes, the HTTP drain above uses all of shutdownCtx, and they
+	// must still run (#5094).
+	cleanupSteps := []shutdownCleanupStep{{
+		name: "stream telemetry shutdown",
+		run:  streamTelemetryRegistry.Stop,
+	}}
 
 	// 2. Clean up stale sessions.
 	if sessionCleaner != nil {
-		cleaned, cleanErr := sessionCleaner.CleanStale(shutdownCtx)
-		if cleanErr != nil {
-			slog.Error("stale session cleanup error", "error", cleanErr)
-		} else if cleaned > 0 {
-			slog.Info("cleaned stale sessions", "count", cleaned)
-		}
+		cleanupSteps = append(cleanupSteps, shutdownCleanupStep{
+			name: "stale session cleanup",
+			run: func(ctx context.Context) error {
+				cleaned, err := sessionCleaner.CleanStale(ctx)
+				if err == nil && cleaned > 0 {
+					slog.Info("cleaned stale sessions", "count", cleaned)
+				}
+				return err
+			},
+		})
 	}
 
 	// 2b. Remove this node's heartbeat and sessions from shared state, after
 	// saving the sessions' watch time for whichever server rebuilds or stops
 	// them next.
 	if reconciler != nil {
-		// Its own deadline: a slow drain above must not leave this save
-		// with an expired context.
-		saveCtx, saveCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := reconciler.SaveWatch(saveCtx); err != nil {
-			slog.Error("watch time save error", "error", err)
-		}
-		saveCancel()
+		cleanupSteps = append(cleanupSteps, shutdownCleanupStep{name: "watch time save", run: reconciler.SaveWatch})
 	}
 	if heartbeatWriter != nil {
-		if err := heartbeatWriter.CleanupSelf(shutdownCtx); err != nil {
-			slog.Error("heartbeat cleanup error", "error", err)
-		}
+		cleanupSteps = append(cleanupSteps, shutdownCleanupStep{name: "heartbeat cleanup", run: heartbeatWriter.CleanupSelf})
 	}
+	runShutdownCleanupSteps(shutdownCleanupStepTimeout, cleanupSteps)
 
 	// 3. Close user store provider.
 	if userStoreProvider != nil {
@@ -4710,6 +4711,28 @@ func runShutdownWorkWithTimeout(timeout time.Duration, work func(context.Context
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	return work(ctx)
+}
+
+// shutdownCleanupStepTimeout bounds each cleanup step that runs after the
+// HTTP servers stop.
+const shutdownCleanupStepTimeout = 5 * time.Second
+
+// shutdownCleanupStep is one step of the shutdown cleanup; a failure is
+// logged as "<name> error".
+type shutdownCleanupStep struct {
+	name string
+	run  func(context.Context) error
+}
+
+// runShutdownCleanupSteps runs the steps in order, each with a fresh deadline
+// of its own, so a step is not handed a context the HTTP drain already
+// expired and a slow step does not use up the next one's time.
+func runShutdownCleanupSteps(timeout time.Duration, steps []shutdownCleanupStep) {
+	for _, step := range steps {
+		if err := runShutdownWorkWithTimeout(timeout, step.run); err != nil {
+			slog.Error(step.name+" error", "error", err)
+		}
+	}
 }
 
 // standaloneServerHooks lets a standalone mode run work that must bracket the
