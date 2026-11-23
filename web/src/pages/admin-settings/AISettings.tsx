@@ -306,6 +306,13 @@ function TextModelTile({
   const provider = providers.find((candidate) => candidate.id === providerID);
   const selected = chatGPT ? CHATGPT_PROVIDER : providerID;
   const supportsServiceTier = !chatGPT && provider?.type === "openai" && serviceTiers.length > 0;
+  // A tier picked before switching to a provider or plan without tiers stays
+  // in view, marked as changed, so Save never writes a value the admin can't
+  // see.
+  const serviceTierKept = !supportsServiceTier && serviceTierDirty;
+  const showServiceTier = supportsServiceTier || serviceTierKept;
+  // A kept tier may not be one the current model lists.
+  const tierOptions = [...new Set([...serviceTiers, serviceTier || "default"])];
 
   return (
     <ProviderTile
@@ -378,8 +385,8 @@ function TextModelTile({
       )}
       <AdvancedSection
         id="ai.text-model"
-        count={supportsServiceTier ? 2 : 1}
-        forceOpen={reasoningAttention || (supportsServiceTier && serviceTierDirty)}
+        count={showServiceTier ? 2 : 1}
+        forceOpen={reasoningAttention || serviceTierDirty}
       >
         <SettingField
           label={t("web.admin.settings.ai.text.reasoningLevel")}
@@ -410,14 +417,15 @@ function TextModelTile({
               : []),
           ]}
         />
-        {supportsServiceTier && (
+        {showServiceTier && (
           <SettingField
             label={t("web.admin.settings.ai.text.serviceTier")}
+            dirty={serviceTierKept}
             type="select"
             value={serviceTier || "default"}
             description={t("web.admin.settings.ai.text.serviceTierDescription")}
             onChange={(next) => onChange("ai.service_tier", next === "default" ? "" : next)}
-            options={serviceTiers.map((tier) => ({
+            options={tierOptions.map((tier) => ({
               value: tier,
               label: t("web.admin.settings.ai.text.serviceTierOption", { tier }),
             }))}
@@ -722,11 +730,13 @@ export default function AISettings() {
   }
 
   // The ChatGPT plan is chosen by authentication mode; any other choice is an
-  // API-key provider. The provider id is kept while the plan serves text, so
-  // switching back restores it.
+  // API-key provider. The saved provider id is kept while the plan serves
+  // text, so switching back restores it; a staged one is taken back, since the
+  // provider select no longer shows it.
   function selectTextProvider(next: string) {
     if (next === CHATGPT_PROVIDER) {
       setValue("ai.auth_mode", "chatgpt");
+      form.resetValue("ai.text_provider_id");
       return;
     }
     setValue("ai.auth_mode", "api_key");

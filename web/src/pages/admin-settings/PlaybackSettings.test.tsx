@@ -105,3 +105,45 @@ describe("hardware device picker kept for an unsaved change", () => {
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
   });
 });
+
+describe("marker settings kept for an unsaved change", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    settings.current = {
+      "markers.mode": "local",
+      "markers.online_storage": "stored",
+      "markers.lazy_playback": "false",
+      "markers.detection_workers": "1",
+    };
+  });
+
+  async function pick(label: string, option: string) {
+    await userEvent.click(screen.getByRole("combobox", { name: label }));
+    await userEvent.click(screen.getByRole("option", { name: option }));
+  }
+
+  it("keeps on-demand storage in view and takes its lazy playback back with it", async () => {
+    render(page);
+    await pick("Marker source", "Online preferred + server detection");
+    await pick("Save online markers", "Fetch when needed");
+    await pick("Marker source", "Detect on this server");
+
+    expect(screen.getByRole("combobox", { name: "Save online markers" })).toHaveTextContent(
+      "Fetch when needed",
+    );
+    expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
+
+    await pick("Save online markers", "Save to library");
+    expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
+  });
+
+  it("keeps an edited detection worker count in view under online-only markers", async () => {
+    render(page);
+    const workers = screen.getByRole("spinbutton", { name: "Detection workers" });
+    await userEvent.clear(workers);
+    await userEvent.type(workers, "3");
+    await pick("Marker source", "Online providers only");
+
+    expect(screen.getByRole("spinbutton", { name: "Detection workers" })).toHaveValue(3);
+  });
+});
