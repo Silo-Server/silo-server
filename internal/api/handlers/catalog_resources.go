@@ -91,6 +91,7 @@ func (h *CatalogResourceHandler) syntheticSeasonDetail(ctx context.Context, v It
 		Overview:          seasonResp.Overview,
 		SeriesID:          seriesID,
 		SeriesTitle:       seriesDetail.Title,
+		EpisodeLabels:     seriesDetail.EpisodeLabels,
 		SeasonNumber:      &seasonNum,
 		EpisodeCount:      &seasonResp.EpisodeCount,
 		IsSpecials:        seasonNum == 0,

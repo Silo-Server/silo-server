@@ -623,7 +623,9 @@ games `S2026E296`. Such a series carries `episode_labels: "air_date"`, and a
 client shows the episode's `air_date` (a calendar date, no time zone) where it
 would show the season and episode numbers. Sorting, next up and playback still
 use the numbers. An undated episode keeps its numbers, and an absent
-`episode_labels` means numbers, so a client needs no capability check.
+`episode_labels` means numbers, so a client needs no capability check. Later
+releases may add values; a client treats a value it doesn't know as absent and
+shows the numbers.
 
 The value comes from the series' metadata provider: a plugin's series
 `MetadataItem.metadata` sets `episode_labels` (`air_date` is the only value; any
@@ -635,9 +637,10 @@ an episode date a provider has since corrected takes "Replace all metadata".
 `episode_labels` appears on:
 
 - item detail of the series, and of its seasons and episodes (the series' value)
-- home and library section cards, and the cards of catalog browse and search,
-  personal collections, favorites, the watchlist and watch history; their
-  episode cards also carry `air_date`
+- series and episode cards of home and library sections, catalog browse and
+  search, library and personal collections, favorites, the watchlist, watch
+  history, Watch Together pickers and the shuffle `next` card; their episode
+  cards also carry `air_date`. Season cards don't carry it.
 - watch detail (`getWatchDetail`) of an episode, with its `air_date`
 
 `/api/v1` and the Jellyfin-compatible API are unchanged.

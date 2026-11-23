@@ -1649,6 +1649,7 @@ func sectionItemFromMediaItem(item *models.MediaItem) sectionItemResponse {
 		AdvisorySource:         item.AdvisorySource,
 		Status:                 item.Status,
 		ShowStatus:             item.ShowStatus,
+		EpisodeLabels:          item.EpisodeLabels,
 		RatingIMDB:             item.RatingIMDB,
 		RatingTMDB:             item.RatingTMDB,
 		RatingRTCritic:         item.RatingRTCritic,

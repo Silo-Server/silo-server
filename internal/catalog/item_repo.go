@@ -219,6 +219,10 @@ const (
 	advisorySourceColumn = "advisory_source"
 )
 
+// episodeLabelsColumn is the series' episode-label choice, shared by the item
+// and browse select lists.
+const episodeLabelsColumn = "episode_labels"
+
 // Served-path columns of the banner, thumb, clear art and disc slots, shared
 // by the item select lists in this package.
 const (
@@ -239,7 +243,7 @@ var itemColumnNames = []string{
 	"metadata_s3_path", "metadata_etag", "season_count",
 	"studios", "networks", "countries", "keywords", "original_language", "release_date::text", "first_air_date", "last_air_date", "air_time", "air_timezone",
 	"show_status",
-	"episode_labels",
+	episodeLabelsColumn,
 	"matched_at", "last_refreshed", "refresh_failures",
 	"episode_metadata_incomplete", "episode_metadata_last_checked_at", "locked_fields", "status", "created_at", "updated_at",
 	advisoryAgeColumn, advisorySourceColumn,

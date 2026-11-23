@@ -1,5 +1,5 @@
 import { captureRoomCreationDraft } from "@/api/v2/watchTogetherCreate";
-import { episodeSubtitle } from "@/lib/episodeCardLabels";
+import { episodeAirDateLabel, episodeSubtitle } from "@/lib/episodeCardLabels";
 import { updateRoomPolicy } from "@/api/v2/watchTogetherPolicy";
 import { stageRoomItem } from "@/api/v2/watchTogetherStage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -75,11 +75,14 @@ const modeOptions: {
 function EpisodeChooser({
   seriesId,
   initialSeasonNumber,
+  episodeLabels,
   onPick,
   onCancel,
 }: {
   seriesId: string;
   initialSeasonNumber?: number;
+  /** The series' episode labels: "air_date" names each game by its date. */
+  episodeLabels?: string;
   onPick: (episode: EpisodeListItem, seasonNumber: number) => void;
   onCancel: () => void;
 }) {
@@ -116,27 +119,33 @@ function EpisodeChooser({
         ))}
       </div>
       <ul className="overlay-scroll flex max-h-64 flex-col gap-0.5 overflow-y-auto">
-        {playable.map((episode) => (
-          <li key={episode.content_id}>
-            <button
-              type="button"
-              onClick={() => onPick(episode, season ?? episode.season_number)}
-              className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-start hover:bg-white/[0.04]"
-            >
-              <span className="text-muted-foreground w-7 shrink-0 text-xs font-semibold tabular-nums">
-                {t("web.watchTogether.common.episodeNumber", {
-                  number: codeNumber(episode.episode_number),
-                })}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-sm">{episode.title}</span>
-              {episode.user_data?.played ? (
-                <span className="text-muted-foreground text-[11px]">
-                  {t("web.watchTogether.startSheet.watched")}
+        {playable.map((episode) => {
+          const airDateLabel = episodeAirDateLabel(episodeLabels, episode.air_date);
+          return (
+            <li key={episode.content_id}>
+              <button
+                type="button"
+                onClick={() => onPick(episode, season ?? episode.season_number)}
+                className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-start hover:bg-white/[0.04]"
+              >
+                <span
+                  className={`text-muted-foreground shrink-0 text-xs font-semibold tabular-nums ${airDateLabel ? "" : "w-7"}`}
+                >
+                  {airDateLabel ??
+                    t("web.watchTogether.common.episodeNumber", {
+                      number: codeNumber(episode.episode_number),
+                    })}
                 </span>
-              ) : null}
-            </button>
-          </li>
-        ))}
+                <span className="min-w-0 flex-1 truncate text-sm">{episode.title}</span>
+                {episode.user_data?.played ? (
+                  <span className="text-muted-foreground text-[11px]">
+                    {t("web.watchTogether.startSheet.watched")}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          );
+        })}
         {!episodes.isLoading && playable.length === 0 ? (
           <li className="text-muted-foreground px-2 py-4 text-center text-sm">
             {t("web.watchTogether.startSheet.noEpisodes")}
@@ -365,6 +374,7 @@ export function StartPartySheet({
             <EpisodeChooser
               seriesId={seriesId}
               initialSeasonNumber={initialSeasonNumber}
+              episodeLabels={item.episode_labels}
               onPick={(episode, seasonNumber) => {
                 setTarget({
                   content_id: episode.content_id,

@@ -47,7 +47,7 @@ type WatchDetail struct {
 	UserData                        *WatchUserData          `json:"user_data,omitempty" doc:"The acting profile's progress; absent without a profile or progress"`
 	SeriesID                        string                  `json:"series_id,omitempty" doc:"Owning series of an episode"`
 	SeriesTitle                     string                  `json:"series_title,omitempty"`
-	EpisodeLabels                   string                  `json:"episode_labels,omitempty" enum:"air_date" doc:"The series' episode labels, as on CatalogItem: air_date means show air_date where the season and episode numbers would go" example:"air_date"`
+	EpisodeLabels                   string                  `json:"episode_labels,omitempty" enum:"air_date" doc:"The series' episode labels, as on CatalogItem: air_date means show air_date where the season and episode numbers would go; absent or unknown means show the numbers" example:"air_date"`
 	AirDate                         *string                 `json:"air_date,omitempty" format:"date" doc:"An episode's air date, YYYY-MM-DD; sent when episode_labels is air_date"`
 	SeasonNumber                    int                     `json:"season_number,omitempty"`
 	EpisodeNumber                   int                     `json:"episode_number,omitempty"`
