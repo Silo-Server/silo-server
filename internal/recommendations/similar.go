@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"math"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -162,7 +163,9 @@ func applyValidation(sourceMeta *ItemMetadata, candidates []ScoredItem, details 
 			continue
 		}
 		if result.scoreMult < 1.0 {
-			item.Score *= result.scoreMult
+			// Lower the score by the penalty's share of its magnitude, so
+			// a negative score also goes down rather than toward zero.
+			item.Score -= math.Abs(item.Score) * (1 - result.scoreMult)
 		}
 		validated = append(validated, item)
 	}

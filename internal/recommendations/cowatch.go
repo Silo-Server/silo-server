@@ -241,8 +241,8 @@ func blendScores(embeddingItems []ScoredItem, cowatchItems map[string]float64, e
 // the search when it is farther than its limit, yet it is still that close
 // to the source; without this, blendScores would give it the co-watch share
 // alone and rank it below every embedding candidate however often the two
-// are watched together. A neighbor without an embedding is left out here and
-// keeps its co-watch score.
+// are watched together. A neighbor without an embedding, or with a zero
+// vector, is left out here and keeps its co-watch score.
 func withCowatchSimilarity(embCandidates []ScoredItem, cowatch map[string]float64, source []float32, embeddings map[string][]float32) []ScoredItem {
 	found := make(map[string]struct{}, len(embCandidates))
 	for _, item := range embCandidates {
@@ -253,7 +253,7 @@ func withCowatchSimilarity(embCandidates []ScoredItem, cowatch map[string]float6
 		if _, ok := found[id]; ok {
 			continue
 		}
-		if emb := embeddings[id]; len(emb) > 0 {
+		if emb := embeddings[id]; hasDirection(emb) {
 			out = append(out, ScoredItem{MediaItemID: id, Score: cosineSimilarity(source, emb), Reason: "cowatch"})
 		}
 	}

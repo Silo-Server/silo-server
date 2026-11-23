@@ -148,7 +148,7 @@ func TestApplyMMRMatchesQuadraticOracle(t *testing.T) {
 // takes the mean similarity of the embedded candidates still in the pool: a
 // lower-relevance one no longer jumps ahead of a diverse embedded title, and
 // it is not handed the worst redundancy either.
-func TestApplyMMRUnembeddedCandidateTakesTypicalPenalty(t *testing.T) {
+func TestApplyMMREdgeCases(t *testing.T) {
 	x, y := []float32{1, 0}, []float32{0, 1}
 	tests := []struct {
 		name       string
@@ -180,6 +180,24 @@ func TestApplyMMRUnembeddedCandidateTakesTypicalPenalty(t *testing.T) {
 		},
 		embeddings: map[string][]float32{"a": x, "b": x, "u": {}, "d": y},
 		want:       []string{"a", "d", "b", "u"},
+	}, {
+		// A zero vector has no direction: counted as embedded, u would be
+		// similar to nothing and come second.
+		name: "zero embedding counts as missing",
+		candidates: []ScoredItem{
+			{MediaItemID: "a", Score: 1}, {MediaItemID: "b", Score: 0.95}, {MediaItemID: "u", Score: 0.9}, {MediaItemID: "d", Score: 0.85},
+		},
+		embeddings: map[string][]float32{"a": x, "b": x, "u": {0, 0}, "d": y},
+		want:       []string{"a", "d", "b", "u"},
+	}, {
+		// Scaled by the top score, -0.1, relevance would flip sign and
+		// rank c above b.
+		name: "all-negative pool keeps relevance order",
+		candidates: []ScoredItem{
+			{MediaItemID: "a", Score: -0.1}, {MediaItemID: "b", Score: -0.2}, {MediaItemID: "c", Score: -0.3},
+		},
+		embeddings: map[string][]float32{"a": x, "b": x, "c": x},
+		want:       []string{"a", "b", "c"},
 	}}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

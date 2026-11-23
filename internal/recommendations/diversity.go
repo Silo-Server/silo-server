@@ -35,12 +35,12 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 		limit = len(candidates)
 	}
 
-	// Find max relevance score for normalization.
-	maxScore := candidates[0].Score
-	for _, c := range candidates[1:] {
-		if c.Score > maxScore {
-			maxScore = c.Score
-		}
+	// Relevance is scaled by the largest score magnitude. Dividing by the
+	// highest score instead would reverse the order of a pool whose scores
+	// are all negative.
+	maxScore := 0.0
+	for _, c := range candidates {
+		maxScore = max(maxScore, math.Abs(c.Score))
 	}
 	if maxScore == 0 {
 		maxScore = 1 // avoid division by zero
@@ -55,7 +55,15 @@ func applyMMR(candidates []ScoredItem, embeddings map[string][]float32, lambda f
 	}
 	maxSim := make([]float64, len(candidates))
 	selected := make([]ScoredItem, 0, limit)
-	embeddingOf := func(ri int) []float32 { return embeddings[candidates[ri].MediaItemID] }
+	// A zero vector has no direction, so it counts as no embedding: it would
+	// otherwise be similar to nothing and escape the redundancy penalty.
+	usable := make([][]float32, len(candidates))
+	for i, c := range candidates {
+		if emb := embeddings[c.MediaItemID]; hasDirection(emb) {
+			usable[i] = emb
+		}
+	}
+	embeddingOf := func(ri int) []float32 { return usable[ri] }
 
 	take := func(at int) {
 		pickEmb := embeddingOf(remaining[at])
@@ -127,6 +135,12 @@ func meanEmbeddedMaxSim(remaining []int, maxSim []float64, embeddingOf func(int)
 		return 0
 	}
 	return sum / float64(n)
+}
+
+// hasDirection reports whether v is a non-empty vector with a nonzero
+// component, one a cosine can be taken against.
+func hasDirection(v []float32) bool {
+	return slices.ContainsFunc(v, func(x float32) bool { return x != 0 })
 }
 
 // nonFiniteScore reports whether item's Score is NaN or infinite. NaN fails
