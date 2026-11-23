@@ -20,6 +20,11 @@ concurrency:
 permissions:
   contents: read
 
+# bash adds pipefail, so a failing command in a pipeline fails its step.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   release:
     name: Prepare draft GitHub release
@@ -48,12 +53,24 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: python3 scripts/release/release_version.py check "$VERSION" | tee -a "$GITHUB_OUTPUT"
 
+      # A draft has no tag until it is published, so the version check can't
+      # see it. One draft at a time keeps a second one from repeating its
+      # version or drafting an older version on a newer commit.
+      - name: Require no other draft release
+        run: |
+          drafts="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isDraft \
+            --jq '[.[] | select(.isDraft) | .tagName] | join(", ")')"
+          if [[ -n "$drafts" ]]; then
+            echo "::error::Publish or delete the draft release ${drafts} first."
+            exit 1
+          fi
+
       # A push run of CI records the commit it tested, so it can be looked up
       # by this commit. A manual Docker Image run skips CI, so the image
       # existing doesn't prove CI passed.
       - name: Require CI to have passed on this commit
         run: |
-          conclusion="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event push \
+          conclusion="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow ci.yml --event push --branch main \
             --commit "$GITHUB_SHA" --limit 1 --json conclusion --jq '.[0].conclusion // ""')"
           if [[ "$conclusion" != "success" ]]; then
             echo "::error::CI has not passed on ${GITHUB_SHA::9} (${conclusion:-still running or missing})."
@@ -95,7 +112,7 @@ jobs:
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
           PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
         run: |
-          args=(--repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --title "Silo $VERSION")
+          args=(--repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --title "Silo $VERSION" --fail-on-no-commits)
           if [[ "$PRERELEASE" == "true" ]]; then
             args+=(--prerelease)
           fi
