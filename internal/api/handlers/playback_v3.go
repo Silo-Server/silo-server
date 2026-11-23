@@ -5831,15 +5831,13 @@ func (h *PlaybackHandler) executeReplanV3(r *http.Request, record *playback.Atte
 			intentChange = audioSelectionDiffersFromStartV3(req.SelectedTracks, start) ||
 				subtitleSelectionDiffersFromStartV3(req.SelectedTracks, start)
 		case qualityChange:
-			nextQuality, _ := playback.NormalizeQualityV3(req.QualityPreference)
-			intentChange = nextQuality != start.QualityPreference || req.LearnedLimit == playback.LearnedLimitClearV3
+			intentChange = qualityIntentChangedV3(req, start, record.EffectiveMediaFileID, record.RequestedMediaFileID)
 		case outputChange:
 			intentChange = true
 		default:
 			switch req.Failure.Classification {
 			case "quality_changed":
-				nextQuality, _ := playback.NormalizeQualityV3(req.QualityPreference)
-				intentChange = nextQuality != start.QualityPreference || req.LearnedLimit == playback.LearnedLimitClearV3
+				intentChange = qualityIntentChangedV3(req, start, record.EffectiveMediaFileID, record.RequestedMediaFileID)
 			case "audio_track_changed":
 				intentChange = audioSelectionDiffersFromStartV3(req.SelectedTracks, start)
 			case "subtitle_track_changed":
@@ -6993,6 +6991,37 @@ func copyOptionalIntV3(value *int) *int {
 	}
 	copy := *value
 	return &copy
+}
+
+func optionalPositiveIntV3(value *int) int {
+	if value == nil || *value <= 0 {
+		return 0
+	}
+	return *value
+}
+
+func bandwidthEstimateRelaxedV3(previous, next *int) bool {
+	prev := optionalPositiveIntV3(previous)
+	if prev == 0 {
+		return false
+	}
+	curr := optionalPositiveIntV3(next)
+	return curr == 0 || curr > prev
+}
+
+func qualityIntentChangedV3(req playback.ReplanRequestV3, start playback.StartRequestV3, effectiveFileID, requestedFileID int) bool {
+	nextQuality, _ := playback.NormalizeQualityV3(req.QualityPreference)
+	if nextQuality != start.QualityPreference ||
+		optionalPositiveIntV3(req.BandwidthCapKbps) != optionalPositiveIntV3(start.BandwidthCapKbps) ||
+		req.LearnedLimit == playback.LearnedLimitClearV3 {
+		return true
+	}
+	if bandwidthEstimateRelaxedV3(start.BandwidthEstimateKbps, req.BandwidthEstimateKbps) {
+		return true
+	}
+	return nextQuality == playback.QualityAutoV3 &&
+		optionalPositiveIntV3(req.BandwidthEstimateKbps) == 0 &&
+		effectiveFileID != requestedFileID
 }
 
 // lowerVersionV3 finds the version that serves lower qualities of a 4K

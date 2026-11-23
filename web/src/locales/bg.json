@@ -521,6 +521,12 @@
       "value": "Тази сесия на възпроизвеждане приключи. Започнете възпроизвеждането отново."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Този поток беше заменен. Възпроизвеждането продължава с текущия поток."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -67907,6 +67913,12 @@
     {
       "type": 0,
       "value": "Отбелязване като гледано при"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Заглавията с маркер за финалните надписи също се отчитат като гледани, щом възпроизвеждането достигне финалните надписи."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
