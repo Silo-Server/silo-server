@@ -521,6 +521,12 @@
       "value": "此播放会话已结束。请重新开始播放。"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "此串流已被替换。播放将在当前串流上继续。"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -61432,6 +61438,12 @@
     {
       "type": 0,
       "value": "标记为已观看的进度"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "带有片尾字幕标记的影片，在播放到片尾字幕时也会计为已看完。"
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

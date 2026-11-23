@@ -1787,6 +1787,10 @@ func fixtureCases() []fixtureCase {
 			scenario: "The home page's pre-override server section baseline: opaque tokens for the server rows in libraries the profile is allowed, plus the pre-override visible server rows.",
 			method:   http.MethodGet, path: "/api/v2/profile/sections/baseline", headers: with(bearer(memberToken), "X-Profile-Id", "p-owner"),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/ProfileSectionBaseline"},
+		fixtureCase{name: "list_unsupported_files_ok", operationID: opListUnsupportedFiles,
+			scenario: "The first page of folders holding files that scans skip because of their type.",
+			method:   http.MethodGet, path: "/api/v2/libraries/unsupported-files?limit=2", headers: bearer(adminToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/UnsupportedFileCollection"},
 	)
 }
 

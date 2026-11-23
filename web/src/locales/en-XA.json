@@ -521,6 +521,12 @@
       "value": "⟦Ţĥîš þļåýƀåçķ šéššîöñ éñđéđ. Šţåŕţ þļåýîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš šţŕéåɱ ŵåš ŕéþļåçéđ. Þļåýƀåçķ çöñţîñûéš öñ ţĥé çûŕŕéñţ öñé.~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -52772,6 +52778,184 @@
       "value": ")~⟧"
     }
   ],
+  "web.admin.libraries.unsupportedFiles.column.files": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļéš~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.column.firstFound": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîŕšţ ƒöûñđ~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.column.folder": [
+    {
+      "type": 0,
+      "value": "⟦Ƒöļđéŕ~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.column.library": [
+    {
+      "type": 0,
+      "value": "⟦Ļîƀŕåŕý~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.column.type": [
+    {
+      "type": 0,
+      "value": "⟦Ţýþé~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.description": [
+    {
+      "type": 0,
+      "value": "⟦Ƒöļđéŕš ĥöļđîñĝ ṽîđéö ƒîļéš ţĥåţ šçåñš ƒîñđ ƀûţ šķîþ ƀéçåûšé öƒ ţĥéîŕ ţýþé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.detail.lastFound": [
+    {
+      "type": 0,
+      "value": "⟦Ļåšţ ƒöûñđ~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.detail.why": [
+    {
+      "type": 0,
+      "value": "⟦Ŵĥý~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šķîþþéđ ƒîļéš ƒöûñđ.~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.filterLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļţéŕ ƒîļéš ñöţ çåţåļöĝéđ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.filterPlaceholder": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļţéŕ ƀý ƒöļđéŕ, ƒîļé, ļîƀŕåŕý, öŕ ŕéåšöñ...~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.loadFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ļîšţ çöûļđ ñöţ ƀé ļöåđéđ.~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.loading": [
+    {
+      "type": 0,
+      "value": "⟦Ļöåđîñĝ...~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.moreFiles": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦åñđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ɱöŕé~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦åñđ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ɱöŕé~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reason.disc_image": [
+    {
+      "type": 0,
+      "value": "⟦Đîšç îɱåĝé~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reason.disc_stream": [
+    {
+      "type": 0,
+      "value": "⟦Ɓļû-ŕåý öŕ ÅṼÇĤĐ ƒöļđéŕ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reason.dvd_vob": [
+    {
+      "type": 0,
+      "value": "⟦ĐṼĐ ṼÖƁ~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reason.realmedia": [
+    {
+      "type": 0,
+      "value": "⟦ŔéåļṀéđîå~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reasonMessage.disc_image": [
+    {
+      "type": 0,
+      "value": "⟦Đîšç îɱåĝéš åŕé ñöţ çåţåļöĝéđ; ŕéɱûẋ ţĥé đîšç ţîţļé ţö å šîñĝļé ƒîļé~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reasonMessage.disc_stream": [
+    {
+      "type": 0,
+      "value": "⟦Ɓļû-ŕåý åñđ ÅṼÇĤĐ đîšç ƒöļđéŕš (ƁĐṀṼ/ŠŢŔÉÅṀ) åŕé ñöţ çåţåļöĝéđ; ŕéɱûẋ ţĥé đîšç ţîţļé ţö å šîñĝļé ƒîļé~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reasonMessage.dvd_vob": [
+    {
+      "type": 0,
+      "value": "⟦ĐṼĐ ṼÖƁ ƒîļéš åŕé ñöţ çåţåļöĝéđ; ŕéɱûẋ ţĥé ĐṼĐ ţîţļé ţö å šîñĝļé ƒîļé~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reasonMessage.realmedia": [
+    {
+      "type": 0,
+      "value": "⟦ŔéåļṀéđîå ƒîļéš åŕé ñöţ çåţåļöĝéđ~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.refreshFailed": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥé ļîšţ çöûļđ ñöţ ƀé ŕéƒŕéšĥéđ. Îţ šĥöŵš ŵĥåţ ļöåđéđ ƀéƒöŕé.~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.title": [
+    {
+      "type": 0,
+      "value": "⟦Ƒîļéš Ñöţ Çåţåļöĝéđ~~~~~~~~⟧"
+    }
+  ],
   "web.admin.libraries.warning.checkMount": [
     {
       "type": 0,
@@ -73739,6 +73923,12 @@
     {
       "type": 0,
       "value": "⟦Ṁåŕķ ŵåţçĥéđ åţ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ţîţļéš ŵîţĥ å çŕéđîţš ɱåŕķéŕ åļšö çöûñţ åš ŵåţçĥéđ öñçé þļåýƀåçķ ŕéåçĥéš ţĥé çŕéđîţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

@@ -127,6 +127,15 @@ vi.mock("@/hooks/queries/admin/libraries", () => ({
     refetch: mocks.unmatchedRefetch,
   }),
   useSetUnmatchedItemIgnored: () => ({ mutate: vi.fn(), isPending: false, variables: undefined }),
+  useUnsupportedLibraryFiles: () => ({
+    data: { pages: [{ groups: [], total: 0 }] },
+    isError: false,
+    refetch: vi.fn(),
+    isRefetching: false,
+    hasNextPage: false,
+    fetchNextPage: vi.fn(),
+    isFetchingNextPage: false,
+  }),
   useLibraryMetadataMatchQueues: () => ({
     data:
       mocks.matcherTotal === undefined

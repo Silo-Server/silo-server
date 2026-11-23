@@ -162,9 +162,11 @@ func TestSubtreeScanUnderAnExcludedNestedRootDoesNothing(t *testing.T) {
 					t.Fatalf("ScanSubtree(%q) went past the guard: %v", movieDir, r)
 				}
 			}()
+			// The result only reports the subtree as not verified, so the
+			// skipped-file rows under it are kept.
 			result, err := (&Scanner{}).ScanSubtree(context.Background(), folder, movieDir)
-			if err != nil || result == nil || !reflect.DeepEqual(*result, ScanResult{}) {
-				t.Fatalf("ScanSubtree(%q) = %+v, %v; want an empty result before the catalog is read", movieDir, result, err)
+			if err != nil || result == nil || !reflect.DeepEqual(*result, ScanResult{ProtectedPaths: []string{movieDir}}) {
+				t.Fatalf("ScanSubtree(%q) = %+v, %v; want only the subtree protected, before the catalog is read", movieDir, result, err)
 			}
 		})
 	}

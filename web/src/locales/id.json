@@ -521,6 +521,12 @@
       "value": "Sesi pemutaran ini telah berakhir. Mulai putar lagi."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Stream ini telah diganti. Pemutaran berlanjut di stream saat ini."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -60916,6 +60922,12 @@
     {
       "type": 0,
       "value": "Tandai sudah ditonton pada"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Judul yang memiliki penanda kredit juga dihitung sudah ditonton setelah pemutaran mencapai kredit."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

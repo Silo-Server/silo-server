@@ -521,6 +521,12 @@
       "value": "\u200F\u202EThis playback session ended. Start playing again.\u202C"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis stream was replaced. Playback continues on the current one.\u202C"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -51092,6 +51098,184 @@
       "value": "\u202E)\u202C"
     }
   ],
+  "web.admin.libraries.unsupportedFiles.column.files": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFiles\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.column.firstFound": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFirst found\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.column.folder": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFolder\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.column.library": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELibrary\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.column.type": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EType\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFolders holding video files that scans find but skip because of their type.\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.detail.lastFound": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast found\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.detail.why": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWhy\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo skipped files found.\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.filterLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFilter files not cataloged\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.filterPlaceholder": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFilter by folder, file, library, or reason...\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.loadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe list could not be loaded.\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.loading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELoading...\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.moreFiles": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202Eand \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E more\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202Eand \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E more\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reason.disc_image": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDisc image\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reason.disc_stream": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBlu-ray or AVCHD folder\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reason.dvd_vob": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDVD VOB\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reason.realmedia": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERealMedia\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reasonMessage.disc_image": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDisc images are not cataloged; remux the disc title to a single file\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reasonMessage.disc_stream": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBlu-ray and AVCHD disc folders (BDMV/STREAM) are not cataloged; remux the disc title to a single file\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reasonMessage.dvd_vob": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDVD VOB files are not cataloged; remux the DVD title to a single file\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.reasonMessage.realmedia": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERealMedia files are not cataloged\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.refreshFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe list could not be refreshed. It shows what loaded before.\u202C"
+    }
+  ],
+  "web.admin.libraries.unsupportedFiles.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFiles Not Cataloged\u202C"
+    }
+  ],
   "web.admin.libraries.warning.checkMount": [
     {
       "type": 0,
@@ -71375,6 +71559,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EMark watched at\u202C"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETitles with a credits marker also count as watched once playback reaches the credits.\u202C"
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

@@ -521,6 +521,12 @@
       "value": "Denne afspilningssession er afsluttet. Start afspilningen igen."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Denne stream er blevet erstattet. Afspilningen fortsætter på den aktuelle."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -67651,6 +67657,12 @@
     {
       "type": 0,
       "value": "Markér som set ved"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titler med en rulletekstmarkør tælles også som set, så snart afspilningen når rulleteksterne."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
