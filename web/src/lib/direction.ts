@@ -100,3 +100,15 @@ const ARABIC_SCRIPT_LETTER = /(?=\p{L})\p{Script=Arabic}/u;
 export function hasArabicScript(text: string): boolean {
   return ARABIC_SCRIPT_LETTER.test(text);
 }
+
+/** Up to this many characters a cut name is short enough to keep whole. */
+const SHORT_NAME = 3;
+
+/**
+ * The least a name cut with "…" keeps once its line runs out of room: a letter and
+ * "…", or all of a short name, since a fixed floor wider than the name would leave
+ * a gap after it.
+ */
+export function nameFloor(name: string): "min-w-max" | "min-w-[2em]" {
+  return [...name].length <= SHORT_NAME ? "min-w-max" : "min-w-[2em]";
+}

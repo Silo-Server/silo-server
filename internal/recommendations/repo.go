@@ -141,6 +141,11 @@ const (
 	ratingTierSQL = `CASE WHEN mi.rating_imdb < 9.6 THEN 2 WHEN mi.rating_tmdb < 9.5 THEN 1 ELSE 0 END`
 	// catalogRatingSQL is a title's rating: trusted IMDb, else trusted TMDB.
 	catalogRatingSQL = `COALESCE(` + guardedIMDbRatingSQL + `, ` + guardedTMDBRatingSQL + `)`
+	// qualityRatingSQL is the rating the quality prior uses: catalogRatingSQL
+	// of a notable title, else NULL. An obscure title's rating rests on a
+	// handful of votes, so it is read as no rating, which the prior leaves
+	// neutral, rather than as a top rating it would lift.
+	qualityRatingSQL = `CASE WHEN ` + notableSQL + ` THEN ` + catalogRatingSQL + ` END`
 	// catalogRatingOrderSQL ranks notable titles first, then by reliability
 	// tier and catalogRatingSQL. idx_media_items_type_catalog_rank indexes
 	// this order per media type; keep the two identical.
@@ -270,35 +275,57 @@ func recommendationItemEligibilityWhereClause(alias string) string {
 	return embeddingvectors.ItemEligibilityWhereClause(alias)
 }
 
+// EmbeddingWrite is one item's vector for UpsertEmbeddings.
+type EmbeddingWrite struct {
+	ItemID        string
+	Embedding     []float32
+	CanonicalText string
+}
+
 // UpsertEmbedding stores or updates an embedding for a media item.
 func (r *Repo) UpsertEmbedding(ctx context.Context, itemID string, embedding []float32, model, canonicalText string) error {
-	padded, err := ensureCanonicalDimensions(embedding)
-	if err != nil {
-		return fmt.Errorf("upsert embedding for item %s: %w", itemID, err)
+	return r.UpsertEmbeddings(ctx, model, []EmbeddingWrite{{ItemID: itemID, Embedding: embedding, CanonicalText: canonicalText}})
+}
+
+// UpsertEmbeddings stores or updates the items' embeddings, all from model,
+// and queues their search index updates, in one transaction: every write is
+// stored, or none is. The statements go to the server in one round trip.
+func (r *Repo) UpsertEmbeddings(ctx context.Context, model string, writes []EmbeddingWrite) error {
+	if len(writes) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	ids := make([]string, 0, len(writes))
+	for _, w := range writes {
+		padded, err := ensureCanonicalDimensions(w.Embedding)
+		if err != nil {
+			return fmt.Errorf("upsert embedding for item %s: %w", w.ItemID, err)
+		}
+		batch.Queue(`
+			INSERT INTO media_item_embeddings (media_item_id, embedding, model, canonical_text)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (media_item_id) DO UPDATE
+				SET embedding      = EXCLUDED.embedding,
+				    model          = EXCLUDED.model,
+				    canonical_text = EXCLUDED.canonical_text,
+				    updated_at     = NOW()
+		`, w.ItemID, pgvector.NewVector(padded), model, w.CanonicalText)
+		ids = append(ids, w.ItemID)
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin upsert embedding for item %s: %w", itemID, err)
+		return fmt.Errorf("begin upsert of %d embeddings: %w", len(writes), err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, `
-		INSERT INTO media_item_embeddings (media_item_id, embedding, model, canonical_text)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (media_item_id) DO UPDATE
-			SET embedding      = EXCLUDED.embedding,
-			    model          = EXCLUDED.model,
-			    canonical_text = EXCLUDED.canonical_text,
-			    updated_at     = NOW()
-	`, itemID, pgvector.NewVector(padded), model, canonicalText)
-	if err != nil {
-		return fmt.Errorf("upsert embedding for item %s: %w", itemID, err)
+	if err := tx.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("upsert %d embeddings: %w", len(writes), err)
 	}
-	if err := catalog.EnqueueSearchIndexUpsert(ctx, tx, itemID); err != nil {
-		return fmt.Errorf("enqueue catalog search embedding update for item %s: %w", itemID, err)
+	if err := catalog.EnqueueSearchIndexUpserts(ctx, tx, ids); err != nil {
+		return fmt.Errorf("enqueue catalog search embedding updates for %d items: %w", len(writes), err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit upsert embedding for item %s: %w", itemID, err)
+		return fmt.Errorf("commit upsert of %d embeddings: %w", len(writes), err)
 	}
 	return nil
 }
@@ -476,13 +503,39 @@ func (r *Repo) FindSimilar(ctx context.Context, embedding []float32, excludeIDs 
 	return items, nil
 }
 
-// CandidateDetails is what the Similar list reads about a candidate: the
-// title, year and genres it validates against the source item, and the
-// embedding MMR compares candidates by. Embedding is nil for an item without
-// one.
+// CandidateDetails is what ranking reads about a candidate: the title, year,
+// type and genres validation and the genre cap compare, the embedding MMR and
+// the aversion compare candidates by, when it was added for the recency
+// boost, and its quality rating for the quality prior. Embedding is nil for
+// an item without one, and Quality for one without a quality rating (see
+// qualityRatingSQL). Studios are not read.
 type CandidateDetails struct {
 	Meta      ItemMetadata
 	Embedding []float32
+	AddedAt   time.Time
+	Quality   *float64
+}
+
+// candidateDetailColumns selects, over media_items mi and
+// media_item_embeddings e, the columns candidateDetailDest scans, named as
+// candidateDetailNames lists them.
+const candidateDetailColumns = `mi.title AS title, COALESCE(mi.year, 0) AS year, mi.genres AS genres, mi.type AS type,
+	       mi.created_at AS created_at, ` + qualityRatingSQL + ` AS quality, e.embedding AS embedding`
+
+// candidateDetailNames are the names candidateDetailColumns selects, for a
+// query over a subquery that selected them.
+const candidateDetailNames = `title, year, genres, type, created_at, quality, embedding`
+
+// candidateDetailDest returns the scan destinations of
+// candidateDetailColumns, which finish fills d from once the row is scanned.
+func candidateDetailDest(d *CandidateDetails) (dest []any, finish func()) {
+	var vec *pgvector.Vector
+	finish = func() {
+		if vec != nil {
+			d.Embedding = vec.Slice()
+		}
+	}
+	return []any{&d.Meta.Title, &d.Meta.Year, &d.Meta.Genres, &d.Meta.Type, &d.AddedAt, &d.Quality, &vec}, finish
 }
 
 // SimilarCandidate is a FindSimilarCandidates result.
@@ -517,7 +570,7 @@ func (r *Repo) findSimilar(ctx context.Context, embedding []float32, excludeIDs 
 	details := ""
 	if withDetails {
 		details = `,
-			       e.embedding, mi.title, COALESCE(mi.year, 0), mi.genres`
+			       ` + candidateDetailColumns
 	}
 	// The distance is selected exactly as ORDER BY writes it, so a plan that
 	// sorts instead of using the index (small or narrowly filtered catalogs)
@@ -546,18 +599,17 @@ func (r *Repo) findSimilar(ctx context.Context, embedding []float32, excludeIDs 
 			var item SimilarCandidate
 			var distance float64
 			dest := []any{&item.MediaItemID, &distance}
-			var vec pgvector.Vector
+			finish := func() {}
 			if withDetails {
-				meta := &item.Details.Meta
-				dest = append(dest, &vec, &meta.Title, &meta.Year, &meta.Genres)
+				var detailDest []any
+				detailDest, finish = candidateDetailDest(&item.Details)
+				dest = append(dest, detailDest...)
 			}
 			if err := rows.Scan(dest...); err != nil {
 				return fmt.Errorf("scanning similar item: %w", err)
 			}
 			item.Score = 1 - distance
-			if withDetails {
-				item.Details.Embedding = vec.Slice()
-			}
+			finish()
 			items = append(items, item)
 		}
 		if err := rows.Err(); err != nil {
@@ -578,7 +630,7 @@ func (r *Repo) GetCandidateDetails(ctx context.Context, itemIDs []string) (map[s
 		return map[string]CandidateDetails{}, nil
 	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT mi.content_id, mi.title, COALESCE(mi.year, 0), mi.genres, e.embedding
+		SELECT mi.content_id, `+candidateDetailColumns+`
 		FROM   media_items mi
 		LEFT   JOIN media_item_embeddings e ON e.media_item_id = mi.content_id
 		WHERE  mi.content_id = ANY($1)`,
@@ -592,13 +644,11 @@ func (r *Repo) GetCandidateDetails(ctx context.Context, itemIDs []string) (map[s
 	for rows.Next() {
 		var id string
 		var d CandidateDetails
-		var vec *pgvector.Vector
-		if err := rows.Scan(&id, &d.Meta.Title, &d.Meta.Year, &d.Meta.Genres, &vec); err != nil {
+		dest, finish := candidateDetailDest(&d)
+		if err := rows.Scan(append([]any{&id}, dest...)...); err != nil {
 			return nil, fmt.Errorf("scan candidate details: %w", err)
 		}
-		if vec != nil {
-			d.Embedding = vec.Slice()
-		}
+		finish()
 		result[id] = d
 	}
 	return result, rows.Err()
@@ -607,7 +657,7 @@ func (r *Repo) GetCandidateDetails(ctx context.Context, itemIDs []string) (map[s
 // FindTasteProfileCandidates returns full-library discover candidates for a
 // user's taste-profile embedding: matched titles of recommendableMediaTypes,
 // optionally constrained to items sharing at least one selected genre and to
-// the caller's access scope.
+// the caller's access scope, with each candidate's genres.
 func (r *Repo) FindTasteProfileCandidates(
 	ctx context.Context,
 	embedding []float32,
@@ -616,12 +666,18 @@ func (r *Repo) FindTasteProfileCandidates(
 	limit int,
 	filter catalog.AccessFilter,
 ) ([]ScoredItem, map[string][]string, error) {
-	return r.findTasteProfileCandidates(ctx, embedding, excludeIDs, genres, limit, filter, "")
+	items, details, err := r.findTasteProfileCandidates(ctx, embedding, excludeIDs, genres, limit, filter, "", false)
+	if err != nil {
+		return nil, nil, err
+	}
+	return items, candidateGenres(details), nil
 }
 
-// FindTasteProfileCandidatesByMediaType is FindTasteProfileCandidates for
-// one media type. A type outside recommendableMediaTypes has no candidates.
-func (r *Repo) FindTasteProfileCandidatesByMediaType(
+// FindTasteProfileCandidatesWithDetails is FindTasteProfileCandidates, for
+// mediaType alone when it is set, returning each candidate's details, read by
+// the same query, so ranking need not read them again. A type outside
+// recommendableMediaTypes has no candidates.
+func (r *Repo) FindTasteProfileCandidatesWithDetails(
 	ctx context.Context,
 	embedding []float32,
 	excludeIDs []string,
@@ -629,10 +685,13 @@ func (r *Repo) FindTasteProfileCandidatesByMediaType(
 	limit int,
 	filter catalog.AccessFilter,
 	mediaType string,
-) ([]ScoredItem, map[string][]string, error) {
-	return r.findTasteProfileCandidates(ctx, embedding, excludeIDs, genres, limit, filter, mediaType)
+) ([]ScoredItem, map[string]CandidateDetails, error) {
+	return r.findTasteProfileCandidates(ctx, embedding, excludeIDs, genres, limit, filter, mediaType, true)
 }
 
+// findTasteProfileCandidates reads the candidates with their details when
+// withDetails is set, and otherwise with their genres alone, empty rather
+// than nil for a title without any.
 func (r *Repo) findTasteProfileCandidates(
 	ctx context.Context,
 	embedding []float32,
@@ -641,9 +700,10 @@ func (r *Repo) findTasteProfileCandidates(
 	limit int,
 	filter catalog.AccessFilter,
 	mediaType string,
-) ([]ScoredItem, map[string][]string, error) {
+	withDetails bool,
+) ([]ScoredItem, map[string]CandidateDetails, error) {
 	if embedding == nil || limit <= 0 {
-		return []ScoredItem{}, map[string][]string{}, nil
+		return []ScoredItem{}, map[string]CandidateDetails{}, nil
 	}
 	if excludeIDs == nil {
 		excludeIDs = []string{}
@@ -654,7 +714,7 @@ func (r *Repo) findTasteProfileCandidates(
 	mediaTypes := recommendableMediaTypes
 	if mediaType != "" {
 		if !slices.Contains(recommendableMediaTypes, mediaType) {
-			return []ScoredItem{}, map[string][]string{}, nil
+			return []ScoredItem{}, map[string]CandidateDetails{}, nil
 		}
 		mediaTypes = []string{mediaType}
 	}
@@ -665,22 +725,13 @@ func (r *Repo) findTasteProfileCandidates(
 	}
 	args := []any{pgvector.NewHalfVector(embedding), excludeIDs, mediaTypes}
 	argIdx := 4
-	genreMatchCountSQL := "0"
-	annLimit := limit
 
+	// A genre constraint only filters: candidates are the nearest titles
+	// sharing at least one genre, in distance order. Ranking by how many
+	// genres match would let a distant title that matches every genre push
+	// a close one out of the pool; callers that want genre-first order, such
+	// as Watch Tonight cards, read a wider pool and re-rank it themselves.
 	if len(genres) > 0 {
-		annLimit = limit * 5
-		if annLimit < limit {
-			annLimit = limit
-		}
-		if annLimit > 2000 {
-			annLimit = 2000
-		}
-		genreMatchCountSQL = fmt.Sprintf(`(
-				SELECT COUNT(DISTINCT matched_genre)
-				FROM unnest(COALESCE(mi.genres, '{}'::text[])) AS matched_genre
-				WHERE matched_genre = ANY($%d)
-			)`, argIdx)
 		conditions = append(conditions, fmt.Sprintf("mi.genres && $%d", argIdx))
 		args = append(args, genres)
 		argIdx++
@@ -688,40 +739,44 @@ func (r *Repo) findTasteProfileCandidates(
 
 	if filter.AllowedLibraryIDs != nil {
 		if len(filter.AllowedLibraryIDs) == 0 {
-			return []ScoredItem{}, map[string][]string{}, nil
+			return []ScoredItem{}, map[string]CandidateDetails{}, nil
 		}
 	}
 	catalog.ApplyLibraryAccessFilter("mi.content_id", filter, &conditions, &args, &argIdx)
 
 	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
 
+	columns, names := `COALESCE(mi.genres, '{}'::text[]) AS genres`, `genres`
+	if withDetails {
+		columns, names = candidateDetailColumns, candidateDetailNames
+	}
+	// relaxed_order iterative scans can return the ANN rows slightly out of
+	// order, so the outer query restores exact distance order. As pgvector
+	// documents, the CTE is materialized and the sort is on distance + 0, so
+	// the planner cannot take the scan's order as already sorted.
 	query := fmt.Sprintf(`
-			WITH ann_candidates AS (
+			WITH ann_candidates AS MATERIALIZED (
 				SELECT mi.content_id,
 				       e.embedding::halfvec(3072) <=> $1::halfvec(3072) AS distance,
-				       COALESCE(mi.genres, '{}'::text[]) AS genres
+				       %s
 				FROM   media_item_embeddings e
 				JOIN   media_items mi ON mi.content_id = e.media_item_id
 				WHERE  %s
 				ORDER  BY e.embedding::halfvec(3072) <=> $1::halfvec(3072)
 				LIMIT  $%d
 			)
-			SELECT content_id,
-			       1 - distance AS similarity,
-			       genres,
-			       %s AS genre_match_count
-			FROM   ann_candidates mi
-			ORDER  BY genre_match_count DESC, distance ASC, content_id
-			LIMIT  $%d`,
+			SELECT content_id, distance, %s
+			FROM   ann_candidates
+			ORDER  BY distance + 0 ASC, content_id`,
+		columns,
 		strings.Join(conditions, " AND "),
 		argIdx,
-		genreMatchCountSQL,
-		argIdx+1,
+		names,
 	)
-	args = append(args, annLimit, limit)
+	args = append(args, limit)
 
 	var items []ScoredItem
-	genreMap := make(map[string][]string, limit)
+	details := make(map[string]CandidateDetails, limit)
 	err := r.withHNSWCandidateScan(ctx, func(tx pgx.Tx) error {
 		rows, err := tx.Query(ctx, query, args...)
 		if err != nil {
@@ -731,15 +786,22 @@ func (r *Repo) findTasteProfileCandidates(
 
 		items = make([]ScoredItem, 0, limit)
 		for rows.Next() {
-			var item ScoredItem
-			var itemGenres []string
-			var genreMatchCount int
-			if err := rows.Scan(&item.MediaItemID, &item.Score, &itemGenres, &genreMatchCount); err != nil {
+			item := ScoredItem{Reason: "taste_profile_match"}
+			var distance float64
+			var d CandidateDetails
+			dest, finish := []any{&item.MediaItemID, &distance, &d.Meta.Genres}, func() {}
+			if withDetails {
+				var detailDest []any
+				detailDest, finish = candidateDetailDest(&d)
+				dest = append(dest[:2], detailDest...)
+			}
+			if err := rows.Scan(dest...); err != nil {
 				return fmt.Errorf("scan taste profile candidate: %w", err)
 			}
-			item.Reason = "taste_profile_match"
+			finish()
+			item.Score = 1 - distance
 			items = append(items, item)
-			genreMap[item.MediaItemID] = itemGenres
+			details[item.MediaItemID] = d
 		}
 		if err := rows.Err(); err != nil {
 			return fmt.Errorf("iterate taste profile candidates: %w", err)
@@ -750,7 +812,7 @@ func (r *Repo) findTasteProfileCandidates(
 		return nil, nil, fmt.Errorf("find taste profile candidates: %w", err)
 	}
 
-	return items, genreMap, nil
+	return items, details, nil
 }
 
 // buildItemsNeedingEmbeddingSQL returns the cheap missing/model-stale candidate
@@ -1143,7 +1205,10 @@ func (r *Repo) GetTasteProfile(ctx context.Context, userID int, profileID string
 }
 
 // FindSimilarUsers returns users with taste profiles similar to the given user's
-// profile, filtered by max_content_rating compatibility.
+// profile. maxContentRating is the ceiling the peers are matched under (see
+// peerCeiling): with one, only peers whose stored max_content_rating, the
+// highest rating among the titles they took to, is empty or within it are
+// returned; with none, any peer is.
 func (r *Repo) FindSimilarUsers(ctx context.Context, userID int, profileID string, maxContentRating string, limit int) ([]UserSimilarity, error) {
 	embedding, err := r.GetTasteProfile(ctx, userID, profileID)
 	if err != nil {
@@ -1719,6 +1784,18 @@ func (r *Repo) MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) 
 type StaleProfile struct {
 	UserID    int
 	ProfileID string
+	// StaleAt is the profile's stale mark.
+	StaleAt time.Time
+}
+
+// StaleProfilesPage selects one page of GetStaleProfiles.
+type StaleProfilesPage struct {
+	// After, when set, starts the page after this profile in mark order, so
+	// a caller can step past profiles it left marked.
+	After *StaleProfile
+	// MarkedBy, when set, leaves out marks newer than it.
+	MarkedBy time.Time
+	Limit    int
 }
 
 // GetStaleProfiles returns profiles with a stale mark, oldest mark first. A
@@ -1727,13 +1804,24 @@ type StaleProfile struct {
 // refresh clears a mark (ClearStaleAt): the nightly taste job stores the
 // taste vector as of its start but does not rebuild cached rows, so a mark it
 // passed over stays pending although it is older than updated_at.
-func (r *Repo) GetStaleProfiles(ctx context.Context, limit int) ([]StaleProfile, error) {
+func (r *Repo) GetStaleProfiles(ctx context.Context, page StaleProfilesPage) ([]StaleProfile, error) {
+	var markedBy, afterAt *time.Time
+	var afterUser int
+	var afterProfile string
+	if !page.MarkedBy.IsZero() {
+		markedBy = &page.MarkedBy
+	}
+	if page.After != nil {
+		afterAt, afterUser, afterProfile = &page.After.StaleAt, page.After.UserID, page.After.ProfileID
+	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT user_id, profile_id
+		SELECT user_id, profile_id, stale_at
 		FROM   user_taste_profiles
 		WHERE  stale_at IS NOT NULL
+		  AND  ($1::timestamptz IS NULL OR stale_at <= $1)
+		  AND  ($2::timestamptz IS NULL OR (stale_at, user_id, profile_id) > ($2, $3, $4))
 		ORDER  BY stale_at, user_id, profile_id
-		LIMIT  $1`, limit)
+		LIMIT  $5`, markedBy, afterAt, afterUser, afterProfile, page.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("get stale profiles: %w", err)
 	}
@@ -1742,7 +1830,7 @@ func (r *Repo) GetStaleProfiles(ctx context.Context, limit int) ([]StaleProfile,
 	var profiles []StaleProfile
 	for rows.Next() {
 		var p StaleProfile
-		if err := rows.Scan(&p.UserID, &p.ProfileID); err != nil {
+		if err := rows.Scan(&p.UserID, &p.ProfileID, &p.StaleAt); err != nil {
 			return nil, fmt.Errorf("scan stale profile: %w", err)
 		}
 		profiles = append(profiles, p)
@@ -2546,33 +2634,6 @@ func (r *Repo) filterItemIDs(ctx context.Context, itemIDs []string, filter catal
 	return result, rows.Err()
 }
 
-// GetItemAddedDates returns the created_at dates for a set of items.
-func (r *Repo) GetItemAddedDates(ctx context.Context, itemIDs []string) (map[string]time.Time, error) {
-	if len(itemIDs) == 0 {
-		return nil, nil
-	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT content_id, created_at
-		FROM   media_items
-		WHERE  content_id = ANY($1)`,
-		itemIDs)
-	if err != nil {
-		return nil, fmt.Errorf("get item added dates: %w", err)
-	}
-	defer rows.Close()
-
-	result := make(map[string]time.Time)
-	for rows.Next() {
-		var id string
-		var t time.Time
-		if err := rows.Scan(&id, &t); err != nil {
-			return nil, fmt.Errorf("scan item added date: %w", err)
-		}
-		result[id] = t
-	}
-	return result, rows.Err()
-}
-
 // presentMediaTypesQuery keeps each media type of $1 that has an embedded,
 // recommendable title; the access conditions follow. EXISTS stops at the
 // first such title.
@@ -2616,39 +2677,6 @@ func (r *Repo) PresentMediaTypes(ctx context.Context, mediaTypes []string, filte
 		present[mediaType] = struct{}{}
 	}
 	return present, rows.Err()
-}
-
-// itemQualityRatingsQuery reads the rating the quality prior uses,
-// catalogRatingSQL, as the taste-seed picker orders by.
-const itemQualityRatingsQuery = `
-		SELECT content_id, quality
-		FROM   (
-			SELECT mi.content_id, ` + catalogRatingSQL + ` AS quality
-			FROM   media_items mi
-			WHERE  mi.content_id = ANY($1)
-		) rated
-		WHERE  quality IS NOT NULL`
-
-// GetItemQualityRatings returns the quality rating of each item that has one.
-func (r *Repo) GetItemQualityRatings(ctx context.Context, itemIDs []string) (map[string]float64, error) {
-	result := make(map[string]float64, len(itemIDs))
-	if len(itemIDs) == 0 {
-		return result, nil
-	}
-	rows, err := r.pool.Query(ctx, itemQualityRatingsQuery, itemIDs)
-	if err != nil {
-		return nil, fmt.Errorf("get item quality ratings: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var id string
-		var rating float64
-		if err := rows.Scan(&id, &rating); err != nil {
-			return nil, fmt.Errorf("scan item quality rating: %w", err)
-		}
-		result[id] = rating
-	}
-	return result, rows.Err()
 }
 
 // listCacheRefreshCandidatesQuery orders profiles by the age of their main
@@ -2984,31 +3012,6 @@ func (r *Repo) GetItemAllGenres(ctx context.Context, itemIDs []string) (map[stri
 	return result, rows.Err()
 }
 
-func (r *Repo) GetItemMediaTypes(ctx context.Context, itemIDs []string) (map[string]string, error) {
-	if len(itemIDs) == 0 {
-		return map[string]string{}, nil
-	}
-	rows, err := r.pool.Query(ctx, `
-		SELECT content_id, type
-		FROM   media_items
-		WHERE  content_id = ANY($1)`,
-		itemIDs)
-	if err != nil {
-		return nil, fmt.Errorf("get item media types: %w", err)
-	}
-	defer rows.Close()
-
-	result := make(map[string]string, len(itemIDs))
-	for rows.Next() {
-		var id, mediaType string
-		if err := rows.Scan(&id, &mediaType); err != nil {
-			return nil, fmt.Errorf("scan item media type: %w", err)
-		}
-		result[id] = mediaType
-	}
-	return result, rows.Err()
-}
-
 // ItemMetadata holds lightweight metadata used by the validation pipeline.
 type ItemMetadata struct {
 	Title   string
@@ -3016,19 +3019,6 @@ type ItemMetadata struct {
 	Genres  []string
 	Year    int
 	Studios []string
-}
-
-// GetItemMetadata returns lightweight metadata for a single item.
-func (r *Repo) GetItemMetadata(ctx context.Context, itemID string) (*ItemMetadata, error) {
-	var m ItemMetadata
-	err := r.pool.QueryRow(ctx, `
-		SELECT title, COALESCE(type, ''), genres, COALESCE(year, 0), studios
-		FROM media_items WHERE content_id = $1`, itemID,
-	).Scan(&m.Title, &m.Type, &m.Genres, &m.Year, &m.Studios)
-	if err != nil {
-		return nil, fmt.Errorf("get item metadata %s: %w", itemID, err)
-	}
-	return &m, nil
 }
 
 // GetSimilarSource returns the embedding and metadata of the item a Similar

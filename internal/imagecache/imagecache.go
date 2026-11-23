@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -15,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
@@ -443,7 +445,9 @@ func putObjectWithRetry(ctx context.Context, putter ObjectPutter, key string, da
 		err := putter.Put(ctx, key, data)
 		if err != nil {
 			lastErr = err
-			if attempt == maxAttempts-1 {
+			// A full disk does not clear in a second; the job queue waits
+			// for space instead.
+			if attempt == maxAttempts-1 || errors.Is(err, syscall.ENOSPC) {
 				break
 			}
 			timer := time.NewTimer(time.Duration(attempt+1) * 500 * time.Millisecond)
