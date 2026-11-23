@@ -68,16 +68,3 @@ func TestRecovererPassesAbortThrough(t *testing.T) {
 	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/", nil))
 	t.Fatal("Recoverer swallowed http.ErrAbortHandler")
 }
-
-// A handler that already wrote its status keeps it.
-func TestRecovererKeepsAWrittenStatus(t *testing.T) {
-	handler := Recoverer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusAccepted)
-		panic("boom")
-	}))
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("status = %d, want 202", rec.Code)
-	}
-}

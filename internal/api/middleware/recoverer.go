@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"runtime/debug"
 
+	chimw "github.com/go-chi/chi/v5/middleware"
+
 	"github.com/Silo-Server/silo-server/internal/activitylog"
 	"github.com/Silo-Server/silo-server/internal/logredact"
 )
@@ -33,7 +35,8 @@ func Recoverer(next http.Handler) http.Handler {
 			// value can too, as an error's text (desc = api_key=...), and the
 			// log handler redacts by key only, so it is masked here.
 			slog.ErrorContext(r.Context(), "panic serving request", "component", "api",
-				"method", r.Method, "path", activitylog.RedactSecretPathParams(r, r.URL.Path),
+				"request_id", chimw.GetReqID(r.Context()), "method", r.Method,
+				"path", activitylog.RedactSecretPathParams(r, r.URL.Path),
 				"panic", logredact.SanitizeText(fmt.Sprint(rec)), "stack", string(debug.Stack()))
 			w.WriteHeader(http.StatusInternalServerError)
 		}()
