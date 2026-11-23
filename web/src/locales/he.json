@@ -73993,6 +73993,12 @@
       "value": "סימון כנצפה אחרי"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "פריטים עם סימון של כתוביות הסיום נחשבים כנצפו גם כשההפעלה מגיעה לכתוביות הסיום."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

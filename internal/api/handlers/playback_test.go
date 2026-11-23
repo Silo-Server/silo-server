@@ -831,6 +831,74 @@ func TestPersistStopAndHistory_SkipsZeroProgressStops(t *testing.T) {
 	}
 }
 
+// A stop inside an episode's end credits finishes it below the % threshold.
+// The episode runs 1440 s; a stop at 1220 s is 85%, under the default 90%.
+// Credits outside the end-credits window, such as an occurrence over the
+// opening, never finish it.
+func TestPersistStopAndHistory_CreditsFinishTheItem(t *testing.T) {
+	credits := func(start, end float64) []models.MarkerSegment {
+		return []models.MarkerSegment{{Kind: models.MarkerSegmentCredits, StartSeconds: start, EndSeconds: end}}
+	}
+	for _, tc := range []struct {
+		name          string
+		segments      []models.MarkerSegment
+		position      float64
+		playingFileID int
+		wantCompleted bool
+	}{
+		{name: "stop inside end credits", segments: credits(1200, 1410), position: 1220, wantCompleted: true},
+		{name: "stop before end credits", segments: credits(1200, 1410), position: 1150},
+		{name: "credits outside the end window", segments: credits(300, 400), position: 1220},
+		// The session streams another version than the requested file whose
+		// credits these are, so they don't apply to its position.
+		{name: "another version streams", segments: credits(1200, 1410), position: 1220, playingFileID: 43},
+		// A detached stop that only guessed its version leaves the streamed
+		// file unknown.
+		{name: "streamed version unknown", segments: credits(1200, 1410), position: 1220, playingFileID: -1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newPlaybackTestStore(t)
+			file := &models.MediaFile{
+				ID:             42,
+				ContentID:      "series-1",
+				EpisodeID:      "episode-1",
+				FilePath:       "/media/Show/Season 01/Show - S01E01.mkv",
+				Duration:       1440,
+				MarkerSegments: tc.segments,
+			}
+			handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
+			handler.StoreProvider = testUserStoreProvider{store: store}
+
+			session := &playback.Session{
+				ID:          "session-1",
+				UserID:      1,
+				ProfileID:   "profile-1",
+				MediaFileID: 42,
+				Position:    tc.position,
+			}
+			if tc.playingFileID != 0 {
+				session.RequestedMediaFileID, session.MediaFileID = 42, max(tc.playingFileID, 0)
+			}
+			result := handler.persistStopAndHistory(context.Background(), session)
+
+			progress, err := store.GetProgress(context.Background(), "profile-1", "episode-1")
+			if err != nil {
+				t.Fatalf("get progress: %v", err)
+			}
+			if progress == nil || progress.Completed != tc.wantCompleted || result.Completed != tc.wantCompleted {
+				t.Fatalf("progress = %+v, stop completed = %v, want completed %v", progress, result.Completed, tc.wantCompleted)
+			}
+			history, err := store.ListHistory(context.Background(), "profile-1", 10, 0)
+			if err != nil {
+				t.Fatalf("list history: %v", err)
+			}
+			if len(history) != 1 || history[0].Completed != tc.wantCompleted {
+				t.Fatalf("history = %+v, want one entry completed %v", history, tc.wantCompleted)
+			}
+		})
+	}
+}
+
 func TestFindAlternateFile_DoesNotCrossEdition(t *testing.T) {
 	source := &models.MediaFile{
 		ID:         1,

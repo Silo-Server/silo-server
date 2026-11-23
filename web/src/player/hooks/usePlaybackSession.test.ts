@@ -20,11 +20,13 @@ import {
 import { resetSessionMutations } from "../session-mutations";
 import { resetCodecDetectionForTests } from "./useCodecDetection";
 import {
+  FAILURE_PROGRESSIVE_DROP_REPEATED,
   RECONNECT_BASE_DELAY_MS,
   RECONNECT_MAX_ATTEMPTS,
   RECONNECT_MAX_DELAY_MS,
   reconnectDelayMs,
   usePlaybackSession,
+  type UsePlaybackSessionResult,
 } from "./usePlaybackSession";
 
 // These hook tests exercise plan adoption and replacement against a transport
@@ -514,6 +516,1365 @@ describe("usePlaybackSession quality changes", () => {
     expect(bodiesTo("/playback/session-1/replan")[1]).toMatchObject({
       quality_preference: "720p",
       bandwidth_cap_kbps: 8_000,
+    });
+
+    unmount();
+  });
+
+  it("replans active playback when the network tier changes cap or quality", async () => {
+    let planCount = 0;
+    const fetchMock = sessionFetch(() => {
+      planCount += 1;
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: `plan:tier-${planCount}`,
+            plan_attempt_key: `v3:tier-${planCount}`,
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({
+        quality,
+        cap,
+        tier,
+      }: {
+        quality: string;
+        cap: number | null;
+        tier: "unmetered" | "metered" | "low_data";
+      }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          quality,
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          quality: "auto",
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+    expect(bodiesTo("/playback/start")[0]?.bandwidth_cap_kbps).toBe(10_000);
+
+    // Settings resolving on the same tier must not trigger a replan.
+    rerender({ quality: "auto", cap: 12_000, tier: "metered" });
+    await Promise.resolve();
+    expect(bodiesTo("/playback/session-1/replan")).toHaveLength(0);
+
+    // Enabling Data Saver lowers the active cap from 10 Mbps to 2 Mbps.
+    rerender({ quality: "auto", cap: 2_000, tier: "low_data" });
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+    expect(bodiesTo("/playback/session-1/replan")[0]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "auto",
+      bandwidth_cap_kbps: 2_000,
+    });
+    await waitFor(() => expect(result.current.replanning).toBe(false));
+
+    // A manual quality pick stays in place while a later tier change updates the cap.
+    act(() => result.current.changeQuality("720p", 90));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(2));
+    await waitFor(() => expect(result.current.replanning).toBe(false));
+
+    rerender({ quality: "auto", cap: null, tier: "unmetered" });
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(3));
+    expect(bodiesTo("/playback/session-1/replan")[2]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "720p",
+    });
+    expect(bodiesTo("/playback/session-1/replan")[2]).not.toHaveProperty("bandwidth_cap_kbps");
+
+    unmount();
+  });
+
+  it("reconciles rapid Data Saver toggles against an in-flight replan", async () => {
+    let resolveFirstReplan!: (response: Response) => void;
+    let replanCount = 0;
+    const fetchMock = sessionFetch(() => {
+      replanCount += 1;
+      if (replanCount === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirstReplan = resolve;
+        });
+      }
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: `plan:reconcile-${replanCount}`,
+            plan_attempt_key: `v3:reconcile-${replanCount}`,
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 2_000 as number | null,
+          tier: "low_data" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Disable Data Saver -> 10 Mbps replan starts in flight.
+    rerender({ cap: 10_000, tier: "metered" });
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+    expect(bodiesTo("/playback/session-1/replan")[0]?.bandwidth_cap_kbps).toBe(10_000);
+
+    // Re-enable Data Saver before the 10 Mbps replan settles.
+    rerender({ cap: 2_000, tier: "low_data" });
+
+    // Once the 10 Mbps replan adopts, the session reconciles back to 2 Mbps.
+    act(() =>
+      resolveFirstReplan(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:reconcile-1",
+              plan_attempt_key: "v3:reconcile-1",
+            }),
+          ),
+        ),
+      ),
+    );
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(2));
+    expect(bodiesTo("/playback/session-1/replan")[1]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "auto",
+      bandwidth_cap_kbps: 2_000,
+    });
+
+    unmount();
+  });
+
+  it("preserves a queued track pick when the network tier changes during an in-flight replan", async () => {
+    let resolveFirstReplan!: (response: Response) => void;
+    let replanCount = 0;
+    const fetchMock = sessionFetch(() => {
+      replanCount += 1;
+      if (replanCount === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirstReplan = resolve;
+        });
+      }
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: `plan:track-tier-${replanCount}`,
+            plan_attempt_key: `v3:track-tier-${replanCount}`,
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Start an audio switch, then queue a subtitle switch behind it.
+    act(() => result.current.switchAudioTrack(1, 30));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+    act(() => result.current.changeSubtitleTrack(2, 30));
+
+    // Toggle Data Saver while the first replan is still in flight.
+    rerender({ cap: 2_000, tier: "low_data" });
+
+    // Resolving the first replan must dispatch the queued subtitle pick with the new 2 Mbps cap.
+    act(() =>
+      resolveFirstReplan(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:track-tier-1",
+              plan_attempt_key: "v3:track-tier-1",
+            }),
+          ),
+        ),
+      ),
+    );
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(3));
+    expect(bodiesTo("/playback/session-1/replan")[1]).toMatchObject({
+      operation: "track_change",
+      bandwidth_cap_kbps: 2_000,
+      selected_tracks: { subtitle: { id: "", index: 2 } },
+    });
+    expect(bodiesTo("/playback/session-1/replan")[2]).toMatchObject({
+      operation: "quality_change",
+      bandwidth_cap_kbps: 2_000,
+    });
+
+    unmount();
+  });
+
+  it("clears a cellular step-down estimate on a queued track replan and still reselects source on Wi-Fi", async () => {
+    let resolveFirstReplan!: (response: Response) => void;
+    let replanCount = 0;
+    const siblingPlan = (planId: string) =>
+      fixturePlanV3({
+        plan_id: planId,
+        plan_attempt_key: `v3:${planId}`,
+        requested_media_file_id: 7,
+        effective_media_file_id: 8,
+      });
+    const fetchMock = sessionFetch(() => {
+      replanCount += 1;
+      if (replanCount === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirstReplan = resolve;
+        });
+      }
+      return jsonResponse(playable("session-1", siblingPlan(`wifi-clear-${replanCount}`)));
+    }, siblingPlan("wifi-clear-start"));
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Record a cellular stall step-down estimate, then start an audio switch
+    // and queue a subtitle switch behind it.
+    act(() => result.current.setKeptEstimate(3_000));
+    act(() => result.current.switchAudioTrack(1, 30));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+    expect(bodiesTo("/playback/session-1/replan")[0]?.bandwidth_estimate_kbps).toBe(3_000);
+    act(() => result.current.changeSubtitleTrack(2, 30));
+
+    // Switch from cellular to Wi-Fi while the first replan is in flight.
+    rerender({ cap: null, tier: "unmetered" });
+
+    // Resolving the first replan dispatches the queued subtitle switch on Wi-Fi
+    // (clearing the cellular estimate), followed by a quality_change replan so
+    // the server can reconsider the requested 4K version instead of staying
+    // pinned to the cellular sibling.
+    act(() => resolveFirstReplan(jsonResponse(playable("session-1", siblingPlan("wifi-clear-1")))));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(3));
+    expect(bodiesTo("/playback/session-1/replan")[1]).toMatchObject({
+      operation: "track_change",
+      selected_tracks: { subtitle: { id: "", index: 2 } },
+    });
+    expect(bodiesTo("/playback/session-1/replan")[1]).not.toHaveProperty("bandwidth_cap_kbps");
+    expect(bodiesTo("/playback/session-1/replan")[1]).not.toHaveProperty("bandwidth_estimate_kbps");
+    expect(bodiesTo("/playback/session-1/replan")[2]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "auto",
+    });
+    expect(bodiesTo("/playback/session-1/replan")[2]).not.toHaveProperty("bandwidth_cap_kbps");
+    expect(bodiesTo("/playback/session-1/replan")[2]).not.toHaveProperty("bandwidth_estimate_kbps");
+
+    unmount();
+  });
+
+  it("still issues a quality_change replan after a queued frozen seek when Data Saver turns on", async () => {
+    let resolveFirstReplan!: (response: Response) => void;
+    let replanCount = 0;
+    const fetchMock = sessionFetch(() => {
+      replanCount += 1;
+      if (replanCount === 1) {
+        return new Promise<Response>((resolve) => {
+          resolveFirstReplan = resolve;
+        });
+      }
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: `plan:seek-tier-${replanCount}`,
+            plan_attempt_key: `v3:seek-tier-${replanCount}`,
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Start an audio switch, then queue a frozen seek reanchor behind it.
+    act(() => result.current.switchAudioTrack(1, 30));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+    act(() => {
+      void result.current.reanchorSeek(240);
+    });
+
+    // Enable Data Saver before the queue drains.
+    rerender({ cap: 2_000, tier: "low_data" });
+
+    // The queued seek runs with the frozen recipe; once it settles, the session
+    // must still issue a quality_change replan so the 2 Mbps cap actually takes effect.
+    act(() =>
+      resolveFirstReplan(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:seek-tier-1",
+              plan_attempt_key: "v3:seek-tier-1",
+            }),
+          ),
+        ),
+      ),
+    );
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(3));
+    expect(bodiesTo("/playback/session-1/replan")[1]).toMatchObject({
+      operation: "seek_reanchor",
+      position_seconds: 240,
+    });
+    expect(bodiesTo("/playback/session-1/replan")[2]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "auto",
+      bandwidth_cap_kbps: 2_000,
+    });
+
+    unmount();
+  });
+
+  it("retires the over-cap session when a stricter Data Saver replan is refused", async () => {
+    const fetchMock = sessionFetch(
+      () =>
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "output_change_v1"],
+          outcome: "transcoding_disabled",
+          playback_plan: null,
+          terminal: {
+            reason: "transcoding_disabled",
+            message: "Transcoding is disabled on this server.",
+            retryable: false,
+          },
+        }),
+      fixturePlanV3(),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    rerender({ cap: 2_000, tier: "low_data" });
+    await waitFor(() => expect(result.current.errorReason).toBe("transcoding_disabled"));
+    expect(result.current.plan).toBeNull();
+    expect(result.current.streamUrl).toBeNull();
+
+    unmount();
+  });
+
+  it("keeps later Wi-Fi step-down estimates after a no-op cellular-to-Wi-Fi transition", async () => {
+    let replanCount = 0;
+    const fetchMock = sessionFetch(() => {
+      replanCount += 1;
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: `plan:wifi-noop-${replanCount}`,
+            plan_attempt_key: `v3:wifi-noop-${replanCount}`,
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ tier }: { tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          null,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: { tier: "metered" as "unmetered" | "metered" | "low_data" },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Switching from uncapped cellular to uncapped Wi-Fi on the requested file needs no replan.
+    rerender({ tier: "unmetered" });
+    await Promise.resolve();
+    expect(bodiesTo("/playback/session-1/replan")).toHaveLength(0);
+
+    // A later Wi-Fi stall step-down estimate must survive a track change on Wi-Fi.
+    act(() => result.current.setKeptEstimate(4_000));
+    act(() => result.current.switchAudioTrack(1, 30));
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+    expect(bodiesTo("/playback/session-1/replan")[0]).toMatchObject({
+      operation: "track_change",
+      bandwidth_estimate_kbps: 4_000,
+    });
+
+    unmount();
+  });
+
+  it("keeps playback running when Data Saver is turned off before a refused tightening returns", async () => {
+    let resolveRefusal!: (response: Response) => void;
+    const fetchMock = sessionFetch(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolveRefusal = resolve;
+        }),
+      fixturePlanV3(),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const bodiesTo = (suffix: string) =>
+      fetchMock.mock.calls
+        .filter(([url]) => String(url).endsWith(suffix))
+        .map(([, init]) => JSON.parse(String(init?.body)) as Record<string, unknown>);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Turn Data Saver on -> 2 Mbps tightening replan starts in flight.
+    rerender({ cap: 2_000, tier: "low_data" });
+    await waitFor(() => expect(bodiesTo("/playback/session-1/replan")).toHaveLength(1));
+
+    // Turn Data Saver back off before the 2 Mbps replan returns its refusal.
+    rerender({ cap: 10_000, tier: "metered" });
+
+    // Resolving the stale refusal must neither retire the permitted 10 Mbps
+    // session nor surface a stale transcoding_disabled error.
+    act(() =>
+      resolveRefusal(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "output_change_v1"],
+          outcome: "transcoding_disabled",
+          playback_plan: null,
+          terminal: {
+            reason: "transcoding_disabled",
+            message: "Transcoding is disabled on this server.",
+            retryable: false,
+          },
+        }),
+      ),
+    );
+    await waitFor(() => expect(result.current.replanning).toBe(false));
+    expect(result.current.plan).not.toBeNull();
+    expect(result.current.streamUrl).not.toBeNull();
+    expect(result.current.errorReason).toBeNull();
+
+    unmount();
+  });
+
+  it("retires the over-cap session when a Data Saver tightening request fails with an HTTP error", async () => {
+    const fetchMock = sessionFetch(
+      () =>
+        new Response(JSON.stringify({ error: "temporary failure" }), {
+          status: 503,
+          headers: { "Content-Type": "application/json" },
+        }),
+      fixturePlanV3(),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    rerender({ cap: 2_000, tier: "low_data" });
+    await waitFor(() => expect(result.current.error).not.toBeNull());
+    expect(result.current.plan).toBeNull();
+    expect(result.current.streamUrl).toBeNull();
+
+    unmount();
+  });
+
+  it("still applies network-tier quality after repeated rejected manual quality picks", async () => {
+    let resolveFirstPick: ((response: Response) => void) | undefined;
+    const firstPickResponse = new Promise<Response>((resolve) => {
+      resolveFirstPick = resolve;
+    });
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = sessionFetch((init) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      replanBodies.push(body);
+      if (replanBodies.length === 1) return firstPickResponse;
+      if (replanBodies.length === 2) {
+        return jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "terminal",
+          terminal: { reason: "transcoding_disabled", message: "Transcoding disabled" },
+        });
+      }
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: "plan:tier-after-rejected-pick",
+            plan_attempt_key: "v3:tier-after-rejected-pick",
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({
+        quality,
+        cap,
+        tier,
+      }: {
+        quality: string;
+        cap: number | null;
+        tier: "unmetered" | "metered" | "low_data";
+      }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          quality,
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          quality: "auto",
+          cap: null as number | null,
+          tier: "unmetered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Two identical manual picks while the first is still in flight; both fail.
+    act(() => result.current.changeQuality("1080p", 30));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+    act(() => result.current.changeQuality("1080p", 31));
+
+    await act(async () => {
+      resolveFirstPick?.(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3"],
+          outcome: "terminal",
+          terminal: { reason: "transcoding_disabled", message: "Transcoding disabled" },
+        }),
+      );
+      await firstPickResponse;
+    });
+
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    await waitFor(() => expect(result.current.qualityPreference).toBe("auto"));
+
+    // Switching onto cellular must still apply the cellular tier's configured quality.
+    rerender({ quality: "720p", cap: 10_000, tier: "metered" });
+    await waitFor(() => expect(replanBodies).toHaveLength(3));
+    expect(replanBodies[2]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "720p",
+      bandwidth_cap_kbps: 10_000,
+    });
+    expect(result.current.qualityPreference).toBe("720p");
+
+    unmount();
+  });
+
+  it("keeps the replacement start quality when switching versions during an in-flight manual pick", async () => {
+    let resolveOldReplan: ((response: Response) => void) | undefined;
+    const oldReplanResponse = new Promise<Response>((resolve) => {
+      resolveOldReplan = resolve;
+    });
+    let resolveSwitchStart: ((response: Response) => void) | undefined;
+    const switchStartResponse = new Promise<Response>((resolve) => {
+      resolveSwitchStart = resolve;
+    });
+    const startBodies: Array<Record<string, unknown>> = [];
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        startBodies.push(body);
+        if (startBodies.length === 1) {
+          return jsonResponse(playable("session-1", fixturePlanV3()), { status: 201 });
+        }
+        return switchStartResponse;
+      }
+      if (url.endsWith("/replan")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        replanBodies.push(body);
+        if (replanBodies.length === 1) return oldReplanResponse;
+        return jsonResponse(
+          playable(
+            "session-2",
+            fixturePlanV3({
+              session_id: "session-2",
+              plan_id: "plan:tier-after-version-switch",
+              plan_attempt_key: "v3:tier-after-version-switch",
+              requested_media_file_id: 99,
+              effective_media_file_id: 99,
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({
+        quality,
+        cap,
+        tier,
+      }: {
+        quality: string;
+        cap: number | null;
+        tier: "unmetered" | "metered" | "low_data";
+      }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          quality,
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          quality: "auto",
+          cap: null as number | null,
+          tier: "unmetered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.sessionId).toBe("session-1"));
+
+    // Start a manual pick, then switch versions before it returns.
+    act(() => result.current.changeQuality("1080p", 30));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+
+    act(() => result.current.switchVersion(99, 30));
+    await waitFor(() => expect(startBodies).toHaveLength(2));
+    expect(startBodies[1]?.quality_preference).toBe("1080p");
+
+    // The superseded replan returns; it must not roll back the replacement start's quality.
+    await act(async () => {
+      resolveOldReplan?.(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:superseded-pick",
+              plan_attempt_key: "v3:superseded-pick",
+            }),
+          ),
+        ),
+      );
+      await oldReplanResponse;
+    });
+
+    await act(async () => {
+      resolveSwitchStart?.(
+        jsonResponse(
+          playable(
+            "session-2",
+            fixturePlanV3({
+              session_id: "session-2",
+              plan_id: "plan:version-switch-1080p",
+              plan_attempt_key: "v3:version-switch-1080p",
+              requested_media_file_id: 99,
+              effective_media_file_id: 99,
+            }),
+          ),
+          { status: 201 },
+        ),
+      );
+      await switchStartResponse;
+    });
+
+    await waitFor(() => expect(result.current.sessionId).toBe("session-2"));
+    expect(result.current.qualityPreference).toBe("1080p");
+
+    // A later network-tier change preserves the adopted manual 1080p preference.
+    rerender({ quality: "720p", cap: 10_000, tier: "metered" });
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    expect(replanBodies[1]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "1080p",
+      bandwidth_cap_kbps: 10_000,
+    });
+    expect(result.current.qualityPreference).toBe("1080p");
+
+    unmount();
+  });
+
+  it("preserves pending manual quality across overlapping replacement starts", async () => {
+    let resolveReconnectReplan: ((response: Response) => void) | undefined;
+    const reconnectReplanResponse = new Promise<Response>((resolve) => {
+      resolveReconnectReplan = resolve;
+    });
+    let resolveManualReplan: ((response: Response) => void) | undefined;
+    const manualReplanResponse = new Promise<Response>((resolve) => {
+      resolveManualReplan = resolve;
+    });
+    let resolveReconnectStart: ((response: Response) => void) | undefined;
+    const reconnectStartResponse = new Promise<Response>((resolve) => {
+      resolveReconnectStart = resolve;
+    });
+    let resolveSwitchStart: ((response: Response) => void) | undefined;
+    const switchStartResponse = new Promise<Response>((resolve) => {
+      resolveSwitchStart = resolve;
+    });
+    const startBodies: Array<Record<string, unknown>> = [];
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/playback/start")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        startBodies.push(body);
+        if (startBodies.length === 1) {
+          return jsonResponse(playable("session-1", fixturePlanV3()), { status: 201 });
+        }
+        if (startBodies.length === 2) return reconnectStartResponse;
+        return switchStartResponse;
+      }
+      if (url.endsWith("/replan")) {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        replanBodies.push(body);
+        if (replanBodies.length === 1) return reconnectReplanResponse;
+        if (replanBodies.length === 2) return manualReplanResponse;
+        return jsonResponse(
+          playable(
+            "session-3",
+            fixturePlanV3({
+              session_id: "session-3",
+              plan_id: "plan:tier-after-second-switch",
+              plan_attempt_key: "v3:tier-after-second-switch",
+              requested_media_file_id: 100,
+              effective_media_file_id: 100,
+            }),
+          ),
+        );
+      }
+      if (url.endsWith("/playback/route-events")) return new Response(null, { status: 202 });
+      if (init?.method === "DELETE") return jsonResponse({ outcome: "stopped" });
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({
+        quality,
+        cap,
+        tier,
+      }: {
+        quality: string;
+        cap: number | null;
+        tier: "unmetered" | "metered" | "low_data";
+      }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          quality,
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          quality: "auto",
+          cap: null as number | null,
+          tier: "unmetered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.sessionId).toBe("session-1"));
+    act(() => result.current.updatePlaybackState(30, true));
+
+    // Begin reconnect so its probe replan is in flight.
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+    try {
+      act(() => result.current.recoverConnection(30, true));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(RECONNECT_BASE_DELAY_MS);
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+
+    // Queue a manual 1080p pick while the reconnect probe is in flight.
+    act(() => result.current.changeQuality("1080p", 30));
+
+    // Reconnect probe returns 404 -> queued manual pick dispatches, then
+    // reconnect opens Start #2 carrying 1080p while the manual pick is in flight.
+    await act(async () => {
+      resolveReconnectReplan?.(
+        jsonResponse(
+          { error: "playback_session_not_found", message: "Playback session not found" },
+          { status: 404 },
+        ),
+      );
+      await reconnectReplanResponse;
+    });
+    await waitFor(() => expect(startBodies).toHaveLength(2));
+    expect(startBodies[1]?.quality_preference).toBe("1080p");
+
+    // Supersede Start #2 with a version switch (Start #3) before Start #2 adopts.
+    act(() => result.current.switchVersion(100, 30));
+    await waitFor(() => expect(startBodies).toHaveLength(3));
+    expect(startBodies[2]?.quality_preference).toBe("1080p");
+
+    await act(async () => {
+      resolveManualReplan?.(jsonResponse(playable("session-1", fixturePlanV3())));
+      await manualReplanResponse;
+      resolveReconnectStart?.(
+        jsonResponse(playable("session-2", fixturePlanV3()), { status: 201 }),
+      );
+      await reconnectStartResponse;
+      resolveSwitchStart?.(
+        jsonResponse(
+          playable(
+            "session-3",
+            fixturePlanV3({
+              session_id: "session-3",
+              plan_id: "plan:second-switch-1080p",
+              plan_attempt_key: "v3:second-switch-1080p",
+              requested_media_file_id: 100,
+              effective_media_file_id: 100,
+            }),
+          ),
+          { status: 201 },
+        ),
+      );
+      await switchStartResponse;
+    });
+
+    await waitFor(() => expect(result.current.sessionId).toBe("session-3"));
+    expect(result.current.qualityPreference).toBe("1080p");
+
+    // A later tier transition must still honor the manual 1080p pick.
+    rerender({ quality: "720p", cap: 10_000, tier: "metered" });
+    await waitFor(() => expect(replanBodies).toHaveLength(3));
+    expect(replanBodies[2]).toMatchObject({
+      operation: "quality_change",
+      quality_preference: "1080p",
+      bandwidth_cap_kbps: 10_000,
+    });
+    expect(result.current.qualityPreference).toBe("1080p");
+
+    unmount();
+  });
+
+  it.each(["adopted", "refused"] as const)(
+    "preserves the surviving in-flight quality intent when an audio pick replaces a queued quality pick (%s)",
+    async (firstOutcome) => {
+      let resolveFirstPick: ((response: Response) => void) | undefined;
+      const firstPickResponse = new Promise<Response>((resolve) => {
+        resolveFirstPick = resolve;
+      });
+      const replanBodies: Array<Record<string, unknown>> = [];
+      const fetchMock = sessionFetch((init) => {
+        const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        replanBodies.push(body);
+        if (replanBodies.length === 1) return firstPickResponse;
+        return jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:after-audio-track",
+              plan_attempt_key: "v3:after-audio-track",
+            }),
+          ),
+        );
+      }, fixturePlanV3());
+      vi.stubGlobal("fetch", fetchMock);
+
+      const { result, unmount } = renderSession();
+      await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+      // Request 1080p, queue 720p behind it, then displace 720p with an audio change.
+      act(() => result.current.changeQuality("1080p", 30));
+      await waitFor(() => expect(replanBodies).toHaveLength(1));
+      act(() => result.current.changeQuality("720p", 31));
+      act(() => result.current.switchAudioTrack(1, 32));
+
+      expect(result.current.qualityPreference).toBe("1080p");
+
+      await act(async () => {
+        resolveFirstPick?.(
+          firstOutcome === "adopted"
+            ? jsonResponse(
+                playable(
+                  "session-1",
+                  fixturePlanV3({
+                    plan_id: "plan:adopted-1080p",
+                    plan_attempt_key: "v3:adopted-1080p",
+                  }),
+                ),
+              )
+            : jsonResponse({
+                protocol_version: 3,
+                server_features: ["playback_plan_v3"],
+                outcome: "terminal",
+                terminal: { reason: "transcoding_disabled", message: "Transcoding disabled" },
+              }),
+        );
+        await firstPickResponse;
+      });
+
+      await waitFor(() => expect(replanBodies).toHaveLength(2));
+      const expectedQuality = firstOutcome === "adopted" ? "1080p" : "auto";
+      expect(replanBodies[1]).toMatchObject({
+        operation: "track_change",
+        quality_preference: expectedQuality,
+      });
+      expect(result.current.qualityPreference).toBe(expectedQuality);
+
+      unmount();
+    },
+  );
+
+  it("bumps networkTierRevision when an equal-cap unmetered replan is adopted", async () => {
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = sessionFetch(
+      (init) => {
+        replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+        return jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:wifi-restored",
+              plan_attempt_key: "v3:wifi-restored",
+              requested_media_file_id: 7,
+              effective_media_file_id: 7,
+            }),
+          ),
+        );
+      },
+      fixturePlanV3({
+        requested_media_file_id: 7,
+        effective_media_file_id: 9,
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+    expect(result.current.networkTierRevision).toBe(0);
+
+    // Equal-cap cellular -> Wi-Fi replan reselects the requested version and bumps networkTierRevision.
+    rerender({ cap: 10_000, tier: "unmetered" });
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+    await waitFor(() => expect(result.current.networkTierRevision).toBe(1));
+    expect(replanBodies[0]).toMatchObject({
+      operation: "quality_change",
+      bandwidth_cap_kbps: 10_000,
+    });
+
+    unmount();
+  });
+
+  it("issues a corrective 2 Mbps replan after a queued track change adopts a 10 Mbps cap", async () => {
+    let resolveFirstReplan: ((response: Response) => void) | undefined;
+    const firstReplanResponse = new Promise<Response>((resolve) => {
+      resolveFirstReplan = resolve;
+    });
+    let resolveTrackReplan: ((response: Response) => void) | undefined;
+    const trackReplanResponse = new Promise<Response>((resolve) => {
+      resolveTrackReplan = resolve;
+    });
+    const replanBodies: Array<Record<string, unknown>> = [];
+    const fetchMock = sessionFetch((init) => {
+      replanBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      if (replanBodies.length === 1) return firstReplanResponse;
+      if (replanBodies.length === 2) return trackReplanResponse;
+      return jsonResponse(
+        playable(
+          "session-1",
+          fixturePlanV3({
+            plan_id: "plan:corrected-2mbps",
+            plan_attempt_key: "v3:corrected-2mbps",
+          }),
+        ),
+      );
+    }, fixturePlanV3());
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 2_000 as number | null,
+          tier: "low_data" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.plan).not.toBeNull());
+
+    // Start an initial replan and queue a track change behind it.
+    act(() => result.current.switchAudioTrack(1, 20));
+    await waitFor(() => expect(replanBodies).toHaveLength(1));
+    act(() => result.current.switchAudioTrack(2, 21));
+
+    // Disable Data Saver so the queued track change dispatches with 10 Mbps.
+    rerender({ cap: 10_000, tier: "metered" });
+    await act(async () => {
+      resolveFirstReplan?.(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:audio-1",
+              plan_attempt_key: "v3:audio-1",
+            }),
+          ),
+        ),
+      );
+      await firstReplanResponse;
+    });
+    await waitFor(() => expect(replanBodies).toHaveLength(2));
+    expect(replanBodies[1]).toMatchObject({
+      operation: "track_change",
+      bandwidth_cap_kbps: 10_000,
+    });
+
+    // Re-enable Data Saver before the 10 Mbps track change adopts.
+    rerender({ cap: 2_000, tier: "low_data" });
+    await act(async () => {
+      resolveTrackReplan?.(
+        jsonResponse(
+          playable(
+            "session-1",
+            fixturePlanV3({
+              plan_id: "plan:audio-2-10mbps",
+              plan_attempt_key: "v3:audio-2-10mbps",
+            }),
+          ),
+        ),
+      );
+      await trackReplanResponse;
+    });
+
+    // Reconciler must see the adopted 10 Mbps cap and issue a corrective 2 Mbps quality_change.
+    await waitFor(() => expect(replanBodies).toHaveLength(3));
+    expect(replanBodies[2]).toMatchObject({
+      operation: "quality_change",
+      bandwidth_cap_kbps: 2_000,
     });
 
     unmount();
@@ -1099,6 +2460,80 @@ describe("usePlaybackSession output capability changes", () => {
     expect(replanBodies).toHaveLength(2);
     expect(replanBodies[1]).toMatchObject({ client_capabilities: { hdr: true } });
     expect(stoppedSessions).toEqual([]);
+    unmount();
+  });
+
+  it("retires the over-cap session when a queued output refresh inherits a tightening policy and fails with HTTP 503", async () => {
+    const setHDR = outputProbe(true);
+    let resolveTightening: ((response: Response) => void) | undefined;
+    const tighteningResponse = new Promise<Response>((resolve) => {
+      resolveTightening = resolve;
+    });
+    const replanOperations: string[] = [];
+    const stoppedSessions: string[] = [];
+    const fetchMock = hdrFetch((init) => {
+      replanOperations.push((JSON.parse(String(init?.body)) as { operation: string }).operation);
+      if (replanOperations.length === 1) return tighteningResponse;
+      return new Response(JSON.stringify({ error: "temporary failure" }), {
+        status: 503,
+        headers: { "Content-Type": "application/json" },
+      });
+    }, stoppedSessions);
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result, rerender, unmount } = renderHook(
+      ({ cap, tier }: { cap: number | null; tier: "unmetered" | "metered" | "low_data" }) =>
+        usePlaybackSession(
+          "request-1",
+          [],
+          [],
+          7,
+          0,
+          false,
+          "auto",
+          cap,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          true,
+          "always",
+          false,
+          tier,
+        ),
+      {
+        wrapper,
+        initialProps: {
+          cap: 10_000 as number | null,
+          tier: "metered" as "unmetered" | "metered" | "low_data",
+        },
+      },
+    );
+    await waitFor(() => expect(result.current.sessionId).toBe("session-hdr"));
+
+    rerender({ cap: 2_000, tier: "low_data" });
+    await waitFor(() => expect(replanOperations).toEqual(["quality_change"]));
+
+    // Queue an output refresh behind the in-flight tightening replan.
+    act(() => setHDR(false));
+
+    await act(async () => {
+      resolveTightening?.(
+        jsonResponse({
+          protocol_version: 3,
+          server_features: ["playback_plan_v3", "output_change_v1"],
+          outcome: "terminal",
+          terminal: { reason: "transcoding_disabled", message: "Transcoding disabled" },
+        }),
+      );
+      await tighteningResponse;
+    });
+
+    await waitFor(() => expect(replanOperations).toEqual(["quality_change", "output_change"]));
+    await waitFor(() => expect(result.current.plan).toBeNull());
+    expect(result.current.streamUrl).toBeNull();
+    expect(result.current.error).not.toBeNull();
+    await waitFor(() => expect(stoppedSessions).toEqual(["/api/v2/playback/session-hdr"]));
     unmount();
   });
 
@@ -2194,11 +3629,11 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     throw new TypeError("Failed to fetch");
   };
 
-  async function startPlaying() {
+  async function startPlaying(played = true) {
     const rendered = renderSession();
     await waitFor(() => expect(rendered.result.current.planRevision).toBe(1));
     // The stream played: a network failure from here on is a lost connection.
-    act(() => rendered.result.current.updatePlaybackState(100, true));
+    act(() => rendered.result.current.updatePlaybackState(100, played));
     // RTL's waitFor polls on real timers; from here the test drives time.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     return rendered;
@@ -2316,6 +3751,239 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     ]);
 
     unmount();
+  });
+
+  describe("a progressive remux that drops again after its reopen", () => {
+    // Playback started at 0. The reconnect reopens the remux on the keyframe
+    // at 2.002 before the drop at 2.8.
+    const remuxPlan = fixturePlanV3({
+      plan_id: "plan:3333333333333333",
+      delivery: "server_remux_progressive",
+      plan_attempt_key: "v3:remux1111111111",
+      timeline: { ...fixturePlanV3().timeline, stream_origin_seconds: 0, player_start_seconds: 0 },
+    });
+    const reopenedPlan = fixturePlanV3({
+      plan_id: "plan:5555555555555555",
+      delivery: "server_remux_progressive",
+      plan_attempt_key: "v3:remux1111111111",
+      stream: { ...fixturePlanV3().stream, url: "/stream/session-1/remux?seek=2.8" },
+      timeline: {
+        ...fixturePlanV3().timeline,
+        stream_origin_seconds: 2.002,
+        player_start_seconds: 0.798,
+      },
+    });
+    const hlsPlan = fixturePlanV3({
+      plan_id: "plan:4444444444444444",
+      delivery: "server_remux_hls",
+      plan_attempt_key: "v3:hls00000000000",
+    });
+
+    const noOtherRoute = {
+      protocol_version: 3,
+      server_features: ["playback_plan_v3"],
+      outcome: "terminal",
+      terminal: {
+        reason: "no_playable_route",
+        message: "No other route can play this title.",
+        retryable: false,
+      },
+    };
+
+    async function dropAndReopen(
+      secondDropAt: number,
+      {
+        recovery = () => jsonResponse(playable("session-1", hlsPlan)),
+        afterRecovery = () => jsonResponse(playable("session-1", reopenedPlan)),
+        restart,
+        playing = true,
+        played = true,
+        beforeDrop,
+      }: {
+        recovery?: () => Response;
+        afterRecovery?: () => Response;
+        restart?: () => Response;
+        playing?: boolean;
+        /** False: the streams showed frames but never played. */
+        played?: boolean;
+        beforeDrop?: (session: UsePlaybackSessionResult) => void;
+      } = {},
+    ) {
+      const harness = reconnectHarness({
+        initialPlan: remuxPlan,
+        // A reanchor reopens the remux until a recovery excludes it. That
+        // recovery gets `recovery`, and replans after it `afterRecovery`.
+        replan: () => {
+          const bodies = harness.replanBodies;
+          const recoveryAt = bodies.findIndex((body) => body.operation === "failure_recovery");
+          if (recoveryAt < 0) return jsonResponse(playable("session-1", reopenedPlan));
+          return recoveryAt === bodies.length - 1 ? recovery() : afterRecovery();
+        },
+        restart,
+      });
+      const rendered = await startPlaying(played);
+      act(() => rendered.result.current.recoverConnection(2.8, played));
+      await advance(RECONNECT_BASE_DELAY_MS);
+      expect(harness.replanBodies[0]?.operation).toBe("seek_reanchor");
+      expect(rendered.result.current.connectionStatus).toBe("connected");
+
+      // The reopened stream plays, and the element is reported paused before
+      // the drop: by Chromium, or by the viewer when `playing` is false.
+      act(() => {
+        rendered.result.current.reportFirstFrame();
+        rendered.result.current.updatePlaybackState(2.8, played);
+        beforeDrop?.(rendered.result.current);
+        rendered.result.current.updatePlaybackState(secondDropAt, false);
+      });
+      act(() => rendered.result.current.recoverConnection(secondDropAt, playing));
+      act(() => rendered.result.current.updatePlaybackState(secondDropAt, false));
+      await advance(reconnectDelayMs(1));
+      return { harness, ...rendered };
+    }
+
+    it("reports the route failed when it drops at the same point", async () => {
+      const { harness, result, unmount } = await dropAndReopen(2.8);
+
+      const body = harness.replanBodies[1];
+      expect(body?.operation).toBe("failure_recovery");
+      expect(body?.position_seconds).toBe(2.8);
+      expect(body?.failure).toMatchObject({ classification: FAILURE_PROGRESSIVE_DROP_REPEATED });
+      expect(body?.attempted_plan_keys).toEqual(["v3:remux1111111111"]);
+      expect(result.current.connectionStatus).toBe("connected");
+      expect(result.current.plan?.delivery).toBe("server_remux_hls");
+      expect(result.current.shouldAutoPlay).toBe(true);
+
+      unmount();
+    });
+
+    it("shows the server's refusal instead of starting over when no other route plays", async () => {
+      const { harness, result, unmount } = await dropAndReopen(2.8, {
+        recovery: () => jsonResponse(noOtherRoute),
+      });
+
+      expect(harness.replanBodies[1]?.operation).toBe("failure_recovery");
+      // A fresh start would forget the excluded remux and could pick it again.
+      expect(harness.startBodies).toHaveLength(1);
+      expect(result.current.errorReason).toBe("no_playable_route");
+
+      unmount();
+    });
+
+    it("keeps a viewer's pause when the recovery request cannot reach the server", async () => {
+      const { harness, result, unmount } = await dropAndReopen(2.8, {
+        recovery: unreachable,
+        playing: false,
+      });
+      // The failed request starts a reconnect, which reopens the remux.
+      await advance(RECONNECT_MAX_DELAY_MS);
+
+      expect(harness.replanBodies.map((body) => body.operation)).toEqual([
+        "seek_reanchor",
+        "failure_recovery",
+        "seek_reanchor",
+      ]);
+      expect(result.current.connectionStatus).toBe("connected");
+      expect(result.current.shouldAutoPlay).toBe(false);
+
+      unmount();
+    });
+
+    it("starts a new session when the server no longer has this one", async () => {
+      // A restarted server or a dead node can also drop the reopened stream at
+      // the same point.
+      const sessionGone = () =>
+        jsonResponse(
+          { error: "playback_session_not_found", message: "Playback session not found" },
+          { status: 404 },
+        );
+      const { harness, result, unmount } = await dropAndReopen(2.8, {
+        recovery: sessionGone,
+        afterRecovery: sessionGone,
+        restart: () =>
+          jsonResponse(playable("session-2", { ...hlsPlan, session_id: "session-2" }), {
+            status: 201,
+          }),
+      });
+      await advance(RECONNECT_MAX_DELAY_MS);
+
+      expect(harness.replanBodies[1]?.operation).toBe("failure_recovery");
+      expect(harness.startBodies).toHaveLength(2);
+      expect(harness.startBodies[1]?.start_position).toBe(2.8);
+      expect(result.current.sessionId).toBe("session-2");
+      expect(result.current.connectionStatus).toBe("connected");
+      expect(result.current.error).toBeNull();
+
+      unmount();
+    });
+
+    it("reopens it again after the viewer seeks back inside the buffer", async () => {
+      // A browser whose seekable range covers what it buffered takes the seek
+      // without a reanchor, so the plan stays the same.
+      const { harness, result, unmount } = await dropAndReopen(2.1, {
+        beforeDrop: (session) => {
+          session.updatePlaybackState(6, true);
+          session.reportSeek(2.1);
+        },
+      });
+
+      expect(harness.replanBodies[1]?.operation).toBe("seek_reanchor");
+      expect(result.current.plan?.delivery).toBe("server_remux_progressive");
+
+      unmount();
+    });
+
+    it("starts a new session when the recovery carries the old installation", async () => {
+      const installationChanged = () =>
+        jsonResponse(
+          { error: "installation_changed", message: "The server was reinstalled" },
+          { status: 409 },
+        );
+      const { harness, result, unmount } = await dropAndReopen(2.8, {
+        recovery: installationChanged,
+        afterRecovery: installationChanged,
+        restart: () =>
+          jsonResponse(playable("session-2", { ...hlsPlan, session_id: "session-2" }), {
+            status: 201,
+          }),
+      });
+      await advance(RECONNECT_MAX_DELAY_MS);
+
+      expect(harness.replanBodies[1]?.operation).toBe("failure_recovery");
+      expect(harness.startBodies).toHaveLength(2);
+      expect(result.current.sessionId).toBe("session-2");
+      expect(result.current.error).toBeNull();
+
+      unmount();
+    });
+
+    it("reconnects a stream that showed frames but never played when the recovery cannot reach the server", async () => {
+      const { harness, result, unmount } = await dropAndReopen(2.8, {
+        recovery: unreachable,
+        played: false,
+        playing: false,
+      });
+      await advance(RECONNECT_MAX_DELAY_MS);
+
+      expect(harness.replanBodies.map((body) => body.operation)).toEqual([
+        "seek_reanchor",
+        "failure_recovery",
+        "seek_reanchor",
+      ]);
+      expect(result.current.connectionStatus).toBe("connected");
+      expect(result.current.error).toBeNull();
+
+      unmount();
+    });
+
+    it("reopens it again when it played on past the previous drop", async () => {
+      const { harness, result, unmount } = await dropAndReopen(9);
+
+      expect(harness.replanBodies[1]?.operation).toBe("seek_reanchor");
+      expect(harness.replanBodies[1]?.failure).toBeUndefined();
+      expect(result.current.plan?.delivery).toBe("server_remux_progressive");
+
+      unmount();
+    });
   });
 
   it("starts a new session at the saved position when the old one did not survive a restart", async () => {

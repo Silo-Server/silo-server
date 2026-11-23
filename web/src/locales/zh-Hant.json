@@ -61578,6 +61578,12 @@
       "value": "標記為已觀看的進度"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "具有片尾字幕標記的作品，播放到片尾字幕時也會視為已觀看。"
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

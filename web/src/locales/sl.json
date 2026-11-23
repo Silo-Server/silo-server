@@ -81502,6 +81502,12 @@
       "value": "Označi kot ogledano pri"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Naslovi z oznako za odjavno špico se štejejo za ogledane tudi, ko predvajanje doseže odjavno špico."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

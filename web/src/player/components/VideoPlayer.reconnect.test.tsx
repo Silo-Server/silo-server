@@ -324,6 +324,58 @@ describe("VideoPlayer with the playback session: reconnect", () => {
     expect(requests.starts).toHaveLength(1);
   });
 
+  it("shows the refusal when a reopened remux drops again and no other route plays", async () => {
+    const remuxPlan = directPlan({
+      delivery: "server_remux_progressive",
+      plan_attempt_key: "v3:remux",
+      timeline: { ...directPlan().timeline, can_seek_anywhere: false },
+    });
+    const requests = stubServer({
+      start: () => jsonResponse(playable("session-1", remuxPlan), 201),
+      replan: (_url, body) =>
+        body.operation === "failure_recovery"
+          ? jsonResponse({
+              protocol_version: 3,
+              server_features: ["playback_plan_v3"],
+              outcome: "terminal",
+              terminal: {
+                reason: "no_playable_route",
+                message: "No other route can play this title.",
+                retryable: false,
+              },
+            })
+          : jsonResponse(playable("session-1", { ...remuxPlan, plan_id: "plan:reopened" })),
+    });
+    renderHarness();
+    const video = await startWatching();
+
+    // The browser cannot read past one point of the remux: the stream drops
+    // there, the reconnect reopens it, and it drops there again.
+    Object.defineProperty(video, "error", {
+      configurable: true,
+      value: { code: 2, message: "PIPELINE_ERROR_NETWORK" },
+    });
+    fireEvent.error(video);
+    await waitFor(() => expect(sessionRef.current?.plan?.plan_id).toBe("plan:reopened"), {
+      timeout: 4_000,
+    });
+    showFrame(video);
+    fireEvent.error(video);
+
+    await waitFor(() => expect(sessionRef.current?.errorReason).toBe("no_playable_route"));
+    expect(requests.replans.map(({ body }) => body.operation)).toEqual([
+      "seek_reanchor",
+      "failure_recovery",
+    ]);
+    // The stream is gone, so the viewer is told why instead of facing a
+    // frozen frame.
+    const message = sessionRef.current?.error;
+    expect(message).toBeTruthy();
+    await waitFor(() =>
+      expect(document.querySelector('[role="alert"]')?.textContent ?? "").toContain(message),
+    );
+  });
+
   it("keeps playing after a reconnect that follows a failed HLS startup", async () => {
     // HLS goes through hls.js: the browser reports no native support.
     vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");

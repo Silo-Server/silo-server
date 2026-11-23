@@ -67943,6 +67943,12 @@
       "value": "Đánh dấu đã xem ở mức"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Các tựa phim có điểm đánh dấu phần danh đề cuối cũng được tính là đã xem khi phát đến phần danh đề cuối."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

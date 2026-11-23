@@ -61960,6 +61960,12 @@
       "value": "ทำเครื่องหมายว่าดูแล้วที่"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "รายการที่มีเครื่องหมายช่วงเครดิตจะนับว่าดูแล้วเช่นกันเมื่อเล่นถึงช่วงเครดิต"
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

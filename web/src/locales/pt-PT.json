@@ -74873,6 +74873,12 @@
       "value": "Marcar como visto aos"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Os títulos com um marcador de créditos também contam como vistos quando a reprodução chega aos créditos."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

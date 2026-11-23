@@ -82414,6 +82414,12 @@
       "value": "Pažymėti kaip žiūrėtą ties"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Elementai su titrų žyme taip pat laikomi peržiūrėtais, kai atkūrimas pasiekia titrus."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

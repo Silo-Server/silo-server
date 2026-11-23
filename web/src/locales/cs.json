@@ -81723,6 +81723,12 @@
       "value": "Označit jako zhlédnuté při"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Tituly se značkou závěrečných titulků se počítají jako zhlédnuté také ve chvíli, kdy přehrávání dosáhne těchto titulků."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

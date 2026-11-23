@@ -93709,6 +93709,12 @@
       "value": "التعليم كمُشاهَد عند"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "تُحتسب العناوين التي تحتوي على علامة لشارة النهاية مُشاهَدةً أيضًا بمجرد وصول التشغيل إلى شارة النهاية."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

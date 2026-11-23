@@ -67607,6 +67607,12 @@
       "value": "Markera som sedd vid"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titlar med en eftertextmarkör räknas också som sedda när uppspelningen når eftertexterna."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

@@ -61068,6 +61068,12 @@
       "value": "視聴済みにする進行度"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "クレジットのマーカーがあるタイトルは、再生がクレジットに達した時点でも視聴済みになります。"
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

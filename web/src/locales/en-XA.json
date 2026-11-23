@@ -73747,6 +73747,12 @@
       "value": "⟦Ṁåŕķ ŵåţçĥéđ åţ~~~~~~⟧"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "⟦Ţîţļéš ŵîţĥ å çŕéđîţš ɱåŕķéŕ åļšö çöûñţ åš ŵåţçĥéđ öñçé þļåýƀåçķ ŕéåçĥéš ţĥé çŕéđîţš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

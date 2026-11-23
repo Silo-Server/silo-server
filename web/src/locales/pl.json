@@ -82341,6 +82341,12 @@
       "value": "Oznacz jako obejrzane przy"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Tytuły ze znacznikiem napisów końcowych są też oznaczane jako obejrzane, gdy odtwarzanie dotrze do napisów końcowych."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

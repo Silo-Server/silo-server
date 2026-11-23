@@ -67967,6 +67967,12 @@
       "value": "Σήμανση ως παρακολουθημένο στο"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Για τα στοιχεία με δείκτη τίτλων τέλους, θεωρείται επίσης ότι έχουν παρακολουθηθεί μόλις η αναπαραγωγή φτάσει στους τίτλους τέλους."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

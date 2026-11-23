@@ -67715,6 +67715,12 @@
       "value": "Merkitse katsotuksi kohdassa"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Kohteet, joissa on lopputekstien merkki, lasketaan katsotuiksi myös silloin, kun toisto saavuttaa lopputekstit."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

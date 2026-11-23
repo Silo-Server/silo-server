@@ -74681,6 +74681,12 @@
       "value": "Označi kao pogledano na"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Naslovi s oznakom odjavne špice također se računaju kao pogledani čim reprodukcija dođe do odjavne špice."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

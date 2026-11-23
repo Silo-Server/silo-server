@@ -67915,6 +67915,12 @@
       "value": "Отбелязване като гледано при"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Заглавията с маркер за финалните надписи също се отчитат като гледани, щом възпроизвеждането достигне финалните надписи."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

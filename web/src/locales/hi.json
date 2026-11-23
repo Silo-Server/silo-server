@@ -67403,6 +67403,12 @@
       "value": "इतने पर देखा गया मार्क करें"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "क्रेडिट मार्कर वाले टाइटल तब भी देखे गए माने जाते हैं, जब प्लेबैक क्रेडिट तक पहुँच जाए।"
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

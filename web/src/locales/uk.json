@@ -81486,6 +81486,12 @@
       "value": "Позначати переглянутим на"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Тайтли з міткою титрів також вважаються переглянутими, щойно відтворення доходить до титрів."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

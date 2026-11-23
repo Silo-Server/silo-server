@@ -67719,6 +67719,12 @@
       "value": "Merk som sett ved"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titler med en rulletekstmarkør regnes også som sett når avspillingen når rulleteksten."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

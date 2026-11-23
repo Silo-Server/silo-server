@@ -81791,6 +81791,12 @@
       "value": "Označiť ako pozreté pri"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Tituly so značkou záverečných titulkov sa považujú za pozreté aj vtedy, keď prehrávanie dosiahne záverečné titulky."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
