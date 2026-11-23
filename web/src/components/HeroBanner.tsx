@@ -198,11 +198,11 @@ export default function HeroBanner({
   const shown = pageVisible && onScreen;
   const audiobookPlayback = useAudiobookPlaybackController();
   // Bumped whenever auto-advance restarts a fresh 8s cycle — after the slide
-  // changes, after the user unpauses, or when the hero is shown again. Used as part of the progress-rail key
-  // so the CSS animation restarts in lockstep with the setInterval timer
-  // (otherwise, resuming via animation-play-state desyncs: rail finishes
-  // before the next slide advance, or vice-versa, depending on when the user
-  // paused).
+  // changes, after the user unpauses, or when the hero is shown again. Used as
+  // part of the progress-rail key so the CSS animation restarts in lockstep
+  // with the setInterval timer (otherwise, resuming via animation-play-state
+  // desyncs: rail finishes before the next slide advance, or vice-versa,
+  // depending on when the user paused).
   const [playCycle, setPlayCycle] = useState(0);
 
   const next = useCallback(() => {
@@ -225,13 +225,11 @@ export default function HeroBanner({
   const wantsPlay = choice === "play" || (choice === null && !reduceMotion);
   // Whether the user and the holds let the slideshow run.
   const autoplaying = wantsPlay && !held;
-  // What actually happens: drives the timer and the progress rail. A hero
-  // out of view or in a background tab stops its timer, so the rail stops too.
+  // What actually happens: drives the timer and the progress rail.
   const advancing = autoplaying && shown;
-  // Each time the timer starts again (a hold ends, Play is pressed, or the
-  // hero comes back into view), playCycle bumps so the rail animation
-  // restarts at scaleX(0) in sync with the fresh 8s interval the effect below
-  // starts.
+  // Each time the slideshow starts running again, playCycle bumps so the rail
+  // animation restarts at scaleX(0) in sync with the fresh 8s interval the
+  // effect below starts.
   const [railRunning, setRailRunning] = useState(advancing);
   if (railRunning !== advancing) {
     setRailRunning(advancing);
