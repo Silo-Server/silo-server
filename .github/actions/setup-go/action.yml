@@ -60,8 +60,16 @@ runs:
     # The restore below unpacks the build cache while libvips installs in the
     # background. On tmpfs, those writes and the job's compile output stay off
     # the disk the install writes to. The path, and so the cache key, is unchanged.
+    #
+    # The vet cache stays on disk. It holds three builds of the tree (Linux
+    # vet, darwin vet, the trimmed darwin node build), about 6 GB for one
+    # commit, and after a go.sum change the restored entries push it past
+    # the tmpfs's 8 GB (half the runner's memory). Go drops cache writes it
+    # has no room for, and route-inventory's go list then fails reading back
+    # a cgo file list it could not write. The decision lives here, not in the
+    # workflow, because pull requests run main's workflow but their own actions.
     - name: Keep the Go build cache in memory
-      if: runner.environment == 'github-hosted'
+      if: runner.environment == 'github-hosted' && inputs.cache-name != 'vet'
       shell: bash
       run: |
         mkdir -p ~/.cache/go-build

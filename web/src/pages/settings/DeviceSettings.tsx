@@ -250,7 +250,7 @@ function SwitchButton({
       onClick={onClick}
       aria-pressed={active}
       className={cn(
-        "inline-flex min-h-11 items-center gap-1.5 rounded-lg px-4 text-sm font-medium transition-colors sm:min-h-9 sm:px-3 sm:text-[13px]",
+        "inline-flex min-h-11 items-center gap-1.5 rounded-lg px-4 text-sm font-medium transition-colors sm:min-h-9 sm:px-3 sm:text-[0.8125rem]",
         active
           ? "bg-surface-raised text-foreground"
           : "text-muted-foreground hover:text-foreground",
@@ -389,11 +389,11 @@ function DeviceDetail({
             device.custom_name !== device.device_name ? (
               // The reported name still identifies the hardware, which is what
               // someone checks before forgetting a device.
-              <p className="text-muted-foreground mt-0.5 text-[13px] leading-snug">
+              <p className="text-muted-foreground mt-0.5 text-[0.8125rem] leading-snug">
                 {t("web.settings.device.reportsItselfAs", { name: device.device_name })}
               </p>
             ) : null}
-            <p className="text-muted-foreground mt-0.5 text-[13px] leading-snug">
+            <p className="text-muted-foreground mt-0.5 text-[0.8125rem] leading-snug">
               {[
                 platformKindLabel(kind),
                 device.is_current_device
@@ -461,7 +461,7 @@ function DeviceDetail({
           {!device.is_current_device ? (
             <Button
               variant="ghost"
-              className="text-muted-foreground hover:text-destructive min-h-11 self-start px-0 text-[13px] sm:h-8 sm:min-h-0 sm:px-3 sm:text-sm"
+              className="text-muted-foreground hover:text-destructive min-h-11 self-start px-0 text-[0.8125rem] sm:h-8 sm:min-h-0 sm:px-3 sm:text-sm"
               disabled={forgetDevice.isPending}
               onClick={() => {
                 if (
@@ -504,7 +504,7 @@ function DeviceDetail({
             ? t("web.settings.device.scopeOther", { name: ownerName, strong: scopeStrong })
             : t("web.settings.device.scopeOwn", { strong: scopeStrong })}
         </span>
-        <span className="text-muted-foreground mt-1 block text-[13px]">{scopeDetail}</span>
+        <span className="text-muted-foreground mt-1 block text-[0.8125rem]">{scopeDetail}</span>
       </Callout>
 
       {capabilitiesUnavailable ? (
@@ -516,7 +516,7 @@ function DeviceDetail({
             <p className="text-sm font-semibold">
               {t("web.settings.device.capabilitiesFailed.title")}
             </p>
-            <p className="text-muted-foreground mt-1 text-[13px] leading-relaxed">
+            <p className="text-muted-foreground mt-1 text-[0.8125rem] leading-relaxed">
               {t("web.settings.device.capabilitiesFailed.body")}
             </p>
           </div>
@@ -728,7 +728,7 @@ function Callout({
   return (
     <div
       className={cn(
-        "flex gap-2.5 rounded-2xl border px-4 py-3 text-[13px] leading-relaxed",
+        "flex gap-2.5 rounded-2xl border px-4 py-3 text-[0.8125rem] leading-relaxed",
         tone === "info" && "border-info/25 bg-info/5 text-muted-foreground",
         tone === "warning" && "border-amber-500/30 bg-amber-500/5 text-amber-100/90",
         tone === "muted" && "border-border/60 bg-surface text-muted-foreground",

@@ -1,4 +1,4 @@
-# Local NFO metadata and sidecar artwork (as built)
+# Local NFO metadata and sidecar artwork
 
 Implements #216: Kodi/Jellyfin-style `.nfo` files and sidecar images
 (`poster.jpg`, `fanart.jpg`, …) next to movies and shows are read by a builtin
@@ -583,7 +583,7 @@ sits in the chain.
   such a refresh, or one with locked artwork, leaves on its remote stand-in
   keeps its local source, as a slot left on its cached copy does.
 - Banner, thumb, clear art, disc art and the backdrops after the primary come
-  only from sidecars today, so the rule above has no provider art to fall back
+  only from sidecars, so the rule above has no provider art to fall back
   to. When a refresh searched the item level and did not return a slot's
   sidecar, the slot is cleared once the sidecar's folder answers (the file is
   missing or no longer qualifies) and kept while it does not. A refresh that

@@ -521,6 +521,12 @@
       "value": "Tato relace přehrávání skončila. Spusťte přehrávání znovu."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Tento stream byl nahrazen. Přehrávání pokračuje v aktuálním streamu."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -81717,6 +81723,12 @@
       "value": "Označit jako zhlédnuté při"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Tituly se značkou závěrečných titulků se počítají jako zhlédnuté také ve chvíli, kdy přehrávání dosáhne těchto titulků."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -122082,6 +122094,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

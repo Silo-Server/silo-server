@@ -31,12 +31,12 @@ export default function DayGroup({ day, isSelected }: DayGroupProps) {
         headerActions={
           <span className="flex items-center gap-1.5">
             {today && (
-              <span className="bg-primary text-primary-foreground rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase">
+              <span className="bg-primary text-primary-foreground rounded-full px-2 py-0.5 text-[0.625rem] font-semibold uppercase">
                 {t("web.calendar.today")}
               </span>
             )}
             {isSelected && (
-              <span className="border-primary/40 text-primary rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase">
+              <span className="border-primary/40 text-primary rounded-full border px-2 py-0.5 text-[0.625rem] font-semibold uppercase">
                 {t("web.calendar.focused")}
               </span>
             )}

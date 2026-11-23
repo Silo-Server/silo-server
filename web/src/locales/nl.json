@@ -521,6 +521,12 @@
       "value": "Deze afspeelsessie is beëindigd. Start het afspelen opnieuw."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Deze stream is vervangen. Het afspelen gaat verder op de huidige stream."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -67381,6 +67387,12 @@
       "value": "Als bekeken markeren bij"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titels met een aftitelingsmarkering tellen ook als bekeken zodra het afspelen de aftiteling bereikt."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -102116,6 +102128,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

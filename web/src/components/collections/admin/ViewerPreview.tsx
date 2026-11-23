@@ -27,7 +27,7 @@ function MiniCollectionCard({
         thumbhash={collection.poster_thumbhash}
         className="ring-border/60 aspect-[2/3] w-full rounded-md ring-1"
       />
-      <span className="line-clamp-2 text-[11px] leading-tight font-medium">
+      <span className="line-clamp-2 text-[0.6875rem] leading-tight font-medium">
         {pinned ? (
           <PinGlyph className="text-muted-foreground me-0.5 size-2.5 align-[-1px]" />
         ) : null}
@@ -45,7 +45,7 @@ function MineCards() {
       {[0, 1].map((index) => (
         <li key={index} className="grid w-[62px] content-start gap-1.5">
           <span className="border-border bg-muted/30 aspect-[2/3] w-full rounded-md border" />
-          <span className="text-muted-foreground text-[11px] leading-tight">
+          <span className="text-muted-foreground text-[0.6875rem] leading-tight">
             {index === 0 ? viewerPreviewMine() : ""}
           </span>
         </li>
@@ -88,10 +88,10 @@ export function ViewerPreview({
       )}
     >
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <b className="text-[14px] font-semibold">
+        <b className="text-[0.875rem] font-semibold">
           {t("web.collections.copy.collectionsTabOf", { library: libraryName })}
         </b>
-        <span className="text-muted-foreground inline-flex items-center gap-1.5 text-[12px]">
+        <span className="text-muted-foreground inline-flex items-center gap-1.5 text-[0.75rem]">
           <span aria-hidden className="bg-success size-1.5 rounded-full" />
           {viewerPreviewLabel()}
         </span>
@@ -100,7 +100,7 @@ export function ViewerPreview({
         if (shelf.kind === "user_collections")
           return (
             <div key={shelf.id} className="grid gap-2">
-              <h3 className="m-0 text-[12.5px] font-semibold">{shelf.name}</h3>
+              <h3 className="m-0 text-[0.78125rem] font-semibold">{shelf.name}</h3>
               <MineCards />
             </div>
           );
@@ -114,7 +114,7 @@ export function ViewerPreview({
             <div className="grid gap-2">
               <h3
                 className={cn(
-                  "m-0 text-[12.5px]",
+                  "m-0 text-[0.78125rem]",
                   loose ? "text-muted-foreground font-normal italic" : "font-semibold",
                 )}
               >
@@ -133,7 +133,9 @@ export function ViewerPreview({
           </Fragment>
         );
       })}
-      <p className="text-muted-foreground m-0 text-[12px] leading-normal">{viewerPreviewNote()}</p>
+      <p className="text-muted-foreground m-0 text-[0.75rem] leading-normal">
+        {viewerPreviewNote()}
+      </p>
     </aside>
   );
 }

@@ -1,7 +1,10 @@
 # Administrator plugin catalog settings
 
-All operations require an acting administrator. The PUT mutation retains the demo
-guard; GET reads do not.
+Catalog settings and environment provisioning for plugins. Plugin repositories,
+the catalog listing, and installations are in
+[plugin administration](admin-api.md#plugin-administration). All operations
+require an acting administrator. The PUT mutation is demo-restricted; GET reads
+are not.
 
 `GET /api/v2/admin/plugins/catalog-settings` returns the canonical editable
 configuration: `include_approved_community_plugins`. It is off until an administrator
@@ -37,10 +40,6 @@ server, and does not refresh/replay authentication, automatically retry, or repl
 a stale validator with a newly fetched one. Successful responses for an inactive
 profile do not update that profile's visible cache.
 
-Existing web catalog controls use these operations. The migration inventory lists
-no Apple or Android consumers for catalog settings. Jellyfin compatibility behavior
-and plugin worker protocols do not change.
-
 ## Environment provisioning
 
 `GET /api/v2/admin/plugins/capabilities` reports `env_declarations` when the
@@ -59,8 +58,9 @@ appear here as `pending`, `refused` or `held` before an installation exists.
 recorded provisioning outcome. Use the installation's runtime state to check
 the plugin process.
 
-`GET /api/v2/admin/plugins/installations` and operations that return an
-installation include optional `env_managed`. Its presence means a declaration
+The installation projection
+([plugin catalog and installations](admin-api.md#plugin-catalog-and-installations))
+carries optional `env_managed`. Its presence means a declaration
 owns the installation and its package source. `version_pin` is present for
 an exact version pin. `config_fields` maps each global config entry key to
 the top-level fields the declaration owns. `binding_fields` maps each

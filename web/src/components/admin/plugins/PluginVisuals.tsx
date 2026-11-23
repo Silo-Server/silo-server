@@ -5,8 +5,8 @@ import { pluginCapabilityKinds } from "@/lib/pluginCapabilities";
 import { cn } from "@/lib/utils";
 
 const MONOGRAM_SIZES = {
-  sm: "size-7 rounded-lg text-[11px]",
-  md: "size-9 rounded-lg text-[12.5px]",
+  sm: "size-7 rounded-lg text-[0.6875rem]",
+  md: "size-9 rounded-lg text-[0.78125rem]",
   lg: "size-12 rounded-xl text-base",
 } as const;
 
@@ -48,7 +48,7 @@ export function PluginStatusLabel({
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1.5 text-[13px] whitespace-nowrap",
+        "inline-flex items-center gap-1.5 text-[0.8125rem] whitespace-nowrap",
         textClass || "text-foreground/80",
       )}
       title={title}

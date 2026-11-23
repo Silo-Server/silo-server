@@ -38,11 +38,11 @@ export function Field({
   const id = useId();
   return (
     <div role="group" aria-labelledby={id} className="grid gap-2">
-      <span id={id} className="text-[14px] font-semibold">
+      <span id={id} className="text-[0.875rem] font-semibold">
         {label}
       </span>
       {children}
-      {help ? <p className="text-muted-foreground text-[13px]">{help}</p> : null}
+      {help ? <p className="text-muted-foreground text-[0.8125rem]">{help}</p> : null}
     </div>
   );
 }

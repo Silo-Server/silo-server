@@ -80,12 +80,14 @@ export function SettingsSidebar({
         <ViewTransitionLink
           to={backTo}
           up
-          className="text-muted-foreground hover:text-foreground hover:bg-accent/70 focus-visible:ring-ring/60 flex w-fit items-center gap-2 rounded-lg px-2 py-1.5 text-[13px] font-medium transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
+          className="text-muted-foreground hover:text-foreground hover:bg-accent/70 focus-visible:ring-ring/60 flex w-fit items-center gap-2 rounded-lg px-2 py-1.5 text-[0.8125rem] font-medium transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />
           {backLabel}
         </ViewTransitionLink>
-        <p className="px-2 text-[22px] leading-tight font-extrabold tracking-[-0.03em]">{title}</p>
+        <p className="px-2 text-[1.375rem] leading-tight font-extrabold tracking-[-0.03em]">
+          {title}
+        </p>
         {scope}
         <SettingsSearchInput
           value={search}

@@ -69,7 +69,7 @@ export function CollapsibleDiagnosticsSection({
         </div>
         {isError ? (
           open ? (
-            <Badge variant="destructive" className="text-[11px] tabular-nums">
+            <Badge variant="destructive" className="text-[0.6875rem] tabular-nums">
               <span className="sr-only">{t("web.admin.common.diagnosticsSection.countError")}</span>
               <span aria-hidden="true">{ERROR_MARK}</span>
             </Badge>
@@ -80,7 +80,7 @@ export function CollapsibleDiagnosticsSection({
             </div>
           )
         ) : open ? (
-          <Badge variant="secondary" className="text-[11px] tabular-nums">
+          <Badge variant="secondary" className="text-[0.6875rem] tabular-nums">
             {countLabel}
           </Badge>
         ) : (

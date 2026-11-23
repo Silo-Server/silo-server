@@ -564,10 +564,10 @@ export function GroupsBoard({
       <div className="grid min-w-0 gap-3">
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <h2 className="m-0 text-[16px] font-semibold tracking-[-0.015em]">
+            <h2 className="m-0 text-[1rem] font-semibold tracking-[-0.015em]">
               {arrangeHeading(libraryName)}
             </h2>
-            <p className="text-muted-foreground m-0 mt-0.5 text-[13px]">{arrangeSubtitle()}</p>
+            <p className="text-muted-foreground m-0 mt-0.5 text-[0.8125rem]">{arrangeSubtitle()}</p>
           </div>
           {canEdit ? (
             <Button variant="outline" size="sm" onClick={() => setNaming({ mode: "create" })}>
@@ -628,7 +628,7 @@ export function GroupsBoard({
         </DndContext>
 
         {narrow ? null : (
-          <p className="text-muted-foreground m-0 flex items-start gap-2 px-1 text-[13px] leading-normal">
+          <p className="text-muted-foreground m-0 flex items-start gap-2 px-1 text-[0.8125rem] leading-normal">
             <GripVertical aria-hidden className="mt-0.5 size-4 shrink-0" />
             {arrangeHint()}
           </p>

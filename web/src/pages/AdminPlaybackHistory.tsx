@@ -514,7 +514,7 @@ function historyRowLabel(row: AdminPlaybackHistoryItem, t: Translate): string {
 function InfoCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="surface-panel rounded-2xl border-0 p-4">
-      <div className="text-muted-foreground text-[11px] font-medium">{label}</div>
+      <div className="text-muted-foreground text-[0.6875rem] font-medium">{label}</div>
       <div className="mt-1 text-2xl font-extrabold tracking-tight">{value}</div>
     </div>
   );

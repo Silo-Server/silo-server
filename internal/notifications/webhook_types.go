@@ -85,6 +85,9 @@ type DeliveryAttempt struct {
 	HTTPStatus             *int
 	Outcome                string
 	FailureMessage         *string
+	// claimedAt is when this process received the claim, on its own
+	// monotonic clock, so lease checks don't depend on the database's clock.
+	claimedAt time.Time
 }
 
 // parseReasonFlags decodes a delivery's reason_flags JSONB for

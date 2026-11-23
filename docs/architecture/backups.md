@@ -1369,8 +1369,8 @@ state (aggregates, recommendation caches, collages, series interest),
 onboarding tours, and beta Books data. **`TestUserTablesCoveredDB` fails for any table with a
 `user_id` or `profile_id` column that no data type or account field set
 claims and `excludedUserTables` does not list with a reason**, so a new
-per-user table must be classified. No user-scoped value carried today is
-encrypted.
+per-user table must be classified. No user-scoped value the backup carries
+is encrypted.
 
 **Lock order.** Both import entrypoints, a selective restore's account item
 and a profile import, take their locks in one order before writing any data
@@ -1531,11 +1531,9 @@ history documents, the large ones, are decoded ahead on a bounded number of
 goroutines (`PreparePending`, a split of `Pending` into decoding and
 comparing) while the comparison queries the connection, and the per-type
 counts come from the restore-set reader's validation rather than a second
-decode. On a local seed shaped like shared dev (184 accounts, 245 profiles,
-about 445,000 plays with one account at 105,000, 350,000 progress rows, and
-29,000 hides) the comparison takes about 1.6 seconds; one INFO line
-("compared the backup's accounts with this server") records its time per
-phase and data type, and a DEBUG line names the preference columns, setting
+decode. The comparison's time grows with the size of the watch history the
+backup and this server hold. One INFO line ("compared the backup's accounts
+with this server") records its time per phase and data type, and a DEBUG line names the preference columns, setting
 keys, and kinds of preference that differ per profile (never values).
 
 A matched profile with nothing pending is `on_this_server` (`same`, not
@@ -1944,7 +1942,7 @@ queue search index events through triggers, as every other write does.
 
 A full restore is a rollback of the accounts, by maintainer decision: every
 account, role, and password goes back to the backup's, an admin demoted or a
-password changed since included. Keeping today's accounts beside the backup's
+password changed since included. Keeping this server's current accounts beside the backup's
 data would restore neither state, and the backup is the state the operator
 chose. Only what `secretTables` carries and the stricter switches
 (`stricterFlags`) stay the live server's. Before the swap the restore says

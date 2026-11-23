@@ -521,6 +521,12 @@
       "value": "This playback session ended. Start playing again."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "This stream was replaced. Playback continues on the current one."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -67725,6 +67731,12 @@
       "value": "Mark watched at"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titles with a credits marker also count as watched once playback reaches the credits."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -102868,6 +102880,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

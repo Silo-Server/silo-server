@@ -72,7 +72,7 @@ export function ConcurrentStreamsWidget() {
       <WidgetHeader
         title={rangeTitle(t("web.admin.dashboard.widgets.concurrentStreams.title"), range)}
       >
-        <span className="text-muted-foreground text-[11px] whitespace-nowrap tabular-nums">
+        <span className="text-muted-foreground text-[0.6875rem] whitespace-nowrap tabular-nums">
           {t("web.admin.dashboard.widgets.concurrentStreams.peak", {
             value: peak.toLocaleString(formatLocale()),
           })}

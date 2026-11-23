@@ -36,7 +36,7 @@ export function FranchiseIdField({
   else if (value.trim() === "") note = franchiseIdMissing();
   return (
     <div className="grid gap-2">
-      <label htmlFor={id} className="text-[14px] font-semibold">
+      <label htmlFor={id} className="text-[0.875rem] font-semibold">
         {franchiseIdLabel()}
       </label>
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
@@ -55,14 +55,16 @@ export function FranchiseIdField({
           href={`https://www.themoviedb.org/search/collection?query=${encodeURIComponent(name)}`}
           target="_blank"
           rel="noreferrer"
-          className="text-[13.5px] font-medium underline underline-offset-4"
+          className="text-[0.84375rem] font-medium underline underline-offset-4"
         >
           {findFranchiseId()}
         </a>
       </div>
       <p
         id={`${id}-note`}
-        className={invalid ? "text-destructive text-[13px]" : "text-muted-foreground text-[13px]"}
+        className={
+          invalid ? "text-destructive text-[0.8125rem]" : "text-muted-foreground text-[0.8125rem]"
+        }
       >
         {note}
       </p>
