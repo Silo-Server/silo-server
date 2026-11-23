@@ -257,6 +257,12 @@ function decodeName(view: DataView, platform: number, start: number, length: num
   return out;
 }
 
+/** Whether a \fn argument resets to the style's font, as libass reads it. */
+function isFontReset(name: string): boolean {
+  const trimmed = name.trim();
+  return trimmed === "" || trimmed === "0";
+}
+
 /** The font a style or \fn override names, as libass looks it up. */
 function assFontKey(name: string): string {
   return name.trim().replace(/^@/, "").trim().toLowerCase();
@@ -310,7 +316,7 @@ export function forceASSFontFamily(
       }
 
       return line.replace(/\\fn([^\\}]*)/g, (override, name: string) =>
-        keep.has(assFontKey(name)) ? override : `\\fn${family}`,
+        isFontReset(name) || keep.has(assFontKey(name)) ? override : `\\fn${family}`,
       );
     })
     .join("\n");

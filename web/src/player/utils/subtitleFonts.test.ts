@@ -17,6 +17,7 @@ const SCRIPT = [
   "Format: Layer, Start, End, Style, Text",
   "Dialogue: 0,0:00:01.00,0:00:02.00,Default,{\\fnAdobe Arabic}attached",
   "Dialogue: 0,0:00:01.00,0:00:02.00,Default,{\\fnArial}missing",
+  "Dialogue: 0,0:00:01.00,0:00:02.00,Default,{\\fnArial}sign{\\fn}back to the style font{\\fnArial}sign{\\fn0}again",
 ].join("\n");
 
 describe("forceASSFontFamily", () => {
@@ -42,6 +43,9 @@ describe("forceASSFontFamily", () => {
     );
     expect(out).toContain("{\\fnAdobe Arabic}attached");
     expect(out).toContain("{\\fnnoto sans arabic}missing");
+    expect(out).toContain(
+      "{\\fnnoto sans arabic}sign{\\fn}back to the style font{\\fnnoto sans arabic}sign{\\fn0}again",
+    );
   });
 });
 
