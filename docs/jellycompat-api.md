@@ -248,8 +248,10 @@ A recursive `/Items` browse that lists `Episode` beside other types (such as
 then the episodes, each part in the requested sort, and `TotalRecordCount`
 counts both. Jellyfin interleaves the types by the sort key instead; listing
 the parts one after the other keeps paging stable at any `StartIndex`. Episodes
-keep their season as `ParentId`. A non-recursive browse returns only the other
-types, since a library's direct children are never episodes.
+keep their season as `ParentId`. A filtered request at the user root is a
+recursive search and includes the episodes. A non-recursive browse of a library
+`ParentId` returns only the other types, since a library's direct children are
+never episodes.
 
 `/Shows/{id}/Episodes` accepts numeric `Season`, `SeasonId`, `StartItemId`,
 `StartIndex`, and `Limit`. As in Jellyfin 12.1, an explicit `SeasonId` selects

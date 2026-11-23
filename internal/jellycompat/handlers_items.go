@@ -2306,13 +2306,15 @@ func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session,
 	return listItems, targets, total, true, nil
 }
 
-// mixedEpisodeBrowser returns the episode browse when a recursive query lists
-// Episode beside other types, such as IncludeItemTypes=Episode,Movie, and no
-// Ids. The media_items browse serves the other types but holds no episodes
-// (#4257). A non-recursive browse lists a library's direct children, which are
-// never episodes; an ExcludeItemTypes-only filter also lists Episode.
+// mixedEpisodeBrowser returns the episode browse when a search lists Episode
+// beside other types, such as IncludeItemTypes=Episode,Movie, and no Ids. The
+// media_items browse serves the other types but holds no episodes (#4257). A
+// type filter at the user root is a recursive search even without Recursive,
+// but a non-recursive ParentId library browse lists the library's direct
+// children, which are never episodes; an ExcludeItemTypes-only filter also
+// lists Episode.
 func (h *ItemsHandler) mixedEpisodeBrowser(query itemsQuery) (episodeBrowser, bool) {
-	if !query.recursive || len(query.specificIDs) > 0 || len(query.itemTypes) < 2 || !slices.Contains(query.itemTypes, compatEpisodeType) || !query.allowsVideo() {
+	if (!query.recursive && query.parentLibraryID > 0) || len(query.specificIDs) > 0 || len(query.itemTypes) < 2 || !slices.Contains(query.itemTypes, compatEpisodeType) || !query.allowsVideo() {
 		return nil, false
 	}
 	repo, ok := h.episodeRepo.(episodeBrowser)

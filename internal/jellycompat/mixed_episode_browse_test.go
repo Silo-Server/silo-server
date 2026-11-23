@@ -124,20 +124,38 @@ func TestBrowseItemsWithEpisodeAndOtherTypesIncludesEpisodes(t *testing.T) {
 	}
 }
 
-// A non-recursive browse lists a library's direct children, which are never
-// episodes, so a type list naming Episode, here the movie, series and episode
-// default of an ExcludeItemTypes-only filter, browses media_items alone.
-func TestNonRecursiveBrowseWithEpisodeTypeOmitsEpisodes(t *testing.T) {
-	movies := &mixedBrowseMovies{}
-	h, episodes := newMixedBrowseHandler(movies)
+// A non-recursive ParentId library browse lists the library's direct children,
+// which are never episodes, so a type list naming Episode, here the movie,
+// series and episode default of an ExcludeItemTypes-only filter, browses
+// media_items alone. The same filter at the user root is a recursive search
+// and pages the episodes too.
+func TestNonRecursiveLibraryBrowseWithEpisodeTypeOmitsEpisodes(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		library      bool
+		wantIDs      []string
+		wantEpisodes bool
+	}{
+		{"library", true, []string{"movie-1", "movie-2"}, false},
+		{"user root", false, []string{"movie-1", "movie-2", "ep-1", "ep-2", "ep-3"}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			movies := &mixedBrowseMovies{}
+			h, episodes := newMixedBrowseHandler(movies)
+			path := "/Items?ExcludeItemTypes=Season"
+			if tc.library {
+				path += "&ParentId=" + h.codec.EncodeIntID(EncodedIDLibrary, 1)
+			}
 
-	result := performItemsRequest(t, h, "/Items?ExcludeItemTypes=Season")
+			result := performItemsRequest(t, h, path)
 
-	if gotIDs := decodedItemIDs(t, h.codec, result); !slices.Equal(gotIDs, []string{"movie-1", "movie-2"}) || result.TotalRecordCount != 2 {
-		t.Fatalf("items = %v total = %d, want [movie-1 movie-2] total 2", gotIDs, result.TotalRecordCount)
-	}
-	if len(episodes.pages) > 0 {
-		t.Fatalf("episode pages = %v, want none", episodes.pages)
+			if gotIDs := decodedItemIDs(t, h.codec, result); !slices.Equal(gotIDs, tc.wantIDs) || result.TotalRecordCount != len(tc.wantIDs) {
+				t.Fatalf("items = %v total = %d, want %v total %d", gotIDs, result.TotalRecordCount, tc.wantIDs, len(tc.wantIDs))
+			}
+			if got := len(episodes.pages) > 0; got != tc.wantEpisodes {
+				t.Fatalf("episode pages = %v, want episodes browsed %v", episodes.pages, tc.wantEpisodes)
+			}
+		})
 	}
 }
 
