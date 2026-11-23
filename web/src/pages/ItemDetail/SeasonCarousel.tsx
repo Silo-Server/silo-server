@@ -77,10 +77,10 @@ export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselPro
                     />
                   )}
 
-                  {/* Completed checkmark */}
+                  {/* Completed checkmark: black, like CardWatchStatus; white on this green is under 3:1 */}
                   {isCompleted && (
                     // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
-                    <div className="absolute top-2.5 right-2.5 z-20 rounded-full bg-green-500/90 p-1 text-white shadow-sm">
+                    <div className="absolute top-2.5 right-2.5 z-20 rounded-full bg-green-500/90 p-1 text-black shadow-sm">
                       <Check className="size-3.5" strokeWidth={3} />
                     </div>
                   )}
@@ -108,7 +108,7 @@ export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselPro
                 onPrefetch={() => prefetchSeason(season.content_id)}
                 className="block px-0.5 pt-2.5"
               >
-                <div className="truncate text-[0.8125rem] font-semibold">
+                <div dir="auto" className="bidi-text truncate text-[0.8125rem] font-semibold">
                   {getSeasonDisplayTitle(season)}
                 </div>
                 <div className="text-muted-foreground text-xs">

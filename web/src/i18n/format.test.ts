@@ -128,6 +128,59 @@ describe("formatWith", () => {
       expect(formatWith(arabic, "web.detail.episodeCode", { season, episode })).toBe(expected);
     },
   );
+
+  it("leaves a code tag's value bare in a right-to-left language, so it copies as shown", () => {
+    // The <code> element isolates its own text (app.css); isolate characters
+    // inside it would only end up in a copy.
+    const arabic = createAppIntl("ar-XB", {});
+    const tag = (name: string) => (chunks: unknown[]) => `<${name}>${chunks.join("")}</${name}>`;
+    expect(
+      formatWith(arabic, "web.admin.users.deleteDialog.confirmLabel", {
+        username: "rtl-copy-check",
+        code: tag("code"),
+      }),
+    ).toBe("Type <code>rtl-copy-check</code> to confirm");
+    // Elsewhere, inside a tag too, the value keeps its isolates.
+    expect(
+      formatWith(arabic, "web.admin.plugins.detail.missingConfig", {
+        name: "TMDB",
+        fields: "API key",
+        b: tag("b"),
+      }),
+    ).toBe(
+      `<b>Finish setting up ${FSI}TMDB${PDI}.</b> Add ${FSI}API key${PDI}. Until then it can't do its job.`,
+    );
+    // A code tag that holds more than the value doesn't isolate it alone.
+    const mixed = createAppIntl("ar", {
+      "home.section.recentlyAddedIn": [
+        text("في "),
+        { type: 8, value: "code", children: [text("cd "), arg("library")] },
+      ],
+    });
+    expect(
+      formatWith(mixed, "home.section.recentlyAddedIn", { library: "/srv", code: tag("code") }),
+    ).toBe(`في <code>cd ${FSI}/srv${PDI}</code>`);
+  });
+
+  it.each([
+    { tag: "url", id: "web.settings.connectApps.provider.tvCode", name: "activate_url" },
+    { tag: "address", id: "web.auth.login.device.goToAndEnter", name: "url" },
+    { tag: "mono", id: "web.admin.nodes.form.renderDeviceHelp", name: "example" },
+    { tag: "id", id: "web.item.split.previewHeading", name: "target_id" },
+  ] as const)(
+    "leaves a value bare in a right-to-left language inside a $tag tag",
+    ({ tag, id, name }) => {
+      // These tags render as <code> elements too, so they get the code tag's rule.
+      const arabic = createAppIntl("ar-XB", {});
+      const out = formatWith(arabic, id, {
+        [name]: "/dev/dri",
+        count: 2,
+        file_count: 2,
+        [tag]: (chunks: unknown[]) => `<${tag}>${chunks.join("")}</${tag}>`,
+      });
+      expect(out).toContain(`<${tag}>/dev/dri</${tag}>`);
+    },
+  );
 });
 
 describe("Arabic digits follow the format locale", () => {

@@ -332,7 +332,7 @@ empty when the profile no longer exists.
 The watch summary accepts `days` from 1 to 365 (default 30) and an optional
 `profile_id`. It totals the finalized attempts that ended at or after `since` (now
 minus `days`): `plays`, `completed_plays`, `watched_seconds` and `last_played_at`
-(null when none). `watched_seconds` here is watch time: each attempt's measured
+(null when none). `watched_seconds` is watch time, not a position: each attempt's measured
 `played_seconds`, or, for an attempt recorded before measurement, its end position
 capped at its wall-clock length. Those are the attempts `listAdminPlaybackHistory` lists with the
 same `user_id`, `profile_id` and `ended_after` set to `since`.
@@ -424,6 +424,3 @@ Both PostgreSQL and SQLite paginate by the full setting identity. Writes reuse
 existing validation, normalization, mirror updates, and last-write semantics;
 see [settings API](settings-api.md). Reset `nav.shortcuts` with PUT of its empty
 document; DELETE is rejected. The web bulk-reset flow reports partial completion.
-
-These administrator projections do not alter Jellyfin compatibility contracts.
-There are no corresponding first-party Apple or Android API callers.

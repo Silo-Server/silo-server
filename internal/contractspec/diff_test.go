@@ -110,6 +110,61 @@ func TestSeededBreakingChangeIsDetected(t *testing.T) {
 	}
 }
 
+// TestResponseEnumValueAddedIsAdditive: the contract rules make response
+// enums additive (clients keep an unknown fallback), so a new value on a
+// response property passes the policy before and after the lock without an
+// approval. Request enums stay closed: removing a request value still fails.
+func TestResponseEnumValueAddedIsAdditive(t *testing.T) {
+	added, err := Diff(seedDocument(t), mutate(t, func(doc map[string]any) {
+		prop := schemas(doc)["Profile"].(map[string]any)["properties"].(map[string]any)["avatar_source"].(map[string]any)
+		prop["enum"] = append(prop["enum"].([]any), "generated")
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, c := range added {
+		if c.ID == "response-property-enum-value-added" {
+			found = true
+		}
+		if c.Breaking {
+			t.Errorf("response enum value addition reported as breaking: %+v", c)
+		}
+	}
+	if !found {
+		t.Fatalf("response enum value addition not reported at all: %+v", added)
+	}
+	for _, locked := range []bool{false, true} {
+		if err := Policy(added, &ApprovalsFile{}, locked); err != nil {
+			t.Errorf("locked=%v: response enum value addition failed the policy: %v", locked, err)
+		}
+	}
+
+	// A rename removes one value and adds another; the removal alone is
+	// informational, so the addition stays breaking.
+	renamed, err := Diff(seedDocument(t), mutate(t, func(doc map[string]any) {
+		prop := schemas(doc)["Profile"].(map[string]any)["properties"].(map[string]any)["avatar_source"].(map[string]any)
+		prop["enum"] = []any{"none", "preset", "uploaded"}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Policy(renamed, &ApprovalsFile{}, true); !errors.Is(err, ErrBreaking) || !strings.Contains(err.Error(), "response-property-enum-value-added") {
+		t.Fatalf("locked contract accepted a response enum value rename: %v", err)
+	}
+
+	removed, err := Diff(seedDocument(t), mutate(t, func(doc map[string]any) {
+		prop := schemas(doc)["ProfileUpdate"].(map[string]any)["properties"].(map[string]any)["max_playback_quality"].(map[string]any)
+		prop["enum"] = []any{"1080p", nil}
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Policy(removed, &ApprovalsFile{}, true); !errors.Is(err, ErrBreaking) || !strings.Contains(err.Error(), "request-property-enum-value-removed") {
+		t.Fatalf("locked contract accepted a request enum value removal: %v", err)
+	}
+}
+
 // TestCommittedApprovalsLoad: the committed allowlist validates.
 func TestCommittedApprovalsLoad(t *testing.T) {
 	if _, err := LoadApprovals(contracts.FS); err != nil {

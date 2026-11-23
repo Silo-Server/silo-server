@@ -55,10 +55,10 @@ function StreamRow({ session }: { session: AdminSession }) {
   const methodMeta = activityMethodMeta(classifyActivityMethod(session));
   const bitrate = formatSessionBitrate(session.stream_bitrate_kbps);
   const watchHref =
-    session.content_id && session.media_file_id
+    session.media_item_id && session.media_file_id
       ? buildWatchHref(
           createWatchRouteRequest({
-            contentId: session.content_id,
+            contentId: session.media_item_id,
             fileId: session.media_file_id,
           }),
         )

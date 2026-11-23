@@ -102,7 +102,9 @@ function TrailerCard({ video, onPlay }: { video: ItemVideo; onPlay: () => void }
         </div>
       </div>
       <div className="px-0.5">
-        <div className="text-foreground truncate text-[0.8125rem] font-medium">{label}</div>
+        <div dir="auto" className="bidi-text text-foreground truncate text-[0.8125rem] font-medium">
+          {label}
+        </div>
         <div className="text-muted-foreground mt-0.5 flex items-center gap-1.5 text-[0.6875rem]">
           <span>{extraKindLabel(video.kind)}</span>
           {video.is_official && (

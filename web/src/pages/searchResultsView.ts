@@ -1,4 +1,8 @@
-import { CATALOG_REQUEST_PAGE_PARAM, readCatalogRequestPage } from "./catalogSearchParams";
+import {
+  CATALOG_REQUEST_PAGE_PARAM,
+  readCatalogRequestPage,
+  withCatalogRequestPage,
+} from "./catalogSearchParams";
 
 /**
  * What a search results page shows: the overview (a few rows of each result
@@ -11,7 +15,7 @@ const VIEW_PARAM = "view";
 
 export function readSearchView(searchParams: URLSearchParams): SearchResultsView {
   const value = searchParams.get(VIEW_PARAM);
-  if (value === "library" || value === "requests") return value;
+  if (value === "overview" || value === "library" || value === "requests") return value;
   // Search URLs from before these views kept a later request page with no
   // view; it still opens the request list at that page.
   return !value && readCatalogRequestPage(searchParams) > 1 ? "requests" : "overview";
@@ -49,6 +53,25 @@ export function withSearchView(
   const next = new URLSearchParams(searchParams);
   next.delete(CATALOG_REQUEST_PAGE_PARAM);
   if (view === "overview") {
+    next.delete(VIEW_PARAM);
+  } else {
+    next.set(VIEW_PARAM, view);
+  }
+  return next;
+}
+
+/**
+ * Pages the request grid without leaving the view the URL names. The
+ * overview's first page is the bare URL; past it the overview names itself,
+ * since a later page with no view opens the request list (readSearchView).
+ */
+export function withRequestPage(
+  searchParams: URLSearchParams,
+  view: SearchResultsView,
+  page: number,
+): URLSearchParams {
+  const next = withCatalogRequestPage(searchParams, page);
+  if (view === "overview" && page <= 1) {
     next.delete(VIEW_PARAM);
   } else {
     next.set(VIEW_PARAM, view);

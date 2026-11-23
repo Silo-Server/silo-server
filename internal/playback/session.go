@@ -92,6 +92,9 @@ type Session struct {
 	// AdaptationReasons says why the route changes the file (see
 	// AdaptationReasons); empty for direct play or an unplanned session.
 	AdaptationReasons []string
+	// Subtitle is the subtitle the current plan delivers, for the admin
+	// views; nil when it shows none or the session has no plan.
+	Subtitle *SessionSubtitle
 
 	// Byte-affecting transcode recipe fields the offloaded restart path needs to
 	// rebuild the exact same stream after an audio switch. Local transcodes read
@@ -170,6 +173,7 @@ type SessionStreamState struct {
 	TranscodeHWAccel              string
 	ToneMapMode                   tonemap.Mode
 	AdaptationReasons             []string
+	Subtitle                      *SessionSubtitle
 	TranscodeNodeURL              string
 	TranscodeTransportID          string
 	TranscodeRouteSet             bool
@@ -1188,6 +1192,7 @@ func (m *SessionManager) UpdateStreamState(sessionID string, state SessionStream
 // committed the plan it is about to return. Admission sets the window too, but
 // preparing the transport can take long enough to eat into it before the
 // client has even received the plan. Ordinary stream-state updates leave it.
+// It also starts the session's watch-time measurement.
 func (m *SessionManager) MarkPlanCommitted(sessionID string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -1198,6 +1203,13 @@ func (m *SessionManager) MarkPlanCommitted(sessionID string) error {
 	}
 	m.touchSessionLocked(s)
 	s.PlanCommittedAt = s.LastActivityAt
+	// The start position is the play's first watch sample, taken now that
+	// its transport is ready: time spent preparing it was not viewing, and
+	// measuring from admission would let a seek in the player's first report
+	// pass as play. No report can precede this; the attempt the client
+	// reports against is saved after it.
+	s.Watch = WatchTime{}
+	s.Watch.Observe(s.Position, s.IsPaused, s.PlanCommittedAt)
 	return nil
 }
 
@@ -1266,6 +1278,7 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TranscodeHWAccel = state.TranscodeHWAccel
 	s.ToneMapMode = state.ToneMapMode
 	s.AdaptationReasons = state.AdaptationReasons
+	s.Subtitle = state.Subtitle
 	if state.TranscodeRouteSet {
 		s.TranscodeNodeURL = state.TranscodeNodeURL
 		s.TranscodeTransportID = state.TranscodeTransportID
@@ -1318,6 +1331,7 @@ func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 		TranscodeHWAccel:              s.TranscodeHWAccel,
 		ToneMapMode:                   s.ToneMapMode,
 		AdaptationReasons:             s.AdaptationReasons,
+		Subtitle:                      s.Subtitle,
 		TranscodeNodeURL:              s.TranscodeNodeURL,
 		TranscodeTransportID:          s.TranscodeTransportID,
 		TranscodeRouteSet:             true,
@@ -1362,6 +1376,7 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TranscodeHWAccel = state.TranscodeHWAccel
 	s.ToneMapMode = state.ToneMapMode
 	s.AdaptationReasons = state.AdaptationReasons
+	s.Subtitle = state.Subtitle
 	s.TranscodeNodeURL = state.TranscodeNodeURL
 	s.TranscodeTransportID = state.TranscodeTransportID
 	s.RoutingNetworkProvider = state.RoutingNetworkProvider
@@ -1774,8 +1789,7 @@ func (m *SessionManager) EndTransport(sessionID string) error {
 // A progressive remux is a single HTTP response whose ffmpeg is owned by the
 // serving handler and canceled only by that request's context, so removing the
 // session from this manager does not reach it: an unnegotiated client would go
-// on consuming a stream the server has already disowned — for a copy-unsafe
-// source, corrupt bytes its decoder cannot recover from. This is the smallest
+// on consuming a stream the server has already disowned. This is the smallest
 // handle that lets a stop interrupt one. Segmented transports (HLS, transcode)
 // do not need it: each of their requests is short, and the next one is refused
 // once the session is gone.

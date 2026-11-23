@@ -146,6 +146,12 @@ type Download struct {
 	UpdatedAt         time.Time
 	CompletedAt       *time.Time
 	StatusEventAt     *time.Time // timestamp of the last accepted client status event
+	// CreatedClientIP is the address the registering request came from and
+	// LastClientIP the latest one a status report or file authorization
+	// came from (see clientAddress); "" when none was recorded.
+	CreatedClientIP string
+	LastClientIP    string
+	LastClientIPAt  *time.Time // when LastClientIP was last written
 	// Preparation is set only on preparing rows read through ListPage; it is
 	// not stored on the row.
 	Preparation *PreparationStatus

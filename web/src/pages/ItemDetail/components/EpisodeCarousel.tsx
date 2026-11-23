@@ -160,7 +160,7 @@ function EpisodeCarouselCard({
           >
             <div
               className={cn(
-                "surface-panel-subtle relative aspect-video overflow-hidden rounded-[1.1rem] border transition-[border-color,box-shadow] duration-200",
+                "surface-panel-subtle relative aspect-video overflow-hidden rounded-[1.1rem] border bg-no-repeat transition-[border-color,box-shadow] duration-200",
                 isCurrent
                   ? "border-transparent shadow-[0_0_0_2px_var(--primary)]"
                   : "border-border/30",

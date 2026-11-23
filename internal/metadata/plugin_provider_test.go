@@ -2,12 +2,14 @@ package metadata
 
 import (
 	"context"
-
+	"maps"
+	"reflect"
 	"testing"
 
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	"github.com/Silo-Server/silo-server/internal/bookid"
 )
 
 const (
@@ -279,5 +281,114 @@ func TestPluginProvider_DropsLocalArtworkSources(t *testing.T) {
 	}
 	if person == nil || person.PhotoPath != "" {
 		t.Fatalf("person detail = %+v, want the local photo dropped", person)
+	}
+}
+
+// A book's work-level keys never reach a plugin, and come back from
+// GetMetadata as the capability's work claims, with their evidence and the
+// catalogs that could not be asked; a search result carries none, and an
+// artwork request sends none.
+func TestPluginProviderKeepsBookWorkIDsOutOfProviderIDs(t *testing.T) {
+	item, err := structpb.NewStruct(map[string]any{
+		"work_evidence":      map[string]any{"openlibrary_work": "isbn"},
+		"work_lookup_failed": []any{"Hardcover"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned, err := structpb.NewStruct(map[string]any{"isbn": "9780306406157", "openlibrary_work": "OL2W", "hardcover": "9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakePluginMetadataClient{
+		response: &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{
+			ProviderId: "openlibrary:OL1M", ProviderIds: returned, Metadata: item,
+		}},
+		searchResponse: &pluginv1.SearchMetadataResponse{Results: []*pluginv1.ProviderSearchResult{{
+			ProviderId: "openlibrary:OL1M", ProviderIds: returned,
+		}}},
+	}
+	provider, err := NewPluginProviderWithClientFactory(map[string]string{
+		pluginInstallationIDSetting: "1",
+		capabilityIDSetting:         "books-metadata",
+	}, func(context.Context, int, string) (pluginMetadataClient, error) { return client, nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	stored := map[string]string{"isbn": "9780306406157", "books-metadata": "openlibrary:OL1M", "Hardcover": "9", "openlibrary_work": "OL2W"}
+	edition := map[string]string{"isbn": "9780306406157", "books-metadata": "openlibrary:OL1M"}
+
+	result, err := provider.GetMetadata(t.Context(), MetadataRequest{ProviderIDs: stored, ContentType: "ebook"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStructStringMap(t, client.getMetadataReq.GetProviderIds(), edition)
+	if !maps.Equal(result.ProviderIDs, edition) {
+		t.Fatalf("ProviderIDs = %v, want %v", result.ProviderIDs, edition)
+	}
+	want := []bookid.WorkClaims{{
+		Source: "books-metadata",
+		Claims: []bookid.WorkClaim{
+			{Provider: "hardcover", ProviderID: "9", Evidence: "unknown"},
+			{Provider: "openlibrary_work", ProviderID: "OL2W", Evidence: "isbn"},
+		},
+		LookupFailed: []string{"hardcover"},
+	}}
+	if !reflect.DeepEqual(result.WorkClaims, want) {
+		t.Fatalf("WorkClaims = %+v, want %+v", result.WorkClaims, want)
+	}
+
+	results, err := provider.Search(t.Context(), SearchQuery{Title: "Book", ProviderIDs: stored, ContentType: "audiobook"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertStructStringMap(t, client.searchReq.GetProviderIds(), edition)
+	if len(results) != 1 || !maps.Equal(results[0].ProviderIDs, edition) {
+		t.Fatalf("search results = %+v, want one with %v", results, edition)
+	}
+	// Identify can carry an admin-typed work id into the artwork phase.
+	if _, err := provider.GetImages(t.Context(), ImageRequest{ProviderIDs: stored, ContentType: "ebook"}); err != nil {
+		t.Fatal(err)
+	}
+	assertStructStringMap(t, client.getImagesReq.GetProviderIds(), edition)
+}
+
+func TestPluginProviderSendsAndReadsISBNsAsISBN13(t *testing.T) {
+	ids, err := structpb.NewStruct(map[string]any{"isbn": "978-0-306-40615-7", "openlibrary": "OL1M"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &fakePluginMetadataClient{
+		searchResponse: &pluginv1.SearchMetadataResponse{Results: []*pluginv1.ProviderSearchResult{{Title: "Book", ProviderIds: ids}}},
+		response:       &pluginv1.GetMetadataResponse{Item: &pluginv1.MetadataItem{Title: "Book", ProviderIds: ids}},
+	}
+	provider, err := NewPluginProviderWithClientFactory(map[string]string{
+		"plugin_installation_id": "1",
+		"capability_id":          "openlibrary",
+	}, func(context.Context, int, string) (pluginMetadataClient, error) {
+		return client, nil
+	})
+	if err != nil {
+		t.Fatalf("NewPluginProviderWithClientFactory() error = %v", err)
+	}
+	stored := map[string]string{"openlibrary": "OL1M", "isbn": "ISBN 0-306-40615-2"}
+	sent := map[string]string{"openlibrary": "OL1M", "isbn": "9780306406157"}
+
+	results, err := provider.Search(context.Background(), SearchQuery{Title: "Book", ContentType: "ebook", ProviderIDs: stored})
+	if err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	assertStructStringMap(t, client.searchReq.GetProviderIds(), sent)
+	if len(results) != 1 || results[0].ProviderIDs["isbn"] != "9780306406157" {
+		t.Fatalf("Search() results = %+v, want the ISBN-13", results)
+	}
+
+	result, err := provider.GetMetadata(context.Background(), MetadataRequest{ContentType: "ebook", ProviderIDs: stored})
+	if err != nil {
+		t.Fatalf("GetMetadata() error = %v", err)
+	}
+	assertStructStringMap(t, client.getMetadataReq.GetProviderIds(), sent)
+	if result == nil || result.ProviderIDs["isbn"] != "9780306406157" {
+		t.Fatalf("GetMetadata() result = %+v, want the ISBN-13", result)
 	}
 }

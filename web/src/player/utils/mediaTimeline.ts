@@ -1,3 +1,5 @@
+import type { PlayerFileVersion } from "../types";
+
 export function toMediaTime(playerTimeSeconds: number, timelineOffsetSeconds = 0): number {
   return Math.max(0, playerTimeSeconds + timelineOffsetSeconds);
 }
@@ -6,6 +8,28 @@ export function toPlayerTime(mediaTimeSeconds: number, timelineOffsetSeconds = 0
   // Preserve negative offsets so callers can distinguish a target before the
   // current HLS window from the locally seekable position at zero.
   return mediaTimeSeconds - timelineOffsetSeconds;
+}
+
+// hls.js's default `maxBufferHole`.
+const BUFFER_HOLE_SECONDS = 0.1;
+
+/**
+ * Seconds of media buffered from `position` on; 0 when `position` is not
+ * buffered. Holes small enough for hls.js to step over don't end the buffer.
+ */
+export function bufferedAheadSeconds(ranges: TimeRanges, position: number): number {
+  let end: number | null = null;
+  for (let i = 0; i < ranges.length; i++) {
+    const start = ranges.start(i) - BUFFER_HOLE_SECONDS;
+    if (end === null) {
+      if (position >= start && position < ranges.end(i)) end = ranges.end(i);
+    } else if (start <= end) {
+      end = ranges.end(i);
+    } else {
+      break;
+    }
+  }
+  return end === null ? 0 : end - position;
 }
 
 export function subtitleStartPositionSeconds(
@@ -40,4 +64,36 @@ export function mediaDurationSeconds(
     return elementDurationSeconds;
   }
   return undefined;
+}
+
+function isStandaloneVersion(version: PlayerFileVersion): boolean {
+  return (
+    !version.presentation_kind &&
+    !version.presentation_group_key &&
+    !version.presentation_part_index &&
+    !version.presentation_part_total &&
+    !version.multi_episode_start &&
+    !version.multi_episode_end
+  );
+}
+
+// Keep the requested source when Auto switched to another copy of a named cut.
+// Parts and different cuts have their own resume timelines.
+export function resumeVersionForPlan(
+  versions: readonly PlayerFileVersion[],
+  requestedFileId: number | undefined,
+  active: PlayerFileVersion | undefined,
+  versionPinned: boolean,
+): PlayerFileVersion | undefined {
+  if (versionPinned || !active?.edition_key || active.file_id === requestedFileId) return undefined;
+  const requested = versions.find((version) => version.file_id === requestedFileId);
+  return requested &&
+    requested.edition_key === active.edition_key &&
+    isStandaloneVersion(requested) &&
+    isStandaloneVersion(active) &&
+    requested.duration > 0 &&
+    active.duration > 0 &&
+    Math.abs(requested.duration - active.duration) <= 5
+    ? requested
+    : undefined;
 }

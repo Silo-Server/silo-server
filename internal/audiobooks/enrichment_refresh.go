@@ -287,7 +287,7 @@ func (e *Enricher) refreshMatched(ctx context.Context, item enrichmentItemRow) e
 }
 
 // ResetMatchTx clears an audiobook's provider match for Reset to Provider, in
-// tx, under the claim token from ClaimRefresh: its provider IDs, the fields
+// tx, under the claim token from ClaimRefresh: its provider IDs and work ids, the fields
 // and credits a match owns, artwork a provider supplied, and its field locks.
 // Tag-owned fields are cleared too, so the tags applied next in the same
 // transaction are written as on an unmatched book, and the enrichment state
@@ -309,6 +309,9 @@ func (e *Enricher) ResetMatchTx(ctx context.Context, tx pgx.Tx, contentID, token
 	// The tags applied next store the tagged ASIN again.
 	if _, err := tx.Exec(ctx, `DELETE FROM media_item_provider_ids WHERE content_id = $1`, contentID); err != nil {
 		return fmt.Errorf("clearing audiobook provider IDs: %w", err)
+	}
+	if err := catalog.DeleteWorkClaimsTx(ctx, tx, contentID); err != nil {
+		return err
 	}
 	if _, err := tx.Exec(ctx, `
 		DELETE FROM item_people WHERE content_id = $1 AND kind IN (7, 8)

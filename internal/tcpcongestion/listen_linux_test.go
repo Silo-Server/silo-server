@@ -107,11 +107,11 @@ func TestListenForcesSendBufferThroughHelper(t *testing.T) {
 				}
 				return
 			}
-			if buffer.State != "on" || buffer.Granted != 2*tt.bytes || buffer.Requested != tt.bytes {
-				t.Errorf("SendBuffer State/Requested/Granted = %q/%d/%d, want on/%d/%d", buffer.State, buffer.Requested, buffer.Granted, tt.bytes, 2*tt.bytes)
+			if buffer.State != "on" || buffer.Granted != tt.bytes || buffer.Requested != tt.bytes {
+				t.Errorf("SendBuffer State/Requested/Granted = %q/%d/%d, want on/%d/%d", buffer.State, buffer.Requested, buffer.Granted, tt.bytes, tt.bytes)
 			}
-			if granted != buffer.Granted {
-				t.Errorf("accepted SO_SNDBUF = %d, want SendBuffer.Granted %d", granted, buffer.Granted)
+			if granted/2 != buffer.Granted {
+				t.Errorf("accepted SO_SNDBUF / 2 = %d, want SendBuffer.Granted %d", granted/2, buffer.Granted)
 			}
 		})
 	}

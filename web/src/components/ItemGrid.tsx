@@ -57,9 +57,10 @@ export interface ItemGridHandle {
 
 /**
  * How much of the top of the viewport sticky page headers cover once stuck:
- * the mobile top bar, or the library header on wide screens. Headers opt in
- * with `data-sticky-header`; one that is hidden or scrolls with the page at
- * the current width covers nothing.
+ * the mobile top bar, or the library header on wide screens, and the
+ * impersonation banner above them. Headers opt in with `data-sticky-header`;
+ * one that is hidden or scrolls with the page at the current width covers
+ * nothing.
  */
 function stickyHeaderInset(): number {
   let inset = 0;
@@ -233,6 +234,7 @@ export default function ItemGrid(props: ItemGridProps) {
     windowed: boolean;
   } | null>(null);
 
+  const attachedRef = useRef(false);
   const virtualizer = useWindowVirtualizer({
     count: windowRows,
     estimateSize: () => rowHeight,
@@ -242,6 +244,15 @@ export default function ItemGrid(props: ItemGridProps) {
     // next scroll event, a frame later; a moved row window has to draw the
     // rows it scrolled to in the same frame (see the window scroll below).
     scrollToFn: (offset, options, instance) => {
+      // On attach the virtualizer scrolls back to the offset it read while
+      // rendering, which is still the previous page's. By then the window is
+      // where the route left it (the top of a new page, or a Back restore),
+      // so take that instead.
+      if (!attachedRef.current) {
+        attachedRef.current = true;
+        instance.scrollOffset = window.scrollY;
+        return;
+      }
       windowScroll(offset, options, instance);
       instance.scrollOffset = window.scrollY;
     },

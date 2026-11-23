@@ -160,18 +160,8 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 		// narrower tokens it spent; that only charges the client that sent it.
 
 		// Check per-IP limiter
-		if clientIP := clientip.FromContext(r.Context()); clientIP != "" {
-			ipRate := Rate{
-				RequestsPerSecond: cfg.IPReqPerSecond,
-				RequestsPerMinute: cfg.IPReqPerMinute,
-				Burst:             cfg.IPBurst,
-			}
-			ipKey := "ip:" + SourceKey(clientIP)
-			ipResult := mw.perKey.Allow(r.Context(), ipKey, ipRate)
-			if !ipResult.Allowed {
-				writeRateLimitResponse(w, ipResult, reject)
-				return
-			}
+		if clientIP := clientip.FromContext(r.Context()); clientIP != "" && !mw.allowIP(w, r, cfg, SourceKey(clientIP), reject) {
+			return
 		}
 
 		// Check per-key limiter (API key auth only)
@@ -228,6 +218,16 @@ func (mw *Middleware) handler(next http.Handler, reject RejectBodyWriter) http.H
 	})
 }
 
+// allowIP spends one request from the address budget shared by ordinary API routes.
+func (mw *Middleware) allowIP(w http.ResponseWriter, r *http.Request, cfg Config, source string, reject RejectBodyWriter) bool {
+	rate := Rate{RequestsPerSecond: cfg.IPReqPerSecond, RequestsPerMinute: cfg.IPReqPerMinute, Burst: cfg.IPBurst}
+	result := mw.perKey.Allow(r.Context(), "ip:"+source, rate)
+	if !result.Allowed {
+		writeRateLimitResponse(w, result, reject)
+	}
+	return result.Allowed
+}
+
 // AdmitOverEndpointBudget lets requests that admit accepts through once the
 // endpoint's own budget, or a forwarding peer's share of it, is spent. The
 // per-address request budget and the global budget still apply. admit runs
@@ -280,9 +280,8 @@ type rateLimitError struct {
 	RetryAfter int    `json:"retry_after"`
 }
 
-// AuthEndpointHandler returns middleware for public auth/webhook endpoints. It
-// applies the shared per-IP and endpoint-specific budgets before consuming the
-// process-wide budget, so one rejected client cannot drain capacity for others.
+// AuthEndpointHandler applies a named endpoint's address budgets before the
+// server-wide budget, so one rejected client cannot drain capacity for others.
 func (mw *Middleware) AuthEndpointHandler(endpoint string) func(http.Handler) http.Handler {
 	return mw.AuthEndpointHandlerWithRejectBody(endpoint, writeRateLimitBody)
 }
@@ -305,15 +304,9 @@ func (mw *Middleware) AuthEndpointHandlerWithRejectBody(endpoint string, reject 
 			clientIP := clientip.FromContext(r.Context())
 			if clientIP != "" {
 				source := SourceKey(clientIP)
-				// Check global per-IP limit (shared counter with authenticated routes)
-				ipRate := Rate{
-					RequestsPerSecond: cfg.IPReqPerSecond,
-					RequestsPerMinute: cfg.IPReqPerMinute,
-					Burst:             cfg.IPBurst,
-				}
-				ipResult := mw.perKey.Allow(r.Context(), "ip:"+source, ipRate)
-				if !ipResult.Allowed {
-					writeRateLimitResponse(w, ipResult, reject)
+				// A page of posters has its own address budget so it can load in a
+				// burst without exhausting the dashboard's ordinary API requests.
+				if endpoint != ItemPosterBucket && !mw.allowIP(w, r, cfg, source, reject) {
 					return
 				}
 

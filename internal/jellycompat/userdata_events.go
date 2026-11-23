@@ -89,7 +89,7 @@ type userDataChangedEntry struct {
 // message for session, or reports false when the envelope is not a user-state
 // change for that session's account and profile.
 func userDataChangedFor(env evt.Envelope, session *Session, codec *ResourceIDCodec) (wsMessage, bool) {
-	if session == nil || codec == nil || env.Channel != evt.ChannelUserState {
+	if session == nil || codec == nil || env.Channel != evt.ChannelUserState || env.V2Only {
 		return wsMessage{}, false
 	}
 	if env.UserID == 0 || env.UserID != session.StreamAppUserID {

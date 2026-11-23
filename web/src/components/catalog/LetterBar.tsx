@@ -134,11 +134,14 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
       className={cn(
         "surface-panel fixed end-1 z-30 flex -translate-y-1/2 touch-none flex-col items-stretch rounded-full border py-1.5 select-none sm:end-2",
         // Centered a little low and short of the viewport, so it clears the
-        // page tabs at the top and the scroll-to-top button at the bottom.
-        "top-[calc(50%+2rem)] h-[min(42rem,calc(100dvh-14rem))]",
+        // page tabs at the top and the scroll-to-top button at the bottom. An
+        // impersonation banner takes its height off the rail's top edge: the
+        // center moves down by half of what the rail loses, so the bottom edge
+        // stays exactly where it is without a banner, capped or not.
+        "top-[calc(50%+2rem+(min(42rem,100dvh-14rem)-min(42rem,100dvh-14rem-var(--impersonation-banner-height)))/2)] h-[min(42rem,calc(100dvh-14rem-var(--impersonation-banner-height)))]",
         // A short viewport (a phone on its side) can't fit 27 readable rows,
         // so the letters wrap into two columns of 14 in the same order.
-        "[@media(max-height:599px)]:top-[calc(50%+0.5rem)] [@media(max-height:599px)]:grid [@media(max-height:599px)]:h-[calc(100dvh-9rem)] [@media(max-height:599px)]:grid-flow-col [@media(max-height:599px)]:grid-rows-[repeat(14,minmax(0,1fr))] [@media(max-height:599px)]:rounded-2xl [@media(max-height:599px)]:px-1",
+        "[@media(max-height:599px)]:top-[calc(50%+0.5rem+var(--impersonation-banner-height)/2)] [@media(max-height:599px)]:grid [@media(max-height:599px)]:h-[calc(100dvh-9rem-var(--impersonation-banner-height))] [@media(max-height:599px)]:grid-flow-col [@media(max-height:599px)]:grid-rows-[repeat(14,minmax(0,1fr))] [@media(max-height:599px)]:rounded-2xl [@media(max-height:599px)]:px-1",
       )}
     >
       {LETTER_BAR_LETTERS.map((letter) => {

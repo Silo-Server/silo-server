@@ -279,13 +279,13 @@ afterEach(() => {
 
 function mount() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
-    <QueryClientProvider client={client}>
-      <MemoryRouter>
-        <SignInSettings />
-      </MemoryRouter>
-    </QueryClientProvider>,
-  );
+  return render(<SignInSettings />, {
+    wrapper: ({ children }) => (
+      <QueryClientProvider client={client}>
+        <MemoryRouter>{children}</MemoryRouter>
+      </QueryClientProvider>
+    ),
+  });
 }
 
 const opCalls = (op: string) => calls.filter((call) => call.op === op);
@@ -560,6 +560,127 @@ describe("SignInSettings saving provider changes", () => {
     );
     // Only the provider changed, so the server settings are not saved.
     expect(state.save).not.toHaveBeenCalled();
+  });
+
+  it("shows an enabled OAuth binding waiting for its callback URL as pending", () => {
+    const installation = oidcInstallation();
+    installation.auth_bindings[0]!.callback_pending = true;
+    installation.auth_bindings[0]!.callback_url = "";
+    state.installations = [installation];
+
+    mount();
+    const oidc = providerPanel("OpenID Connect");
+    expect(within(oidc).getByTestId("sign-in-provider-state")).toHaveTextContent("Pending");
+    expect(
+      within(oidc).queryByDisplayValue("https://silo.example.test/api/v2/auth/oauth/5/callback"),
+    ).toBeNull();
+  });
+
+  it("preserves a managed provider binding and managed config while saving another field", async () => {
+    const user = userEvent.setup();
+    const installation = oidcInstallation();
+    installation.capabilities[0]!.env_managed = ["enabled"];
+    installation.env_managed = {
+      config_fields: { connection: ["issuer_url", "client_secret"] },
+      binding_fields: { oidc: ["enabled"] },
+    };
+    state.installations = [installation];
+
+    mount();
+    const oidc = providerPanel("OpenID Connect");
+    expect(within(oidc).getByRole("button", { name: "Turn off" })).toBeDisabled();
+    expect(within(oidc).getByLabelText("Issuer URL")).toBeDisabled();
+    const secret = within(oidc).getByLabelText("Client secret");
+    expect(secret).toBeDisabled();
+    expect(secret).toHaveValue("");
+
+    const providerLogout = within(oidc).getByRole("switch", { name: "Sign out at the provider" });
+    await user.click(providerLogout);
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(
+        opCalls("PUT /api/v2/admin/plugins/installations/{id}/config")[0]?.options?.body,
+      ).toEqual({
+        key: "connection",
+        value: { provider_logout: true },
+        clear_secrets: [],
+      }),
+    );
+  });
+
+  it("drops superseded edits and secret clears when the deployment takes and releases fields", async () => {
+    const user = userEvent.setup();
+    const installation = oidcInstallation();
+    state.installations = [installation];
+    const view = mount();
+    const oidc = providerPanel("OpenID Connect");
+    await user.type(within(oidc).getByLabelText("Issuer URL"), "/obsolete");
+    await user.click(within(oidc).getByRole("button", { name: "Clear" }));
+    await user.click(within(oidc).getByRole("switch", { name: "Sign out at the provider" }));
+
+    const update = structuredClone(installation);
+    update.global_configs[0]!.value = {
+      ...update.global_configs[0]!.value,
+      issuer_url: "https://new.example.test",
+    };
+    state.installations = [
+      {
+        ...update,
+        env_managed: {
+          binding_fields: {},
+          config_fields: { connection: ["issuer_url", "client_secret"] },
+        },
+      },
+    ];
+    view.rerender(<SignInSettings />);
+    state.installations = [update];
+    view.rerender(<SignInSettings />);
+    expect(within(oidc).getByLabelText("Issuer URL")).toHaveValue("https://new.example.test");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(
+        opCalls("PUT /api/v2/admin/plugins/installations/{id}/config")[0]?.options?.body,
+      ).toMatchObject({
+        value: { issuer_url: "https://new.example.test", provider_logout: true },
+        clear_secrets: [],
+      }),
+    );
+  });
+
+  it("saves fields made visible by a deployment update during an edit", async () => {
+    const user = userEvent.setup();
+    const installation = oidcInstallation();
+    installation.global_config_schema[0]!.admin_form!.fields[0]!.show_when = [
+      { field: "provider_logout", equals: ["true"] },
+    ];
+    installation.env_managed = {
+      binding_fields: {},
+      config_fields: { connection: ["provider_logout"] },
+    };
+    state.installations = [installation];
+    const view = mount();
+    const oidc = providerPanel("OpenID Connect");
+    expect(within(oidc).queryByLabelText("Issuer URL")).toBeNull();
+    await user.type(within(oidc).getByLabelText("Client secret"), "new-secret");
+
+    const updated = structuredClone(installation);
+    updated.global_configs[0]!.value = {
+      ...updated.global_configs[0]!.value,
+      provider_logout: true,
+    };
+    state.installations = [updated];
+    view.rerender(<SignInSettings />);
+    const issuer = within(oidc).getByLabelText("Issuer URL");
+    await user.clear(issuer);
+    await user.type(issuer, "https://updated.example.test");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() =>
+      expect(
+        opCalls("PUT /api/v2/admin/plugins/installations/{id}/config")[0]?.options?.body,
+      ).toMatchObject({
+        value: { issuer_url: "https://updated.example.test", client_secret: "new-secret" },
+      }),
+    );
   });
 
   it("saves edited configuration from the save bar, then the server settings", async () => {

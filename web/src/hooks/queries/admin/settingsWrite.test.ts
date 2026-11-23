@@ -111,6 +111,160 @@ it("keeps the original displayed guard after a background refetch and a 412", as
   for (const [, init] of puts) expect(init.headers["If-Match"]).toBe('"displayed-v1"');
 });
 
+it("saves the other edits after a refusal shows an edited key is set by the environment", async () => {
+  let envManaged = false;
+  const writes: Array<Record<string, string>> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        const values = JSON.parse(String(init.body)).values as Record<string, string>;
+        writes.push(values);
+        if (envManaged && "branding.server_name" in values)
+          return response(
+            {
+              type: "https://siloserver.org/docs/api/v2/problems/validation_failed",
+              title: "Validation failed",
+              status: 422,
+              detail: "branding.server_name is managed by an environment variable",
+            },
+            422,
+          );
+        return response({ values, restart_required: false });
+      }
+      if (url.endsWith("/sensitive-status"))
+        return response({
+          configured: [],
+          managed_by_env: envManaged ? ["branding.server_name"] : [],
+          managed_by_env_vars: envManaged ? { "branding.server_name": "SILO_SERVER_NAME" } : {},
+        });
+      return response({ "branding.server_name": "Silo", "branding.login_subtitle": "" });
+    }),
+  );
+  const { result } = renderHook(
+    () => useSettingsForm({ keys: ["branding.server_name", "branding.login_subtitle"] }),
+    fixture(),
+  );
+  await waitFor(() => expect(result.current.getValue("branding.server_name")).toBe("Silo"));
+  act(() => {
+    result.current.setValue("branding.server_name", "Casa");
+    result.current.setValue("branding.login_subtitle", "Welcome home");
+  });
+
+  // The server restarted with SILO_SERVER_NAME set to the stored name while
+  // the page stayed open, so the settings revision is unchanged.
+  envManaged = true;
+  await act(async () => {
+    await expect(result.current.save()).rejects.toThrow();
+  });
+  await waitFor(() => expect(result.current.dirtyKeys).toEqual(["branding.login_subtitle"]));
+  expect(result.current.getValue("branding.server_name")).toBe("Silo");
+
+  await act(async () => {
+    await result.current.save();
+  });
+  expect(writes.at(-1)).toEqual({ "branding.login_subtitle": "Welcome home" });
+  expect(result.current.dirtyCount).toBe(0);
+});
+
+it("keeps the environment list when its refresh after a refused save fails", async () => {
+  let statusReads = 0;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT")
+        return response(
+          {
+            type: "https://siloserver.org/docs/api/v2/problems/validation_failed",
+            title: "Validation failed",
+            status: 422,
+            detail: "artwork.local_path must be an absolute path",
+          },
+          422,
+        );
+      if (url.endsWith("/sensitive-status")) {
+        statusReads += 1;
+        return statusReads === 1
+          ? response({
+              configured: [],
+              managed_by_env: ["server.log_level"],
+              managed_by_env_vars: { "server.log_level": "SILO_LOG_LEVEL" },
+            })
+          : response({ title: "Bad gateway", status: 502 }, 502);
+      }
+      return response({ "artwork.local_path": "/srv/artwork" });
+    }),
+  );
+  const { client, wrapper } = fixture();
+  const { result } = renderHook(() => useSettingsForm({ keys: ["artwork.local_path"] }), {
+    wrapper,
+  });
+  await waitFor(() => expect(result.current.sensitiveStatusReady).toBe(true));
+  act(() => result.current.setValue("artwork.local_path", "relative/path"));
+
+  await act(async () => {
+    await expect(result.current.save()).rejects.toThrow();
+  });
+  await waitFor(() => expect(statusReads).toBeGreaterThanOrEqual(2));
+  await waitFor(() => expect(client.isFetching()).toBe(0));
+
+  // The Storage page trades its editor for a reload notice when the list
+  // errors, which would strand this draft.
+  expect(result.current.sensitiveStatusError).toBe(false);
+  expect(result.current.envVar("server.log_level")).toBe("SILO_LOG_LEVEL");
+  expect(result.current.dirtyKeys).toEqual(["artwork.local_path"]);
+});
+
+it("keeps a staged clear of the Redis database number when REDIS_URL takes over", async () => {
+  let envManaged = false;
+  const writes: Array<Record<string, string>> = [];
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string, init?: RequestInit) => {
+      if (init?.method === "PUT") {
+        const values = JSON.parse(String(init.body)).values as Record<string, string>;
+        writes.push(values);
+        return response({ values, restart_required: true });
+      }
+      if (url.endsWith("/sensitive-status"))
+        return response({
+          configured: [],
+          managed_by_env: envManaged ? ["redis.db", "redis.url"] : [],
+          managed_by_env_vars: envManaged
+            ? { "redis.db": "REDIS_URL", "redis.url": "REDIS_URL" }
+            : {},
+        });
+      return response({ "redis.db": "3", "branding.login_subtitle": "" });
+    }),
+  );
+  const { client, wrapper } = fixture();
+  const { result } = renderHook(
+    () => useSettingsForm({ keys: ["redis.db", "branding.login_subtitle"] }),
+    { wrapper },
+  );
+  await waitFor(() => expect(result.current.getValue("redis.db")).toBe("3"));
+  act(() => {
+    result.current.setValue("redis.db", "");
+    result.current.setValue("branding.login_subtitle", "Welcome home");
+  });
+
+  // The server restarted with REDIS_URL set, and the page read the list again.
+  // The server still accepts clearing redis.db then: it removes the saved number.
+  envManaged = true;
+  await act(async () => {
+    await client.invalidateQueries({
+      predicate: (query) => query.queryKey.includes("sensitive-status"),
+    });
+  });
+  await waitFor(() => expect(result.current.envVar("redis.db")).toBe("REDIS_URL"));
+  expect([...result.current.dirtyKeys].sort()).toEqual(["branding.login_subtitle", "redis.db"]);
+
+  await act(async () => {
+    await result.current.save();
+  });
+  expect(writes.at(-1)).toEqual({ "redis.db": "", "branding.login_subtitle": "Welcome home" });
+});
+
 it("rejects a decoded completion after the acting profile changes", async () => {
   let release: ((value: unknown) => void) | undefined;
   const decoded = new Promise((resolve) => {

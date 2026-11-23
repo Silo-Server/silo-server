@@ -44,6 +44,7 @@ func wireBackupRestore(deps Dependencies, admin *handlers.AdminHandler, librarie
 		targets.ApplySettings = func(ctx context.Context, tx pgx.Tx, values map[string]string, check func(map[string]string) error) ([]string, func(context.Context), error) {
 			return applyRestoredSettings(ctx, tx, admin, rateLimits, values, check)
 		}
+		targets.EnvironmentValue = admin.EnvironmentSetting
 	}
 	if pluginHandler != nil {
 		targets.Plugins = pluginHandler

@@ -5,19 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"maps"
 	"slices"
-	"sort"
 	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
+	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
 // PluginsChangedEvent is the payload of cache.EventPluginsChanged. An empty
 // payload means "something about the installed set changed; reconcile".
 // Restart remains accepted from older API replicas. Current senders advance
-// plugin_installations.runtime_generation on admin config saves and restarts,
-// then send a plain reconcile event; the poll can recover missed events.
+// plugin_installations.runtime_generation on enablement changes, admin config
+// saves, and restarts, then send a plain event; the poll recovers missed events.
 type PluginsChangedEvent struct {
 	InstallationID int  `json:"installation_id,omitempty"`
 	Restart        bool `json:"restart,omitempty"`
@@ -29,27 +30,25 @@ type PluginsChangedEvent struct {
 const DefaultLifecyclePollInterval = time.Minute
 
 // PublishLifecycleChanges makes this service announce every lifecycle change
-// on cache.ChannelAdmin as cache.EventPluginsChanged. The API server calls
-// it; proxy nodes follow with FollowLifecycleChanges. Publishing is
-// best-effort: a failed publish is logged and the followers' poll catches up.
-//
-// The announcement runs before the hooks registered so far, which include
-// slow ones such as the resident reconcile. Until it arrives, another API
-// server stores the events it produces by its old plugin event subscribers.
+// on cache.ChannelAdmin as cache.EventPluginsChanged. Call it on hosts that
+// make lifecycle changes. The followers' poll catches a missed announcement.
 func (s *Service) PublishLifecycleChanges(bus cache.EventBus) {
 	if s == nil || bus == nil {
 		return
 	}
-	s.lifecycleBus = bus
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
-	s.lifecycleHooks = slices.Insert(s.lifecycleHooks, 0, func(ctx context.Context) {
-		s.publishPluginsChanged(ctx, PluginsChangedEvent{})
-	})
+	s.lifecycleBus = bus
 }
 
 func (s *Service) publishPluginsChanged(ctx context.Context, event PluginsChangedEvent) {
-	if s == nil || s.lifecycleBus == nil {
+	if s == nil {
+		return
+	}
+	s.lifecycleMu.RLock()
+	bus := s.lifecycleBus
+	s.lifecycleMu.RUnlock()
+	if bus == nil {
 		return
 	}
 	payload := ""
@@ -61,20 +60,14 @@ func (s *Service) publishPluginsChanged(ctx context.Context, event PluginsChange
 		}
 		payload = string(encoded)
 	}
-	if err := s.lifecycleBus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventPluginsChanged, Payload: payload}); err != nil {
+	if err := bus.Publish(ctx, cache.ChannelAdmin, cache.Event{Type: cache.EventPluginsChanged, Payload: payload}); err != nil {
 		slog.WarnContext(ctx, "publish plugins changed event", "component", "plugins", "error", err)
 	}
 }
 
-// FollowLifecycleChanges makes this service (a proxy node's) reconcile on
-// every cache.EventPluginsChanged published on cache.ChannelAdmin and, as a
-// backstop, every poll interval (DefaultLifecyclePollInterval when poll is
-// zero). Both run OnLifecycleChange, which drops the installation cache and
-// reconciles the resident set; an event naming an installation to restart
-// replaces that process first. Events are handled by one worker off the bus
-// goroutine, so a slow plugin handshake never delays other subscribers, and
-// a burst of admin actions collapses into one reconcile (plus one restart
-// per named installation) rather than a reconcile per event.
+// FollowLifecycleChanges reconciles committed state on events and on each
+// poll, without publishing. Zero selects DefaultLifecyclePollInterval.
+// One worker coalesces events and keeps plugin work off the bus goroutine.
 //
 // The poll is started even when the subscription fails (Redis down at boot,
 // for example): the returned error then only says that changes arrive on
@@ -103,6 +96,7 @@ func (s *Service) FollowLifecycleChanges(ctx context.Context, bus cache.EventBus
 			follower.enqueue(payload)
 		})
 	}
+	follower.enqueue(PluginsChangedEvent{})
 	go func() {
 		ticker := time.NewTicker(poll)
 		defer ticker.Stop()
@@ -111,7 +105,6 @@ func (s *Service) FollowLifecycleChanges(ctx context.Context, bus cache.EventBus
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				follower.enqueue(PluginsChangedEvent{})
 			case <-follower.wake:
 			}
 			restarts := follower.drain()
@@ -120,10 +113,142 @@ func (s *Service) FollowLifecycleChanges(ctx context.Context, bus cache.EventBus
 					slog.WarnContext(ctx, "restart resident plugin after remote change", "component", "plugins", "installation_id", installationID, "error", err)
 				}
 			}
-			s.OnLifecycleChange(ctx)
+			s.reconcileLifecycle(ctx, len(restarts) != 0)
 		}
 	}()
 	return subscribeErr
+}
+
+type installationRuntime struct {
+	pluginID    string
+	version     string
+	installPath string
+	generation  int64
+	enabled     bool
+}
+
+type runningInstallations struct {
+	mu   sync.RWMutex
+	byID map[int]installationRuntime
+}
+
+func (r *runningInstallations) load(id int) (installationRuntime, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	runtime, ok := r.byID[id]
+	return runtime, ok
+}
+
+func (r *runningInstallations) store(id int, runtime installationRuntime) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.byID == nil {
+		r.byID = make(map[int]installationRuntime)
+	}
+	r.byID[id] = runtime
+}
+
+func (r *runningInstallations) delete(id int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.byID, id)
+}
+
+func (r *runningInstallations) snapshot() map[int]installationRuntime {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return maps.Clone(r.byID)
+}
+
+func runtimeOf(installation *Installation) installationRuntime {
+	return installationRuntime{
+		pluginID:    installation.PluginID,
+		version:     installation.Version,
+		installPath: installation.InstallPath,
+		generation:  installation.RuntimeGeneration,
+		enabled:     installation.Enabled,
+	}
+}
+
+func (s *Service) reconcileLifecycle(ctx context.Context, force bool) {
+	changed := s.reconcileInstallations(ctx)
+	if !changed && !force {
+		// The proxy host gate and identity can change independently of plugin
+		// rows. Reconcile also retries a resident whose manifest was unavailable.
+		s.resident.Reconcile(ctx)
+	}
+	s.runLifecycleHooks(ctx, changed || force)
+}
+
+func (s *Service) reconcileInstallations(ctx context.Context) bool {
+	if s.installations == nil {
+		return false
+	}
+	s.reconcileMu.Lock()
+	defer s.reconcileMu.Unlock()
+	rows, err := s.installations.List(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "read plugin lifecycle state", "component", "plugins", "error", err)
+		return false
+	}
+	current := make(map[int]*Installation, len(rows))
+	for _, row := range rows {
+		if row != nil && !row.IsBuiltin() {
+			current[row.ID] = row
+		}
+	}
+	sameRuntime := func(a, b *Installation) bool {
+		return a != nil && b != nil && runtimeOf(a) == runtimeOf(b)
+	}
+	changed := s.reconciled == nil || !maps.EqualFunc(s.reconciled, current, sameRuntime)
+	if changed {
+		s.InvalidateInstallationCache()
+	}
+	// Only lazy processes are stopped here. The resident supervisor owns
+	// replacement, including its failure budget and host identity.
+	for id, runtime := range s.running.snapshot() {
+		if row := current[id]; row != nil && runtime == runtimeOf(row) {
+			continue
+		}
+		if err := s.stopStaleLazyRuntime(ctx, id); err != nil {
+			slog.WarnContext(ctx, "reconcile plugin process", "component", "plugins", "installation_id", id, "error", err)
+		}
+	}
+	s.archiveCache.retryRetirements(ctx, current)
+	if !changed {
+		return false
+	}
+	for id, previous := range s.reconciled {
+		if err := s.archiveCache.retire(previous, current[id]); err != nil {
+			slog.WarnContext(ctx, "remove retired plugin release from cache", "component", "plugins", "installation_id", id, "error", err)
+		}
+	}
+	s.reconciled = current
+	return true
+}
+
+func (s *Service) stopStaleLazyRuntime(ctx context.Context, id int) error {
+	if _, supervised := s.resident.State(id); supervised {
+		return nil
+	}
+	lock := s.runtimeLock(id)
+	if !lock.tryLock() {
+		return nil // The next poll checks every tracked runtime again.
+	}
+	defer lock.Unlock()
+	running, ok := s.running.load(id)
+	if !ok {
+		return nil
+	}
+	// A new start can have read a more recent commit than our list.
+	err := s.checkStartRuntime(ctx, id, running)
+	if errors.Is(err, ErrInstallationChanged) {
+		err = s.stopRuntime(id)
+	}
+	if errors.Is(err, pluginhost.ErrClientNotFound) {
+		return nil
+	}
+	return err
 }
 
 // lifecycleFollower coalesces pending lifecycle events for the worker in
@@ -157,11 +282,7 @@ func (f *lifecycleFollower) drain() []int {
 	if len(f.restarts) == 0 {
 		return nil
 	}
-	ids := make([]int, 0, len(f.restarts))
-	for id := range f.restarts {
-		ids = append(ids, id)
-	}
+	ids := slices.Sorted(maps.Keys(f.restarts))
 	f.restarts = nil
-	sort.Ints(ids)
 	return ids
 }

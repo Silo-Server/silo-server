@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -20,6 +21,9 @@ import (
 const (
 	nodeKeyPrefix      = "snk1_"
 	nodeKeyRandomBytes = 32
+	// MaxNodeID is the largest stream_nodes id: the column is a PostgreSQL
+	// integer.
+	MaxNodeID = math.MaxInt32
 )
 
 var (
@@ -28,6 +32,9 @@ var (
 	// ErrNodeKeyNotIssuable reports a key request for a node that cannot take
 	// one. Only transcode nodes have keys: a proxy holds the shared secret.
 	ErrNodeKeyNotIssuable = errors.New("only transcode nodes take a node key")
+	// ErrNodeDeploymentManaged refuses an admin key issue or delete on a node
+	// the API servers' deployment configuration (SILO_TRANSCODE_NODES) owns.
+	ErrNodeDeploymentManaged = errors.New("this node is managed by the server's deployment configuration")
 	// ErrNoNodeKey reports a transcode node with no usable key: none was
 	// issued, or the stored one does not decrypt under this SECRET_KEY. It is
 	// nodeauth.ErrNoNodeKey, so a caller tests one sentinel whether the
@@ -39,8 +46,8 @@ var nodeKeyEncoding = base64.RawURLEncoding.Strict()
 
 // GenerateNodeKey returns a fresh key for node nodeID.
 func GenerateNodeKey(nodeID int) (string, error) {
-	if nodeID <= 0 {
-		return "", fmt.Errorf("%w: node id must be positive", ErrInvalidNodeKey)
+	if nodeID <= 0 || nodeID > MaxNodeID {
+		return "", fmt.Errorf("%w: node id must be between 1 and %d", ErrInvalidNodeKey, MaxNodeID)
 	}
 	random := make([]byte, nodeKeyRandomBytes)
 	if _, err := rand.Read(random); err != nil {
@@ -64,7 +71,7 @@ func ParseNodeKey(key string) (int, error) {
 		return 0, fmt.Errorf("%w: missing node id", ErrInvalidNodeKey)
 	}
 	nodeID, err := strconv.Atoi(idPart)
-	if err != nil || nodeID <= 0 || strconv.Itoa(nodeID) != idPart {
+	if err != nil || nodeID <= 0 || nodeID > MaxNodeID || strconv.Itoa(nodeID) != idPart {
 		return 0, fmt.Errorf("%w: malformed node id", ErrInvalidNodeKey)
 	}
 	random, err := nodeKeyEncoding.DecodeString(encoded)
@@ -127,7 +134,8 @@ func DecryptNodeKey(cipher *secret.Cipher, nodeID int, ciphertext string) (strin
 // and returns it. This is the only time the key is returned: it is never read
 // back out of the row except by the credential registry. Issuing again
 // rotates the key, and the previous one stops working once the registries
-// refresh. A proxy gets ErrNodeKeyNotIssuable and a missing row
+// refresh. A proxy gets ErrNodeKeyNotIssuable, a node the deployment
+// configuration owns ErrNodeDeploymentManaged, and a missing row
 // ErrNodeNotFound.
 //
 // The column is a credential, not configuration: the configuration trigger
@@ -143,14 +151,18 @@ func (r *Repository) IssueNodeKey(ctx context.Context, cipher *secret.Cipher, id
 		return "", err
 	}
 	tag, err := r.pool.Exec(ctx,
-		`UPDATE stream_nodes SET node_key_ciphertext = $2 WHERE id = $1 AND type = $3`,
+		`UPDATE stream_nodes SET node_key_ciphertext = $2 WHERE id = $1 AND type = $3 AND NOT deployment_managed`,
 		id, ciphertext, NodeTypeTranscode)
 	if err != nil {
 		return "", fmt.Errorf("issue node key: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		if _, err := r.GetByID(ctx, id); err != nil {
+		node, err := r.GetByID(ctx, id)
+		if err != nil {
 			return "", err
+		}
+		if node.Type == NodeTypeTranscode && node.DeploymentManaged {
+			return "", ErrNodeDeploymentManaged
 		}
 		return "", ErrNodeKeyNotIssuable
 	}

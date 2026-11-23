@@ -28,6 +28,8 @@ interface CollectionRulesEditorProps {
   allowPersonalizedSorts?: PersonalizedSorts;
   sortRelevanceScope?: QuerySortRelevanceScope;
   readOnly?: boolean;
+  /** False hides Sort by, for a surface whose toolbar owns the sort. */
+  showSortControls?: boolean;
 }
 
 export default function CollectionRulesEditor({
@@ -40,6 +42,7 @@ export default function CollectionRulesEditor({
   allowPersonalizedSorts = false,
   sortRelevanceScope,
   readOnly = false,
+  showSortControls = true,
 }: CollectionRulesEditorProps) {
   const t = useT();
   const filterConfig: FilterConfig = {
@@ -122,6 +125,7 @@ export default function CollectionRulesEditor({
           sortRelevanceScope={sortRelevanceScope}
           mediaScope={value.media_scope ?? "all"}
           valueScope={{ libraryIds: value.library_ids, mediaScope: value.media_scope }}
+          showSortControls={showSortControls}
           onChange={(next) =>
             onChange({
               ...value,

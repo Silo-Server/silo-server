@@ -40,7 +40,9 @@ type AuthConnectionTestResult struct {
 	Steps []AuthConnectionTestStep
 	// AuthModes are the tested capability's sign-in modes, so a caller can
 	// tell an OAuth provider (which has a redirect URI) from a password one.
-	AuthModes []string
+	AuthModes    []string
+	CallbackMode string
+	CapabilityID string
 }
 
 // TestAuthProviderConnection sends the staged configuration, merged over the
@@ -104,9 +106,9 @@ func (s *Service) TestAuthProviderConnection(ctx context.Context, installationID
 		// see, not a server error.
 		return AuthConnectionTestResult{Steps: []AuthConnectionTestStep{{
 			ID: "plugin", Label: "Plugin reachable", Message: status.Convert(err).Message(),
-		}}, AuthModes: descriptor.GetAuthModes()}, nil
+		}}, AuthModes: descriptor.GetAuthModes(), CapabilityID: descriptor.GetId()}, nil
 	}
-	result := AuthConnectionTestResult{OK: response.GetOk(), Steps: make([]AuthConnectionTestStep, 0, len(response.GetSteps())), AuthModes: descriptor.GetAuthModes()}
+	result := AuthConnectionTestResult{OK: response.GetOk(), Steps: make([]AuthConnectionTestStep, 0, len(response.GetSteps())), AuthModes: descriptor.GetAuthModes(), CapabilityID: descriptor.GetId()}
 	allPassed := len(response.GetSteps()) > 0
 	for _, step := range response.GetSteps() {
 		result.Steps = append(result.Steps, AuthConnectionTestStep{ID: step.GetId(), Label: step.GetLabel(), OK: step.GetOk(), Message: step.GetMessage()})

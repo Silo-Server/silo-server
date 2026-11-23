@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useId, type ReactNode } from "react";
 import { ExternalLink, ShieldAlert } from "lucide-react";
 
 import type {
@@ -33,6 +33,7 @@ import { describeTrigger, pluginTaskPath, pluginTaskTrigger } from "@/lib/taskTr
 import { humanizeConfigKey } from "./configSchemaAdminForm";
 import { PluginConfigForm } from "./PluginConfigForm";
 import { PluginMarkdown } from "./PluginMarkdown";
+import { ownValue } from "./schemaFormUtils";
 
 export function DetailPanel({
   id,
@@ -48,7 +49,7 @@ export function DetailPanel({
   children?: ReactNode;
 }) {
   return (
-    <section id={id} className="bg-card scroll-mt-4 rounded-2xl border px-5 py-5">
+    <section id={id} className="bg-card scroll-mt-24 rounded-2xl border px-5 py-5 lg:scroll-mt-4">
       <div className="flex flex-wrap items-center gap-2">
         <h2 className="text-base font-semibold tracking-tight">{title}</h2>
         {badge}
@@ -74,6 +75,7 @@ export function PluginSettingsPanels({
   missingKeys: Set<string>;
 }) {
   const t = useT();
+  const bindingNotePrefix = useId();
   const saveConfig = useSavePluginConfig();
   const testConfig = useTestPluginConfig();
   const saveAuthBinding = useSavePluginAuthBinding();
@@ -122,13 +124,17 @@ export function PluginSettingsPanels({
               schema={schema}
               value={saved?.value}
               configuredSecrets={saved?.configured_secrets}
+              managedFields={ownValue(installation.env_managed?.config_fields, schema.key)}
               isSaving={saveConfig.isPending}
               isTesting={testConfig.isPending}
-              onTest={(key, nextValue, clearSecrets) =>
-                testConfig.mutateAsync({
-                  id: installation.id,
-                  body: { key, value: nextValue, clear_secrets: clearSecrets },
-                })
+              onTest={
+                installation.connection_check_supported
+                  ? (key, nextValue, clearSecrets) =>
+                      testConfig.mutateAsync({
+                        id: installation.id,
+                        body: { key, value: nextValue, clear_secrets: clearSecrets },
+                      })
+                  : undefined
               }
               onSave={(key, nextValue, clearSecrets) =>
                 saveConfig.mutate({
@@ -150,6 +156,8 @@ export function PluginSettingsPanels({
             {authCapabilities.map((capability, index) => {
               const binding = authBindings.find((e) => e.capability_id === capability.id);
               const label = capability.display_name || capability.id;
+              const locked = capability.env_managed?.includes("enabled") === true;
+              const noteId = `${bindingNotePrefix}-${index}`;
               return (
                 <li key={capability.id} className="flex items-center justify-between gap-4 p-3.5">
                   <div className="min-w-0">
@@ -157,11 +165,22 @@ export function PluginSettingsPanels({
                     {capability.description ? (
                       <p className="text-muted-foreground text-[13px]">{capability.description}</p>
                     ) : null}
+                    {binding?.callback_pending ? (
+                      <p className="text-muted-foreground text-xs">
+                        {t("web.admin.plugins.provisioning.pending")}
+                      </p>
+                    ) : null}
+                    {locked ? (
+                      <p id={noteId} className="text-muted-foreground text-xs">
+                        {t("web.admin.plugins.provisioning.managed")}
+                      </p>
+                    ) : null}
                   </div>
                   <Switch
                     aria-label={t("web.admin.plugins.settings.offerSignIn", { label })}
+                    aria-describedby={locked ? noteId : undefined}
                     checked={binding?.enabled ?? false}
-                    disabled={saveAuthBinding.isPending}
+                    disabled={saveAuthBinding.isPending || locked}
                     onCheckedChange={(checked) =>
                       saveAuthBinding.mutate({
                         id: installation.id,

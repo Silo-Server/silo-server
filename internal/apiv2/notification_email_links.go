@@ -45,7 +45,16 @@ func registerNotificationEmailLinks(reg *Registry) {
 				"Referrer-Policy":                {Schema: &huma.Schema{Type: huma.TypeString, Enum: []any{"no-referrer"}}},
 			}
 		}
-		op := Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + "/notifications/email/" + route.path, OperationID: route.id, Tags: []string{"notifications"}, Summary: "Process a tokenized notification email link and render its standalone result.", Parameters: []*huma.Param{{Name: notificationEmailLinkToken, In: notificationEmailLinkQuery, Description: "Email capability token. Missing, expired or consumed proof returns an HTML error page.", Schema: &huma.Schema{Type: huma.TypeString}}}, Responses: responses}, Class: ClassPublic, ServiceBacked: true}
+		summary := "Process a tokenized notification email link and render its standalone result."
+		tokenDescription := "Email capability token. Missing, expired or consumed proof returns an HTML error page."
+		switch {
+		case route.method == http.MethodGet && !route.verify:
+			summary = "Render an unsubscribe confirmation page without changing email preferences."
+			tokenDescription = "Email capability token. Missing proof returns an HTML error page; validity is checked only when the confirmation is submitted with POST."
+		case route.method == http.MethodPost:
+			tokenDescription = "Email capability token. Missing or unknown proof returns an HTML error page. The token stays valid after use."
+		}
+		op := Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + "/notifications/email/" + route.path, OperationID: route.id, Tags: []string{"notifications"}, Summary: summary, Parameters: []*huma.Param{{Name: notificationEmailLinkToken, In: notificationEmailLinkQuery, Description: tokenDescription, Schema: &huma.Schema{Type: huma.TypeString}}}, Responses: responses}, Class: ClassPublic, ServiceBacked: true}
 		if route.method == http.MethodPost {
 			op.RetrySafety = RetrySafetyNonRetryable
 		}

@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/catalog/reattribute"
 	"github.com/Silo-Server/silo-server/internal/contentid"
@@ -2562,6 +2563,13 @@ func hasTransientMatchError(errs []error) bool {
 // the lists it supplies are not extended by later results (localListFields).
 func foldProviderResult(accumulator, result *MetadataResult, language, providerSlug string, isIdentityHinter bool, quarantined map[string]struct{}) {
 	result.ProviderIDs = sanitizeCandidateProviderIDs(result.ProviderIDs)
+	// A book answer whose edition ids contradict the item's names another
+	// edition, so its work ids do not describe this item. Its claims are
+	// dropped whole, so it neither stores a claim nor clears its capability's
+	// earlier ones. Only book answers carry claims (splitPluginWorkClaims).
+	if len(result.WorkClaims) > 0 && contradictsProviderIDs(accumulator.ProviderIDs, result.ProviderIDs) {
+		result.WorkClaims = nil
+	}
 	if isIdentityHinter {
 		result.ProviderIDs = nil
 		accumulator.localLists.record(result)
@@ -3150,6 +3158,11 @@ func (s *MetadataService) mergeAndPersist(
 		}
 	}
 	item.ContentID = contentID
+	// A book's work ids came from the match a reset or a correction replaces.
+	// corrected compares only TMDB, TVDB and IMDb ids, which books lack, so an
+	// Identify of a book, the admin naming the book, counts as one too; the
+	// answers it fetches supply the claims again.
+	clearsWorkClaims := resetsRow || corrected || (req.Mode == ModeIdentify && bookid.HasWorkIDs(item.Type))
 	if corrected {
 		if err := s.clearPreviousMatchRows(ctx, contentID, item, locked, mergeLocked); err != nil {
 			return nil, err
@@ -3168,6 +3181,8 @@ func (s *MetadataService) mergeAndPersist(
 			clearChildEdits: replacesShow,
 			resetLocks:      resetsRow,
 			clearCredits:    resetsRow && creditsUnlisted(item, mergeLocked),
+			clearWorkClaims: clearsWorkClaims,
+			workClaims:      accumulator.WorkClaims,
 		},
 	)
 	if err != nil {
@@ -3377,13 +3392,16 @@ func (s *MetadataService) clearUnlistedCredits(ctx context.Context, contentID st
 
 // itemWriteSteps are the extra writes that commit with an item's identity
 // write: an Identify's choice, clearing a replaced show's season and episode
-// edits, and a Reset to Provider dropping the item's locks and the credits its
-// providers no longer list.
+// edits, a Reset to Provider dropping the item's locks and the credits its
+// providers no longer list, a reset, an identity correction or a book's
+// Identify dropping its work ids, and the work ids the providers' answers claim.
 type itemWriteSteps struct {
 	identityChosen  bool
 	clearChildEdits bool
 	resetLocks      bool
 	clearCredits    bool
+	clearWorkClaims bool
+	workClaims      []bookid.WorkClaims
 }
 
 // forRetry is the steps for the write retried after conflict recovery. A row
@@ -3393,6 +3411,7 @@ func (w itemWriteSteps) forRetry(sameRow bool) itemWriteSteps {
 	w.clearChildEdits = w.clearChildEdits && sameRow
 	w.resetLocks = w.resetLocks && sameRow
 	w.clearCredits = w.clearCredits && sameRow
+	w.clearWorkClaims = w.clearWorkClaims && sameRow
 	return w
 }
 
@@ -3513,6 +3532,14 @@ func (s *MetadataService) persistItemAndProviderIDsOnceTx(
 		if err := providerRepo.ReplaceByContentIDTx(ctx, tx, item.ContentID, item.Type, providerIDs); err != nil {
 			return err
 		}
+	}
+	if steps.clearWorkClaims {
+		if err := catalog.DeleteWorkClaimsTx(ctx, tx, item.ContentID); err != nil {
+			return err
+		}
+	}
+	if err := catalog.ApplyWorkClaimsTx(ctx, tx, item.ContentID, item.Type, steps.workClaims); err != nil {
+		return err
 	}
 	// An Identify's choice commits with the identity it chose
 	// (identify_sticky.go).
@@ -9010,6 +9037,20 @@ func (s *MetadataService) rebindItemOnto(ctx context.Context, fromContentID, toC
 					  AND other.provider = src.provider
 					  AND other.provider_id = src.provider_id
 					  AND other.item_type = (SELECT type FROM media_items WHERE content_id = $2)
+				  )
+			`,
+			args: []any{fromContentID, toContentID},
+		},
+		{
+			name: "move work ids",
+			sql: `
+				UPDATE media_item_work_ids src
+				SET content_id = $2,
+					updated_at = NOW()
+				WHERE src.content_id = $1
+				  AND NOT EXISTS (
+					SELECT 1 FROM media_item_work_ids dest
+					WHERE dest.content_id = $2 AND dest.provider = src.provider
 				  )
 			`,
 			args: []any{fromContentID, toContentID},

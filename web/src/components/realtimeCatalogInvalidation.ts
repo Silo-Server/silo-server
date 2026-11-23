@@ -201,35 +201,9 @@ function resolveBatch(batch: PendingCatalogInvalidation): CatalogInvalidationOpt
 }
 
 /**
- * Whether a `user_state` change can move an item in or out of a home section.
- *
- * Progress ticks arrive every few seconds throughout playback and only move a
- * position, so they must not reset the home load queue per event; they refresh
- * through `scheduleProgressHomeRefresh` instead.
+ * Whether to refresh Home immediately. Progress can also move a card, and
+ * coalesces with the related media reads before refreshing Home.
  */
 export function userStateChangeAffectsSectionMembership(change: string | undefined): boolean {
   return change !== "progress";
-}
-
-/**
- * One trailing home refresh per window for progress ticks. Another client's
- * playback still has to reach an OPEN home page: the first tick moves an item
- * into Continue Watching and the bar itself should advance — but Home renders
- * from its own loaded-section state, which only the refresh signal reloads.
- * A per-tick bump would reset the load queue every few seconds for the whole
- * playback; one bump per window keeps home current without that storm.
- */
-export const PROGRESS_HOME_REFRESH_WINDOW_MS = 30_000;
-
-let progressHomeRefreshTimer: number | undefined;
-
-export function scheduleProgressHomeRefresh(
-  queryClient: QueryClient,
-  windowMs: number = PROGRESS_HOME_REFRESH_WINDOW_MS,
-) {
-  if (progressHomeRefreshTimer !== undefined) return;
-  progressHomeRefreshTimer = window.setTimeout(() => {
-    progressHomeRefreshTimer = undefined;
-    bumpHomeRefreshSignal(queryClient);
-  }, windowMs);
 }

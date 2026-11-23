@@ -21,11 +21,12 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/backup"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/database"
+	"github.com/Silo-Server/silo-server/internal/envutil"
 	"github.com/Silo-Server/silo-server/internal/s3client"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/migrations"
 )
 
@@ -67,7 +68,8 @@ const (
 	envBackupS3PathStyle = "SILO_BACKUP_S3_PATH_STYLE"
 
 	backupS3EnvUsage = envBackupS3Endpoint + ", " + envBackupS3Region + ", " + envBackupS3AccessKey + ", " +
-		envBackupS3SecretKey + ", and " + envBackupS3PathStyle + " (true or false), from the environment or the .env file"
+		envBackupS3SecretKey + ", and " + envBackupS3PathStyle + " (true or false), from the environment or the .env file " +
+		"(the keys can come from files named by their _FILE variants)"
 )
 
 // acceptSuperuserUsage describes --accept-superuser.
@@ -217,7 +219,8 @@ func parseS3Address(where string) (bucket, key string, isS3 bool, err error) {
 	return bucket, strings.Trim(key, "/"), true, nil
 }
 
-// backupS3Client opens bucket with the credentials in the environment.
+// backupS3Client opens bucket with the credentials in the environment. The
+// access and secret keys can each come from the file their _FILE variant names.
 func backupS3Client(bucket, keyPrefix string) (*s3client.Client, error) {
 	endpoint := os.Getenv(envBackupS3Endpoint)
 	if endpoint == "" {
@@ -230,9 +233,17 @@ func backupS3Client(bucket, keyPrefix string) (*s3client.Client, error) {
 			return nil, fmt.Errorf("%s must be true or false", envBackupS3PathStyle)
 		}
 	}
+	accessKey, err := backupSecretEnv(envBackupS3AccessKey)
+	if err != nil {
+		return nil, err
+	}
+	secretKey, err := backupSecretEnv(envBackupS3SecretKey)
+	if err != nil {
+		return nil, err
+	}
 	return backup.S3Config{
 		Endpoint: endpoint, Region: os.Getenv(envBackupS3Region), Bucket: bucket, KeyPrefix: keyPrefix,
-		AccessKey: os.Getenv(envBackupS3AccessKey), SecretKey: os.Getenv(envBackupS3SecretKey), PathStyle: pathStyle,
+		AccessKey: accessKey, SecretKey: secretKey, PathStyle: pathStyle,
 	}.Client(), nil
 }
 
@@ -266,6 +277,13 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 	if err != nil {
 		return err
 	}
+	// Read the remaining secret inputs before openBackupSource fetches or
+	// decrypts the backup: a missing or conflicting _FILE variable stops here
+	// rather than after downloading the backup or swapping the database.
+	liveURL, redisURL, blobStore, err := restoreTargetEnv(f)
+	if err != nil {
+		return err
+	}
 	src, tools, validate, cleanup, err := openBackupSource(ctx, f.from, sourceOptions{
 		masterKey: masterKey, keyCheck: keyCheck, acceptLostCredentials: f.acceptLostCredentials, databaseOnly: f.databaseOnly,
 	}, out)
@@ -280,11 +298,7 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 	defer func() { _ = closeSource(src, out) }()
 	loader := backup.PGLoader{Tools: tools}
 	if f.into != "" {
-		return runSeparateRestore(ctx, f, src, loader, validate, masterKey, out)
-	}
-	liveURL, err := liveDatabaseURL()
-	if err != nil {
-		return err
+		return runSeparateRestore(ctx, f, src, loader, validate, masterKey, liveURL, blobStore, out)
 	}
 	cipher, err := secret.New(masterKey)
 	if err != nil {
@@ -323,8 +337,32 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 	}); err != nil {
 		return err
 	}
-	clearRedisAfterRestore(ctx, restoredRedisPlan(ctx, f.keepRedis, liveURL, cipher), dialRedis, out)
+	clearRedisAfterRestore(ctx, restoredRedisPlan(ctx, f.keepRedis, liveURL, redisURL, cipher), dialRedis, out)
 	return nil
+}
+
+// restoreTargetEnv reads the target database, Redis, and separate-mode bucket
+// credentials a restore needs before openBackupSource fetches or decrypts.
+func restoreTargetEnv(f backupRestoreFlags) (liveURL, redisURL string, blobStore blobstore.Store, err error) {
+	if f.into != "" {
+		if liveURL, err = backupSecretEnv(envDatabaseURL); err != nil {
+			return "", "", nil, err
+		}
+		if blobStore, err = blobTarget(f.blobsInto); err != nil {
+			return "", "", nil, err
+		}
+		return liveURL, "", blobStore, nil
+	}
+	if liveURL, err = liveDatabaseURL(); err != nil {
+		return "", "", nil, err
+	}
+	if f.keepRedis {
+		return liveURL, "", nil, nil
+	}
+	if redisURL, err = backupSecretEnv(envRedisURL); err != nil {
+		return "", "", nil, err
+	}
+	return liveURL, redisURL, nil, nil
 }
 
 // restoredRedisPlan picks the Redis to clear once the restored database is
@@ -333,12 +371,12 @@ func runBackupRestore(ctx context.Context, args []string, out io.Writer) error {
 // When that read fails the plan clears nothing and says so, because the
 // Redis the live database named before the swap need not be the restored
 // server's.
-func restoredRedisPlan(ctx context.Context, keep bool, liveURL string, cipher *secret.Cipher) redisPlan {
+func restoredRedisPlan(ctx context.Context, keep bool, liveURL, redisURL string, cipher *secret.Cipher) redisPlan {
 	if keep {
 		return redisPlan{keep: true}
 	}
-	if os.Getenv("REDIS_URL") != "" {
-		return redisPlan{config: liveRedisConfig(&config.Config{})}
+	if redisURL != "" {
+		return redisPlan{config: config.RedisConfig{}.WithBootstrapURL(redisURL)}
 	}
 	readCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
@@ -346,22 +384,19 @@ func restoredRedisPlan(ctx context.Context, keep bool, liveURL string, cipher *s
 	if err != nil {
 		return redisPlan{readErr: err}
 	}
-	return redisPlan{config: liveRedisConfig(cfg)}
+	return redisPlan{config: cfg.Redis}
 }
 
 // runSeparateRestore restores into --into and --blobs-into, aimed away
 // from the live server named by DATABASE_URL, when set.
 func runSeparateRestore(ctx context.Context, f backupRestoreFlags, src *backup.Source, loader backup.PGLoader,
-	validate backup.ValidateOptions, masterKey []byte, out io.Writer) error {
+	validate backup.ValidateOptions, masterKey []byte, liveURL string, blobStore blobstore.Store, out io.Writer) error {
 	opts := backup.SeparateOptions{
-		Validate: validate, Into: f.into, BlobsInto: f.blobsInto, DatabaseOnly: f.databaseOnly, Out: out,
-		LiveURL: os.Getenv("DATABASE_URL"),
+		Validate: validate, Into: f.into, BlobsInto: f.blobsInto, BlobStore: blobStore,
+		DatabaseOnly: f.databaseOnly, Out: out, LiveURL: liveURL,
 	}
 	var err error
 	if opts.Cipher, err = optionalCipher(masterKey); err != nil {
-		return err
-	}
-	if opts.BlobStore, err = blobTarget(f.blobsInto); err != nil {
 		return err
 	}
 	if opts.LiveURL != "" && !f.databaseOnly && opts.BlobStore == nil {
@@ -549,7 +584,10 @@ func decryptInput(input string) (backup.Objects, string, error) {
 // liveDatabaseURL reads DATABASE_URL, the database a replace or recovery
 // works on.
 func liveDatabaseURL() (string, error) {
-	liveURL := os.Getenv("DATABASE_URL")
+	liveURL, err := backupSecretEnv(envDatabaseURL)
+	if err != nil {
+		return "", err
+	}
 	if liveURL == "" {
 		return "", errors.New("DATABASE_URL is required (set in .env or environment)")
 	}
@@ -558,12 +596,15 @@ func liveDatabaseURL() (string, error) {
 
 // backupMasterKey reads SECRET_KEY and its check value.
 func backupMasterKey(required bool) ([]byte, string, error) {
-	key := os.Getenv("SECRET_KEY")
+	key, usedVar, err := envutil.LookupSecret(os.Getenv, envSecretKey)
+	if err != nil {
+		return nil, "", err
+	}
 	if key == "" && !required {
 		return nil, "", nil
 	}
 	if len(key) < secret.MinMasterKeyLen {
-		return nil, "", fmt.Errorf("SECRET_KEY is required (>=%d chars): the key the backup's server used", secret.MinMasterKeyLen)
+		return nil, "", fmt.Errorf("%s is required (>=%d chars): the key the backup's server used", usedVar, secret.MinMasterKeyLen)
 	}
 	check, err := secret.KeyCheckValue([]byte(key))
 	return []byte(key), check, err
@@ -688,7 +729,7 @@ func liveConfigFromDatabase(ctx context.Context, dbURL string, cipher *secret.Ci
 		return nil, err
 	}
 	defer database.ClosePool(pool)
-	settings, err := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher).GetAll(ctx)
+	settings, err := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher).GetAll(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("reading the settings: %w", err)
 	}
@@ -742,25 +783,56 @@ func plainSettings(ctx context.Context, dbURL string) (map[string]string, error)
 		return nil, err
 	}
 	defer database.ClosePool(pool)
-	return catalog.NewServerSettingsRepo(pool).GetAll(ctx)
+	return serversettings.NewServerSettingsRepo(pool).GetAll(ctx)
 }
 
-// runSecretCommand runs `silo secret check`: it reads a SECRET_KEY on stdin
-// and prints its check value, the one every backup manifest records, so an
-// operator can confirm which key a backup needs without showing the key.
+// runSecretCommand runs `silo secret check`: it reads a SECRET_KEY and prints
+// its check value, the one every backup manifest records, so an operator can
+// confirm which key a backup needs without showing the key. The key comes from
+// the first line of stdin, so one pasted at a prompt is checked at Enter, or
+// with --file from a key file read the way SECRET_KEY_FILE is.
 func runSecretCommand(args []string, in io.Reader, out io.Writer) error {
-	if len(args) != 1 || args[0] != "check" {
-		return errors.New("usage: printf %s \"$SECRET_KEY\" | silo secret check")
+	const usage = `usage: printf %s "$SECRET_KEY" | silo secret check, or silo secret check --file "$SECRET_KEY_FILE"`
+	if len(args) == 0 || args[0] != "check" {
+		return errors.New(usage)
 	}
-	key, err := bufio.NewReader(io.LimitReader(in, 64<<10)).ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
-		return err
+	flags := flag.NewFlagSet("secret check", flag.ContinueOnError)
+	flags.SetOutput(io.Discard)
+	file := flags.String("file", "", "read the key from this file, as SECRET_KEY_FILE does")
+	if err := flags.Parse(args[1:]); err != nil || flags.NArg() != 0 {
+		return errors.New(usage)
 	}
-	key = strings.TrimRight(key, "\r\n")
+	var key string
+	if *file != "" {
+		// SECRET_KEY_FILE's own lookup, so the key and every refusal match startup.
+		fileVar := envSecretKey + envutil.SecretFileSuffix
+		var err error
+		if key, _, err = envutil.LookupSecret(func(name string) string {
+			if name == fileVar {
+				return *file
+			}
+			return ""
+		}, envSecretKey); err != nil {
+			return err
+		}
+	} else {
+		line, err := bufio.NewReader(io.LimitReader(in, 64<<10)).ReadString('\n')
+		if err != nil && !errors.Is(err, io.EOF) {
+			return err
+		}
+		key = strings.TrimRight(line, "\r\n")
+	}
 	check, err := secret.KeyCheckValue([]byte(key))
 	if err != nil {
 		return err
 	}
 	_, err = fmt.Fprintln(out, check)
 	return err
+}
+
+// backupSecretEnv reads a secret the backup commands take from the
+// environment, or from the file its _FILE variant names, as the server does.
+func backupSecretEnv(name string) (string, error) {
+	value, _, err := envutil.LookupSecret(os.Getenv, name)
+	return value, err
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/api/handlers"
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 type fakeAdminPlaybackSessions struct{ calls, lastLimit int }
@@ -19,7 +20,8 @@ func (f *fakeAdminPlaybackSessions) ReadAdminPlaybackSessions(_ context.Context,
 	at := time.Date(2026, 1, 2, 3, 4, 5, 123456789, time.FixedZone("offset", 3600))
 	rows := []handlers.AdminPlaybackSessionView{
 		{SessionID: "b", UserID: 7, ProfileID: "child", MediaFileID: 42, RequestedMediaFileID: 41, StartedAt: at, UpdatedAt: at, RoutingExecutionNodeID: new(9), RoutingNetworkProvider: new("tailscale"), TargetAudioChannels: new(2), SourceAudioChannels: new(8), EffectivePlayMethod: "transcode", IsJellyfinClient: true, HasPlaybackControl: true},
-		{SessionID: "a", UserID: 7, ProfileID: "primary", MediaFileID: 44, RequestedMediaFileID: 44, ClientIP: "127.0.0.1", StartedAt: at, UpdatedAt: at},
+		{SessionID: "a", UserID: 7, ProfileID: "primary", MediaFileID: 44, RequestedMediaFileID: 44, ClientIP: "127.0.0.1", StartedAt: at, UpdatedAt: at,
+			Subtitle: &playback.SessionSubtitle{TrackID: "file:44:subtitle:2", Language: "en", Codec: "subrip", Format: "vtt", Source: "external", Delivery: "sidecar", HearingImpaired: true}},
 	}
 	slices.SortFunc(rows, func(a, b handlers.AdminPlaybackSessionView) int { return cmp.Compare(a.SessionID, b.SessionID) })
 	out := []handlers.AdminPlaybackSessionView{}
