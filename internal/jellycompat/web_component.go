@@ -24,6 +24,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/nodemetrics"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 )
 
 const (
@@ -410,7 +411,11 @@ func WebComponentStatusForConfig(cfg *config.Config, settings map[string]string)
 	return status
 }
 
-func StartWebComponentInstall(opts WebComponentInstallOptions, onComplete WebComponentInstallCompleteFunc) (WebComponentStatus, error) {
+// StartWebComponentInstall starts an install in the background under parent,
+// the server's lifetime context, so shutting the server down stops the build
+// instead of leaving it running in its own process group. A nil parent means
+// context.Background().
+func StartWebComponentInstall(parent context.Context, opts WebComponentInstallOptions, onComplete WebComponentInstallCompleteFunc) (WebComponentStatus, error) {
 	opts, status, err := normalizeWebInstallOptions(opts)
 	if err != nil {
 		return status, err
@@ -435,7 +440,10 @@ func StartWebComponentInstall(opts WebComponentInstallOptions, onComplete WebCom
 	notifyWebOperationProgress(opts.OnProgress, op)
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 45*time.Minute)
+		if parent == nil {
+			parent = context.Background()
+		}
+		ctx, cancel := context.WithTimeoutCause(parent, webInstallTimeout, errWebInstallTimedOut)
 		defer cancel()
 
 		installStatus, installErr := installWebComponentLocked(ctx, opts, op.ID)
@@ -454,6 +462,12 @@ func StartWebComponentInstall(opts WebComponentInstallOptions, onComplete WebCom
 
 	return status, nil
 }
+
+// webInstallTimeout bounds a background install; errWebInstallTimedOut is
+// the error its commands report when it runs out.
+const webInstallTimeout = 45 * time.Minute
+
+var errWebInstallTimedOut = fmt.Errorf("the Jellyfin Web install timed out after %s", webInstallTimeout)
 
 func StartWebComponentRemove(opts WebComponentRemoveOptions) (WebComponentStatus, error) {
 	root, err := normalizeWebInstallRoot(opts.InstallRoot)
@@ -648,6 +662,13 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 	}
 	reportProgress(WebComponentOperationActivating, 94, "Preparing Jellyfin Web activation")
 	if err := ensureCanReplaceWebRelease(releaseDir); err != nil {
+		writeWebInstallError(root, err)
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
+	}
+	// An install that timed out or was interrupted before this point leaves
+	// the current release in place.
+	if ctx.Err() != nil {
+		err := fmt.Errorf("activate jellyfin-web %s: %w", version, context.Cause(ctx))
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
@@ -1535,14 +1556,21 @@ func webBuildNodeOptions(existing, preloadPath string) string {
 }
 
 // webInstallCommandRunner runs install commands with npm's cache in cacheDir
-// and the CPU-limit preload at preloadPath.
+// and the CPU-limit preload at preloadPath. npm runs the build through
+// cross-env, webpack and webpack's workers, so each command gets a process
+// group of its own: when ctx ends the whole tree is killed, and the error
+// names why ctx ended instead of only "signal: killed".
 func webInstallCommandRunner(cacheDir, preloadPath string) func(context.Context, string, []string, string) error {
 	nodeOptions := webBuildNodeOptions(os.Getenv("NODE_OPTIONS"), preloadPath)
 	return func(ctx context.Context, dir string, argv []string, stdin string) error {
 		if len(argv) == 0 {
 			return errors.New("empty command")
 		}
-		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // G204: argv is the installer's own git and npm commands
+		cmd := procgroup.CommandContext(ctx, argv[0], argv[1:]...)
+		// Wait for the output pipes until every writer has exited. When ctx
+		// ends the group kill closes them at once, and an npm that exits
+		// before its children must not end the install while they still run.
+		cmd.WaitDelay = 0
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "npm_config_cache="+cacheDir, "NODE_OPTIONS="+nodeOptions)
 		if stdin != "" {
@@ -1550,6 +1578,9 @@ func webInstallCommandRunner(cacheDir, preloadPath string) func(context.Context,
 		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
+			if cause := context.Cause(ctx); cause != nil && !errors.Is(err, cause) {
+				err = fmt.Errorf("%w: %w", cause, err)
+			}
 			if output := strings.TrimSpace(string(out)); output != "" {
 				return fmt.Errorf("%s: %w: %s", strings.Join(argv, " "), err, output)
 			}
