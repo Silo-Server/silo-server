@@ -67731,6 +67731,12 @@
       "value": "Mark watched at"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titles with a credits marker also count as watched once playback reaches the credits."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

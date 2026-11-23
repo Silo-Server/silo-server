@@ -1085,9 +1085,13 @@ type SourceDescriptorV3 struct {
 	AudioCodec         string             `json:"audio_codec,omitempty"`
 	AudioChannels      int                `json:"audio_channels,omitempty"`
 	AudioLayout        string             `json:"audio_layout,omitempty"`
-	// VideoCopyUnsafe marks a source whose video stream cannot be safely
-	// stream-copied into an avc1/fMP4 segment (H.264 with conflicting in-band
-	// PPS). Copy/remux routes are disqualified for it; a real encode is used.
+	// VideoCopyUnsafe marks an H.264 source whose copy-safety verdict is
+	// unsafe: the scan found picture parameter sets redefined in-band with
+	// conflicting content, which strict decoders fail whether copied or played
+	// as is, or a synchronous scan could not finish. Streaming plans it like
+	// any other source and leaves it to recovery, except that web clients
+	// with strict decoders get the encode on the first plan; downloads, which
+	// cannot recover, never remux it.
 	VideoCopyUnsafe bool `json:"video_copy_unsafe,omitempty"`
 }
 

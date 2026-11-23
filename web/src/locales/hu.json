@@ -67499,6 +67499,12 @@
       "value": "Megtekintettnek jelölés ennél:"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "A stáblistajelölővel rendelkező címek akkor is megtekintettnek számítanak, ha a lejátszás eléri a stáblistát."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

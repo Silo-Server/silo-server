@@ -74661,6 +74661,12 @@
       "value": "Marca com a vist al"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Els títols amb un marcador de crèdits també compten com a vistos quan la reproducció arriba als crèdits."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

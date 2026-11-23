@@ -74637,6 +74637,12 @@
       "value": "Marcar como assistido em"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Títulos com um marcador de créditos também contam como assistidos quando a reprodução chega aos créditos."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

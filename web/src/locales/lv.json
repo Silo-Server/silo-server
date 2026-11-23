@@ -75708,6 +75708,12 @@
       "value": "Atzīmēt kā skatītu pie"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Vienumi ar beigu titru marķieri arī tiek uzskatīti par noskatītiem, tiklīdz atskaņošana sasniedz beigu titrus."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

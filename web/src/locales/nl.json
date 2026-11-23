@@ -67387,6 +67387,12 @@
       "value": "Als bekeken markeren bij"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titels met een aftitelingsmarkering tellen ook als bekeken zodra het afspelen de aftiteling bereikt."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

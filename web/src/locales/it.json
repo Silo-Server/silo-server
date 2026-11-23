@@ -74433,6 +74433,12 @@
       "value": "Segna come visto al"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "I contenuti con un marcatore dei titoli di coda vengono considerati visti anche quando la riproduzione raggiunge i titoli di coda."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

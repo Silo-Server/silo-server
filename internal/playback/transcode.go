@@ -4979,7 +4979,7 @@ func (s *TranscodeSession) flushStderr(ctx context.Context) {
 }
 
 func (s *TranscodeSession) logFFmpegLine(ctx context.Context, line string) {
-	if s == nil || s.opts.FFmpegLogSink == nil {
+	if s == nil {
 		return
 	}
 
@@ -4992,8 +4992,13 @@ func (s *TranscodeSession) logFFmpegLine(ctx context.Context, line string) {
 		trimmed += "...[truncated]"
 	}
 
+	// A restart's replacement process writes stderr before restart publishes
+	// its options under s.mu, so read them only while holding it.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.opts.FFmpegLogSink == nil {
+		return
+	}
 
 	if s.stderrLinesLogged >= maxPersistedFFmpegLines || s.stderrBytesLogged+len(trimmed) > maxPersistedFFmpegBytes {
 		s.stderrDroppedLines++
@@ -5015,14 +5020,17 @@ func (s *TranscodeSession) logFFmpegLine(ctx context.Context, line string) {
 }
 
 func (s *TranscodeSession) logFFmpegEvent(ctx context.Context, message, exitError string) {
-	if s == nil || s.opts.FFmpegLogSink == nil {
+	if s == nil {
 		return
 	}
 	s.mu.Lock()
+	sink, sessionID := s.opts.FFmpegLogSink, s.opts.SessionID
 	attrs := s.ffmpegAttrsLocked()
 	attrs.ExitError = exitError
 	s.mu.Unlock()
-	s.opts.FFmpegLogSink.WriteEvent(ctx, s.opts.SessionID, attrs, message)
+	if sink != nil {
+		sink.WriteEvent(ctx, sessionID, attrs, message)
+	}
 }
 
 func (s *TranscodeSession) logWaitResult(ctx context.Context, waitErr error) {

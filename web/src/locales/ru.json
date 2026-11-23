@@ -82584,6 +82584,12 @@
       "value": "Отмечать просмотренным при"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Если у видео есть метка титров, оно также считается просмотренным, когда воспроизведение доходит до титров."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

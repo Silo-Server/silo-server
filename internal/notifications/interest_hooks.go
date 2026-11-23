@@ -336,7 +336,7 @@ func (s *interestTrackingStore) currentProgressState(ctx context.Context, profil
 }
 
 func progressStateFromValues(position, duration float64, thresholds userstore.ProgressThresholds) progressState {
-	completed := duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct)
+	completed := thresholds.Watched(position, duration)
 	return progressState{
 		exists:     true,
 		inProgress: !completed && position > 0,

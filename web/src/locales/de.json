@@ -67499,6 +67499,12 @@
       "value": "Als gesehen markieren bei"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titel mit Abspann-Markierung gelten auch als gesehen, sobald die Wiedergabe den Abspann erreicht."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

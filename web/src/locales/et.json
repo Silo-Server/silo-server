@@ -68299,6 +68299,12 @@
       "value": "Märgi vaadatuks alates"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Lõputiitrite märgisega pealkirjad loetakse vaadatuks ka siis, kui esitus jõuab lõputiitriteni."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

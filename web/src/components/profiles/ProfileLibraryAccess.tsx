@@ -1,6 +1,7 @@
 import { useId } from "react";
 
 import type { UserLibrary } from "@/api/types";
+import { libraryTypeLabel } from "@/components/admin/libraries/libraryTypes";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useT } from "@/i18n";
@@ -75,9 +76,12 @@ export function ProfileLibraryAccess({
                       widening the row past the list. */}
                   <div className="min-w-0 flex-1 space-y-0.5 wrap-anywhere">
                     <div className="text-sm font-medium">{library.name}</div>
-                    <div className="text-muted-foreground text-xs capitalize">{library.type}</div>
+                    <div className="text-muted-foreground text-xs">
+                      {libraryTypeLabel(library.type)}
+                    </div>
                   </div>
                   <Switch
+                    aria-label={library.name}
                     checked={allowedLibraryIDs.includes(library.id)}
                     onCheckedChange={(checked) => onLibraryChange(library.id, checked)}
                   />

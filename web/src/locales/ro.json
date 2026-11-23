@@ -74677,6 +74677,12 @@
       "value": "Marcare ca vizionat la"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titlurile cu un marcaj pentru generic sunt considerate vizionate și atunci când redarea ajunge la generic."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

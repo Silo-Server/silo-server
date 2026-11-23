@@ -74321,6 +74321,12 @@
       "value": "Marquer comme vu à"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Les titres dotés d’un marqueur de générique sont aussi considérés comme vus dès que la lecture atteint le générique."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,

@@ -61376,6 +61376,12 @@
       "value": "시청 완료 처리 기준"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "크레딧 마커가 있는 작품은 재생이 크레딧에 도달할 때도 시청한 것으로 처리돼요."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
