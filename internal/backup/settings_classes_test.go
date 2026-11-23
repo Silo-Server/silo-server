@@ -194,6 +194,8 @@ func TestOnlyAConnectionIsSupplied(t *testing.T) {
 		{"providers", config.AIProvidersSettingKey, seal(cipher, config.AIProvidersSettingKey, provider), cipher, true},
 		{"no providers", config.AIProvidersSettingKey, seal(cipher, config.AIProvidersSettingKey, noProviders[config.AIProvidersSettingKey]), cipher, false},
 		{"connected ChatGPT", chatgpt.CredentialsKey, seal(cipher, chatgpt.CredentialsKey, connected), cipher, true},
+		{"disconnected ChatGPT", chatgpt.CredentialsKey, seal(cipher, chatgpt.CredentialsKey,
+			`{"active":"","has_connected":true,"accounts":[{"client_id":"a","refresh_token":"r","needs_login":true}]}`), cipher, false},
 		{"ChatGPT under another key", chatgpt.CredentialsKey, seal(other, chatgpt.CredentialsKey, connected), cipher, false},
 		{"ChatGPT without a key", chatgpt.CredentialsKey, seal(cipher, chatgpt.CredentialsKey, connected), nil, false},
 		{"stale text binding", config.AITextProviderSettingKey, "custom-gone", cipher, false},
