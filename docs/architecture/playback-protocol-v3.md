@@ -1242,6 +1242,20 @@ Segmented HLS does not carry the same offset. Its player starts at the target
 segment rather than at the transport's first frame, because the segment layer
 waits for, or restarts FFmpeg at, that segment.
 
+**A segment restart belongs to the newest seek.** A seek can put several segment
+requests in flight at once: the new target ahead of the produced head, plus
+older waits that have not expired. Each recovery request is numbered when it
+arrives, not when its wait ends, and the newest position the produced window
+cannot reach becomes the viewer's target. A wait or restart issued before it is
+superseded: the wait ends at the fence and never restarts FFmpeg at the older
+position. A request that arrives while an in-place restart is running is
+coalesced onto that restart when it lies beyond the reach of the restart's own
+production (a seek); otherwise it waits for the segment as before. The worker
+re-reads the coalesced target after each restart, so the final position is the
+last one the viewer asked for. A request farther past the produced head than the
+throttle's forward window is a seek rather than sequential prefetch, because a
+healthy encoder is allowed to run ahead of the client by at least that window.
+
 Re-encoding the leading GOP to remove the pre-roll was considered and rejected:
 it changes the delivery and play method — a CPU-cost and route decision, not a
 seek fix. Starting at the next keyframe instead would skip past the requested
@@ -1705,6 +1719,19 @@ the class that is playing, which is a preference, not evidence about a recipe.
 An audio-output initialization failure is a verdict on the audio shape the
 recipe delivered (§6.2.1); once its one stereo retry is spent, the class retires
 as it always did.
+
+**A generation fence is not a failed recipe.** A segment request answered
+`412 stale_generation` names an FFmpeg generation the server has replaced; the
+bytes are gone, the recipe is not. A client may report it as
+`failure_recovery` with `failure.classification: "stale_generation"`, and the
+server keeps the current recipe eligible: neither the client's attempted-key
+history nor the durable recipe-exclusion chain records it, and the delivery
+class stays eligible. The replan answers with the same route for the rebuilt
+generation rather than walking the ladder, so fencing cannot reach
+`adaptation_exhausted`. A client that can reanchor or refetch on the fence should
+do that instead of spending a recovery at all; the classification exists so a
+fence that does arrive through the failure path still cannot retire a healthy
+recipe.
 
 **A failed direct play retires direct play for the attempt.** `original_http`
 ships the source container untouched, so it has no server-side executor that can

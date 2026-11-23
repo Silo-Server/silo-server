@@ -125,6 +125,61 @@ func TestRestartSegmentAsyncCoalescesToLatestTarget(t *testing.T) {
 	}
 }
 
+// TestRestartSegmentAsyncKeepsNewestSeekWhenOlderWaitExpiresLate pins the
+// ordering that a seek can expose: two waits overlap, the viewer's newer seek
+// reaches the coalescer first, and the older wait times out afterwards. The
+// older target must not overwrite the newer one, so the worker applies exactly
+// the newer position.
+func TestRestartSegmentAsyncKeepsNewestSeekWhenOlderWaitExpiresLate(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "seeks.log")
+	m := NewTranscodeManager()
+	s := newAsyncRestartTestSession(t, logPath)
+	const sid = "sess-async"
+	m.RegisterTranscodeSession(sid, s)
+	t.Cleanup(func() { _ = s.Close() })
+
+	// Both requests arrived before either applied; the viewer asked for the
+	// newer one second even though the older wait expires last.
+	older := s.BeginSegmentRecovery()
+	newer := s.BeginSegmentRecovery()
+	release := m.LockSessionLifecycle(sid)
+	m.RestartSegmentAsyncForRequest(sid, s, 20, newer)
+	m.RestartSegmentAsyncForRequest(sid, s, 10, older)
+	release()
+
+	waitAsyncRestartsDrained(t, m, sid)
+	seeks := waitSeekLogLast(t, logPath, "40.000")
+	if len(seeks) != 1 {
+		t.Fatalf("applied seeks = %v, want exactly one restart at 40.000 (the newer segment 20)", seeks)
+	}
+}
+
+// TestRestartSegmentForRecoveryRefusesSupersededTarget pins the last check
+// before ffmpeg is re-spawned: a request whose newer seek has already been
+// recorded answers superseded instead of moving the generation to the position
+// the viewer left.
+func TestRestartSegmentForRecoveryRefusesSupersededTarget(t *testing.T) {
+	logPath := filepath.Join(t.TempDir(), "seeks.log")
+	s := newAsyncRestartTestSession(t, logPath)
+	older := s.BeginSegmentRecovery()
+	newer := s.BeginSegmentRecovery()
+	s.MarkSegmentSeek(newer)
+
+	target, ok, err := s.RestartSegmentForRecovery(context.Background(), 10, older)
+	if !errors.Is(err, ErrSegmentRecoverySuperseded) {
+		t.Fatalf("RestartSegmentForRecovery error = %v, want ErrSegmentRecoverySuperseded", err)
+	}
+	if ok {
+		t.Fatal("RestartSegmentForRecovery reported a restart for a superseded target")
+	}
+	if target != (SegmentRecoveryTarget{}) {
+		t.Fatalf("target = %+v, want the zero target", target)
+	}
+	if seeks := readSeekLog(t, logPath); len(seeks) != 0 {
+		t.Fatalf("applied seeks = %v, want no restart for the superseded target", seeks)
+	}
+}
+
 // TestRestartSegmentAsyncConvergesWhenTargetArrivesMidRestart pins the second
 // half of the coalescing: a newer target that arrives while the first restart is
 // still resolving makes the worker run once more, so the final applied position

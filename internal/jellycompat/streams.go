@@ -1450,7 +1450,14 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 		segNum, parseErr := playback.ParseSegmentNumber(name)
 		if parseErr == nil {
 			now := time.Now()
-			decision := transcodeSession.SegmentRecoveryDecision(segNum, now)
+			// Arrival order decides which overlapping request owns the next
+			// restart; a wait that outlives a newer seek must not move the
+			// generation to the older position.
+			recoverySeq := transcodeSession.BeginSegmentRecovery()
+			decision := transcodeSession.SegmentRecoveryDecisionForRequest(segNum, recoverySeq, now)
+			if decision.BeyondWaitReach {
+				transcodeSession.MarkSegmentSeek(recoverySeq)
+			}
 			segmentStalled := false
 			lastProducedAgeMS := int64(-1)
 			if !decision.Progress.LastProducedAt.IsZero() {
@@ -1483,10 +1490,16 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					"session", playSession.UpstreamSessionID,
 					"playback_session_id", playSession.UpstreamSessionID,
 				)
+				stall := time.Duration(0)
 				if decision.Reason == "near_produced_head" {
-					segmentLease, err = transcodeSession.WaitForOpenSegmentWithStall(segmentName, decision.WaitTimeout, playback.SegmentStallTimeoutFor(transcodeSession.Opts()))
-				} else {
-					segmentLease, err = transcodeSession.WaitForOpenSegment(segmentName, decision.WaitTimeout)
+					stall = playback.SegmentStallTimeoutFor(transcodeSession.Opts())
+				}
+				segmentLease, err = transcodeSession.WaitForOpenSegmentRecoveryContext(r.Context(), segmentName, "", recoverySeq, decision.WaitTimeout, stall)
+				if errors.Is(err, playback.ErrSegmentRecoverySuperseded) {
+					// A newer seek replaced this target. The child-resource
+					// contract answers a retryable 404, which makes the client
+					// reload the playlist the newest seek produces.
+					err = playback.ErrSegmentNotFound
 				}
 				if errors.Is(err, playback.ErrSegmentStalled) {
 					stalledHead := transcodeSession.SegmentProgress(time.Now()).ProducedHead
@@ -1516,7 +1529,11 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 				}
 			}
 
-			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout && segmentStalled && !transcodeSession.IsCopyVideo() {
+			// A newer seek that arrived while this request waited owns the
+			// generation; restarting here would apply the older target. Leave
+			// the retryable 404 in place so the client reloads the playlist.
+			restartSuperseded := transcodeSession.SegmentRecoverySuperseded(recoverySeq)
+			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout && !restartSuperseded && segmentStalled && !transcodeSession.IsCopyVideo() {
 				// A stalled encoder cannot produce the requested segment by waiting.
 				// Restart detached and answer with the same retryable 404 the
 				// Jellyfin child-resource contract already uses; holding the request
@@ -1532,15 +1549,20 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 					"session", playSession.UpstreamSessionID,
 					"playback_session_id", playSession.UpstreamSessionID,
 				)
-				h.tm.RestartSegmentAsync(playSession.UpstreamSessionID, transcodeSession, segNum)
+				h.tm.RestartSegmentAsyncForRequest(playSession.UpstreamSessionID, transcodeSession, segNum, recoverySeq)
 				err = playback.ErrSegmentNotFound
-			} else if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
-				target, ok, restartErr := h.tm.RestartSegmentLocked(
+			} else if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout && !restartSuperseded {
+				target, ok, restartErr := h.tm.RestartSegmentLockedForRecovery(
 					r.Context(),
 					playSession.UpstreamSessionID,
 					transcodeSession,
 					segNum,
+					recoverySeq,
 				)
+				if errors.Is(restartErr, playback.ErrSegmentRecoverySuperseded) {
+					err = playback.ErrSegmentNotFound
+					restartErr = nil
+				}
 				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) {
 					slog.ErrorContext(r.Context(), "restart transcode at missing segment", "component", "jellycompat",
 						"error", restartErr,
@@ -1557,7 +1579,7 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 				// client retries while the session keeps producing manifest.
 				// Mirrors the transcode-node guard in
 				// internal/transcodenode/server.go.
-				if !ok && restartErr == nil && transcodeSession.IsCopyVideo() {
+				if err == nil && !ok && restartErr == nil && transcodeSession.IsCopyVideo() {
 					err = playback.ErrSegmentNotFound
 				}
 
@@ -1582,7 +1604,10 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 						"playback_session_id", playSession.UpstreamSessionID,
 					)
 
-					segmentLease, err = transcodeSession.WaitForOpenSegment(segmentName, 30*time.Second)
+					segmentLease, err = transcodeSession.WaitForOpenSegmentRecoveryContext(r.Context(), segmentName, "", recoverySeq, 30*time.Second, 0)
+					if errors.Is(err, playback.ErrSegmentRecoverySuperseded) {
+						err = playback.ErrSegmentNotFound
+					}
 				}
 			}
 		} else if transcodeSession.IsRunning() {

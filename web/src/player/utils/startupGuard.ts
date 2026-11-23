@@ -115,11 +115,12 @@ export class StartupGuard {
 export const STALE_GENERATION_STATUS = 412;
 
 /**
- * Cap on consecutive playlist refetches a single transport may perform for the
+ * Cap on consecutive playlist refetches a single transport may perform for one
  * stale-generation fence. Each refetch rebuilds the segment URLs with the
- * current `sgen`; if the server keeps answering 412 the session is genuinely
- * moving faster than the client can adopt it, so the player stops refetching
- * and lets the ordinary failure path replan instead of spinning.
+ * current `sgen`. A different generation starts the bound again, because a
+ * rotation during the refetch is a normal seek-burst event, not a stuck
+ * transport. Once the bound is spent the player reanchors at the playhead
+ * instead of treating the fence as a route failure.
  */
 export const MAX_STALE_GENERATION_RECOVERIES = 2;
 

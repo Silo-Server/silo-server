@@ -365,6 +365,21 @@ func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision S
 	progress := decision.Progress
 	switch {
 	case progress.Restarting:
+		// A request past the prefetch window that arrived after the restart in
+		// flight is a newer seek the restart will not produce. It joins that
+		// restart's coalescing instead of waiting out the head budget and
+		// leaving the generation at the older target. A plan-level restart has
+		// no originating request, so its own target is the reference.
+		newerThanRestart := decision.RestartSuperseded ||
+			(decision.RestartPlanLevel && decision.BeyondWaitReach &&
+				segNum > decision.RestartTargetSegment+plannedSegmentPrefetchSegments)
+		if newerThanRestart && segNum > progress.ProducedHead+plannedSegmentPrefetchSegments {
+			decision.BeyondWaitReach = true
+			decision.Wait = false
+			decision.RestartOnTimeout = true
+			decision.Reason = "planned_segment_seek"
+			break
+		}
 		decision.Wait = true
 		decision.WaitTimeout = activeSegmentWait
 		decision.RestartOnTimeout = false
@@ -378,7 +393,9 @@ func (s *TranscodeSession) plannedSegmentRecoveryDecision(segNum int, decision S
 		decision.Reason = "planned_segment_ahead"
 	default:
 		// A far forward target, a pruned segment behind the player, or a
-		// stopped producer: restart at the plan's exact segment start.
+		// stopped producer: restart at the plan's exact segment start. Only a
+		// forward target is a viewer seek that supersedes an older wait.
+		decision.BeyondWaitReach = segNum > progress.ProducedHead
 		decision.Wait = false
 		decision.RestartOnTimeout = true
 		decision.Reason = "planned_segment_seek"
