@@ -3736,6 +3736,23 @@ func (h *PlaybackHandler) resolveVirtualPlaybackSource(r *http.Request, file *mo
 		// requested row.
 		resolvedOwnsCandidate := dbFound && dbFile != nil &&
 			strings.TrimSpace(dbFile.FilePath) == strings.TrimSpace(cand.URI)
+		// A provider re-list can re-qualify a release URI (?profile=...), and the
+		// persistence then owns that new URI with a row of its own. The selected
+		// row and the owner row are the same release, so the inventory the
+		// selected row already carries describes the bytes this attempt serves.
+		// A bound selection (explicit pick or session binding) therefore keeps
+		// its probed evidence instead of replacing it with the owner row's empty
+		// snapshot and paying an ffprobe for streams already enumerated. Auto
+		// selection is untouched: it never named this row.
+		if dbFound && (options.sessionBound || explicitSelection) && !substituted &&
+			virtualSiblingOwnerSharesRelease(file, &transient) &&
+			file.ProbeUpdatedAt != nil && virtualRowCarriesProbeInventory(file) &&
+			(transient.ProbeUpdatedAt == nil || !virtualRowCarriesProbeInventory(&transient)) {
+			carryProbedEvidenceFields(&transient, file)
+			slog.InfoContext(attemptCtx, "virtual playback: carried the selected row's probe evidence onto its same-release owner row",
+				"component", "api", "requested_file_id", file.ID, "owner_file_id", transient.ID,
+				"candidate_uri", cand.URI, "status", "same_release_evidence_carried")
+		}
 		// Carry the resolved candidate's durable identity on the served file
 		// so the probe-evidence adoption persists the identity of the bytes
 		// being adopted. Fill-empty-only: stored tiers are never overwritten.
@@ -7735,6 +7752,38 @@ func virtualPathLookupRowFor(ctx context.Context, resolver FilePathResolver, can
 	return row, true, nil
 }
 
+// carryProbedEvidenceFields copies the stream table and its derived identity
+// fields from a probed row onto another row of the same release. Identity,
+// path, verdict, declared size and delivery state stay with the destination
+// row: only what ffprobe enumerated about the bytes moves. The declared size is
+// deliberately left alone because the served-bytes classification compares the
+// probe against the row's own declaration, and two rows of one release may
+// carry slightly different provider-rounded sizes.
+func carryProbedEvidenceFields(dst, src *models.MediaFile) {
+	if dst == nil || src == nil {
+		return
+	}
+	dst.VideoTracks = src.VideoTracks
+	dst.AudioTracks = src.AudioTracks
+	dst.SubtitleTracks = src.SubtitleTracks
+	dst.ExternalSubtitles = src.ExternalSubtitles
+	dst.Chapters = src.Chapters
+	dst.Resolution = src.Resolution
+	dst.CodecVideo = src.CodecVideo
+	dst.CodecAudio = src.CodecAudio
+	dst.Container = src.Container
+	dst.HDR = src.HDR
+	dst.Bitrate = src.Bitrate
+	dst.Duration = src.Duration
+	dst.AudioChannels = src.AudioChannels
+	dst.ProbeSource = src.ProbeSource
+	dst.ProbeUpdatedAt = src.ProbeUpdatedAt
+	dst.ProbedFormatSize = src.ProbedFormatSize
+	dst.MultiplePPS = src.MultiplePPS
+	dst.MultiplePPSScanSize = src.MultiplePPSScanSize
+	dst.MultiplePPSScanMtime = src.MultiplePPSScanMtime
+}
+
 // rotateVirtualSourceToOwnerRow returns the resolved source's file rebased on
 // the existing alternate-version row the fallback rotates to, with the freshly
 // probed track and stream evidence overlaid. Starting from the owning row keeps
@@ -7750,23 +7799,11 @@ func rotateVirtualSourceToOwnerRow(probed *models.MediaFile, ownerRow *models.Me
 	rotated := *ownerRow
 	rotated.FilePath = uri
 	if probed != nil {
-		rotated.VideoTracks = probed.VideoTracks
-		rotated.AudioTracks = probed.AudioTracks
-		rotated.SubtitleTracks = probed.SubtitleTracks
-		rotated.ExternalSubtitles = probed.ExternalSubtitles
-		rotated.Chapters = probed.Chapters
-		rotated.Resolution = probed.Resolution
-		rotated.CodecVideo = probed.CodecVideo
-		rotated.CodecAudio = probed.CodecAudio
-		rotated.Container = probed.Container
-		rotated.HDR = probed.HDR
-		rotated.Bitrate = probed.Bitrate
-		rotated.Duration = probed.Duration
-		rotated.AudioChannels = probed.AudioChannels
+		carryProbedEvidenceFields(&rotated, probed)
+		// The probed transient is the candidate the fallback actually measured,
+		// so its declared size is the one the served-bytes check must compare
+		// against; the owner row may still carry the pre-probe declaration.
 		rotated.FileSize = probed.FileSize
-		rotated.MultiplePPS = probed.MultiplePPS
-		rotated.MultiplePPSScanSize = probed.MultiplePPSScanSize
-		rotated.MultiplePPSScanMtime = probed.MultiplePPSScanMtime
 	}
 	return &rotated
 }

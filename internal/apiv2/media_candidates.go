@@ -91,9 +91,10 @@ const (
 )
 
 // preplayDiscoveryRepeatWindow returns the memo window for one detail trigger.
-// The catalog leaf read is item-scoped and lives longer because it answers a
-// browse read that remounts; the watch read is selection-scoped and about to
-// play, so it keeps the short poll-coalescing window.
+// The catalog leaf read lives longer because it answers a browse read that
+// remounts; the watch read is about to play and keeps the short
+// poll-coalescing window. Both share one item-scoped memo key, so whichever
+// trigger listed most recently decides freshness for the other.
 func preplayDiscoveryRepeatWindow(trigger string) time.Duration {
 	if trigger == "catalog_detail" {
 		return preplayDiscoveryCatalogRepeatWindow
@@ -118,12 +119,19 @@ const (
 )
 
 // preplayDiscoveryMemoKey identifies one viewer's detail read for one item.
-// The watch read is selection-scoped: switching versions must run discovery for
-// the newly selected row even inside the repeat window. The catalog leaf read
-// is item-scoped: its listing is the same for every row and the page remounts
-// with whatever selection the client last had, so the selected file must not
-// create a fresh memo entry per mount.
-func preplayDiscoveryMemoKey(ctx context.Context, contentID string, filter catalogpkg.AccessFilter, selectionScoped bool) string {
+//
+// The key is item-scoped for every trigger. Discovery lists the item's provider
+// candidates and persists them as the item's version rows; neither the listing
+// nor the persistence depends on which row the reader currently has selected
+// (filter.SelectedFileID only gates the default warm-up inside the discovery
+// service). Keying the memo on the selection made every version pick and every
+// picker open look like a new item to the repeat window, so the watch read ran
+// another full provider listing — up to the watch budget — and rewrote every
+// candidate row seconds after the item page had just done the same work. The
+// per-selection work that genuinely depends on the row (inventory probe and
+// provider fill warm-up) is scheduled separately from the read that carries the
+// selection, so it is unaffected.
+func preplayDiscoveryMemoKey(ctx context.Context, contentID string, filter catalogpkg.AccessFilter) string {
 	userID := 0
 	if claims := claimsFrom(ctx); claims != nil {
 		userID = claims.UserID
@@ -132,12 +140,8 @@ func preplayDiscoveryMemoKey(ctx context.Context, contentID string, filter catal
 	if filter.PresentationLibraryID != nil {
 		libraryID = *filter.PresentationLibraryID
 	}
-	key := strconv.Itoa(userID) + "\x00" + profileFrom(ctx) + "\x00" + contentID + "\x00" +
+	return strconv.Itoa(userID) + "\x00" + profileFrom(ctx) + "\x00" + contentID + "\x00" +
 		strconv.Itoa(libraryID)
-	if selectionScoped {
-		key += "\x00" + strconv.Itoa(filter.SelectedFileID)
-	}
-	return key
 }
 
 func (reg *Registry) preplayDiscoveryRecentlyRan(key string, window time.Duration) bool {
@@ -226,7 +230,7 @@ func (reg *Registry) endPreplayDiscovery(key string) {
 // admitted is true only when the caller may run the listing; key names the
 // coalescing identity for it. The caller decides whether to claim that key as
 // an in-flight run (see startDetailVersionDiscovery).
-func (reg *Registry) detailDiscoveryAdmission(ctx context.Context, contentID, mediaType string, filter catalogpkg.AccessFilter, trigger string, selectionScoped bool) (claims *auth.Claims, hasVirtualSource bool, key string, admitted bool) {
+func (reg *Registry) detailDiscoveryAdmission(ctx context.Context, contentID, mediaType string, filter catalogpkg.AccessFilter, trigger string) (claims *auth.Claims, hasVirtualSource bool, key string, admitted bool) {
 	claims = claimsFrom(ctx)
 	if claims == nil || (mediaType != themeOwnerMovie && mediaType != themeOwnerEpisode) ||
 		reg.deps.VirtualCandidatesDiscovery == nil {
@@ -250,12 +254,13 @@ func (reg *Registry) detailDiscoveryAdmission(ctx context.Context, contentID, me
 	if reg.deps.PreplayDiscoveryEnabled == nil || !reg.deps.PreplayDiscoveryEnabled(ctx) {
 		return nil, hasVirtualSource, "", false
 	}
-	key = preplayDiscoveryMemoKey(ctx, contentID, filter, selectionScoped)
+	key = preplayDiscoveryMemoKey(ctx, contentID, filter)
 	if reg.preplayDiscoveryRecentlyRan(key, preplayDiscoveryRepeatWindow(trigger)) {
 		// The player polls watch detail for inventory while the pre-play probe
-		// is still running. Re-listing on that poll rewrites every candidate and
-		// invalidates the probe write's catalog snapshot; the first read in this
-		// window already did the work.
+		// is still running, and the item page and player read the same item with
+		// different selected rows. Re-listing on either rewrites every candidate
+		// and invalidates the probe write's catalog snapshot; the first read in
+		// this window already listed the item-wide set.
 		slog.DebugContext(ctx, "pre-play version discovery coalesced", "component", "apiv2", "item_id", contentID,
 			"trigger", trigger, "selected_file_id", filter.SelectedFileID)
 		return nil, hasVirtualSource, "", false
@@ -312,7 +317,7 @@ func (reg *Registry) runDetailDiscovery(ctx context.Context, claims *auth.Claims
 // short pre-play budget because the caller is about to start playback, and the
 // start path's own candidate resolution depends on that fresh listing.
 func (reg *Registry) startDetailVersionDiscovery(ctx context.Context, contentID, mediaType string, filter catalogpkg.AccessFilter, trigger string, budget time.Duration) (hasVirtualSource bool) {
-	claims, hasVirtualSource, key, admitted := reg.detailDiscoveryAdmission(ctx, contentID, mediaType, filter, trigger, false)
+	claims, hasVirtualSource, key, admitted := reg.detailDiscoveryAdmission(ctx, contentID, mediaType, filter, trigger)
 	if !admitted {
 		return hasVirtualSource
 	}
@@ -343,7 +348,7 @@ func (reg *Registry) startDetailVersionDiscovery(ctx context.Context, contentID,
 // into the answer. Catalog detail uses startDetailVersionDiscovery instead and
 // never waits.
 func (reg *Registry) discoverDetailVersions(ctx context.Context, contentID, mediaType string, filter catalogpkg.AccessFilter, trigger string, budget time.Duration) (discovered, hasVirtualSource bool) {
-	claims, hasVirtualSource, key, admitted := reg.detailDiscoveryAdmission(ctx, contentID, mediaType, filter, trigger, true)
+	claims, hasVirtualSource, key, admitted := reg.detailDiscoveryAdmission(ctx, contentID, mediaType, filter, trigger)
 	if !admitted {
 		return false, hasVirtualSource
 	}
