@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { Search } from "lucide-react";
 import { PosterArt } from "@/components/calm/PosterTile";
 import { Input } from "@/components/ui/input";
@@ -126,7 +127,7 @@ export function CollectionOptionBody({
   title: string;
   posterUrl?: string;
   thumbhash?: string;
-  meta: string;
+  meta: ReactNode;
   /** The id of the meta line screen readers hear, for the item's aria-describedby. */
   metaId: string;
   /** What screen readers hear in place of `meta`; `meta` when absent. */
@@ -145,12 +146,20 @@ export function CollectionOptionBody({
         <span dir="auto" className="block w-fit max-w-full truncate text-sm font-semibold">
           {title}
         </span>
-        <span aria-hidden className="text-muted-foreground block truncate text-[0.8125rem]">
-          {meta}
-        </span>
-        <span id={metaId} className="sr-only">
-          {srMeta ?? meta}
-        </span>
+        {srMeta === undefined ? (
+          <span id={metaId} className="text-muted-foreground block truncate text-[0.8125rem]">
+            {meta}
+          </span>
+        ) : (
+          <>
+            <span aria-hidden className="text-muted-foreground block truncate text-[0.8125rem]">
+              {meta}
+            </span>
+            <span id={metaId} className="sr-only">
+              {srMeta}
+            </span>
+          </>
+        )}
       </span>
     </>
   );

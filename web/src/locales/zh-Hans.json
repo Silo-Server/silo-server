@@ -521,6 +521,12 @@
       "value": "此播放会话已结束。请重新开始播放。"
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "暂停时间过长，播放已停止。请重新开始播放。"
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -60982,6 +60988,24 @@
       "value": "保存到媒体库"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "暂停的播放"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "暂停多久后结束播放"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0到1440。在Silo应用中暂停达到此时长的视频将被结束，并释放其串流和所有转码；再次播放时会从同一位置继续。一起看、投屏和有声书不受影响。设为0则关闭此功能。"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -61420,6 +61444,12 @@
     {
       "type": 0,
       "value": "天"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "分钟"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -67323,6 +67353,12 @@
       "value": "开启软件HDR色调映射"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "暂停多久后结束播放（分钟）"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -67381,6 +67417,12 @@
     {
       "type": 0,
       "value": "标记来源"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "暂停的播放"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -69323,6 +69365,36 @@
     {
       "type": 0,
       "value": "请先开启一个登录提供商。如果关闭密码登录且未开启任何提供商，将只有应急管理员能登录。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "长度为8到72个字符。规则在有人设置或更改密码时生效；已设置的密码仍可继续使用。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "最小密码长度"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "任何标点或符号，例如!或#。字母、数字和空格不算在内。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "要求包含特殊字符"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "要求包含大写字母"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -80473,6 +80545,20 @@
       "value": "正在设置……"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "请自行将密码告知"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -82806,10 +82892,48 @@
       "value": "不允许此设备登录此服务器。"
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "至少"
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": "个字符。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "密码不匹配。"
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "至少包含一个特殊字符，例如!或#。"
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "至少包含一个大写字母。"
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -82822,6 +82946,32 @@
     {
       "type": 0,
       "value": "至少使用8个字符。"
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "请至少使用"
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": "个字符。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -114271,6 +114421,12 @@
     {
       "type": 0,
       "value": "管理员已结束此播放会话。"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "暂停时间过长，播放已停止。"
     }
   ],
   "web.player.shuffle.scopeWithParent": [

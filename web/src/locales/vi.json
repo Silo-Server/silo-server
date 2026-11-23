@@ -521,6 +521,12 @@
       "value": "Phiên phát này đã kết thúc. Bắt đầu phát lại."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Đã dừng phát do tạm dừng quá lâu. Bắt đầu phát lại."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67453,6 +67459,24 @@
       "value": "Lưu vào thư viện"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Tạm dừng phát"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Dừng phát nội dung đang tạm dừng sau"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 đến 1440. Dừng phát video đã tạm dừng lâu như vậy trong ứng dụng Silo, giải phóng luồng và mọi phiên chuyển mã của video đó; khi phát tiếp, video sẽ tiếp tục từ đúng vị trí cũ. Không ảnh hưởng đến Xem cùng nhau, truyền tới thiết bị khác và sách nói. 0 để tắt tính năng này."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67923,6 +67947,12 @@
     {
       "type": 0,
       "value": "ngày"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "phút"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73853,6 +73883,12 @@
       "value": "Bật ánh xạ tông màu HDR bằng phần mềm"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Dừng phát nội dung đang tạm dừng sau (phút)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73911,6 +73947,12 @@
     {
       "type": 0,
       "value": "Nguồn điểm đánh dấu"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Tạm dừng phát"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -75893,6 +75935,36 @@
     {
       "type": 0,
       "value": "Hãy bật một nhà cung cấp đăng nhập trước. Khi tắt đăng nhập bằng mật khẩu và không bật nhà cung cấp nào, chỉ quản trị viên khẩn cấp mới có thể đăng nhập."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Từ 8 đến 72 ký tự. Quy tắc áp dụng khi ai đó chọn hoặc đổi mật khẩu; các mật khẩu đã đặt vẫn tiếp tục hoạt động."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Độ dài mật khẩu tối thiểu"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Bất kỳ dấu câu hoặc ký hiệu nào, chẳng hạn như ! hoặc #. Chữ cái, chữ số và dấu cách không được tính."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Yêu cầu ký tự đặc biệt"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Yêu cầu chữ in hoa"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -87815,6 +87887,20 @@
       "value": "Đang đặt…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Hãy tự chia sẻ mật khẩu này với "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -90363,10 +90449,64 @@
       "value": " không cho phép thiết bị này đăng nhập vào máy chủ này."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tối thiểu "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " ký tự."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tối thiểu "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " ký tự."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Mật khẩu không khớp."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Bao gồm ít nhất một ký tự đặc biệt, chẳng hạn như ! hoặc #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Bao gồm ít nhất một chữ in hoa."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -90379,6 +90519,48 @@
     {
       "type": 0,
       "value": "Dùng ít nhất 8 ký tự."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dùng ít nhất "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " ký tự."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dùng ít nhất "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " ký tự."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -124771,6 +124953,12 @@
     {
       "type": 0,
       "value": "Quản trị viên đã kết thúc phiên phát này."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Đã dừng phát do tạm dừng quá lâu."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

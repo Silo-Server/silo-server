@@ -41,7 +41,9 @@ Jellyfin serializes a Guid: 32 lowercase hex digits without dashes, in the user
 DTO, `SessionInfo.UserId`, `/Sessions`, and `UserDataChanged` socket messages.
 Seerr's avatar proxy rejects any other shape. Routes and queries that take a
 user ID also accept the dashed form, which clients that signed in before this
-format still send. Item, library, and server IDs keep the dashed form.
+format still send. Media-source IDs take the same form (see
+[Playback negotiation and media](#playback-negotiation-and-media)). Item,
+library, and server IDs keep the dashed form.
 
 The user DTO carries `PrimaryImageTag` when the profile has an uploaded avatar
 and the caller signed in (a session for an `sa_` API key is never stored, so
@@ -461,8 +463,15 @@ media-source id there and resolve it to the item that owns its file (the
 episode for an episode file). On `PlaybackInfo` the id selects that version
 unless the body names a `MediaSourceId`. A stale body `MediaSourceId` falls back
 to the route's version, and a route version the item no longer has answers
-`404`. The negotiated session keeps the client's id as its route item id, so the
-stream URLs it hands out and later session reports can carry that id.
+`404`. The negotiated session keeps that media-source id as its route item id,
+in the form Silo sends it, so the stream URLs it hands out and later session
+reports can carry that id.
+
+Media-source ids take Jellyfin's Guid form, 32 lowercase hex digits without
+dashes, like user ids. Infuse cuts a dashed `MediaSourceId` at its first dash
+when it sends it back in a `PlaybackInfo` body, which made that body name no
+version. Every route and body still accepts the dashed form that clients stored
+earlier.
 
 Every compat user is a non-administrator, and only a viewer who may curate
 metadata sees where a file lives or what it is called (see
