@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"testing"
 	"time"
@@ -320,5 +321,26 @@ func TestPausedTimeoutSweepPagesPastSkippedRowsDB(t *testing.T) {
 	f.sweep(t, playback.DefaultPausedSessionTimeoutMinutes)
 	if got := f.stopID(t, eligible); got != pausedTimeoutStopID(eligible) {
 		t.Fatalf("the eligible session behind a batch of skipped ones ended under %q, want the paused timeout's", got)
+	}
+}
+
+// TestPausedTimeoutSweepWaitsForTheSettingDB pins that a server that could
+// not read the timeout yet ends nothing: the default would end sessions an
+// administrator kept by turning the timeout off. Once the read succeeds, the
+// session ends.
+func TestPausedTimeoutSweepWaitsForTheSettingDB(t *testing.T) {
+	f := newPausedTimeoutSweepFixture(t)
+	session := f.pausedSession(t, f.video, 10*time.Second, `{}`)
+
+	f.settings.getErrors = map[string]error{playback.PausedSessionTimeoutSettingKey: errors.New("settings unavailable")}
+	f.sweep(t, 0)
+	if got := f.stopID(t, session); got != "" {
+		t.Fatalf("a sweep that could not read the timeout ended the session under %s", got)
+	}
+
+	f.settings.getErrors = nil
+	f.sweep(t, playback.DefaultPausedSessionTimeoutMinutes)
+	if got := f.stopID(t, session); got != pausedTimeoutStopID(session) {
+		t.Fatalf("stop id = %q after the timeout was read, want the paused timeout's", got)
 	}
 }

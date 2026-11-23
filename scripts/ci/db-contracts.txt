@@ -755,6 +755,7 @@
 ./internal/api/handlers TestPausedTimeoutSweepDropsCopiesStoppedElsewhereDB
 ./internal/api/handlers TestPausedTimeoutSweepDropsCopiesFinalizedElsewhereDB
 ./internal/api/handlers TestPausedTimeoutSweepPagesPastSkippedRowsDB
+./internal/api/handlers TestPausedTimeoutSweepWaitsForTheSettingDB
 ./internal/api/handlers TestLifecycleSweepKeepsARecordedSubtitleDB
 ./internal/api/handlers TestLifecycleSweepTakesALaterSyncedSubtitleDB
 # A live row names an episode as the history entry its play leaves does.

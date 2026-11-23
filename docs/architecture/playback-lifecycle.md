@@ -119,7 +119,9 @@ Lifecycle events themselves are at most once.
 A native session left paused longer than
 `playback.paused_session_timeout_minutes` (default 15, `0` off, read live
 through a per-server cache that keeps a value for a minute) is ended, so an
-abandoned pause stops holding a stream slot and its transcode. The same sweep
+abandoned pause stops holding a stream slot and its transcode. A server that
+has not read the setting successfully yet ends nothing, rather than apply the
+default an administrator may have turned off. The same sweep
 runs it on every API server (`playback_paused_timeout.go`). The attempt's
 24-hour lifetime bounds it: a value near the 1440-minute maximum may not fire
 before the attempt expires, and the existing expiry then ends the session.

@@ -64,7 +64,9 @@ type pausedTimeoutCursor struct {
 
 // pausedSessionTimeout is the configured timeout, zero when it is off, read
 // through a per-server cache that keeps a value for pausedTimeoutSettingTTL.
-func (h *PlaybackHandler) pausedSessionTimeout(ctx context.Context) time.Duration {
+// ok is false while no read of the setting has succeeded: the default would
+// end sessions an administrator may have kept by turning the timeout off.
+func (h *PlaybackHandler) pausedSessionTimeout(ctx context.Context) (timeout time.Duration, ok bool) {
 	h.pausedTimeoutOnce.Do(func() {
 		var settings config.SettingReader
 		if h.SettingsRepo != nil {
@@ -73,7 +75,7 @@ func (h *PlaybackHandler) pausedSessionTimeout(ctx context.Context) time.Duratio
 		h.pausedTimeoutSetting = config.NewCachedSetting(settings, playback.PausedSessionTimeoutSettingKey,
 			pausedTimeoutSettingTTL, playback.ParsePausedSessionTimeout)
 	})
-	return h.pausedTimeoutSetting.Get(ctx)
+	return h.pausedTimeoutSetting.Lookup(ctx)
 }
 
 // sweepPausedTimeouts drops the copies this server holds of sessions another
@@ -84,8 +86,8 @@ func (h *PlaybackHandler) pausedSessionTimeout(ctx context.Context) time.Duratio
 func (h *PlaybackHandler) sweepPausedTimeouts(ctx context.Context, pool *pgxpool.Pool) {
 	heldIDs := h.heldNativeSessionIDs()
 	h.dropCopiesPausedOutElsewhere(ctx, pool, heldIDs)
-	timeout := h.pausedSessionTimeout(ctx)
-	if timeout <= 0 {
+	timeout, ok := h.pausedSessionTimeout(ctx)
+	if !ok || timeout <= 0 {
 		return
 	}
 	expirer, ok := h.PlanStoreV3.(pausedAttemptExpirer)
