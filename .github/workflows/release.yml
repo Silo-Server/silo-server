@@ -41,6 +41,20 @@ jobs:
           echo "::error::Releases are made from main."
           exit 1
 
+      # A draft has no tag until it is published, so the version check can't
+      # see it. One draft at a time keeps a second one from repeating its
+      # version or drafting an older version on a newer commit. This runs
+      # before the checkout, so a draft published in between is already a tag
+      # there.
+      - name: Require no other draft release
+        run: |
+          drafts="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isDraft \
+            --jq '[.[] | select(.isDraft) | if .tagName == "" then "(untagged)" else .tagName end] | join(", ")')"
+          if [[ -n "$drafts" ]]; then
+            echo "::error::Publish or delete the draft release ${drafts} first."
+            exit 1
+          fi
+
       - name: Check out the release commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -53,15 +67,17 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: python3 scripts/release/release_version.py check "$VERSION" | tee -a "$GITHUB_OUTPUT"
 
-      # A draft has no tag until it is published, so the version check can't
-      # see it. One draft at a time keeps a second one from repeating its
-      # version or drafting an older version on a newer commit.
-      - name: Require no other draft release
+      # The notes start at this tag, so an empty range means a release with
+      # nothing new, such as a second candidate on the same commit. A stable
+      # release's range starts at the previous stable one, so promoting a
+      # candidate's commit still passes.
+      - name: Require new commits since the previous release
+        if: steps.version.outputs.previous_tag != ''
+        env:
+          PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
         run: |
-          drafts="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 --json tagName,isDraft \
-            --jq '[.[] | select(.isDraft) | .tagName] | join(", ")')"
-          if [[ -n "$drafts" ]]; then
-            echo "::error::Publish or delete the draft release ${drafts} first."
+          if [[ "$(git rev-list --count "${PREVIOUS_TAG}..${GITHUB_SHA}")" -eq 0 ]]; then
+            echo "::error::${GITHUB_SHA::9} has no commits since ${PREVIOUS_TAG}."
             exit 1
           fi
 
@@ -112,7 +128,7 @@ jobs:
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
           PREVIOUS_TAG: ${{ steps.version.outputs.previous_tag }}
         run: |
-          args=(--repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --title "Silo $VERSION" --fail-on-no-commits)
+          args=(--repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --title "Silo $VERSION")
           if [[ "$PRERELEASE" == "true" ]]; then
             args+=(--prerelease)
           fi

@@ -189,8 +189,10 @@ jobs:
       # newer commit. Once a release exists, release-published.yml owns latest.
       # Both are decided right before pushing, so a build that started before
       # the first release can't overwrite its latest. One that checks in the
-      # seconds before that release pushes still could; re-running Release
-      # published puts it back.
+      # seconds before that release pushes still could. Re-running Release
+      # published puts latest back when that build is the release commit's;
+      # a newer build keeps latest until the next release, which never moves
+      # it to an older commit.
       - name: Create and push manifest list
         working-directory: ${{ runner.temp }}/digests
         env:

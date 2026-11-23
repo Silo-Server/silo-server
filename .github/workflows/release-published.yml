@@ -73,6 +73,11 @@ jobs:
             echo "::error::Release tags start with v, for example v0.24.0, and ${TAG} doesn't."
             exit 1
           fi
+          # A manual run can name any tag; only a published release gets tagged.
+          if [[ "$(gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq .isDraft)" != false ]]; then
+            echo "::error::${TAG} isn't a published release."
+            exit 1
+          fi
           commit="$(git rev-list -n 1 "refs/tags/${TAG}")"
           version="${TAG#v}"
           image="${REGISTRY}/${IMAGE_NAME,,}"
@@ -128,12 +133,28 @@ jobs:
           IMAGE: ${{ steps.tags.outputs.image }}
           VERSION: ${{ steps.tags.outputs.version }}
         run: |
-          released="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' 2>/dev/null | jq -r '.digest // ""')" || released=""
-          if [[ -n "$released" ]]; then
-            echo "::notice::${IMAGE}:${VERSION} is already published; pointing the tags at it."
-            echo "released=${released}" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
+          # Ask the registry directly, so a missing version (404) is told
+          # apart from a failed lookup, which stops the job rather than
+          # rebuilding a version that may already be published.
+          repo="${IMAGE#*/}"
+          token="$(curl -fsS "https://${REGISTRY}/token?scope=repository:${repo}:pull" | jq -r .token)"
+          status="$(curl -sS -o /dev/null -w '%{http_code}' -I \
+            -H "Authorization: Bearer ${token}" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.oci.image.manifest.v1+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://${REGISTRY}/v2/${repo}/manifests/${VERSION}")"
+          case "$status" in
+            200)
+              released="$(docker buildx imagetools inspect "${IMAGE}:${VERSION}" --format '{{json .Manifest}}' | jq -r .digest)"
+              echo "::notice::${IMAGE}:${VERSION} is already published; pointing the tags at it."
+              echo "released=${released}" >> "$GITHUB_OUTPUT"
+              exit 0
+              ;;
+            404) ;;
+            *)
+              echo "::error::Couldn't tell whether ${IMAGE}:${VERSION} is published (HTTP ${status}). Run Release published again."
+              exit 1
+              ;;
+          esac
           digest="$(docker buildx imagetools inspect "${IMAGE}:${COMMIT}" --format '{{json .Manifest}}' | jq -r .digest)" || digest=""
           if [[ -z "$digest" || "$digest" == null ]]; then
             echo "::error::${IMAGE}:${COMMIT} doesn't exist. The Docker Image workflow must have published this commit."
