@@ -437,11 +437,13 @@ func sortScoredItems(items []ScoredItem) {
 }
 
 // BecauseYouWatched returns items similar to a specific item the user has
-// watched. Blends embedding similarity (70%) with co-watch data (30%) and
-// validates the candidates against the source like SimilarItems: a title
-// sharing no genre with it is dropped and a remake of it ranks lower. Titles
-// in the profile's recommendation exclusion set, and those filter does not
-// admit, are left out before ranking.
+// watched. Blends embedding similarity (70%) with co-watch data (30%). Unlike
+// SimilarItems it does not validate candidates against the source: the genre
+// gate empties or shortens the row on a small library, where few of the
+// nearest titles share a genre with the source, and a co-watched title of
+// another genre is still a fair suggestion on Home. Titles in the profile's
+// recommendation exclusion set, and those filter does not admit, are left out
+// before ranking.
 func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	excluded, err := e.recommendationExclusionSet(ctx, userID, profileID)
 	if err != nil {
@@ -515,10 +517,8 @@ func (e *Engine) becauseYouWatched(ctx context.Context, builder rowBuilder, sour
 	}
 	embMap := candidateEmbeddings(details)
 
-	// Blend scores, validate them against the source like "More like this",
-	// then apply the quality prior, aversion and MMR.
+	// Blend scores, then apply the quality prior, aversion and MMR.
 	blended := blendScores(withCowatchSimilarity(embCandidates, cowatchMap, embedding, embMap), cowatchMap, 0.7, 0.3)
-	blended = applyValidation(sourceMeta, blended, details)
 	blended = builder.withQualityPrior(ctx, blended, qualityMinSmallPool)
 	blended, _ = builder.withAversion(blended, embMap, embedding)
 	result := applyMMR(blended, embMap, builder.lambda, limit)
