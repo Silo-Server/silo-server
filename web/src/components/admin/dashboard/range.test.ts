@@ -1,17 +1,28 @@
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createAppIntl, setAppIntl, type Messages } from "@/i18n";
-import arabic from "@/locales/ar.json";
 import english from "@/locales/en.json";
-import japanese from "@/locales/ja.json";
 
 import { rangeTitle } from "./range";
 
 const NBSP = "\u00a0";
+// CI's web tests check out only the English catalogs, so the other languages
+// carry their shipped message for this key inline.
+const DAY_TITLE = "web.admin.dashboard.range.title.day";
 const CATALOGS = {
   en: english as Messages,
-  ar: arabic as Messages,
-  ja: japanese as Messages,
+  ar: {
+    [DAY_TITLE]: [
+      { type: 1, value: "title" },
+      { type: 0, value: " · آخر 24 س" },
+    ],
+  } as Messages,
+  ja: {
+    [DAY_TITLE]: [
+      { type: 1, value: "title" },
+      { type: 0, value: "・過去24時間" },
+    ],
+  } as Messages,
 } satisfies Record<string, Messages>;
 
 afterEach(() => {
