@@ -104,6 +104,7 @@
 ./migrations TestMediaSearchDocumentsMigrationPostgres
 ./migrations TestEpisodeSearchRefreshMigrationPostgres
 ./migrations TestSkipUnchangedEpisodeCatalogRefreshMigrationPostgres
+./migrations TestSkipUnchangedEpisodeSearchEventsMigrationPostgres
 ./migrations TestEpisodeExactSearchIndexMigrationPostgres
 ./internal/catalog TestMediaSearchDocumentsPostgres
 ./internal/catalog TestSearchOptimizedAccuracyPostgres
