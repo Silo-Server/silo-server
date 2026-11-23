@@ -670,7 +670,7 @@ func (r *Repo) findTasteProfileCandidates(
 	// sharing at least one genre, in distance order. Ranking by how many
 	// genres match would let a distant title that matches every genre push
 	// a close one out of the pool; callers that want genre-first order, such
-	// as Watch Tonight cards, re-rank the pool themselves.
+	// as Watch Tonight cards, read a wider pool and re-rank it themselves.
 	if len(genres) > 0 {
 		conditions = append(conditions, fmt.Sprintf("mi.genres && $%d", argIdx))
 		args = append(args, genres)
