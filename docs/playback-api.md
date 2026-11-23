@@ -350,7 +350,7 @@ own receipt.
 
 A session left paused longer than the administrator's
 `playback.paused_session_timeout_minutes` (default 15, `0` turns it off) is
-stopped under a third server-minted `stop_id` and recorded as `expired`. Its
+stopped under a fourth server-minted `stop_id` and recorded as `expired`. Its
 progress, replan and control-ticket requests answer `410`: with
 `playback_session_paused_timeout` when the start listed client feature
 `paused_timeout_v1`, and with `playback_session_ended` otherwise. A player that
