@@ -1372,7 +1372,13 @@ URL to its transport:
   A token route (`/stream/transcode/{token}/...`) is already bound to its
   transport by the token. The answer is terminal for that URL, not for the
   session: the client stops the superseded player and plays the current plan.
-  It must not treat the code as `playback_session_ended`.
+  It must not treat the code as `playback_session_ended`. The server switches
+  to the new transport before the replan's response is sent, so while a
+  replan the client started is in flight, the player it is replacing can get
+  this answer first. Such a client waits for the replan's answer before it
+  acts: on success it plays the new plan; when the replan fails, the session
+  and any proxy grant go back to the previous transport, and the URL the
+  client holds is served again.
 - A request without the marker (a client without the feature, or a URL issued
   before this rule) and a session
   without a recorded transport keep the old behavior: the request is served
