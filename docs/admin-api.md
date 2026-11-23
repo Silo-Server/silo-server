@@ -2580,6 +2580,18 @@ by any other route. It answers deterministically:
 - Pause, resume and message require a live realtime lane (`409 conflict`
   otherwise). Stop without a lane answers `delivery: "fallback_scheduled"` and
   the server ends the session after the deadline.
+- `delivery: "dispatched"` means the command was written to the session's
+  realtime connection. The receipt does not say whether the player confirmed
+  it: a pause, resume or stop the player confirms later still reads
+  `dispatched`, and a connection whose player went away without closing it
+  still takes the write until the server's ping times out (about 30 seconds).
+- A message waits up to 3 seconds for the player's result before answering.
+  `delivery: "acknowledged"` means the player answered that it received the
+  message; Android answers before it shows the notice. With no answer in time,
+  or a rejection, the receipt stays `dispatched`, so the message may not have
+  been shown. A replay reports the same delivery as the first request; one
+  that arrives during the wait waits for the same answer. Other commands do
+  not wait.
 - A pause, resume or stop the player does not confirm before its deadline ends
   the session. The session's playback attempt is then
   recorded as ended by an administrator, so the player is told to leave

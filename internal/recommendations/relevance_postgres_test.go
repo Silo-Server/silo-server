@@ -41,6 +41,11 @@ func newRelevanceFixture(t *testing.T, name string) *relevanceFixture {
 	pool := newEngineTestPool(t)
 	prefix := "trel-" + name + "-" + uuid.NewString()[:8] + "-"
 	cleanupRecoMediaItems(t, pool, prefix)
+	return relevanceFixtureOn(pool, prefix)
+}
+
+// relevanceFixtureOn is the fixture over pool, its titles under prefix.
+func relevanceFixtureOn(pool *pgxpool.Pool, prefix string) *relevanceFixture {
 	store := pgstore.NewPostgresProvider(pool)
 	ratings := catalog.NewRatingsRepo(pool)
 	engine := NewEngine(pool, ratings, catalog.NewItemRepository(pool), nil, store, config.RecommendationsConfig{DiversityLambda: 0.7})
@@ -631,8 +636,9 @@ func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
 	// The audiobook is the latest completion; the movies follow it.
 	f.finish(t, userID, viewer, append([]string{finishedBook}, finished...)...)
 
-	// The latest movie is co-watched with an audiobook and the ebook, and the
-	// finished audiobook with another audiobook.
+	// The latest movie is co-watched with an audiobook, the ebook and a movie
+	// of another genre, which Because You Watched keeps, and the finished
+	// audiobook with another audiobook.
 	if err := f.repo.UpsertCowatchPairs(ctx, []CowatchPair{
 		{ItemID: finished[0], SimilarItemID: books[0], JaccardScore: 0.9, CowatchCount: 5},
 		{ItemID: finished[0], SimilarItemID: books[6], JaccardScore: 0.9, CowatchCount: 5},
@@ -698,7 +704,7 @@ func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
 		t.Fatalf("candidates = %d and %d, want 10 movies each", len(nearest), len(clustered))
 	}
 	for _, mediaType := range []string{"audiobook", "ebook"} {
-		extra, _, err := f.repo.FindTasteProfileCandidatesByMediaType(ctx, axisVector(axis, nil), nil, nil, 10, filter, mediaType)
+		extra, _, err := f.repo.FindTasteProfileCandidatesWithDetails(ctx, axisVector(axis, nil), nil, nil, 10, filter, mediaType)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -762,6 +768,47 @@ func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
 	}
 	if !slices.Contains(scoredIDs(bookSimilar), books[1]) {
 		t.Errorf("audiobook similar = %v, want the co-watched audiobook %s", scoredIDs(bookSimilar), books[1])
+	}
+}
+
+// A co-watched title the embedding search misses, because nearer titles fill
+// its limit, is still scored by its similarity to the source as well as by
+// co-watch. Here it is close enough, and watched together often enough, to
+// lead both Because You Watched and "More like this"; with its co-watch share
+// alone it would rank below every title the search found.
+func TestCowatchedTitleBeyondTheEmbeddingSearchKeepsItsSimilarityPostgres(t *testing.T) {
+	f := newRelevanceFixture(t, "cowatch-similarity")
+	ctx := t.Context()
+	const axis = 2900
+	near := func(distance float32) []float32 { return axisVector(axis, map[int]float32{axis + 1: distance}) }
+	source := f.movie(t, "source", []string{"Drama"}, "PG-13", 13, near(0))
+	// limit 2 searches the six nearest titles; these are all nearer than
+	// the co-watched one.
+	for i := range 8 {
+		f.movie(t, fmt.Sprintf("near-%d", i), []string{"Drama"}, "PG-13", 13, near(0.01*float32(i+1)))
+	}
+	cowatched := f.movie(t, "cowatched", []string{"Drama"}, "PG-13", 13, near(0.5))
+	if err := f.repo.UpsertCowatchPairs(ctx, []CowatchPair{{ItemID: source, SimilarItemID: cowatched, JaccardScore: 0.9, CowatchCount: 5}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM item_cowatch WHERE item_id LIKE $1 OR similar_item_id LIKE $1`, f.prefix+"%")
+	})
+	userID, viewer := newTasteTestAccount(t, f.pool, f.prefix+"viewer")
+
+	byw, err := f.engine.becauseYouWatched(ctx, f.engine.rowBuilder(), source, 2, map[string]struct{}{}, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := prefixed(byw, f.prefix); len(got) == 0 || got[0] != cowatched {
+		t.Errorf("Because You Watched = %v, want the co-watched %s first", got, cowatched)
+	}
+	similar, err := f.engine.SimilarItems(ctx, userID, viewer, source, 2, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := prefixed(similar, f.prefix); len(got) == 0 || got[0] != cowatched {
+		t.Errorf("similar = %v, want the co-watched %s first", got, cowatched)
 	}
 }
 

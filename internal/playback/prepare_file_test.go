@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
@@ -245,5 +246,54 @@ func TestPrepareFileDoesNotDropHardwareToneMapGraphOnSoftwareRetry(t *testing.T)
 	}
 	if _, statErr := os.Stat(outputPath); !os.IsNotExist(statErr) {
 		t.Fatalf("invalid tone-mapped artifact was published: %v", statErr)
+	}
+}
+
+// A download of an AV1 source under explicit VAAPI, on a GPU without AV1
+// decode, stops the GPU-decode attempt at FFmpeg's first rejection line
+// instead of reading the whole input, then decodes on the CPU (#4279).
+func TestPrepareFileStopsAV1DecodeTheGPUCannotRun(t *testing.T) {
+	resetDeviceLoad(t)
+	fakeDeviceStat(t, qsvPairDevA)
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "invocations.log")
+	script := filepath.Join(dir, "ffmpeg")
+	fake := "#!/bin/sh\n" +
+		"for last; do :; done\n" +
+		"printf '%s\\n' \"$*\" >> " + logPath + "\n" +
+		"case \"$*\" in\n" +
+		"  *'-hwaccel vaapi'*) echo \"[av1 @ 0x1] Your platform doesn't support hardware accelerated AV1 decoding.\" >&2; sleep 30 & wait; exit 1 ;;\n" +
+		"  *) printf x > \"$last\"; exit 0 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(script, []byte(fake), 0o755); err != nil {
+		t.Fatalf("write fake ffmpeg: %v", err)
+	}
+
+	began := time.Now()
+	err := PrepareFile(context.Background(), TranscodeOpts{
+		InputPath:        "/media/movie.mkv",
+		FFmpegPath:       script,
+		SourceVideoCodec: "av1",
+		TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac",
+		TargetResolution: "720p",
+		HWAccel:          transcodeHWVAAPI,
+		HWDevice:         qsvPairDevA,
+		AudioTrackIndex:  -1,
+	}, filepath.Join(dir, "artifact.mp4"))
+	if err != nil {
+		t.Fatalf("PrepareFile() error = %v, want the CPU-decode retry to succeed", err)
+	}
+	if elapsed := time.Since(began); elapsed > 10*time.Second {
+		t.Fatalf("PrepareFile took %s; the rejected GPU decode was not stopped", elapsed)
+	}
+	log, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read invocation log: %v", err)
+	}
+	attempts := strings.Split(strings.TrimSpace(string(log)), "\n")
+	if len(attempts) != 2 || !strings.Contains(attempts[0], "-hwaccel vaapi") ||
+		strings.Contains(attempts[1], "-hwaccel") || !strings.Contains(attempts[1], "h264_vaapi") {
+		t.Fatalf("attempts = %q, want VAAPI decode, then CPU decode with VAAPI encode", attempts)
 	}
 }

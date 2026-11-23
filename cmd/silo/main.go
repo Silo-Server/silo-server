@@ -820,7 +820,19 @@ func main() {
 		slog.Warn("runtime metrics configuration failed", "error", err)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "compat-web" {
-		if err := runCompatWebCommand(context.Background(), os.Args[2:]); err != nil {
+		// The install runs git and npm in process groups of their own, which a
+		// terminal's Ctrl-C does not reach, so an interrupt cancels the context
+		// and the installer kills them. After the first, a signal gets its
+		// default handling again, so a second Ctrl-C exits at once. status and
+		// remove don't use the context, so they keep the default handling.
+		ctx, stop := context.Background(), func() {}
+		if len(os.Args) > 2 && (os.Args[2] == "install" || os.Args[2] == "update") {
+			ctx, stop = signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
+			context.AfterFunc(ctx, stop)
+		}
+		err := runCompatWebCommand(ctx, os.Args[2:])
+		stop()
+		if err != nil {
 			log.Fatalf("compat-web: %v", err)
 		}
 		return
