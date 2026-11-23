@@ -483,7 +483,11 @@ func (e *Engine) becauseYouWatched(ctx context.Context, builder rowBuilder, sour
 	// Get co-watch neighbors the viewer can see, of the source item's media
 	// type like the embedding candidates: co-watch counts ebook reading too,
 	// and a movie's row would otherwise take series its viewers also watched.
-	cowatchPairs, _ := e.repo.GetCowatchNeighbors(ctx, sourceItemID, limit*3)
+	cowatchPairs, err := e.repo.GetCowatchNeighbors(ctx, sourceItemID, limit*3)
+	if err != nil {
+		slog.WarnContext(ctx, "reading co-watch neighbors failed; ranking by embedding similarity alone", "component", "recommendations", "item_id", sourceItemID, "error", err)
+		cowatchPairs = nil
+	}
 	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, filter, cowatchMediaTypes(sourceType, recommendableMediaTypes))
 	if err != nil {
 		return nil, fmt.Errorf("filter co-watch neighbors for because watched: %w", err)
