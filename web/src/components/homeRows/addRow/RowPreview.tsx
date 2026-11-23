@@ -118,7 +118,7 @@ export function RowPreview({
           <div className="text-muted-foreground text-sm" role="status">
             <p>{message}</p>
             {lookFor ? (
-              <p className="mt-0.5 text-[13px]">
+              <p className="mt-0.5 text-[0.8125rem]">
                 {t("web.home.addRow.preview.looksFor", { rule: lookFor })}
               </p>
             ) : null}

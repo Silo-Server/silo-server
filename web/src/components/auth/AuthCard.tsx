@@ -26,7 +26,7 @@ export function AuthCard({
         <CardHeader>
           {eyebrow && (
             <p
-              className="text-muted-foreground font-mono text-[11px] font-semibold tracking-[0.1em] uppercase"
+              className="text-muted-foreground font-mono text-[0.6875rem] font-semibold tracking-[0.1em] uppercase"
               data-cursive={hasArabicScript(eyebrow) || undefined}
             >
               {eyebrow}

@@ -113,7 +113,7 @@ export function EditableCard({
       {state.conflict ? (
         <div
           role="alert"
-          className="flex min-w-0 flex-1 basis-64 flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[13px] text-amber-100/90"
+          className="flex min-w-0 flex-1 basis-64 flex-wrap items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-[0.8125rem] text-amber-100/90"
         >
           <TriangleAlert aria-hidden="true" className="size-4 shrink-0 text-amber-400" />
           <span className="min-w-0 flex-1 basis-48">

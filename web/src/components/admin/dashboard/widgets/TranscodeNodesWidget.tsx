@@ -78,7 +78,7 @@ export function TranscodeNodesWidget() {
         </div>
         <Link
           to="/admin/nodes"
-          className="text-muted-foreground hover:text-primary shrink-0 text-[11px] whitespace-nowrap transition-colors"
+          className="text-muted-foreground hover:text-primary shrink-0 text-[0.6875rem] whitespace-nowrap transition-colors"
         >
           {t("web.admin.dashboard.widgets.transcodeNodes.manage")}
         </Link>
@@ -326,7 +326,7 @@ function FleetSummary({ nodes }: { nodes: StreamNode[] }) {
   ];
 
   return (
-    <span className="text-muted-foreground truncate text-[11px] tabular-nums">
+    <span className="text-muted-foreground truncate text-[0.6875rem] tabular-nums">
       {parts.filter(Boolean).join(" · ")}
     </span>
   );
@@ -338,7 +338,7 @@ const HIGH_LOAD_PERCENT = 90;
 const SPACE = " ";
 
 const COLUMN_HEADING =
-  "bg-card text-muted-foreground border-border sticky top-0 z-10 border-b pb-1 ps-2.5 text-end text-[11px] font-medium whitespace-nowrap";
+  "bg-card text-muted-foreground border-border sticky top-0 z-10 border-b pb-1 ps-2.5 text-end text-[0.6875rem] font-medium whitespace-nowrap";
 const CELL = "h-6 py-0.5 ps-2.5 text-end whitespace-nowrap";
 
 /** Narrow columns go first: the name and the two work numbers always stay. */
@@ -410,7 +410,7 @@ function NodeFlag({
 }) {
   return (
     <span
-      className="text-warning flex flex-shrink-0 items-center gap-1 text-[11px] font-medium"
+      className="text-warning flex flex-shrink-0 items-center gap-1 text-[0.6875rem] font-medium"
       title={title}
     >
       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
@@ -456,7 +456,7 @@ function GroupRows({
         <tr>
           {/* Empty cells rather than a colspan: a hidden column inside a span
               would keep its width in the fixed table layout. */}
-          <th scope="rowgroup" className="pt-1.5 pb-0.5 text-start text-[11px] font-bold">
+          <th scope="rowgroup" className="pt-1.5 pb-0.5 text-start text-[0.6875rem] font-bold">
             <div className="flex min-w-0 items-center gap-1.5">
               <StatusIcon state={group.state} />
               <span dir="auto" className="min-w-0 truncate" title={group.name || undefined}>
@@ -582,11 +582,11 @@ function NodeRow({
           ) : null}
         </td>
       ) : null}
-      <td className={cn(CELL, CHECKED_COLUMN, "text-muted-foreground text-[11px]")}>
+      <td className={cn(CELL, CHECKED_COLUMN, "text-muted-foreground text-[0.6875rem]")}>
         {lastCheckLabel(t, node)}
       </td>
       <td
-        className={cn(CELL, BUILD_COLUMN, "text-muted-foreground text-[11px]")}
+        className={cn(CELL, BUILD_COLUMN, "text-muted-foreground text-[0.6875rem]")}
         title={buildTitle(t, node)}
       >
         {build ? buildLabel(t, build) : null}
@@ -641,7 +641,7 @@ function ActiveCount({ node }: { node: StreamNode }) {
             ? "web.admin.dashboard.widgets.transcodeNodes.streamsTitle"
             : "web.admin.dashboard.widgets.transcodeNodes.transcodesTitle",
         )}
-        className="text-muted-foreground text-[10px] no-underline"
+        className="text-muted-foreground text-[0.625rem] no-underline"
       >
         {t(
           proxy

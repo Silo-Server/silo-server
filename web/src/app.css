@@ -1,4 +1,6 @@
 @import "tailwindcss";
+/* The lint rules' test strings are class names, not UI; scanning them ships their CSS. */
+@source not "../eslint-rules";
 /* animate-in/animate-out and their fade-/zoom-/slide- modifiers, used by the
    radix overlay primitives in components/ui. Radix keeps a closing overlay
    mounted until its exit animation ends. The enter/exit keyframes are
@@ -822,11 +824,11 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   }
   html[data-text-scale="large"] {
     font-size: 112.5%;
-    --ui-text-scale-factor: 1.12;
+    --ui-text-scale-factor: 1.125;
   }
   html[data-text-scale="x-large"] {
     font-size: 125%;
-    --ui-text-scale-factor: 1.24;
+    --ui-text-scale-factor: 1.25;
   }
   html[data-text-weight="strong"] {
     --font-weight-ui: 520;
@@ -918,58 +920,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   }
   html[data-text-weight="strong"] .font-bold {
     font-weight: var(--font-weight-bold-ui, 800) !important;
-  }
-  html[data-text-scale="large"] .text-\[8px\],
-  html[data-text-scale="x-large"] .text-\[8px\] {
-    font-size: calc(8px * var(--ui-text-scale-factor)) !important;
-  }
-  html[data-text-scale="large"] .text-\[9px\],
-  html[data-text-scale="x-large"] .text-\[9px\] {
-    font-size: calc(9px * var(--ui-text-scale-factor)) !important;
-  }
-  html[data-text-scale="large"] .text-\[10px\],
-  html[data-text-scale="x-large"] .text-\[10px\] {
-    font-size: calc(10px * var(--ui-text-scale-factor)) !important;
-  }
-  html[data-text-scale="large"] .text-\[11px\],
-  html[data-text-scale="x-large"] .text-\[11px\] {
-    font-size: calc(11px * var(--ui-text-scale-factor)) !important;
-  }
-  html[data-text-scale="large"] .text-\[12px\],
-  html[data-text-scale="x-large"] .text-\[12px\] {
-    font-size: calc(12px * var(--ui-text-scale-factor)) !important;
-  }
-  html[data-text-scale="large"] .text-\[13px\],
-  html[data-text-scale="x-large"] .text-\[13px\] {
-    font-size: calc(13px * var(--ui-text-scale-factor)) !important;
-  }
-  html[data-text-scale="large"] .text-\[14px\],
-  html[data-text-scale="x-large"] .text-\[14px\] {
-    font-size: calc(14px * var(--ui-text-scale-factor)) !important;
-  }
-  html[data-text-scale="large"] .text-\[15px\],
-  html[data-text-scale="x-large"] .text-\[15px\] {
-    font-size: calc(15px * var(--ui-text-scale-factor)) !important;
-  }
-  html[data-text-scale="large"] .text-\[17px\],
-  html[data-text-scale="x-large"] .text-\[17px\] {
-    font-size: calc(17px * var(--ui-text-scale-factor)) !important;
-  }
-  html[data-text-scale="large"] .text-\[20px\],
-  html[data-text-scale="x-large"] .text-\[20px\] {
-    font-size: calc(20px * var(--ui-text-scale-factor)) !important;
-  }
-  html[data-text-scale="large"] .text-\[28px\],
-  html[data-text-scale="x-large"] .text-\[28px\] {
-    font-size: calc(28px * var(--ui-text-scale-factor)) !important;
-  }
-  html[data-text-scale="large"] .text-\[32px\],
-  html[data-text-scale="x-large"] .text-\[32px\] {
-    font-size: calc(32px * var(--ui-text-scale-factor)) !important;
-  }
-  html[data-text-scale="large"] .text-\[38px\],
-  html[data-text-scale="x-large"] .text-\[38px\] {
-    font-size: calc(38px * var(--ui-text-scale-factor)) !important;
   }
   /* Buttons are activatable, so they get the activatable cursor. Declared in
      `base` rather than as a utility, so an explicit `cursor-*` class — a

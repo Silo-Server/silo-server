@@ -23,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/idgen"
 	"github.com/Silo-Server/silo-server/internal/lang"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/metadata/showstatus"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
@@ -1979,7 +1980,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			if searchErr != nil {
 				// A provider whose search failed may never get the ID it
 				// answers metadata by, so it fails a reset like a failed lookup.
-				if failure := resetProviderFailure(req.resetToProvider, p, "search", searchErr); failure != nil {
+				if failure := req.unansweredLookup(p, "search", searchErr); failure != nil {
 					return nil, failure
 				}
 				if handleProvider404(provider404s, accumulatedIDs, p.Slug(), searchErr,
@@ -2087,7 +2088,7 @@ func (s *MetadataService) processInternal(ctx context.Context, req ProcessReques
 			localMetadataUnreadable |= localArtworkItem
 		}
 		if err != nil {
-			if failure := resetProviderFailure(req.resetToProvider, p, "metadata", err); failure != nil {
+			if failure := req.unansweredLookup(p, "metadata", err); failure != nil {
 				return nil, failure
 			}
 			if handleProvider404(provider404s, accumulatedIDs, p.Slug(), err,
@@ -2818,6 +2819,9 @@ func (s *MetadataService) mergeAndPersist(
 	// it doesn't follow a merge onto another row, whose edits and locks are
 	// that row's own: the merged row gets an ordinary refresh.
 	resetsRow := req.resetToProvider
+	// The refresh that ends a Complete Refresh empties the row's stored values
+	// the same way, keeping its locks, and doesn't follow a merge either.
+	rebuildsRow := req.rebuildMatch
 	// Identity repairs (rebinding, local-ID promotion) belong to matching and
 	// refreshes, never to an enrichment write.
 	if !req.writesFieldsOnly() && !isNew && contentID != "" && existingItem != nil && (isProvisionalOwnershipStatus(existingItem.Status) || len(durableIDs) == 0) {
@@ -2829,6 +2833,7 @@ func (s *MetadataService) mergeAndPersist(
 			contentID = reboundTo
 			replacesShow = false
 			resetsRow = false
+			rebuildsRow = false
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading rebound item: %w", err)
@@ -2857,6 +2862,7 @@ func (s *MetadataService) mergeAndPersist(
 			contentID = canonical
 			replacesShow = replacesShow && renamed
 			resetsRow = resetsRow && renamed
+			rebuildsRow = rebuildsRow && renamed
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading canonicalized item: %w", err)
@@ -2887,6 +2893,7 @@ func (s *MetadataService) mergeAndPersist(
 			contentID = reanchored
 			replacesShow = replacesShow && renamed
 			resetsRow = resetsRow && renamed
+			rebuildsRow = rebuildsRow && renamed
 			existingItem, err = s.itemRepo.GetByID(ctx, contentID)
 			if err != nil {
 				return nil, fmt.Errorf("loading reanchored item: %w", err)
@@ -2948,7 +2955,7 @@ func (s *MetadataService) mergeAndPersist(
 		// Fallback text belongs to the provider IDs it was fetched with, so it
 		// applies after persistence moved the item to another content ID too.
 		keepStoredTitle := req.Mode != ModeInitialMatch || existingItem == nil || !isSkeletonLikeStatus(existingItem.Status)
-		if corrected || resetsRow {
+		if corrected || resetsRow || rebuildsRow {
 			req.fallback.ignoreStoredText()
 		}
 		req.fallback.applyToItem(accumulator, req.Language, existingItem, keepStoredTitle)
@@ -3021,9 +3028,9 @@ func (s *MetadataService) mergeAndPersist(
 			}
 		}
 		// A correction's stored values describe another title, and a reset's
-		// are what the admin asked to replace: either way a value the
-		// providers lack must not stay behind.
-		if corrected || resetsRow {
+		// or a Complete Refresh's are what the admin asked to replace: either
+		// way a value the providers lack must not stay behind.
+		if corrected || resetsRow || rebuildsRow {
 			sortTitle, overview, tagline := existingResult.SortTitle, existingResult.Overview, existingResult.Tagline
 			clearPreviousMatch(existingResult, mergeLocked)
 			// A reset in another language fetched that language's text for
@@ -3180,7 +3187,7 @@ func (s *MetadataService) mergeAndPersist(
 			identityChosen:  req.Mode == ModeIdentify,
 			clearChildEdits: replacesShow,
 			resetLocks:      resetsRow,
-			clearCredits:    resetsRow && creditsUnlisted(item, mergeLocked),
+			clearCredits:    (resetsRow || rebuildsRow) && creditsUnlisted(item, mergeLocked),
 			clearWorkClaims: clearsWorkClaims,
 			workClaims:      accumulator.WorkClaims,
 		},
@@ -3310,7 +3317,7 @@ func (s *MetadataService) mergeAndPersist(
 		replace := mergeMode == MergeReplaceUnlocked || (req.Mode == ModeScheduledRefresh && !req.enrichmentOnly)
 		var err error
 		switch {
-		case req.Mode == ModeIdentify || corrected || resetsRow:
+		case req.Mode == ModeIdentify || corrected || resetsRow || rebuildsRow:
 			err = s.ratingSourceRepo.Replace(ctx, contentID, sources)
 		case len(sources) > 0:
 			err = s.ratingSourceRepo.Upsert(ctx, contentID, sources, replace)
@@ -3613,12 +3620,26 @@ func (s *MetadataService) RefreshItem(ctx context.Context, contentID string) err
 }
 
 func (s *MetadataService) refreshItemTarget(ctx context.Context, contentID string, folderID int, mode RefreshMode, incrementDebtAttempt, reset bool) error {
-	result, err := s.Process(ctx, ProcessRequest{
+	return s.refreshItem(ctx, ProcessRequest{
 		ContentID:       contentID,
 		FolderID:        formatFolderID(folderID),
 		Mode:            mode,
 		resetToProvider: reset,
-	})
+	}, incrementDebtAttempt)
+}
+
+func (s *MetadataService) refreshItem(ctx context.Context, req ProcessRequest, incrementDebtAttempt bool) error {
+	contentID, reset := req.ContentID, req.resetToProvider
+	result, err := s.Process(ctx, req)
+	if req.rebuildMatch && errors.As(err, new(unansweredLookupError)) {
+		// The item keeps the values that provider would have confirmed or
+		// replaced; an ordinary refresh still applies what the others sent.
+		slog.WarnContext(ctx, "metadata: a provider did not answer, so the complete refresh keeps stored values",
+			"component", "metadata", "content_id", contentID,
+			"error", logredact.RedactSecretAssignments(logredact.SanitizeURLError(err).Error()))
+		req.rebuildMatch = false
+		result, err = s.Process(ctx, req)
+	}
 	if err != nil {
 		s.recordRefreshFailure(ctx, contentID, err, incrementDebtAttempt)
 		return err

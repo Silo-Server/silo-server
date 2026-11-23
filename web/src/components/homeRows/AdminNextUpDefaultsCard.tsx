@@ -63,7 +63,7 @@ export function AdminNextUpDefaultsCard() {
         <h2 id={`${nextUpId}-heading`} className="text-sm font-semibold">
           {t("web.home.preferences.adminHeading")}
         </h2>
-        <p className="text-muted-foreground text-[13px] leading-relaxed">
+        <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
           {t("web.home.preferences.adminHelp")}
         </p>
       </div>
@@ -72,7 +72,10 @@ export function AdminNextUpDefaultsCard() {
           <label htmlFor={nextUpId} className="text-sm font-semibold">
             {t("settingsManifest.ui.next_up_mode.label")}
           </label>
-          <p id={`${nextUpId}-help`} className="text-muted-foreground text-[13px] leading-relaxed">
+          <p
+            id={`${nextUpId}-help`}
+            className="text-muted-foreground text-[0.8125rem] leading-relaxed"
+          >
             {t("settingsManifest.ui.next_up_mode.description")}
           </p>
         </div>
@@ -104,7 +107,7 @@ export function AdminNextUpDefaultsCard() {
           </label>
           <p
             id={`${newReleasesFirstId}-help`}
-            className="text-muted-foreground text-[13px] leading-relaxed"
+            className="text-muted-foreground text-[0.8125rem] leading-relaxed"
           >
             {t("settingsManifest.ui.next_up_new_releases_first.description")}
           </p>

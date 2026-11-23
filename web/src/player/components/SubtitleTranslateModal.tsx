@@ -347,7 +347,7 @@ export function SubtitleTranslateModal({
 
             {mode === "audio" && quota && (
               <p
-                className={`text-[11px] leading-relaxed ${
+                className={`text-[0.6875rem] leading-relaxed ${
                   quotaExhausted ? "text-amber-300/90" : "text-white/35"
                 }`}
               >
@@ -398,7 +398,7 @@ export function SubtitleTranslateModal({
               </button>
             </div>
 
-            <p className="text-[11px] leading-relaxed text-white/35">
+            <p className="text-[0.6875rem] leading-relaxed text-white/35">
               {mode === "audio"
                 ? translateEnabled
                   ? t("web.subtitles.translate.noteAudioTranslate")
