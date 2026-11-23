@@ -19,22 +19,28 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 	// completed_progress. Any other episode, such as one of a local series,
 	// keeps the single-row lookup. CASE tests completion before the file
 	// lookup, so a long-running series skips the file lookups for every
-	// episode the profile has finished. The set is unnested from an array
-	// because PostgreSQL estimates a few rows for unnest of a computed array
-	// whatever the profile's history, so it plans a hashed subplan; a large
-	// estimate for the set itself turns membership into a rescan of the whole
-	// set for every episode. TestPlayableTargetResolverAnchoredCompletedRangePlan
-	// checks the hash at minimum work_mem. The hashed set and the array hold
-	// the requested series' completed IDs in memory, outside work_mem.
-	unwatchedSQL := fmt.Sprintf(`CASE WHEN episode.content_id = ANY (SELECT unnest((SELECT array_agg(completed.media_item_id) FROM completed_progress completed WHERE completed.completed)))
-			OR (NOT (scope.series_id LIKE 'series-%%' AND starts_with(episode.content_id, `+seriesEpisodePrefixSQL+` || '-'))
-				AND EXISTS (
-					SELECT 1 FROM %s progress
-					WHERE progress.media_item_id = episode.content_id AND progress.completed
-					-- Keep the unique-key lookup when profile statistics lag a bulk import.
-					OFFSET 0
-				))
-			THEN false ELSE %s END`, progress, availableSQL)
+	// episode the profile has finished.
+	//
+	// The set is unnested from an array because PostgreSQL estimates a few rows
+	// for unnest of a computed array whatever the profile's history, so it
+	// plans a hashed subplan; a large estimate for the set itself turns
+	// membership into a rescan of the whole set for every episode. A hashed
+	// subplan is not held to work_mem at run time, so the set is hashed only
+	// while it fits the memory PostgreSQL grants a hash node; a larger set
+	// falls back to the single-row lookup. completedSetBytesPerID is a generous
+	// estimate of what one ID costs across the array and the hash table.
+	unwatchedSQL := fmt.Sprintf(`CASE WHEN
+			CASE WHEN scope.series_id LIKE 'series-%%' AND starts_with(episode.content_id, `+seriesEpisodePrefixSQL+` || '-')
+				AND (SELECT count(*) FROM completed_progress completed WHERE completed.completed) * %d
+					<= pg_size_bytes(current_setting('work_mem')) * current_setting('hash_mem_multiplier')::float8
+			THEN episode.content_id = ANY (SELECT unnest((SELECT array_agg(completed.media_item_id) FROM completed_progress completed WHERE completed.completed)))
+			ELSE EXISTS (
+				SELECT 1 FROM %s progress
+				WHERE progress.media_item_id = episode.content_id AND progress.completed
+				-- Keep the unique-key lookup when profile statistics lag a bulk import.
+				OFFSET 0
+			) END
+			THEN false ELSE %s END`, completedSetBytesPerID, progress, availableSQL)
 	query := fmt.Sprintf(`
 		WITH requested AS (
 			SELECT content_id, media_type, series_id, season_number, preferred_content_id, ord
@@ -146,6 +152,11 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 	}
 	return result, nil
 }
+
+// completedSetBytesPerID bounds the memory one completed episode ID takes in
+// the hashed membership set: the array element, the hash table's tuple and
+// bucket, and allocation overhead, for an ID of a few dozen bytes.
+const completedSetBytesPerID = 100
 
 // seriesEpisodePrefixSQL is the episode content ID prefix of a provider-anchored
 // series (series-<provider>-<id> becomes episode-<provider>-<id>), for a scope

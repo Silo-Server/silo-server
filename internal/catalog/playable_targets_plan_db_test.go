@@ -305,8 +305,10 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 // A provider-anchored series' completed episodes are read as one primary-key
 // range per requested series. Pin that the read never scans the profile's
 // other history or its completed-cursor index (which cannot bound the range,
-// so each series would rescan every completed row), and that completion
-// membership stays hashed when work_mem is at its minimum.
+// so each series would rescan every completed row), that completion
+// membership is a hashed set while the set fits the server's hash memory, and
+// that a set too large for it falls back to one key lookup per walked episode
+// instead of an unbounded hash.
 func TestPlayableTargetResolverAnchoredCompletedRangePlan(t *testing.T) {
 	pool, capture := openPlayableTargetPlanDB(t)
 	// Match the production schema where the read depends on it: content IDs
@@ -338,7 +340,7 @@ func TestPlayableTargetResolverAnchoredCompletedRangePlan(t *testing.T) {
 	}
 	// VACUUM sets the visibility map, as autovacuum does in production, so an
 	// index-only scan of the cursor index is costed as cheap as it really is.
-	for _, statement := range []string{`VACUUM ANALYZE user_watch_progress`, `ANALYZE episodes; ANALYZE media_files; SET work_mem = '64kB'`} {
+	for _, statement := range []string{`VACUUM ANALYZE user_watch_progress`, `ANALYZE episodes; ANALYZE media_files; SET work_mem = '256kB'`} {
 		if _, err := pool.Exec(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
@@ -353,19 +355,27 @@ func TestPlayableTargetResolverAnchoredCompletedRangePlan(t *testing.T) {
 	for s := 1; s <= seriesCount; s++ {
 		query.Items = append(query.Items, PlayableTargetInput{ContentID: fmt.Sprintf("series-tvdb-%d", s), Type: "series"})
 	}
-	targets, err := NewPlayableTargetResolver(pool).Resolve(t.Context(), query)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for s, card := range query.Items {
-		if want := fmt.Sprintf("episode-tvdb-%d-1-%d", s+1, watched+1); targets[card.Key()] != want {
-			t.Fatalf("card %s target = %q, want %q", card.ContentID, targets[card.Key()], want)
+	resolver := NewPlayableTargetResolver(pool)
+	resolveAnchored := func(label string) (playableTargetPlan, []byte) {
+		t.Helper()
+		targets, err := resolver.Resolve(t.Context(), query)
+		if err != nil {
+			t.Fatal(err)
 		}
+		for s, card := range query.Items {
+			if want := fmt.Sprintf("episode-tvdb-%d-1-%d", s+1, watched+1); targets[card.Key()] != want {
+				t.Fatalf("%s: card %s target = %q, want %q", label, card.ContentID, targets[card.Key()], want)
+			}
+		}
+		plan, raw := explainOnePlayableTargetPlan(t, pool, capture, label)
+		if plan.usesIndex("user_watch_progress_completed_cursor") {
+			t.Fatalf("%s: completed progress read the completed-cursor index, which rescans the profile's completed history per series\n%s", label, raw)
+		}
+		return plan, raw
 	}
-	plan, raw := explainOnePlayableTargetPlan(t, pool, capture, "anchored")
-	if plan.usesIndex("user_watch_progress_completed_cursor") {
-		t.Fatalf("completed progress read the completed-cursor index, which rescans the profile's completed history per series\n%s", raw)
-	}
+
+	// 256kB grants a hash 512kB, which holds the set's IDs.
+	plan, raw := resolveAnchored("fitting set")
 	// The requested series' completed rows, plus one row per series of slack.
 	// Filtered rows count too: a scan that reads the profile and filters it
 	// down to the range returns few rows but reads them all.
@@ -373,8 +383,18 @@ func TestPlayableTargetResolverAnchoredCompletedRangePlan(t *testing.T) {
 		t.Fatalf("%d series cards read %.0f progress rows; want at most %d, the requested series' rows\n%s",
 			seriesCount, rows, limit, raw)
 	}
-	if !strings.Contains(string(raw), "content_id = (hashed SubPlan") {
-		t.Fatalf("completion membership is not a hashed subplan at minimum work_mem\n%s", raw)
+	if _, lookups := plan.work(); !strings.Contains(string(raw), "content_id = (hashed SubPlan") || lookups > seriesCount {
+		t.Fatalf("a fitting set made %.0f key lookups; want membership in the hashed set\n%s", lookups, raw)
+	}
+
+	// At 64kB the set no longer fits: one key lookup per walked episode.
+	if _, err := pool.Exec(t.Context(), `SET work_mem = '64kB'`); err != nil {
+		t.Fatal(err)
+	}
+	plan, raw = resolveAnchored("oversized set")
+	if _, lookups := plan.work(); lookups < seriesCount*watched {
+		t.Fatalf("an oversized set made %.0f key lookups; want one per walked episode (%d) instead of hashing it\n%s",
+			lookups, seriesCount*watched, raw)
 	}
 }
 
