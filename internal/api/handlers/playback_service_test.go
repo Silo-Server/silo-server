@@ -1774,6 +1774,36 @@ var playedAfterTheLastReportCases = []struct {
 	},
 }
 
+// TestRealtimeConfirmedStopKeepsABridgePlaysMeasurement covers a confirmed
+// stop of a play whose progress came only through the bridge: its final
+// position is submitted without an estimate, and the play the session
+// measured is still recorded.
+func TestRealtimeConfirmedStopKeepsABridgePlaysMeasurement(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		f := newPlaybackServiceFixture(t)
+		admin := &recordingPlaybackAdminStore{}
+		f.handler.AdminStore = admin
+		f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{ID: 100, ContentID: "movie-1", Duration: 3600}}
+		for _, position := range []float64{890, 900} {
+			if err := f.manager.UpdateProgress(f.session.ID, position, false); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(10 * time.Second) //nolint:forbidigo // advances the synctest clock to the next bridge report
+		}
+		f.handler.rememberRealtimeCommand("cmd-stop", f.session.ID, playback.CommandStop)
+		if err := f.handler.handleRealtimeClientMessage(f.session.ID, realtimeResultMessage(t, f.session.ID, "cmd-stop", playback.RealtimeResultStatusCompleted)); err != nil {
+			t.Fatal(err)
+		}
+		synctest.Wait()
+		if len(admin.history) != 1 {
+			t.Fatalf("admin history = %+v, want one row", admin.history)
+		}
+		if row := admin.history[0]; row.Watch.PlayedSeconds != 10 || row.EndPositionSeconds != 900 {
+			t.Fatalf("played %v s ending at %v, want the bridge play's 10 s ending at 900", row.Watch.PlayedSeconds, row.EndPositionSeconds)
+		}
+	})
+}
+
 // confirmRealtimeCommand has the player confirm an administrator's pause or
 // resume.
 func confirmRealtimeCommand(t *testing.T, f *playbackServiceFixture, id string, name playback.CommandName) {
@@ -1818,18 +1848,20 @@ func TestRealtimeConfirmedStopAfterAPendingPauseAddsNothing(t *testing.T) {
 					}
 				}
 				time.Sleep(7 * time.Second) //nolint:forbidigo // advances the synctest clock to the pause and stop
-				// Hold the pause's worker before it applies the pause.
-				unlock := f.handler.progressSideEffectLock(f.session.ID)
-				for _, command := range []struct {
-					id   string
-					name playback.CommandName
-				}{{"cmd-pause", playback.CommandPause}, {"cmd-stop", playback.CommandStop}} {
-					f.handler.rememberRealtimeCommand(command.id, f.session.ID, command.name)
-					if err := f.handler.handleRealtimeClientMessage(f.session.ID, realtimeResultMessage(t, f.session.ID, command.id, playback.RealtimeResultStatusCompleted)); err != nil {
-						t.Fatal(err)
+				func() {
+					// Hold the pause's worker before it applies the pause,
+					// and release it even when a confirmation fails.
+					defer f.handler.progressSideEffectLock(f.session.ID)()
+					for _, command := range []struct {
+						id   string
+						name playback.CommandName
+					}{{"cmd-pause", playback.CommandPause}, {"cmd-stop", playback.CommandStop}} {
+						f.handler.rememberRealtimeCommand(command.id, f.session.ID, command.name)
+						if err := f.handler.handleRealtimeClientMessage(f.session.ID, realtimeResultMessage(t, f.session.ID, command.id, playback.RealtimeResultStatusCompleted)); err != nil {
+							t.Fatal(err)
+						}
 					}
-				}
-				unlock()
+				}()
 				synctest.Wait()
 				if len(admin.history) != 1 {
 					t.Fatalf("admin history = %+v, want one row", admin.history)

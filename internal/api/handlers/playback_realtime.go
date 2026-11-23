@@ -202,8 +202,8 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	}
 	if final != nil {
 		// The finalizer judges the final sample against the measurement it
-		// was estimated from, even if a second read of the save fails or
-		// finds nothing newer.
+		// was built from, even if a second read of the save fails or finds
+		// nothing newer.
 		session.Watch = estimatedFrom
 	}
 	// An administrator end that finalized the receipt without a history row
@@ -252,15 +252,15 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 }
 
 // realtimeStopFinal is the final sample a confirmed stop submits, the
-// measurement an estimated one came from, and the file it was bounded by, if
-// it was looked up.
+// measurement it is judged against, and the file an estimate was bounded by,
+// if it was looked up.
 func (h *PlaybackHandler) realtimeStopFinal(ctx context.Context, session *playback.Session, record *playback.AttemptRecordV3, sentAt time.Time) (*playback.ProgressSampleV3, playback.WatchTime, *models.MediaFile, error) {
 	if record.LastSample == nil {
 		if session.Position > 0 {
 			// A bridge progress report may have updated the live session
 			// without a sequenced native sample. Preserve its final resume
-			// position.
-			return &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: session.Position, IsPaused: session.IsPaused}, playback.WatchTime{}, nil, nil
+			// position, judged against the play the session measured.
+			return &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: session.Position, IsPaused: session.IsPaused}, session.Watch, nil, nil
 		}
 		return nil, playback.WatchTime{}, nil, nil
 	}
