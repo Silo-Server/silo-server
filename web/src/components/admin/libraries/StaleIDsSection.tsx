@@ -16,7 +16,7 @@ import {
   TOUCH_CONTROL_CLASS,
 } from "@/components/admin/libraries/DiagnosticsListParts";
 import {
-  useWideDiagnosticsTableLayout,
+  useWideTableLayout,
   usePagination,
 } from "@/components/admin/libraries/diagnosticsListState";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +43,7 @@ export function StaleIDsSection({
   onStatusChange?: (status: { count: number | undefined; isError?: boolean }) => void;
 } = {}) {
   const t = useT();
-  const showTable = useWideDiagnosticsTableLayout();
+  const showTable = useWideTableLayout();
   const [open, setOpen] = useState(false);
   const isOpen = embedded || open;
   const [search, setSearch] = useState("");

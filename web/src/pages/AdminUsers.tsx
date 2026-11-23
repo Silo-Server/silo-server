@@ -60,7 +60,7 @@ import {
   SortControl,
   TOUCH_CONTROL_CLASS,
 } from "@/components/admin/libraries/DiagnosticsListParts";
-import { useLibrariesTableLayout } from "@/components/admin/libraries/diagnosticsListState";
+import { useWideTableLayout } from "@/components/admin/libraries/diagnosticsListState";
 import { AdminUserCompactList } from "@/components/admin/users/AdminUserCompactList";
 import {
   AdminUserRoleBadge,
@@ -127,8 +127,9 @@ function AdminUsersPage() {
   const [pageSize, setPageSize] = useState(25);
   const [sortField, setSortField] = useState<UserSortField>("username");
   const [sortDir, setSortDir] = useState<SortDirection>("asc");
-  // Tables from lg up, compact rows below; tests have no matchMedia and get the table.
-  const isDesktop = useLibrariesTableLayout();
+  // The table from xl up, compact rows below: at lg the admin sidebar leaves the
+  // table too little room. Tests have no matchMedia and get the table.
+  const showTable = useWideTableLayout();
 
   const filteredUsers = useMemo(() => {
     const q = search.toLowerCase();
@@ -162,7 +163,7 @@ function AdminUsersPage() {
     setSortDir(defaultSortDirection(field));
   }
 
-  // The Sort control below lg: picking a field acts like clicking its header.
+  // The Sort control below xl: picking a field acts like clicking its header.
   function handleSortFieldChange(field: UserSortField) {
     if (field !== sortField) handleSort(field);
   }
@@ -372,7 +373,7 @@ function AdminUsersPage() {
                   <SelectItem value="none">{t("web.admin.users.list.noGroup")}</SelectItem>
                 </SelectContent>
               </Select>
-              {isDesktop ? null : (
+              {showTable ? null : (
                 // SortControl carries its own bottom margin for the cards; the row's gap spaces it here.
                 <div className="min-w-0 flex-1 *:mb-0!">
                   <SortControl
@@ -403,7 +404,7 @@ function AdminUsersPage() {
             </div>
           )}
           <div className="surface-panel overflow-x-auto rounded-2xl border-0">
-            {isDesktop ? (
+            {showTable ? (
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -466,16 +467,22 @@ function AdminUsersPage() {
                     const u = row.user;
                     return (
                       <TableRow key={u.id}>
-                        <TableCell>
-                          <Link to={row.detailPath} className="font-medium hover:underline">
+                        {/* Usernames, emails and group names wrap, so a long one
+                            can't push the last columns out of view. */}
+                        <TableCell className="whitespace-normal">
+                          <Link
+                            to={row.detailPath}
+                            dir="auto"
+                            className="align-with-page block w-fit max-w-full font-medium wrap-anywhere hover:underline"
+                          >
                             {u.username}
                           </Link>
                         </TableCell>
-                        <TableCell>{u.email}</TableCell>
+                        <TableCell className="wrap-anywhere whitespace-normal">{u.email}</TableCell>
                         <TableCell>
                           <AdminUserRoleBadge user={u} />
                         </TableCell>
-                        <TableCell>
+                        <TableCell className="whitespace-normal">
                           {row.group.kind === "admin" ? (
                             <span className="text-muted-foreground">
                               {t("web.admin.users.list.adminGroupNone")}
@@ -487,7 +494,8 @@ function AdminUsersPage() {
                           ) : (
                             <Link
                               to={`/admin/access-groups/${row.group.id}`}
-                              className="hover:underline"
+                              dir="auto"
+                              className="align-with-page block w-fit max-w-full wrap-anywhere hover:underline"
                             >
                               {row.group.name}
                             </Link>
