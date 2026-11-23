@@ -139,9 +139,10 @@ describe("useShowThenSave after an online failure", () => {
   });
 
   // Picks each `key` (or `owner:key`, switching to that cache owner first) in
-  // turn, then settles the picks in `order` with `outcomes`; returns how often
-  // a reconcile had run after each settle.
-  async function reconcilesAcross(picks: string[], order: number[], outcomes: unknown[]) {
+  // turn, then runs each [i, outcome] step, settling the i-th pick's save with
+  // outcome (an Error rejects); returns how often a reconcile had run after
+  // each step.
+  async function reconcilesAcross(picks: string[], steps: Array<[number, unknown]>) {
     const { result, rerender } = renderHook(({ owner }) => useShowThenSave(owner), {
       initialProps: { owner: null as string | null },
     });
@@ -165,8 +166,8 @@ describe("useShowThenSave after an online failure", () => {
       });
     }
     const after: number[] = [];
-    for (const [step, i] of order.entries()) {
-      settles[i]!(outcomes[step]);
+    for (const [i, outcome] of steps) {
+      settles[i]!(outcome);
       await settled();
       after.push(reconciled);
     }
@@ -177,8 +178,11 @@ describe("useShowThenSave after an online failure", () => {
     expect(
       await reconcilesAcross(
         ["ui.text_weight", "ui.text_weight", "ui.text_scale"],
-        [2, 1, 0],
-        [problem(502), "saved", "saved"],
+        [
+          [2, problem(502)],
+          [1, "saved"],
+          [0, "saved"],
+        ],
       ),
     ).toEqual([0, 0, 1]);
   });
@@ -186,17 +190,31 @@ describe("useShowThenSave after an online failure", () => {
   it("reconciles only once another preference's save has settled", async () => {
     // Reconciling at the 502 would put back the text weight that is still saving.
     expect(
-      await reconcilesAcross(["ui.text_scale", "ui.text_weight"], [0, 1], [problem(502), "saved"]),
-    ).toEqual([0, 1]);
-  });
-
-  it("reconciles the active profile once a save the previous one made settles", async () => {
-    expect(
       await reconcilesAcross(
-        ["a:ui.text_weight", "b:ui.text_scale"],
-        [1, 0],
-        [problem(502), "saved"],
+        ["ui.text_scale", "ui.text_weight"],
+        [
+          [0, problem(502)],
+          [1, "saved"],
+        ],
       ),
     ).toEqual([0, 1]);
   });
+
+  it.each([
+    ["saves", "saved"],
+    ["fails ambiguously", problem(502)],
+  ])(
+    "reconciles the active profile once a save the previous one made %s",
+    async (_label, outcome) => {
+      expect(
+        await reconcilesAcross(
+          ["a:ui.text_weight", "b:ui.text_scale"],
+          [
+            [1, problem(502)],
+            [0, outcome],
+          ],
+        ),
+      ).toEqual([0, 1]);
+    },
+  );
 });

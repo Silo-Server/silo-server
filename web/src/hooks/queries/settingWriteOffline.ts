@@ -132,9 +132,9 @@ interface UnsettledPreference {
  */
 export function useShowThenSave(cacheOwner: string | null) {
   const unsettled = useRef(new Map<string, UnsettledPreference>());
-  // The reconcile owed for a change that may have saved, run once nothing is
-  // saving: a caller reconciles every preference it shows at once.
-  const owedReconcile = useRef<{ owner: string | null; run: () => void } | null>(null);
+  // Per owner, the reconcile owed for a change that may have saved, run once
+  // nothing is saving: a caller reconciles every preference it shows at once.
+  const owedReconciles = useRef(new Map<string | null, () => void>());
   // A restore shows the value through the provider's current state, so it is
   // skipped once another account or profile owns the appearance.
   const currentOwner = useRef(cacheOwner);
@@ -177,12 +177,12 @@ export function useShowThenSave(cacheOwner: string | null) {
         if (--pending.saving === 0) unsettled.current.delete(entryKey);
       };
       const reconcileOnceSettled = () => {
-        const owed = owedReconcile.current;
-        if (!owed || unsettled.current.size > 0) return;
-        owedReconcile.current = null;
-        // Only for the owner whose change it was, which may not be the
-        // owner of the save that settled last.
-        if (currentOwner.current === owed.owner) owed.run();
+        if (unsettled.current.size > 0) return;
+        // Only the owner showing now, which may not own the save that settled
+        // last; another owner's namespace is refreshed on its next load.
+        const owed = owedReconciles.current.get(currentOwner.current);
+        owedReconciles.current.clear();
+        owed?.();
       };
       const showStored = () => {
         // Once another owner holds the appearance, leave it alone: writing the
@@ -215,7 +215,7 @@ export function useShowThenSave(cacheOwner: string | null) {
           if (pending.latest === token) {
             if (!unsaved(error)) {
               // It may have saved: the settings re-read has the answer.
-              if (reconcile) owedReconcile.current = { owner: cacheOwner, run: reconcile };
+              if (reconcile) owedReconciles.current.set(cacheOwner, reconcile);
             } else {
               pending.restored = true;
               showStored();
