@@ -1509,6 +1509,21 @@ route, so a direct-play viewer would come back on a transcode. The web player
    startup deadline, and the session would loop between the two. Adopting a
    reconnect's plan keeps the attempt's failed plan keys and recovery count, so
    a later `failure_recovery` still excludes the routes that already failed.
+   A reanchored remux starts on the keyframe FFmpeg's input seek lands on,
+   which with a long GOP is often the one it started on before, and the remux
+   writes the same bytes for the same origin, so a browser that cannot read
+   past one point in them drops there after every reopen. When the remux a
+   reconnect reopened drops again within 30 s of that reconnect, with no seek
+   in between, less than a second past the position it dropped at before, the
+   route failed: the client sends `failure_recovery` with
+   `failure.classification: "progressive_drop_repeated"` instead of starting
+   another cycle. That
+   excludes the route, and a refusal ends playback with the server's terminal
+   as for any failed route, rather than a fresh start that could pick the
+   same remux again. A server restart or a dead node can also drop the stream
+   there, so a failed request (a `404`, `installation_changed`, an unreachable
+   server) goes back to the reconnect cycle, which starts a new session for any
+   answer that is not a plan.
 3. A network failure, a 5xx, `408`, or `429` waits for the next attempt. Any other answer means the session did not survive (a
    server restart answers 404), and the client starts a new attempt at the
    saved position with the current tracks. That includes `installation_changed`:

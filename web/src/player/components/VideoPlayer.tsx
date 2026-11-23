@@ -1056,6 +1056,10 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!onConnectionLost || !video || !streamFramedRef.current) return false;
     if (connectionStatusRef.current === "connected") {
+      // The transport is gone. When the session recovers the route instead of
+      // reconnecting (a progressive remux that drops again at the same point),
+      // a refusal of that recovery is this revision's to show.
+      transportFailedForPlanRevisionRef.current = planRevisionRef.current;
       // A seek still in flight is where the viewer wants to be.
       const positionSeconds =
         pendingSeekTimeRef.current ?? toMediaTime(video.currentTime, timelineOffsetRef.current);
@@ -1618,7 +1622,12 @@ export function VideoPlayer({
     if (reportedPlanFailureKeyRef.current === failureKey) {
       reportedPlanFailureKeyRef.current = null;
     }
-    if (transportFailedForPlanRevisionRef.current === planRevision || !isPlayerReady) {
+    // While the session reconnects, its own status says what happened.
+    if (
+      (transportFailedForPlanRevisionRef.current === planRevision &&
+        connectionStatusRef.current === "connected") ||
+      !isPlayerReady
+    ) {
       setError(replanError);
     }
   }, [isPlayerReady, plan.plan_attempt_key, planRevision, replanError, replanning, sessionId]);
