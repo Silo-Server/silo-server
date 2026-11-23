@@ -101,18 +101,22 @@ export function rangeTitle(title: string, range: WidgetRange): string {
   const frame = t(RANGE_TITLES[range], { title: TITLE_MARK });
   const at = frame.indexOf(TITLE_MARK);
   if (at < 0) {
-    return t(RANGE_TITLES[range], { title });
+    // A translation without the title has nothing to keep apart from it.
+    return frame;
   }
   const before = frame.slice(0, at);
   const after = frame.slice(at + TITLE_MARK.length);
   // The last space before the title and the first one after it stay breakable.
-  const lead = before.replace(/ +(?=.* )/gsu, nonBreaking);
-  const trail = after.replace(/(?<= .*) +/gsu, nonBreaking);
+  const lastSpace = before.lastIndexOf(" ");
+  const firstSpace = after.indexOf(" ");
+  const lead =
+    nonBreaking(before.slice(0, Math.max(lastSpace, 0))) + before.slice(Math.max(lastSpace, 0));
+  const trail = after.slice(0, firstSpace + 1) + nonBreaking(after.slice(firstSpace + 1));
   return lead + title + trail;
 }
 
-function nonBreaking(spaces: string): string {
-  return "\u00a0".repeat(spaces.length);
+function nonBreaking(text: string): string {
+  return text.replaceAll(" ", "\u00a0");
 }
 
 /** Axis edges: how far back the window starts, and where it ends. */

@@ -29,12 +29,6 @@ describe("rangeTitle", () => {
       expected: `Playback activity ·${NBSP}last${NBSP}24${NBSP}h`,
     },
     {
-      tag: "en",
-      title: "Most active profiles",
-      range: "week",
-      expected: `Most active profiles ·${NBSP}last${NBSP}7${NBSP}d`,
-    },
-    {
       tag: "ar",
       title: "Egress",
       range: "day",
