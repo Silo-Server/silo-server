@@ -1493,8 +1493,9 @@ route, so a direct-play viewer would come back on a transcode. The web player
    as for any failed route, rather than a fresh start that could pick the
    same remux again. A server restart or a dead node can also drop the stream
    there, so a failed request (a `404`, `installation_changed`, an unreachable
-   server) goes back to the reconnect cycle, which starts a new session for any
-   answer that is not a plan.
+   server) goes back to the reconnect cycle, which leaves playback on either
+   ended-session `410` (step 3) and starts a new session for any other answer
+   that is not a plan.
 3. A network failure, a 5xx, `408`, or `429` waits for the next attempt. A
    `410 playback_session_ended` or `410 playback_session_paused_timeout` means
    the server ended the session for good: the client leaves playback (§6.3)
