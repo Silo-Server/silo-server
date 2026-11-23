@@ -316,14 +316,23 @@ func (s *webhookSender) commitFinish(ctx context.Context, attempt DeliveryAttemp
 			return nil, "", err
 		}
 	}
-	if exists, err := s.webhooks.lockForFinish(ctx, tx, hook.ID); err != nil || !exists {
+	urlCiphertext, exists, err := s.webhooks.lockForFinish(ctx, tx, hook.ID)
+	if err != nil || !exists {
 		return nil, "", err // a deleted webhook took its attempts with it
 	}
 
 	reason := f.disableReason
-	if f.outcome == WebhookOutcomeDelivered {
+	switch {
+	case urlCiphertext != hook.URLCiphertext:
+		// The owner saved a URL while this send was in flight; the save reset
+		// the streaks. The outcome is the old URL's, so the attempt is
+		// finalized below without touching the new URL's streaks, failure
+		// diagnostics or enabled state (#4598). Every URL save encrypts anew,
+		// so a changed ciphertext is exactly a save that reset the streaks.
+		reason = ""
+	case f.outcome == WebhookOutcomeDelivered:
 		err = s.webhooks.RecordSuccess(ctx, tx, hook.ID)
-	} else {
+	default:
 		var rejections int
 		rejections, err = s.webhooks.RecordFailure(ctx, tx, hook.ID, f.status, f.message, f.rejected)
 		if f.rejected && rejections >= autoDisableConsecutive4xx {
