@@ -2016,12 +2016,15 @@ func (h *PlaybackHandler) teardownPlaySession(
 	}
 }
 
+// compatStopSnapshot returns the native session a stop finishes: the live one,
+// or else a copy of fallbackSession. The copy's MediaFileID is the streamed
+// file only when the play identified it. Otherwise it is 0, and the first
+// listed version goes in RequestedMediaFileID: history still has a file to
+// record, while nothing takes that guess as the streamed version (no credits).
 func (h *PlaybackHandler) compatStopSnapshot(
 	playSession *PlaybackSession,
 	fallbackSession *playback.Session,
-) (*playback.Session, string) {
-	transcodeNodeURL := ""
-	var upstreamSession *playback.Session
+) (upstreamSession *playback.Session, transcodeNodeURL string) {
 	if h.sessionMgr != nil {
 		if current, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err == nil {
 			upstreamSession = current
@@ -2031,8 +2034,10 @@ func (h *PlaybackHandler) compatStopSnapshot(
 	if upstreamSession == nil && fallbackSession != nil {
 		copy := *fallbackSession
 		copy.ID = playSession.UpstreamSessionID
-		if source := compatScrobbleSource(playSession, &copy, nil); source != nil {
-			copy.MediaFileID = source.FileID
+		if copy.MediaFileID <= 0 {
+			if source := compatScrobbleSource(playSession, &copy, nil); source != nil {
+				copy.RequestedMediaFileID = source.FileID
+			}
 		}
 		upstreamSession = &copy
 	}
@@ -2654,8 +2659,12 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	// point, matching the native playback persistence rule.
 	if positionSeconds > 0 && h.storeProvider != nil && playSession.ItemID != "" {
 		if store, storeErr := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID); storeErr == nil {
-			duration := playedSourceDuration(playSession, req.MediaSourceID)
-			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context()))
+			source, identified := reportedSource(playSession, req.MediaSourceID)
+			duration := 0.0
+			if source != nil {
+				duration = float64(source.Version.Duration)
+			}
+			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, duration, h.sourceThresholds(r.Context(), source, identified))
 			if err == nil && completed {
 				refreshTasteProfile = true
 			}
@@ -3980,7 +3989,7 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 		if sourceFromRoute && int64(version.FileID) != routeFileID {
 			continue
 		}
-		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx))}, allow4KTranscode)
+		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx)), episode: detail.Type == compatEpisodeType}, allow4KTranscode)
 		sources = append(sources, source)
 	}
 
@@ -4199,20 +4208,21 @@ func mediaSourceByFileID(session *PlaybackSession, fileID int) *PlaybackMediaSou
 	return nil
 }
 
-// playedSourceDuration returns the runtime in seconds that a progress report
-// is judged against: the played version's (see playedMediaSource), which is 0
-// when that version has none, or the first listed runtime when no version can
-// be identified.
-func playedSourceDuration(session *PlaybackSession, mediaSourceID string) float64 {
+// reportedSource returns the source whose runtime and end credits a progress
+// report is judged against: the played version (see playedMediaSource), whose
+// runtime is 0 when it has none, or the first listed version with a runtime
+// when no version can be identified. identified reports which of the two it
+// is; nil when the play lists neither.
+func reportedSource(session *PlaybackSession, mediaSourceID string) (source *PlaybackMediaSource, identified bool) {
 	if source := playedMediaSource(session, mediaSourceID); source != nil {
-		return float64(source.Version.Duration)
+		return source, true
 	}
 	for _, source := range session.MediaSources {
 		if source.Version.Duration > 0 {
-			return float64(source.Version.Duration)
+			return &source, false
 		}
 	}
-	return 0
+	return nil, false
 }
 
 func findMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMediaSource {

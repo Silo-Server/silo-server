@@ -28,6 +28,9 @@ type videoFactsV3 struct {
 	base                                               PlanV3
 	// mustAdapt means no route that copies the video can work.
 	mustAdapt, remuxActive, transcodeStage, subtitleForced bool
+	// sourceFailsOnClient means a strict web decoder would fail this
+	// copy-unsafe source both as is and copied, so neither is offered.
+	sourceFailsOnClient bool
 	// evidenceInsufficient means the client's evidence tier, not a known
 	// decode gap, kept the video off copy routes.
 	evidenceInsufficient bool
@@ -183,12 +186,13 @@ func (p *candidatePlannerV3) videoBase(videoClaims VideoClaimsV3, passthrough, s
 }
 
 // routeFacts decides which routes get candidates. An automatic quality
-// reduction that only an encode could deliver, when no encode can run and no
-// lower version serves it, is dropped with a warning so the source plays.
+// reduction from a bandwidth estimate or device limit that only an encode could
+// deliver, when no encode can run and no lower version serves it, is dropped
+// with a warning so the source plays. An explicit bandwidth cap is not dropped.
 func (p *candidatePlannerV3) routeFacts(evidenceInsufficient bool) {
 	in, source, f := p.input, p.source, &p.video
 	anySubtitle := f.originalSubtitleOK || f.remuxSubtitleOK || f.hlsSubtitleOK
-	if in.ServerBitrateCapKbps == 0 && f.quality.RequiresTranscode && !f.quality.ExplicitRung && anySubtitle && f.videoOK &&
+	if in.ServerBitrateCapKbps == 0 && f.quality.RequiresTranscode && !f.quality.ExplicitRung && !f.quality.SourceExceedsCap && anySubtitle && f.videoOK &&
 		f.anyCopyRange() && !encodeCanRunV3(in, source) && !lowerVersionServesQualitiesV3(in) {
 		warnings := append(f.quality.Warnings, DegradationWarningV3{Code: "quality_reduction_unavailable", Message: "Reduced-quality transcoding is unavailable for this source; it is delivered at original quality."})
 		f.quality = originalQualityResultV3(source)
@@ -198,7 +202,8 @@ func (p *candidatePlannerV3) routeFacts(evidenceInsufficient bool) {
 	f.mustAdapt = f.quality.RequiresTranscode || !f.videoOK || !f.anyCopyRange() || !anySubtitle
 	// A remux maps only the base layer, so Profile 7 is never copied as is.
 	remuxRangeOK := f.rangeOK && source.DVProfile != 7 || f.serverDV81
-	f.remuxActive = !f.mustAdapt && !source.VideoCopyUnsafe && (remuxRangeOK || f.stripProgressive || f.stripHLS) &&
+	f.sourceFailsOnClient = source.VideoCopyUnsafe && strictParameterSetWebV3(in.Request)
+	f.remuxActive = !f.mustAdapt && !f.sourceFailsOnClient && (remuxRangeOK || f.stripProgressive || f.stripHLS) &&
 		(f.remuxSubtitleOK || f.hlsSubtitleOK)
 	if f.remuxActive {
 		p.remuxAudioFacts()
@@ -269,7 +274,7 @@ func (p *candidatePlannerV3) videoCandidates() []candidateV3 {
 	}
 	sidecar := []candidateSubtitleV3{candidateSidecarV3}
 	hls := []candidateSubtitleV3{candidateOnDemandRenditionsV3, candidatePipelineRenditionV3, candidateSidecarV3}
-	if !f.mustAdapt && f.quality.PreservesSource && f.videoOK && f.audioOK && f.originalAudioOK && f.originalSubtitleOK &&
+	if !f.mustAdapt && !f.sourceFailsOnClient && f.quality.PreservesSource && f.videoOK && f.audioOK && f.originalAudioOK && f.originalSubtitleOK &&
 		containsFoldV3(request.Capabilities.Containers, source.Container) && deliveryAvailableV3(request, DeliveryClassOriginalHTTPV3) {
 		original := func(video candidateVideoV3, ok bool) {
 			add(candidateV3{route: candidateOriginalV3, video: video}, ok, sidecar...)

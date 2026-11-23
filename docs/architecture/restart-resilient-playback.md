@@ -955,8 +955,8 @@ grant, and the node recipe. The session recipe is written when a transport
 served from the API origin commits, and re-recorded when a sidecar-only replan
 keeps the transport; a proxy-served transport has none, since its grant already
 covers it. A user's stop and an abort drop it on the replica that ends the
-session; a system teardown that leaves the attempt live (an FFmpeg exit, a
-copy-safety stop) keeps it for a transcode the API runs itself, so the next
+session; a system teardown that leaves the attempt live (an FFmpeg exit)
+keeps it for a transcode the API runs itself, so the next
 request rebuilds as a token would. A remote transcode's teardown drops it,
 since the node job and node recipe go with it. It is
 only a reconstruction aid: the durable v3 attempt row decides whether it may be
@@ -1059,8 +1059,7 @@ API egress) and cannot reach the session's node, it moves the transcode itself:
   token to that node only, so the stored card is what lets the new node
   rebuild the transport after its own restart. A move to this API process
   deletes the node recipe instead. With
-  neither, nothing moves and the relay answers `502` as before. A stream-copy recipe answers to the persisted
-  copy-safety verdict first, like any other revival.
+  neither, nothing moves and the relay answers `502` as before.
 - **Executor.** `noderouting.Resolve` with the current policy, restricted to
   API-egress shapes and excluding the dead node: another pooled transcode node
   per the normal selection rules, or this process when policy lets the API

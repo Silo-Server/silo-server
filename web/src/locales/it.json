@@ -521,6 +521,12 @@
       "value": "Questa sessione di riproduzione è terminata. Avvia di nuovo la riproduzione."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Questo stream è stato sostituito. La riproduzione continua su quello attuale."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -74425,6 +74431,12 @@
     {
       "type": 0,
       "value": "Segna come visto al"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "I contenuti con un marcatore dei titoli di coda vengono considerati visti anche quando la riproduzione raggiunge i titoli di coda."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

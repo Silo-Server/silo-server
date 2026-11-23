@@ -66,8 +66,8 @@ stops the attempt row and claims its finalization lease, so only one caller runs
 non-idempotent writers (watch history, provider events). The admin history row and the
 lifecycle's stop commit in one transaction (`RecordEnd`): the first end sets the reason
 and `lifecycle_seq`, later ends record that reason, and only the first is announced,
-with the history entry as stored. A teardown the client recovers from (encoder exit,
-copy-safety) is not an end: it records its stretch and announces nothing.
+with the history entry as stored. A teardown the client recovers from (an encoder
+exit) is not an end: it records its stretch and announces nothing.
 
 ## Sessions no server holds
 
