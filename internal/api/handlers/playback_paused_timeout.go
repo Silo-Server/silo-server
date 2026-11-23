@@ -111,6 +111,10 @@ func (h *PlaybackHandler) sweepPausedTimeouts(ctx context.Context, pool *pgxpool
 				return
 			}
 			h.endPausedTimeout(ctx, expirer, c, files[c.mediaFileID], timeout)
+			if ctx.Err() != nil {
+				// The deadline may have cut this claim short: retry it next.
+				return
+			}
 			h.pausedTimeoutCursor = &pausedTimeoutCursor{pausedSince: c.pausedSince, sessionID: c.sessionID}
 		}
 		if len(candidates) < lifecycleSweepBatch {
