@@ -1691,9 +1691,8 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 			}
 		}
 	}
-	// The restore's report leaves out the settings the carry takes from the
-	// live server, except a ChatGPT record ("live") with no connected
-	// account.
+	// The report leaves out what the carry takes from the live server,
+	// except a ChatGPT record ("live") with no connected account.
 	liveOwn, err := (PGLoader{}).ServerSpecificSettingKeys(ctx, liveURL, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1711,10 +1710,9 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 	if !slices.Equal(liveOwn, fromLive) {
 		t.Errorf("ServerSpecificSettingKeys = %v, want the settings the carry takes from the live server %v", liveOwn, fromLive)
 	}
-	// A server that never set one up still holds an empty AI provider
-	// registry, which its first start writes, empty search settings, and a
-	// ChatGPT account it disconnected: they supply no connection, so the
-	// report still lists what the backup loses.
+	// An empty AI provider registry (as a first start writes it), empty search
+	// settings, and a disconnected ChatGPT account supply no connection, so
+	// the report still lists what the backup loses.
 	cipher, err := secret.New([]byte("server-specific-test-key-0123456789"))
 	if err != nil {
 		t.Fatal(err)
