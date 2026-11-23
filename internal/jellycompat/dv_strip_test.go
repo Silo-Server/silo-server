@@ -161,3 +161,32 @@ func TestPlaybackInfoToneMapPolicyFailureWithoutCapIsTemporary(t *testing.T) {
 		t.Fatalf("status = %d, body = %s; want 503 for the unknown tone-map policy", rec.Code, rec.Body.String())
 	}
 }
+
+// An AV1 profile 10 copy whose master advertises dav1.10.LL must ask for a
+// recipe that keeps FFmpeg's dvvC record: dav1 for a known 10.0 base layer,
+// where FFmpeg writes it into no other entry, and av01 otherwise. The same
+// file for a client without Dolby Vision and every HEVC recipe stay as they
+// were.
+func TestCompatCopyVideoRecipeDolbyVisionAV1(t *testing.T) {
+	file := func(profile, compatID int, compatKnown bool) *models.MediaFile {
+		return &models.MediaFile{VideoTracks: []models.VideoTrack{{DVProfile: profile, DVBLCompatID: compatID, DVBLCompatIDPresent: compatKnown}}}
+	}
+	dovi := PlaybackMediaSource{DOVIVariant: true}
+	for _, tc := range []struct {
+		name   string
+		source PlaybackMediaSource
+		file   *models.MediaFile
+		want   string
+	}{
+		{"AV1 10.0 for a Dolby Vision client", dovi, file(10, 0, true), playback.VideoSampleEntryDAV1},
+		{"AV1 10.1 for a Dolby Vision client", dovi, file(10, 1, true), playback.VideoSampleEntryAV01},
+		{"AV1 10 with an unknown base layer", dovi, file(10, 0, false), playback.VideoSampleEntryAV01},
+		{"AV1 10.0 without Dolby Vision", PlaybackMediaSource{}, file(10, 0, true), ""},
+		{"HEVC profile 5 for a Dolby Vision client", dovi, file(5, 0, true), playback.VideoSampleEntryDVH1},
+		{"HEVC profile 8", PlaybackMediaSource{}, file(8, 1, true), playback.VideoSampleEntryDVH1},
+	} {
+		if got, _ := compatCopyVideoRecipe(tc.source, tc.file); got != tc.want {
+			t.Errorf("%s: sample entry = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}

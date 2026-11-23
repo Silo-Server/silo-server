@@ -3252,7 +3252,7 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 	}
 	if compatHLSCopiesVideo(source) {
 		opts.TargetCodecVideo = compatCopyCodec
-		opts.VideoSampleEntry, opts.VideoBitstreamFilter = compatCopyVideoRecipe(source, file.PrimaryDVProfile())
+		opts.VideoSampleEntry, opts.VideoBitstreamFilter = compatCopyVideoRecipe(source, file)
 		opts.CopyVideoMPEGTS = source.HLSRemuxMPEGTS
 		opts.KeyframePlaylist = source.KeyframePlaylist
 	}
