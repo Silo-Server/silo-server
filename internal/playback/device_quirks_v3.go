@@ -133,6 +133,16 @@ func isFirefoxWebV3(request StartRequestV3) bool {
 	return strings.Contains(userAgent, "firefox/") && !strings.Contains(userAgent, "seamonkey/")
 }
 
+// strictParameterSetWebV3 reports a web client whose H.264 decoder uses only
+// the sample entry's parameter sets (Media Source Extensions, Safari's HLS),
+// so a copy of a source that redefines them in-band fails there. The planner
+// encodes a copy-unsafe source for it up front: recovery alone would fail the
+// copies again on every track, quality or reconnect replan, which start over
+// from the top. Firefox decodes these sources, so it keeps the copy.
+func strictParameterSetWebV3(request StartRequestV3) bool {
+	return strings.EqualFold(request.ClientPlaybackContext.Device.Platform, "web") && !isFirefoxWebV3(request)
+}
+
 func applyCopiedVideoQuirksV3(plan *PlanV3, source SourceDescriptorV3, request StartRequestV3, high10 *AppliedQuirkV3) {
 	if high10 != nil {
 		appendAppliedQuirkV3(plan, *high10, "")

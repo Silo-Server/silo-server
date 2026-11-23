@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -700,6 +701,39 @@ func TestPlanPlaybackV3CopyUnsafeSourceStillCopies(t *testing.T) {
 	result := planFileV3(req, file)
 	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxProgressiveV3 || !result.Plan.Source.VideoCopyUnsafe {
 		t.Fatalf("result = %s, want the progressive copy of a source marked copy-unsafe", ExplainPlannerResultV3(result))
+	}
+
+	// A strict decoder fails every copy; its recovery walk reaches the encode.
+	plans, _ := replanChainV3(t, PlannerInputV3{
+		Request: req, RequestedFile: file, EffectiveFile: file, AudioTrackIndex: 0,
+		Settings: PlannerSettingsV3{TranscodeEnabled: true, Allow4KTranscode: true}, Registry: testTransformationRegistryV3(),
+	})
+	var deliveries []DeliveryV3
+	for _, plan := range plans {
+		deliveries = append(deliveries, plan.Delivery)
+	}
+	t.Logf("recovery walk: %v", deliveries)
+	firstEncode := slices.Index(deliveries, DeliveryTranscodeHLSV3)
+	if firstEncode < 0 || !slices.Contains(deliveries[:firstEncode], DeliveryRemuxHLSV3) {
+		t.Fatalf("recovery walk = %v, want both copy deliveries before the encode", deliveries)
+	}
+
+	// A browser whose decoder ignores in-band parameter sets gets the encode
+	// up front, since every track or quality replan would fail the copies
+	// again. Firefox decodes these sources and keeps the copy.
+	for name, test := range map[string]struct {
+		userAgent string
+		want      DeliveryV3
+	}{
+		"safari":  {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/19.0 Safari/605.1.15", DeliveryTranscodeHLSV3},
+		"chrome":  {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/150.0.0.0 Safari/537.36", DeliveryTranscodeHLSV3},
+		"firefox": {"Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:153.0) Gecko/20100101 Firefox/153.0", DeliveryRemuxProgressiveV3},
+	} {
+		web := req
+		web.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{"user_agent": test.userAgent}}
+		if result := planFileV3(web, file); result.Plan == nil || result.Plan.Delivery != test.want {
+			t.Errorf("%s: result = %s, want %s", name, ExplainPlannerResultV3(result), test.want)
+		}
 	}
 }
 

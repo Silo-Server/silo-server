@@ -198,7 +198,9 @@ func (p *candidatePlannerV3) routeFacts(evidenceInsufficient bool) {
 	f.mustAdapt = f.quality.RequiresTranscode || !f.videoOK || !f.anyCopyRange() || !anySubtitle
 	// A remux maps only the base layer, so Profile 7 is never copied as is.
 	remuxRangeOK := f.rangeOK && source.DVProfile != 7 || f.serverDV81
-	f.remuxActive = !f.mustAdapt && (remuxRangeOK || f.stripProgressive || f.stripHLS) &&
+	// A strict web decoder fails every copy of a copy-unsafe source.
+	copyFailsOnClient := source.VideoCopyUnsafe && strictParameterSetWebV3(in.Request)
+	f.remuxActive = !f.mustAdapt && !copyFailsOnClient && (remuxRangeOK || f.stripProgressive || f.stripHLS) &&
 		(f.remuxSubtitleOK || f.hlsSubtitleOK)
 	if f.remuxActive {
 		p.remuxAudioFacts()
