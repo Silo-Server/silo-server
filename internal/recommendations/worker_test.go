@@ -523,3 +523,31 @@ func TestExternalResultIdleAndProgress(t *testing.T) {
 		t.Fatalf("after clear progress = %+v, want zero value", p)
 	}
 }
+
+// An automatic bootstrap leaves the initial build to the schedule once a run
+// built or failed, and only retries after runs that pruned or skipped.
+func TestExternalAlreadyRan(t *testing.T) {
+	ctx := context.Background()
+	key := jobTaskKeys[JobExternal]
+	cases := []struct {
+		name   string
+		status string
+		result string
+		want   bool
+	}{
+		{"built", runStatusCompleted, `{"enabled":true}`, true},
+		{"failed", runStatusFailed, `{"enabled":true}`, true},
+		{"skipped for no lock", runStatusCompleted, `{"enabled":true,"vectors_skipped_reason":"no_lock"}`, false},
+		{"pruned while off", runStatusCompleted, `{"enabled":false,"pruned_titles":3}`, false},
+	}
+	for _, tc := range cases {
+		h := newFakeHistory()
+		h.runs = []taskmanager.ExecutionResult{{TaskKey: key, Status: tc.status, ResultData: []byte(tc.result)}}
+		if got := (&Worker{history: h}).externalAlreadyRan(ctx); got != tc.want {
+			t.Errorf("%s: already ran %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if (&Worker{history: newFakeHistory()}).externalAlreadyRan(ctx) {
+		t.Error("no recorded run: already ran, want not")
+	}
+}

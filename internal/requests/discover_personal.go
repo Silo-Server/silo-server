@@ -25,12 +25,6 @@ func (s *Service) SetRecommendations(r discoverrows.Recommendations) { s.recomme
 //   - Request state and follows are overlaid on the page shown, as on other
 //     rows.
 
-// declinedRequestStore is the optional narrow slice of *Repository used to
-// hide titles whose request by the viewer was declined.
-type declinedRequestStore interface {
-	ListDeclinedByViewerTMDB(ctx context.Context, viewer Viewer, mediaType MediaType, tmdbIDs []int) (map[int]bool, error)
-}
-
 // personalTitles returns the viewer's titles of a personal row that pass its
 // rating ceiling and that the library does not have. Titles whose request by
 // the viewer was declined (with no newer active request) are dropped, and
@@ -81,16 +75,13 @@ func (s *Service) orderPersonalByRequestState(ctx context.Context, viewer Viewer
 	}
 	active := map[MediaType]map[int]*Request{}
 	declined := map[MediaType]map[int]bool{}
-	declinedStore, hasDeclined := s.store.(declinedRequestStore)
 	for mediaType, ids := range idsByType {
 		var err error
 		if active[mediaType], err = s.store.ListActiveByTMDB(ctx, mediaType, ids); err != nil {
 			return nil, err
 		}
-		if hasDeclined {
-			if declined[mediaType], err = declinedStore.ListDeclinedByViewerTMDB(ctx, viewer, mediaType, ids); err != nil {
-				return nil, err
-			}
+		if declined[mediaType], err = s.store.ListDeclinedByViewerTMDB(ctx, viewer, mediaType, ids); err != nil {
+			return nil, err
 		}
 	}
 	fresh := make([]discoverrows.PersonalTitle, 0, len(titles))

@@ -248,6 +248,28 @@ func TestBuildExternalPoolDB(t *testing.T) {
 	}
 }
 
+// A run that skips vectors still keeps the stored pool referenced, without a
+// TMDB call, so retention does not delete it while the provider is fixed.
+func TestBuildExternalPoolSkipKeepsPoolReferencedDB(t *testing.T) {
+	s := newExternalPoolScenario(t, 926_000_000)
+	ctx := context.Background()
+	s.lock()
+	s.build(externalTMDBRequestBudget, externalEmbedBudget)
+
+	if _, err := s.db.Exec(ctx, `UPDATE external_titles SET last_referenced_at = now() - interval '29 days' WHERE tmdb_id BETWEEN $1 AND $1 + 999`, s.base); err != nil {
+		t.Fatal(err)
+	}
+	s.engine.embClient = nil
+	counts := s.build(externalTMDBRequestBudget, externalEmbedBudget)
+	if counts.VectorsSkippedReason != ExternalSkipNoProvider || counts.TMDBRequests != 0 || counts.PoolTitles != len(s.pool) {
+		t.Fatalf("run without a provider: %+v", counts)
+	}
+	var stale int
+	if err := s.db.QueryRow(ctx, `SELECT count(*) FROM external_titles WHERE tmdb_id BETWEEN $1 AND $1 + 999 AND last_referenced_at < now() - interval '1 day'`, s.base).Scan(&stale); err != nil || stale != 0 {
+		t.Fatalf("%d pool titles left unreferenced by a skipped run (%v)", stale, err)
+	}
+}
+
 // A run that spends its TMDB or embedding budget stops cleanly and says what
 // is left; the next runs continue from stored state until the pool is done.
 func TestBuildExternalPoolBudgetDB(t *testing.T) {

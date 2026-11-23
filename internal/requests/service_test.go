@@ -960,6 +960,18 @@ func (f *fakeStore) ListRequestedTMDB(_ context.Context, viewer Viewer, mediaTyp
 	return out, nil
 }
 
+func (f *fakeStore) ListDeclinedByViewerTMDB(_ context.Context, viewer Viewer, mediaType MediaType, ids []int) (map[int]bool, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := map[int]bool{}
+	for _, req := range f.requests {
+		if req.MediaType == mediaType && slices.Contains(ids, req.TMDBID) && req.requestedBy(viewer) && req.Outcome == OutcomeDeclined {
+			out[req.TMDBID] = true
+		}
+	}
+	return out, nil
+}
+
 func (f *fakeStore) ListProfileWatchlistRequests(_ context.Context, userID int, profileID string) ([]*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()

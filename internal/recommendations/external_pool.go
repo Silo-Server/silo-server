@@ -239,18 +239,23 @@ func (r *externalRun) run(ctx context.Context, profiles []ExternalProfile, maxTi
 	}
 	if lock == nil {
 		r.counts.VectorsSkipped, r.counts.VectorsSkippedReason = msg, code
-		return nil
-	}
-	if len(profiles) == 0 && !r.partialProfiles {
+	} else if len(profiles) == 0 && !r.partialProfiles {
 		r.counts.VectorsSkipped, r.counts.VectorsSkippedReason = errNoExternalTasteProfiles.Error(), ExternalSkipNoTasteProfiles
-		return nil
 	}
-	// Sets first: the server cap admits them first, and they are few requests.
 	var setKeys []string
 	for _, p := range profiles {
 		setKeys = append(setKeys, p.SetSources...)
 	}
 	setKeys = uniqueSorted(setKeys)
+	if r.counts.VectorsSkippedReason != "" {
+		// Still choose from what is stored, which calls no TMDB: it keeps the
+		// pool referenced, so retention does not delete it while an admin
+		// fixes the provider, and it applies the cap and drops titles the
+		// library has gained.
+		_, err := r.choosePool(ctx, profiles, setKeys, maxTitles)
+		return err
+	}
+	// Sets first: the server cap admits them first, and they are few requests.
 	if err := r.fetchSets(ctx, setKeys); err != nil {
 		return err
 	}

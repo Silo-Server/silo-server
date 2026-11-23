@@ -2,6 +2,7 @@ package recommendations
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -81,10 +82,15 @@ type ExternalStatus struct {
 	Progress ExternalProgress
 }
 
+// setExternalProgress records a running job's progress. Parallel fetches
+// report out of order, so a phase's count never goes back.
 func (w *Worker) setExternalProgress(phase string, done, total int) {
 	w.mu.Lock()
+	defer w.mu.Unlock()
+	if p := w.externalProgress; p.Phase == phase && p.Total == total && done < p.Done {
+		return
+	}
 	w.externalProgress = ExternalProgress{Phase: phase, Done: done, Total: total}
-	w.mu.Unlock()
 }
 
 func (w *Worker) clearExternalProgress() {
@@ -123,51 +129,90 @@ const externalBootstrapInterval = 15 * time.Minute
 // feature is on, no outside rows exist yet, an embedding lock is ready, and
 // at least one profile has a taste vector.
 func (w *Worker) EnsureExternalNow() {
-	if w == nil || w.engine == nil || !w.ExternalEnabled() || w.engine.externalTMDB == nil || w.IsRunning(JobExternal) {
+	w.startExternalBootstrap(false)
+}
+
+// maybeBootstrapExternal checks, at most once per externalBootstrapInterval,
+// whether turning on or completing initial taste profiles left Discover
+// recommendations empty and ready to build. It leaves a server whose last
+// run already did the work, or failed, to the schedule: rows can stay empty
+// after a full run, and retrying it from every refresh would repeat the whole
+// job on each node.
+func (w *Worker) maybeBootstrapExternal() {
+	if !w.canBootstrapExternal() || !w.externalBootstrap.allow("bootstrap", externalBootstrapInterval) {
+		return
+	}
+	w.startExternalBootstrap(true)
+}
+
+func (w *Worker) canBootstrapExternal() bool {
+	return w != nil && w.engine != nil && w.ExternalEnabled() && w.engine.externalTMDB != nil && !w.IsRunning(JobExternal)
+}
+
+func (w *Worker) startExternalBootstrap(unlessRan bool) {
+	if !w.canBootstrapExternal() {
 		return
 	}
 	go func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
-		w.ensureExternalRows(ctx)
+		w.ensureExternalRows(ctx, unlessRan)
 	}()
 }
 
-// maybeBootstrapExternal checks, at most once per externalBootstrapInterval,
-// whether turning on or completing initial taste profiles left Discover
-// recommendations empty and ready to build.
-func (w *Worker) maybeBootstrapExternal() {
-	if w == nil || w.engine == nil || !w.ExternalEnabled() || w.engine.externalTMDB == nil || w.IsRunning(JobExternal) {
-		return
-	}
-	if !w.externalBootstrap.allow("bootstrap", externalBootstrapInterval) {
-		return
-	}
-	w.EnsureExternalNow()
-}
-
-func (w *Worker) ensureExternalRows(ctx context.Context) {
-	if w == nil || w.engine == nil || !w.ExternalEnabled() || w.engine.externalTMDB == nil || w.IsRunning(JobExternal) {
+// ensureExternalRows starts an outside-title run when Discover
+// recommendations are on and empty with their prerequisites in place. With
+// unlessRan it also leaves alone a server whose newest recorded run, from
+// any node, failed or built with nothing skipped.
+func (w *Worker) ensureExternalRows(ctx context.Context, unlessRan bool) {
+	if !w.canBootstrapExternal() {
 		return
 	}
 	lock, _, _, err := w.engine.externalEmbeddingLock(ctx)
 	if err != nil || lock == nil {
 		return
 	}
-	var hasRows, hasTaste bool
-	if err := w.engine.pool.QueryRow(ctx, `
-		SELECT EXISTS (SELECT 1 FROM external_recommendation_rows),
-		       EXISTS (SELECT 1 FROM user_taste_profiles WHERE embedding IS NOT NULL)`).Scan(&hasRows, &hasTaste); err != nil {
+	hasRows, hasTaste, err := w.engine.repo.externalBootstrapState(ctx)
+	if err != nil {
 		slog.WarnContext(ctx, "checking whether Discover recommendations need an initial run failed", "component", "recommendations", "error", err)
 		return
 	}
 	if hasRows || !hasTaste {
 		return
 	}
+	if unlessRan && w.externalAlreadyRan(ctx) {
+		return
+	}
 	slog.InfoContext(ctx, "Discover recommendations enabled with no rows yet; starting initial run", "component", "recommendations")
 	if err := w.TriggerExternal(); err != nil && !errors.Is(err, ErrJobRunning) && !errors.Is(err, ErrJobRunningElsewhere) {
 		slog.WarnContext(ctx, "initial Discover recommendations run could not start", "component", "recommendations", "error", err)
 	}
+}
+
+// externalAlreadyRan reports whether the newest recorded outside-title run
+// failed, or ran with the feature on and skipped nothing. A run that only
+// pruned, or skipped for a missing provider, lock or taste profile, leaves
+// the initial build still to do. With no history it reports false.
+func (w *Worker) externalAlreadyRan(ctx context.Context) bool {
+	if w.history == nil {
+		return false
+	}
+	last, err := w.history.GetLatest(ctx, jobTaskKeys[JobExternal])
+	if err != nil {
+		slog.WarnContext(ctx, "reading the last Discover recommendations run failed", "component", "recommendations", "error", err)
+		return true
+	}
+	if last == nil {
+		return false
+	}
+	if last.Status == runStatusFailed {
+		return true
+	}
+	var res externalResult
+	if err := json.Unmarshal(last.ResultData, &res); err != nil {
+		return true
+	}
+	return res.Enabled && res.VectorsSkippedReason == ""
 }
 
 // externalResult is one outside-title run's result data.

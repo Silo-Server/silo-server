@@ -143,6 +143,28 @@ func TestFilterExternalByCeiling(t *testing.T) {
 	}
 }
 
+// A restricted profile with too few admitted titles to rank on their own
+// keeps a short row of them rather than none.
+func TestScoreEligibleExternalShortRow(t *testing.T) {
+	sims := externalSims(externalMinCandidates+5, func(i int) float64 { return float64(i) / 20 }, func(int) int { return 100 })
+	for i := range sims {
+		sims[i].USCertification = "R"
+	}
+	sims[3].USCertification, sims[8].USCertification = "PG", "G"
+
+	got := scoreEligibleExternal(sims, "PG-13", nil, nil)
+	var ids []int
+	for _, it := range got {
+		ids = append(ids, it.TMDBID)
+	}
+	if !slices.Equal(ids, []int{9, 4}) {
+		t.Fatalf("restricted short row %v, want [9 4]", ids)
+	}
+	if got := scoreEligibleExternal(sims[:externalMinCandidates-1], "", nil, nil); len(got) != 0 {
+		t.Fatalf("unrestricted pool below the minimum ranked %d titles, want none", len(got))
+	}
+}
+
 func TestApplyExternalQualityPrior(t *testing.T) {
 	sims := externalSims(qualityMinRated+2, func(int) float64 { return 0.7 }, func(int) int { return 500 })
 	// Give spread to base scores so scoreSD > 0, while titles 1 and 2 tie on

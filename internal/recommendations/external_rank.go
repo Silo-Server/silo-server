@@ -53,6 +53,25 @@ func filterExternalByCeiling(sims []ExternalSimilarity, ceiling string) []Extern
 	return out
 }
 
+// scoreEligibleExternal scores the candidates the ceiling admits, best first.
+// When too few pass to rank on their own, it ranks every candidate and keeps
+// the admitted ones, so a restricted profile keeps a short row rather than
+// none.
+func scoreEligibleExternal(sims []ExternalSimilarity, ceiling string, pool map[ExternalTitleKey]ExternalPoolTitle, seedContentIDs map[string]string) []ExternalRowItem {
+	eligible := filterExternalByCeiling(sims, ceiling)
+	scored := scoreExternalCandidates(eligible, pool, seedContentIDs)
+	if len(scored) > 0 || len(eligible) == 0 || len(eligible) == len(sims) {
+		return scored
+	}
+	admitted := make(map[int]bool, len(eligible))
+	for _, s := range eligible {
+		admitted[s.Key.TMDBID] = true
+	}
+	return slices.DeleteFunc(scoreExternalCandidates(sims, pool, seedContentIDs), func(it ExternalRowItem) bool {
+		return !admitted[it.TMDBID]
+	})
+}
+
 // rankExternalCandidates scores a profile's candidates of one media type and
 // returns its row: score = z(similarity) + z(log(1 + vote count)) plus a
 // gentle quality prior on vote_average (when enough rated titles qualify),
@@ -370,8 +389,7 @@ func (e *Engine) rankExternalMediaType(
 	if err != nil {
 		return nil, err
 	}
-	sims = filterExternalByCeiling(sims, ceiling)
-	scored := scoreExternalCandidates(sims, pool, seedContentIDs)
+	scored := scoreEligibleExternal(sims, ceiling, pool, seedContentIDs)
 	if len(scored) == 0 {
 		return nil, nil
 	}

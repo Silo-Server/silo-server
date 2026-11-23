@@ -734,3 +734,15 @@ func (r *Repo) externalStoredTitleIDs(ctx context.Context) ([]externalTitleIDs, 
 	}
 	return out, nil
 }
+
+// externalBootstrapState reports whether any profile has an outside row and
+// whether any profile has a taste vector.
+func (r *Repo) externalBootstrapState(ctx context.Context) (hasRows, hasTaste bool, err error) {
+	err = r.pool.QueryRow(ctx, `
+		SELECT EXISTS (SELECT 1 FROM external_recommendation_rows),
+		       EXISTS (SELECT 1 FROM user_taste_profiles WHERE embedding IS NOT NULL)`).Scan(&hasRows, &hasTaste)
+	if err != nil {
+		return false, false, fmt.Errorf("read outside bootstrap state: %w", err)
+	}
+	return hasRows, hasTaste, nil
+}

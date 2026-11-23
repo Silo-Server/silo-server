@@ -3218,7 +3218,7 @@ func main() {
 					recWorker.StopExternalGeneration()
 					return
 				}
-				if prev == nil || !prev.Recommendations.ExternalEnabled {
+				if prev == nil || !prev.Recommendations.Enabled || !prev.Recommendations.ExternalEnabled {
 					recWorker.EnsureExternalNow()
 				}
 			})

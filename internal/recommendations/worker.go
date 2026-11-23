@@ -177,7 +177,7 @@ func (w *Worker) Start() {
 	go w.stalenessLoop(ctx)
 	go w.embedMissingLoop(ctx)
 	go w.ensureGlobalRows(ctx, w.engine.repo)
-	go w.ensureExternalRows(ctx)
+	go w.ensureExternalRows(ctx, false)
 
 	slog.Info("recommendation worker started")
 }
