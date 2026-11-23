@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { leafUserData, type FileVersion, type ItemDetail } from "@/api/types";
+import { buildFieldFilterHref } from "@/pages/catalogSearchParams";
 import type { PlayerSubtitleTrackSignature } from "@/player/types";
 import { useRedetectItemMarkers, useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useAdminMarkerCapabilities } from "@/hooks/queries/admin/markers";
@@ -243,6 +244,11 @@ export default function MovieContent({
           topNav={<PageBack />}
           context={t("web.detail.hero.typeMovie")}
           studioLabel={firstStudio}
+          studioHref={
+            firstStudio
+              ? buildFieldFilterHref("studio", firstStudio, { libraryId, mediaType: "movie" })
+              : undefined
+          }
           backdropUrl={item.backdrop_url}
           backdropThumbhash={item.backdrop_thumbhash}
           posterUrl={item.poster_url}

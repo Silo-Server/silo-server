@@ -303,6 +303,31 @@ export function buildPersonCatalogHref(personId: string): string {
   return `/person/${encodeURIComponent(personId)}`;
 }
 
+/**
+ * The titles whose `field` (an exact-match rule field such as studio, network,
+ * or series) is `value`. With a library, the library's own browse; without
+ * one, a catalog query across the viewer's libraries, limited to mediaType and
+ * headed by the value.
+ */
+export function buildFieldFilterHref(
+  field: "studio" | "network" | "series",
+  value: string,
+  scope: { libraryId?: number; mediaType?: "movie" | "series" },
+): string {
+  const rule = new URLSearchParams({
+    "groups[0][rules][0][field]": field,
+    "groups[0][rules][0][op]": "is",
+    "groups[0][rules][0][value]": value,
+  });
+  if (scope.libraryId !== undefined) {
+    return `/library/${scope.libraryId}?tab=library&${rule.toString()}`;
+  }
+  const params = new URLSearchParams({ source: "query" });
+  if (scope.mediaType) params.set("type", scope.mediaType);
+  params.set("title", value);
+  return `/catalog?${params.toString()}&${rule.toString()}`;
+}
+
 export function buildSectionCatalogHref(destination: SectionCatalogDestination): string {
   return buildCatalogHref({
     source: "section",
