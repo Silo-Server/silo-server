@@ -893,7 +893,8 @@ func TestStopFinalizationRunsOnce(t *testing.T) {
 // An attempt an administrator or the paused timeout ended answers 410 on
 // progress and replan, so the player exits: the paused timeout with its own
 // type for a client that advertised paused_timeout_v1. An expired attempt
-// keeps answering 404 so the player renews.
+// keeps answering 404 so the player renews. Another profile gets 403 either
+// way.
 func TestStoppedAttemptAnswersGoneWhenThePlayerMustLeave(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
@@ -913,8 +914,17 @@ func TestStoppedAttemptAnswersGoneWhenThePlayerMustLeave(t *testing.T) {
 			stopAttemptAs(f.handler, f.session.ID, tc.stopID(f.session.ID))
 			_, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 10})
 			assertPlaybackOperationError(t, err, tc.status, tc.code)
-			_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto"}, Digest: "d"})
+			replan := PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto"}, Digest: "d"}
+			_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, replan)
 			assertPlaybackOperationError(t, err, tc.status, tc.code)
+			// Another profile is refused before it learns how the play ended.
+			other := f.caller
+			other.ProfileID = "profile-2"
+			otherCtx := apimw.SetProfileID(f.ctx, other.ProfileID)
+			_, err = f.handler.ApplyProgressV2(otherCtx, other, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 10})
+			assertPlaybackOperationError(t, err, http.StatusForbidden, "forbidden")
+			_, err = f.handler.ReplanPlaybackV2(otherCtx, other, f.session.ID, replan)
+			assertPlaybackOperationError(t, err, http.StatusForbidden, "forbidden")
 		})
 	}
 }

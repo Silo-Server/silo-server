@@ -714,10 +714,15 @@ func (h *PlaybackHandler) ownedAttemptV2(ctx context.Context, caller PlaybackCal
 		}
 		return nil, playbackStoreOperationError()
 	}
-	if record.UserID != caller.UserID || record.ProfileID != caller.ProfileID {
+	if !attemptOwnedBy(record, caller) {
 		return nil, playbackOperationError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
 	}
 	return record, nil
+}
+
+// attemptOwnedBy reports whether the attempt belongs to the caller's profile.
+func attemptOwnedBy(record *playback.AttemptRecordV3, caller PlaybackCaller) bool {
+	return record != nil && record.UserID == caller.UserID && record.ProfileID == caller.ProfileID
 }
 
 func acceptedProgressV2(sample *playback.ProgressSampleV3) *PlaybackAcceptedProgress {
@@ -746,7 +751,12 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 	// A stop accepted on any replica ends the attempt; a late recovery or
 	// seek must not launch a replacement transport the deny marker will
 	// refuse to serve. The store's commit predicate refuses stopped rows too.
+	// Only the attempt's owner learns how it ended; anyone else gets the 403
+	// the replan itself answers.
 	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record != nil && record.StoppedAt != nil {
+		if !attemptOwnedBy(record, caller) {
+			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
+		}
 		return playback.DecisionResponseV3{}, h.stoppedAttemptError(ctx, sessionID, record)
 	}
 	response, err := h.replanPlaybackApplicationV3(playbackCallerSessionRequest(ctx, caller, sessionID), sessionID, body)
@@ -757,7 +767,7 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 		// timeout still answers 410 instead of the 404 the player renews from.
 		var opErr *PlaybackOperationError
 		if errors.Is(err, playback.ErrAttemptStoppedV3) || (errors.As(err, &opErr) && opErr.Status == http.StatusNotFound) {
-			if record, getErr := h.PlanStoreV3.GetAttempt(ctx, sessionID); getErr == nil {
+			if record, getErr := h.PlanStoreV3.GetAttempt(ctx, sessionID); getErr == nil && attemptOwnedBy(record, caller) {
 				if ended := endedAttemptError(record); ended != nil {
 					return playback.DecisionResponseV3{}, ended
 				}
