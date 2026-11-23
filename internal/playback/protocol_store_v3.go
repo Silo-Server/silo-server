@@ -159,6 +159,11 @@ type AttemptRecordV3 struct {
 	// StopID is the stop_id the attempt was stopped under; empty while it is
 	// live. Server-minted ids tell who ended it (for example an administrator).
 	StopID string
+	// SampleAcceptedAt is when the row accepted LastSample, a progress report
+	// or a stop's final sample, by the accepting server's clock. Unlike
+	// LastSampleAt, no other write moves it. Zero when the row has no sample,
+	// or accepted it before this time was recorded.
+	SampleAcceptedAt time.Time
 	// LastSampleAt is when the row last accepted a progress sample or a stop.
 	// A replica reaping a stale local copy compares it with its own activity
 	// clock, since requests can land on other replicas.
@@ -309,6 +314,7 @@ func (s *MemoryPlanStoreV3) SaveAttempt(_ context.Context, record AttemptRecordV
 		return ErrPlaybackAttemptExistsV3
 	}
 	record.LastSequence, record.LastSample, record.StoppedAt, record.StopID = 0, nil, nil, ""
+	record.SampleAcceptedAt = time.Time{}
 	record.CreatedAt = now
 	s.attempts[record.PlaybackAttemptID] = record
 	return nil
@@ -438,6 +444,7 @@ func (s *MemoryPlanStoreV3) CompleteReplan(_ context.Context, sessionID, request
 	entry.response = append(json.RawMessage(nil), response...)
 	s.replans[key] = entry
 	record.LastSequence, record.LastSample, record.StoppedAt, record.StopID = existing.LastSequence, existing.LastSample, existing.StoppedAt, existing.StopID
+	record.SampleAcceptedAt = existing.SampleAcceptedAt
 	s.attempts[attemptID] = record
 	return nil
 }
@@ -510,6 +517,7 @@ func (s *MemoryPlanStoreV3) ApplyProgress(_ context.Context, sessionID string, s
 		applied := sample
 		record.LastSequence, record.LastSample = sample.Sequence, &applied
 		record.LastSampleAt = time.Now()
+		record.SampleAcceptedAt = record.LastSampleAt
 		s.attempts[attemptID] = *record
 		return ProgressReceiptV3{Outcome: ProgressAppliedV3, Accepted: &sample}, nil
 	}
@@ -550,11 +558,12 @@ func (s *MemoryPlanStoreV3) StopAttempt(_ context.Context, sessionID, stopID str
 		}
 		return receipt, false, nil
 	}
+	now := time.Now()
 	if final != nil && final.Sequence > record.LastSequence {
 		applied := *final
 		record.LastSequence, record.LastSample = final.Sequence, &applied
+		record.SampleAcceptedAt = now
 	}
-	now := time.Now()
 	record.StoppedAt = &now
 	record.StopID = stopID
 	record.LastSampleAt = now

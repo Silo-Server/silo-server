@@ -41,7 +41,7 @@ func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, ses
 	// updated this replica's live snapshot after the stop reached PostgreSQL.
 	if accepted != nil {
 		current.Position, current.IsPaused = accepted.Position, accepted.IsPaused
-		observeEndSample(current, time.Now())
+		observeEndSample(current, accepted.Position, accepted.IsPaused, time.Now())
 	}
 	return h.finalizeSessionStopWithResult(ctx, current, true, "stop", reason), nil
 }

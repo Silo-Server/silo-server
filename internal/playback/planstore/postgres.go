@@ -177,13 +177,14 @@ func (s *Postgres) getAttemptIdentity(ctx context.Context, predicate string, val
 func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) (*playback.AttemptRecordV3, error) {
 	var record playback.AttemptRecordV3
 	var planJSON, recipeJSON, requestJSON, responseJSON, sampleJSON, desiredJSON []byte
+	var sampleAcceptedAt *time.Time
 	err := s.db.QueryRow(ctx, `
 		SELECT playback_attempt_id, COALESCE(session_id::text, ''), user_id, profile_id,
 		       requested_media_file_id, effective_media_file_id,
 		       current_plan_id, current_replan_request_id, current_plan, frozen_recipe,
 		       normalized_request, start_response, request_digest, expires_at, server_bitrate_cap_kbps,
 		       last_sequence, last_sample, stopped_at, COALESCE(stop_receipt->>'stop_id', ''), updated_at,
-		       desired_tracks, created_at, login_session_id
+		       desired_tracks, created_at, login_session_id, sample_accepted_at
 		FROM playback_v3_attempts
 		WHERE `+predicate+` AND expires_at > NOW()`, value).Scan(
 		&record.PlaybackAttemptID, &record.SessionID, &record.UserID, &record.ProfileID,
@@ -191,7 +192,7 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 		&record.CurrentPlanID, &record.CurrentReplanRequestID, &planJSON, &recipeJSON,
 		&requestJSON, &responseJSON, &record.RequestDigest, &record.ExpiresAt, &record.ServerBitrateCapKbps,
 		&record.LastSequence, &sampleJSON, &record.StoppedAt, &record.StopID, &record.LastSampleAt,
-		&desiredJSON, &record.CreatedAt, &record.LoginSessionID,
+		&desiredJSON, &record.CreatedAt, &record.LoginSessionID, &sampleAcceptedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
@@ -201,6 +202,9 @@ func (s *Postgres) getAttempt(ctx context.Context, predicate string, value any) 
 	}
 	if record.LastSample, err = decodeProgressSample(sampleJSON); err != nil {
 		return nil, err
+	}
+	if sampleAcceptedAt != nil {
+		record.SampleAcceptedAt = *sampleAcceptedAt
 	}
 	if len(desiredJSON) > 0 {
 		record.DesiredTracks = &playback.DesiredTracksV3{}
@@ -440,9 +444,9 @@ func (s *Postgres) ApplyProgress(ctx context.Context, sessionID string, sample p
 	defer func() { _ = tx.Rollback(ctx) }()
 	result, err := tx.Exec(ctx, `
 		UPDATE playback_v3_attempts
-		SET last_sequence = $2, last_sample = $3, updated_at = NOW()
+		SET last_sequence = $2, last_sample = $3, sample_accepted_at = $4, updated_at = NOW()
 		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL AND last_sequence < $2`,
-		sessionID, sample.Sequence, sampleJSON)
+		sessionID, sample.Sequence, sampleJSON, time.Now())
 	if err != nil {
 		return playback.ProgressReceiptV3{}, err
 	}
@@ -517,12 +521,13 @@ func (s *Postgres) StopAttempt(ctx context.Context, sessionID, stopID string, fi
 		    stop_id = $2::uuid,
 		    last_sequence = CASE WHEN $3::bigint > last_sequence THEN $3::bigint ELSE last_sequence END,
 		    last_sample = CASE WHEN $3::bigint > last_sequence THEN $4::jsonb ELSE last_sample END,
+		    sample_accepted_at = CASE WHEN $3::bigint > last_sequence THEN $5::timestamptz ELSE sample_accepted_at END,
 		    stop_receipt = jsonb_strip_nulls(jsonb_build_object(
 		        'stop_id', $2::uuid::text,
 		        'accepted', CASE WHEN $3::bigint > last_sequence THEN $4::jsonb ELSE last_sample END)),
 		    updated_at = NOW()
 		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL
-		RETURNING stop_receipt`, sessionID, stopID, finalSequence, finalJSON).Scan(&receiptJSON)
+		RETURNING stop_receipt`, sessionID, stopID, finalSequence, finalJSON, time.Now()).Scan(&receiptJSON)
 	if err == nil {
 		var receipt playback.StopReceiptV3
 		if err := json.Unmarshal(receiptJSON, &receipt); err != nil {

@@ -1711,7 +1711,7 @@ func (h *PlaybackHandler) handleFinishedSession(ctx context.Context, session *pl
 		if reported {
 			// The end's own report (a Jellyfin Stopped report, or the
 			// sample an abort settled on) reached no copy that measures.
-			observeEndSample(session, time.Now())
+			observeEndSample(session, session.Position, session.IsPaused, time.Now())
 		}
 	}
 	h.recordStopHistory(ctx, session, reason)
@@ -1815,14 +1815,15 @@ func ReconstructedWatchRestorer(store *PGPlaybackAdminStore) func(context.Contex
 	}
 }
 
-// observeEndSample measures the final sample an end recorded from outside
-// the live copy: the copy, if any, never saw it. A sample from before the
-// measurement's latest one is left out.
-func observeEndSample(session *playback.Session, now time.Time) {
-	if session.Watch.Measured && !now.After(session.Watch.Until) {
+// observeEndSample measures a sample an end recorded from outside the live
+// copy, which the copy, if any, never saw: the player was at position, paused
+// or not, at the time at. A sample from before the measurement's latest one
+// is left out.
+func observeEndSample(session *playback.Session, position float64, paused bool, at time.Time) {
+	if session.Watch.Measured && !at.After(session.Watch.Until) {
 		return
 	}
-	session.Watch.Observe(session.Position, session.IsPaused, now)
+	session.Watch.Observe(position, paused, at)
 }
 
 type endWatchKey struct{}
