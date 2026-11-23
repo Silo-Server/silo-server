@@ -97,12 +97,14 @@ function signedInAs(id: number, profileId = "p1"): void {
  */
 function effectiveAnswer(values: Record<string, { value: unknown; source?: string }>): {
   data: Record<string, { key: string; value: unknown; source: string }>;
+  fetchStatus: "idle";
 } {
   const data: Record<string, { key: string; value: unknown; source: string }> = {};
   for (const [key, entry] of Object.entries(values)) {
     data[key] = { key, value: entry.value, source: entry.source ?? "profile" };
   }
-  return { data };
+  // A settled read, as the query reports once it has an answer.
+  return { data, fetchStatus: "idle" };
 }
 
 function expectDefaults(captured: Captured): void {
@@ -374,12 +376,18 @@ describe("appearance cache ownership", () => {
     },
   );
 
-  // When the re-read fails too, the cached answer is no newer than the change,
-  // which may have been stored: the page waits for a read that succeeds.
-  it("waits for a successful settings read before showing the server's value", async () => {
+  // When the re-read fails too, or is paused offline, the cached answer is no
+  // newer than the change, which may have been stored: the page waits for a
+  // read that succeeds.
+  it.each([
+    ["fails", { isError: true, fetchStatus: "idle" }],
+    ["is paused", { isError: false, fetchStatus: "paused" }],
+  ])("waits for a successful read when the re-read %s", async (_label, reread) => {
     signedInAs(1);
     const answer = effectiveAnswer({ [SETTING_KEYS.UI_TEXT_SCALE]: { value: "large" } });
-    mocks.useEffectiveSettings.mockReturnValue({ ...answer, isError: true });
+    const read = (state: object) =>
+      mocks.useEffectiveSettings.mockReturnValue({ ...answer, ...state });
+    read({ isError: false, fetchStatus: "idle" });
     let failSave: (error: unknown) => void = () => {};
     mocks.mutate.mockReturnValue(new Promise((_resolve, reject) => (failSave = reject)));
     const view = renderAppearance();
@@ -387,12 +395,14 @@ describe("appearance cache ownership", () => {
     act(() => {
       view.captured.setTextScale("x-large");
     });
+    // The save settles once its re-read has failed or paused.
+    read(reread);
     await act(async () => failSave(v2Problem(502, "bad_gateway", "Bad gateway")));
     expect(document.documentElement.getAttribute("data-text-scale")).toBe("x-large");
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe("x-large");
 
     // A later read succeeds with the same answer.
-    mocks.useEffectiveSettings.mockReturnValue({ ...answer, isError: false });
+    read({ isError: false, fetchStatus: "idle" });
     act(() => {
       view.rerender();
     });

@@ -142,16 +142,16 @@ describe("useShowThenSave after an online failure", () => {
 
   // Picks each `key` (or `owner:key`, switching to that cache owner first) in
   // turn, then runs each step: [i, outcome] settles the i-th pick's save with
-  // outcome (an Error rejects); "read failed" and "read ok" say how the
+  // outcome (an Error rejects); "read unsettled" and "read ok" say how the
   // settings read last went. Returns how often a reconcile had run after each
   // step.
   async function reconcilesAcross(
     picks: string[],
-    steps: Array<[number, unknown] | "read failed" | "read ok">,
+    steps: Array<[number, unknown] | "read unsettled" | "read ok">,
   ) {
     const { result, rerender } = renderHook(
-      ({ owner, readFailed }) => useShowThenSave(owner, readFailed),
-      { initialProps: { owner: null as string | null, readFailed: false } },
+      ({ owner, readUnsettled }) => useShowThenSave(owner, readUnsettled),
+      { initialProps: { owner: null as string | null, readUnsettled: false } },
     );
     let owner: string | null = null;
     const settles: Array<(outcome: unknown) => void> = [];
@@ -159,7 +159,7 @@ describe("useShowThenSave after an online failure", () => {
     for (const pick of picks) {
       const [pickOwner, key] = pick.includes(":") ? pick.split(":") : [null, pick];
       owner = pickOwner ?? null;
-      rerender({ owner, readFailed: false });
+      rerender({ owner, readUnsettled: false });
       result.current({
         key: key!,
         value: "picked",
@@ -177,7 +177,7 @@ describe("useShowThenSave after an online failure", () => {
     const after: number[] = [];
     for (const step of steps) {
       await act(async () => {
-        if (typeof step === "string") rerender({ owner, readFailed: step === "read failed" });
+        if (typeof step === "string") rerender({ owner, readUnsettled: step === "read unsettled" });
         else settles[step[0]]!(step[1]);
         await settled();
       });
@@ -235,7 +235,7 @@ describe("useShowThenSave after an online failure", () => {
   // save started meanwhile.
   it("waits for a failed settings read to succeed", async () => {
     expect(
-      await reconcilesAcross(["ui.text_scale"], ["read failed", [0, problem(502)], "read ok"]),
+      await reconcilesAcross(["ui.text_scale"], ["read unsettled", [0, problem(502)], "read ok"]),
     ).toEqual([0, 0, 1]);
   });
 
@@ -243,7 +243,7 @@ describe("useShowThenSave after an online failure", () => {
     expect(
       await reconcilesAcross(
         ["ui.text_scale", "ui.text_weight"],
-        ["read failed", [0, problem(502)], "read ok", [1, "saved"]],
+        ["read unsettled", [0, problem(502)], "read ok", [1, "saved"]],
       ),
     ).toEqual([0, 0, 0, 1]);
   });

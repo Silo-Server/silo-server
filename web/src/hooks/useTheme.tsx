@@ -114,7 +114,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // that must stay distinguishable from an explicit choice so the local warm
   // start keeps its layering, so those values are dropped here rather than
   // treated as the profile's preference.
-  const { data: effectiveSettings, isError: settingsReadFailed } = useEffectiveSettings({
+  const {
+    data: effectiveSettings,
+    isError: settingsReadFailed,
+    fetchStatus: settingsFetchStatus,
+  } = useEffectiveSettings({
     keys: APPEARANCE_KEYS,
     enabled: loadApi,
   });
@@ -242,7 +246,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => query.removeEventListener("change", onChange);
   }, [cacheOwner]);
 
-  const showThenSave = useShowThenSave(cacheOwner, settingsReadFailed);
+  const showThenSave = useShowThenSave(
+    cacheOwner,
+    settingsReadFailed || settingsFetchStatus !== "idle",
+  );
 
   const setTextScale = useCallback(
     (value: TextScale) =>

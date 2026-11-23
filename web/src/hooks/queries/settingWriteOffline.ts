@@ -99,7 +99,7 @@ interface ShownChange<T> {
    * failed in a way that may have stored it, once no save made through this
    * hook is still pending (so after the settings re-read the failure
    * triggers, and without putting back another preference that is still
-   * saving) and the settings read last succeeded. That re-read can return
+   * saving) and the settings read has last succeeded. That re-read can return
    * what the caller already had, so its own sync from the stored value won't
    * run.
    */
@@ -131,12 +131,14 @@ interface UnsettledPreference {
  * change failed in a way that may have saved, `reconcile` shows what the
  * server holds instead.
  *
- * `readFailed` is whether the caller's settings read last failed. A reconcile
- * waits for it to succeed: when the re-read after the failure failed too, its
- * cached answer is no newer than the change, which may have been stored, so it
- * must not replace that change on screen or in the cache.
+ * `readUnsettled` is whether the caller's settings read last failed or is
+ * still running or paused. A reconcile waits for it to succeed: when the
+ * re-read after the failure failed too, or was paused offline (which settles
+ * the save without it), its cached answer is no newer than the change, which
+ * may have been stored, so it must not replace that change on screen or in
+ * the cache.
  */
-export function useShowThenSave(cacheOwner: string | null, readFailed = false) {
+export function useShowThenSave(cacheOwner: string | null, readUnsettled = false) {
   const unsettled = useRef(new Map<string, UnsettledPreference>());
   // Per owner, the reconcile owed for a change that may have saved, run once
   // nothing is saving: a caller reconciles every preference it shows at once.
@@ -147,17 +149,17 @@ export function useShowThenSave(cacheOwner: string | null, readFailed = false) {
   useLayoutEffect(() => {
     currentOwner.current = cacheOwner;
   }, [cacheOwner]);
-  // Checked after a render, so `readFailed` reflects the read that a failed
-  // save waited for.
+  // Checked after a render, so `readUnsettled` reflects the read that a
+  // failed save waited for.
   const [settleChecks, checkOwedReconcile] = useReducer((count: number) => count + 1, 0);
   useEffect(() => {
-    if (readFailed || unsettled.current.size > 0) return;
+    if (readUnsettled || unsettled.current.size > 0) return;
     // Only the owner showing now, which may not own the save that settled
     // last; another owner's namespace is refreshed on its next load.
     const owed = owedReconciles.current.get(currentOwner.current);
     owedReconciles.current.clear();
     owed?.();
-  }, [settleChecks, readFailed]);
+  }, [settleChecks, readUnsettled]);
   return useCallback(
     <T>({
       key,
