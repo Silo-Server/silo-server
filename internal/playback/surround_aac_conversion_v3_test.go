@@ -59,24 +59,6 @@ func TestPlanPlaybackV3AudioConvertingRemuxKeepsSurround(t *testing.T) {
 	}
 }
 
-// The AFTKRT E-AC-3 correction's device stays on stereo when the conversion
-// has another cause, such as a client that doesn't claim E-AC-3.
-func TestAFTKRTEAC3WithoutEAC3ClaimStaysStereo(t *testing.T) {
-	input := bitratePolicyFixtureV3()
-	input.Request.ClientFeatures = append(input.Request.ClientFeatures, FeatureDeviceQuirksV3)
-	input.Request.ClientPlaybackContext.Device = quirkRequestV3().ClientPlaybackContext.Device
-	delete(input.Request.ClientPlaybackContext.Deliveries, DeliveryClassOriginalHTTPV3)
-	delete(input.Request.ClientPlaybackContext.Deliveries, DeliveryClassProgressiveV3)
-	input.EffectiveFile.CodecAudio, input.EffectiveFile.AudioChannels = "eac3", 8
-	input.EffectiveFile.AudioTracks[0].Codec, input.EffectiveFile.AudioTracks[0].Channels, input.EffectiveFile.AudioTracks[0].Layout = "eac3", 8, "7.1"
-
-	result := PlanPlaybackV3(input)
-	if result.Plan == nil || result.Plan.Delivery != DeliveryRemuxHLSV3 || !result.TranscodeAudio {
-		t.Fatalf("expected an audio-converting HLS remux: %s", ExplainPlannerResultV3(result))
-	}
-	assertAACChannelsV3(t, result, 2)
-}
-
 func assertAACChannelsV3(t *testing.T, result PlannerResultV3, channels int) {
 	t.Helper()
 	if result.TargetAudioChannels != channels || optionalValueV3(result.Plan.EffectiveRecipe.AudioChannels) != channels {

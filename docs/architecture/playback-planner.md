@@ -43,9 +43,11 @@ Each one is commented where it is implemented.
 - **The HLS remux lacks AAC.** When an HLS copy remux needed AAC that no HLS
   remux executor offers and no other copy route played, planning refuses
   (retryable) instead of encoding.
-- **Audio-converting remux under a server cap.** The converted remux may not
-  fit the cap, so an encode follows with its own decision reason, and without
-  HLS it refuses `client_hls_unsupported`.
+- **Audio-converting remux under a server cap.** The conversion keeps a
+  surround source at 5.1 within the delivery's ceiling, and drops to stereo
+  when only stereo fits the cap. A remux that fits neither way gives way to an
+  encode with its own decision reason, and without HLS it refuses
+  `client_hls_unsupported`.
 - **Failed HEVC encode.** Once the HEVC sidecar plan is attempted, every HEVC
   candidate is dropped and the H.264 encode follows.
 - **Audio-only remux.** It has one audio recipe, fixed by the facts, so once it

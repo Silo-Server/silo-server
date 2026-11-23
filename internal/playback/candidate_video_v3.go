@@ -250,23 +250,21 @@ func (p *candidatePlannerV3) remuxAudioFacts() {
 	// A conversion keeps surround within the delivery's ceiling, like the
 	// full transcode, and falls back to stereo when 5.1 alone would push the
 	// copy over the server's bitrate cap.
-	remuxAACChannels := func(deliveryClass string, preserveSurround bool) int {
-		channels := aacOutputChannelsV3(request, deliveryClass, source.AudioChannels, preserveSurround)
+	remuxAACChannels := func(deliveryClass string) int {
+		channels := aacOutputChannelsV3(request, deliveryClass, source.AudioChannels, true)
 		if channels > 2 && !audioRemuxFitsServerCapV3(p.input, p.file, channels) && audioRemuxFitsServerCapV3(p.input, p.file, 2) {
 			return 2
 		}
 		return channels
 	}
 	if a.progressiveConverts {
-		a.progressiveAACChannels = remuxAACChannels(DeliveryClassProgressiveV3, true)
+		a.progressiveAACChannels = remuxAACChannels(DeliveryClassProgressiveV3)
 	}
 	switch {
 	case a.hlsQuirkConverts:
 		a.hlsAACChannels = aacOutputChannelsV3(request, DeliveryClassHLSV3, source.AudioChannels, false)
 	case a.hlsTranscode:
-		// The quirk's device stays on its stereo recipe when the conversion
-		// has another cause.
-		a.hlsAACChannels = remuxAACChannels(DeliveryClassHLSV3, a.hlsQuirk == nil)
+		a.hlsAACChannels = remuxAACChannels(DeliveryClassHLSV3)
 	}
 }
 
