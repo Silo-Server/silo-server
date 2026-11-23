@@ -11,6 +11,8 @@ import (
 	"image/jpeg"
 	"image/png"
 	"testing"
+
+	"github.com/h2non/bimg"
 )
 
 // largeTestJPEG encodes a width×height gradient so the bytes are a real,
@@ -75,4 +77,23 @@ func withPNGDimensions(t *testing.T, data []byte, width, height uint32) []byte {
 	binary.BigEndian.PutUint32(out[ihdr+8:], height)
 	binary.BigEndian.PutUint32(out[ihdr+4+13:], crc32.ChecksumIEEE(out[ihdr:ihdr+4+13]))
 	return out
+}
+
+// TMDB serves logos as SVGs whose canvas is a few dozen units wide. Drawn at
+// that canvas, every rung of a logo was a 54px image.
+func TestRasterizeDrawsSVGAtTheCachedOriginalSize(t *testing.T) {
+	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 53.921 24"><rect width="53.921" height="24" fill="#f64312"/></svg>`)
+	rasterized, err := Rasterize(svg)
+	if err != nil {
+		t.Fatalf("Rasterize: %v", err)
+	}
+	size, err := bimg.NewImage(rasterized).Size()
+	if err != nil {
+		t.Fatalf("Size: %v", err)
+	}
+	// The declared size bimg reports is whole pixels (54x24), so the longest
+	// edge lands just short of the cap.
+	if size.Width < 3800 || size.Width > MaxCachedOriginalDimension || size.Height < 1690 || size.Height > 1710 {
+		t.Fatalf("rasterized to %dx%d, want about %dx1707", size.Width, size.Height, MaxCachedOriginalDimension)
+	}
 }
