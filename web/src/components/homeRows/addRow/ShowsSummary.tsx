@@ -42,7 +42,7 @@ export function ShowsSummary({
         </span>
         <span className="min-w-0 flex-1">
           <span className="block truncate text-sm font-semibold">{label}</span>
-          <span className="text-muted-foreground block truncate text-[13px]">{sentence}</span>
+          <span className="text-muted-foreground block truncate text-[0.8125rem]">{sentence}</span>
         </span>
         {onChange ? (
           <Button
@@ -57,7 +57,9 @@ export function ShowsSummary({
         ) : null}
       </div>
       {origin === "server" && !onChange ? (
-        <p className="text-muted-foreground text-[13px]">{t("web.home.addRow.shows.serverNote")}</p>
+        <p className="text-muted-foreground text-[0.8125rem]">
+          {t("web.home.addRow.shows.serverNote")}
+        </p>
       ) : null}
     </div>
   );

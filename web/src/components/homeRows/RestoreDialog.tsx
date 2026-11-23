@@ -101,10 +101,10 @@ function OptionRow({
         <Label htmlFor={id} className="text-sm font-medium">
           {label}
         </Label>
-        <p id={`${id}-help`} className="text-muted-foreground mt-1 text-[13px]">
+        <p id={`${id}-help`} className="text-muted-foreground mt-1 text-[0.8125rem]">
           {help}
         </p>
-        {note ? <p className="text-muted-foreground mt-1 text-[13px]">{note}</p> : null}
+        {note ? <p className="text-muted-foreground mt-1 text-[0.8125rem]">{note}</p> : null}
       </div>
       <Switch
         id={id}
@@ -238,7 +238,7 @@ export function RestoreDialog({
           </div>
         ) : null}
         <DialogFooter className="items-center sm:justify-between">
-          <p className="text-muted-foreground text-[13px]">{t("web.home.rows.cantUndo")}</p>
+          <p className="text-muted-foreground text-[0.8125rem]">{t("web.home.rows.cantUndo")}</p>
           <div className="flex gap-2">
             <Button variant="outline" disabled={busy} onClick={() => onOpenChange(false)}>
               {t("common.cancel")}

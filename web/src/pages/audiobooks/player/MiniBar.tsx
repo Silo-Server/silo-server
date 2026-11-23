@@ -83,7 +83,7 @@ export function MiniBar({
           <div className="flex min-w-0 flex-col gap-0.5">
             {title ? (
               <div
-                className="truncate text-[14px] leading-tight font-semibold tracking-tight sm:text-[15px]"
+                className="truncate text-[0.875rem] leading-tight font-semibold tracking-tight sm:text-[0.9375rem]"
                 title={title}
               >
                 {title}
@@ -92,16 +92,16 @@ export function MiniBar({
             {playback.currentChapter ? (
               <div
                 data-testid="minibar-chapter-title"
-                className="text-muted-foreground truncate text-[11px] leading-tight"
+                className="text-muted-foreground truncate text-[0.6875rem] leading-tight"
                 title={playback.currentChapter.title}
               >
                 {playback.currentChapter.title}
               </div>
             ) : null}
-            <div className="text-muted-foreground flex items-center gap-2 text-[10px] leading-tight uppercase">
+            <div className="text-muted-foreground flex items-center gap-2 text-[0.625rem] leading-tight uppercase">
               <span
                 dir="ltr"
-                className="font-mono text-[11px] tracking-[0.12em] normal-case tabular-nums"
+                className="font-mono text-[0.6875rem] tracking-[0.12em] normal-case tabular-nums"
               >
                 {formatTime(playback.currentTime)}
                 <span className="mx-1 opacity-50">{TIME_SEPARATOR}</span>

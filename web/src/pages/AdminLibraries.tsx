@@ -415,7 +415,7 @@ function LibrariesPage() {
         >
           <TabsTrigger value="libraries" className="flex-none shrink-0 gap-2 max-lg:h-11">
             {t("web.admin.libraries.tabs.libraries")}
-            <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums">
+            <span className="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-[0.6875rem] font-medium tabular-nums">
               {numberText(rows.length)}
             </span>
           </TabsTrigger>
@@ -429,7 +429,7 @@ function LibrariesPage() {
             {totalActiveWork > 0 ? (
               <span
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums",
+                  "inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[0.6875rem] font-medium tabular-nums",
                   hasRunningWork
                     ? "bg-success/15 text-success"
                     : "bg-secondary text-secondary-foreground",
@@ -446,7 +446,7 @@ function LibrariesPage() {
           <TabsTrigger value="health" className="flex-none shrink-0 gap-2 max-lg:h-11">
             {t("web.admin.libraries.tabs.health")}
             {catalogHealthBadgeCount !== undefined && catalogHealthBadgeCount > 0 ? (
-              <span className="bg-warning/15 text-warning rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums">
+              <span className="bg-warning/15 text-warning rounded-full px-2 py-0.5 text-[0.6875rem] font-medium tabular-nums">
                 {numberText(catalogHealthBadgeCount)}
               </span>
             ) : null}
@@ -620,7 +620,7 @@ function LibraryTable({
                                 onClick={row.editFolders}
                               >
                                 {singlePath !== undefined ? (
-                                  <span dir="ltr" className="font-mono text-[11px]">
+                                  <span dir="ltr" className="font-mono text-[0.6875rem]">
                                     <PathText path={singlePath} />
                                   </span>
                                 ) : (

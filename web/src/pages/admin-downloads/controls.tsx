@@ -71,7 +71,7 @@ export function TabCount({ count }: { count: number }) {
   const t = useT();
   return (
     <span
-      className={`rounded-md px-1.5 py-0.5 text-[10px] leading-none font-bold tabular-nums ${
+      className={`rounded-md px-1.5 py-0.5 text-[0.625rem] leading-none font-bold tabular-nums ${
         count > 0 ? "bg-primary/10 text-primary" : "bg-surface text-muted-foreground"
       }`}
     >

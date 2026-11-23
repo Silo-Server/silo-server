@@ -35,7 +35,7 @@ export function ServerResourcesWidget() {
         {sampledLabel ? (
           <span
             className={cn(
-              "text-[11px]",
+              "text-[0.6875rem]",
               sample.kind === "sampled" && sample.stale ? "text-warning" : "text-muted-foreground",
             )}
           >
@@ -99,7 +99,7 @@ function SampledResources({
       </div>
       {/* Every footer reading comes from attribution, which an older server omits. */}
       {sample.processMemory ? (
-        <div className="border-border/60 text-muted-foreground mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t pt-2 text-[11px]">
+        <div className="border-border/60 text-muted-foreground mt-3 flex flex-wrap gap-x-4 gap-y-1 border-t pt-2 text-[0.6875rem]">
           <ResourceFootnote
             label={t("web.admin.dashboard.widgets.serverResources.siloProcess")}
             metric={sample.processMemory}

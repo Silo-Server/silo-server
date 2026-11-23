@@ -91,7 +91,7 @@ function SuggestionRow({
             <span className="text-muted-foreground truncate text-xs">{suggestion.subtitle}</span>
           ) : null}
           {showVotes && rank === 0 && suggestion.vote_count > 0 ? (
-            <span className="rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-amber-300 uppercase">
+            <span className="rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[0.625rem] font-semibold tracking-wide text-amber-300 uppercase">
               {t("web.watchTogether.suggestions.leading")}
             </span>
           ) : null}

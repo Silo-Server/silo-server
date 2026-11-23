@@ -237,7 +237,7 @@ function NewListContents({
           </TabsContent>
         </Tabs>
       ) : capabilities ? (
-        <p className="bg-muted/60 flex items-start gap-2.5 rounded-xl px-3 py-2.5 text-[13px]">
+        <p className="bg-muted/60 flex items-start gap-2.5 rounded-xl px-3 py-2.5 text-[0.8125rem]">
           <Info aria-hidden className="text-muted-foreground mt-0.5 size-4 shrink-0" />
           {syncedOff()}
         </p>
@@ -311,7 +311,7 @@ function ListSettings({
           onChange={(libraryIds) => onChange((current) => ({ ...current, libraryIds }))}
           warning={
             librariesNote ? (
-              <p className="text-muted-foreground text-[13px]">{librariesNote}</p>
+              <p className="text-muted-foreground text-[0.8125rem]">{librariesNote}</p>
             ) : null
           }
         />
@@ -327,7 +327,7 @@ function ListSettings({
       />
 
       <section aria-labelledby={`${id}-sync`} className="border-border/70 grid gap-3 border-t pt-4">
-        <h3 id={`${id}-sync`} className="text-[14.5px] font-semibold">
+        <h3 id={`${id}-sync`} className="text-[0.90625rem] font-semibold">
           {t("web.collections.syncedList.syncHeading")}
         </h3>
         {isServer ? (
@@ -347,7 +347,7 @@ function ListSettings({
           />
         )}
         {scheduleLockedReason ? (
-          <p className="text-muted-foreground flex items-center gap-1.5 text-[13px]">
+          <p className="text-muted-foreground flex items-center gap-1.5 text-[0.8125rem]">
             <Lock aria-hidden className="size-3.5 shrink-0" />
             {scheduleLockedReason}
           </p>
@@ -502,10 +502,10 @@ function FixedSource({ list }: { list: ListDraft }) {
         })
       : syncedSourceLabel(list.source);
   return (
-    <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[13.5px]">
+    <div className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-[0.84375rem]">
       <span className="text-muted-foreground">{t("web.collections.syncedList.follows")}</span>
       <span className="font-medium">{what}</span>
-      <span className="text-muted-foreground flex items-center gap-1 text-[12.5px]">
+      <span className="text-muted-foreground flex items-center gap-1 text-[0.78125rem]">
         <Lock aria-hidden className="size-3.5" />
         {chartSetWhenMade()}
       </span>
@@ -570,14 +570,14 @@ function WhoDecides({ scheduleEditable }: { scheduleEditable: boolean }) {
         <div key={key} className="bg-accent/55 rounded-xl px-3.5 py-3">
           <p
             id={`${id}-${key}`}
-            className="mb-1.5 flex items-center gap-2 text-[13px] font-semibold"
+            className="mb-1.5 flex items-center gap-2 text-[0.8125rem] font-semibold"
           >
             <Icon aria-hidden className="text-muted-foreground size-3.5" />
             {title}
           </p>
           <ul
             aria-labelledby={`${id}-${key}`}
-            className="text-muted-foreground grid gap-0.5 text-[12.5px]"
+            className="text-muted-foreground grid gap-0.5 text-[0.78125rem]"
           >
             {items.map((item) => (
               <li key={item}>{item}</li>
@@ -724,10 +724,10 @@ export function SyncedListPanel(props: SyncedListPanelProps) {
       className="surface-panel grid content-start gap-5 rounded-[22px] p-5 sm:p-6"
     >
       <div>
-        <h2 id={`${id}-heading`} className="text-[17px] font-semibold">
+        <h2 id={`${id}-heading`} className="text-[1.0625rem] font-semibold">
           {syncedHeading()}
         </h2>
-        <p className="text-muted-foreground mt-1 text-[13.5px]">{syncedCaption()}</p>
+        <p className="text-muted-foreground mt-1 text-[0.84375rem]">{syncedCaption()}</p>
       </div>
       {props.saved ? <SavedListContents {...props} /> : <NewListContents {...props} />}
     </section>

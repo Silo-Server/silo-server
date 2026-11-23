@@ -296,7 +296,7 @@ export default function MatchItemDialog({
                 {t("web.item.dialog.yearInParens", { year: item.year })}
               </span>
             ) : null}
-            <Badge variant="secondary" className="ms-2 text-[10px]">
+            <Badge variant="secondary" className="ms-2 text-[0.625rem]">
               {item.type}
             </Badge>
           </div>
@@ -530,19 +530,19 @@ export default function MatchItemDialog({
                           </div>
                           <div className="mt-1 flex min-w-0 flex-wrap gap-1">
                             {candidate.match_score !== undefined ? (
-                              <Badge variant="secondary" className="text-[10px] tabular-nums">
+                              <Badge variant="secondary" className="text-[0.625rem] tabular-nums">
                                 {t("web.item.match.score", {
                                   score: formatDecimal(candidate.match_score, 1),
                                 })}
                               </Badge>
                             ) : null}
                             {candidate.sources.map((source) => (
-                              <Badge key={source} variant="outline" className="text-[10px]">
+                              <Badge key={source} variant="outline" className="text-[0.625rem]">
                                 {source}
                               </Badge>
                             ))}
                             {candidate.sources.length > 1 && (
-                              <Badge variant="secondary" className="text-[10px]">
+                              <Badge variant="secondary" className="text-[0.625rem]">
                                 {t("web.item.match.sourcesAgree", {
                                   count: candidate.sources.length,
                                 })}
@@ -656,7 +656,7 @@ function FolderPathsList({ paths }: { paths: string[] }) {
       <div className="bg-background/70 rounded-lg border">
         {folderData.rootPath ? (
           <div className="border-b px-3 py-2">
-            <div className="text-muted-foreground mb-1 text-[11px] font-medium tracking-[0.08em] uppercase">
+            <div className="text-muted-foreground mb-1 text-[0.6875rem] font-medium tracking-[0.08em] uppercase">
               {t("web.item.match.rootPath")}
             </div>
             <div className="flex items-center gap-2">
