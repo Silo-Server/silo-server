@@ -1013,8 +1013,9 @@
 
 # Recommendation ranking and rows: default rows, Popular floor, genre rows, picker
 # order, taste levels, per-interest anchors, quality prior, rubric leakage,
-# media types of personal rows, Because You Watched anchors per library, the
-# holdout evaluation's leakage checks and recall floor.
+# media types of personal rows, Because You Watched anchors per library,
+# Similar Users likes and peer ceilings, the holdout evaluation's leakage
+# checks and recall floor.
 ./internal/recommendations TestBecauseYouWatchedAnchorsEachLibraryOnItsOwnWatchesPostgres
 ./internal/recommendations TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres
 ./internal/recommendations TestCandidateQualityRatingsPostgres
@@ -1039,6 +1040,7 @@
 ./internal/recommendations TestRelevanceRubricNewProfileGetsRowsPostgres
 ./internal/recommendations TestRelevanceRubricProfilesOnOneAccountDifferPostgres
 ./internal/recommendations TestSimilarItemsValidateEveryCandidatePostgres
+./internal/recommendations TestSimilarUsersReadsEveryLikePostgres
 ./internal/recommendations TestTasteProfileSummaryGenresComeFromTheClustersPostgres
 ./internal/recommendations TestTasteSeedPickerInterleavesGenresPostgres
 ./internal/recommendations TestTopGenresRankByCrowdThenCatalogPostgres

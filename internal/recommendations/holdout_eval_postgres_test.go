@@ -719,9 +719,12 @@ func (*statementLog) TraceBatchEnd(context.Context, *pgx.Conn, pgx.TraceBatchEnd
 // evaluation's focused persona sends. The candidate scans of the main row's
 // anchors, the cluster rows, the type supplements and Because You Watched
 // return the details ranking reads (embedding, media type, added date and
-// quality rating); reading them per pool instead cost 31 statements more. A
-// deliberate change must update this budget and its comment together.
-const evalFocusedRefreshStatements = 114
+// quality rating); reading them per pool instead cost 31 statements more.
+// Similar Users reads each peer's liked ratings with one filtered query and
+// keeps only its movie and series favorites, which costs one type check per
+// peer (6 for this persona). A deliberate change must update this budget and
+// its comment together.
+const evalFocusedRefreshStatements = 119
 
 // A profile refresh sends evalFocusedRefreshStatements statements for the
 // evaluation's focused persona. Its rows are the evaluation's, the same on

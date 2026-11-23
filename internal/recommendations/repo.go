@@ -1205,7 +1205,10 @@ func (r *Repo) GetTasteProfile(ctx context.Context, userID int, profileID string
 }
 
 // FindSimilarUsers returns users with taste profiles similar to the given user's
-// profile, filtered by max_content_rating compatibility.
+// profile. maxContentRating is the ceiling the peers are matched under (see
+// peerCeiling): with one, only peers whose stored max_content_rating, the
+// highest rating among the titles they took to, is empty or within it are
+// returned; with none, any peer is.
 func (r *Repo) FindSimilarUsers(ctx context.Context, userID int, profileID string, maxContentRating string, limit int) ([]UserSimilarity, error) {
 	embedding, err := r.GetTasteProfile(ctx, userID, profileID)
 	if err != nil {
