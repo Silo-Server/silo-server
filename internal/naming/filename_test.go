@@ -516,6 +516,21 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: true,
 		},
 		{
+			// Nor is a configured library folder ending in a bare IMDb id.
+			name:                    "season folder in a library folder with a bare IMDb id keeps its own root",
+			path:                    "/tv/Library tt4565380/Fauda - S02/E01.mkv",
+			libraryRoots:            []string{"/tv/Library tt4565380"},
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/Library tt4565380/Fauda - S02",
+			wantTitle:               "Fauda",
+			wantSeason:              2,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
 			// A tagged configured library folder is not a parent show folder.
 			name:                    "season folder in a tagged library folder keeps its own root",
 			path:                    "/tv/فوضى - 2015 {tmdb-227604}/Fauda - S02/E01.mkv",

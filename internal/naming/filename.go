@@ -371,9 +371,10 @@ func deriveSeriesRoot(filePath, fileTitle string, hasEpisodePattern bool, forceP
 		topLevel := inLibraryFolder && mayBeShowFolder(segment, fileStem)
 		parent := path.Base(path.Dir(current))
 		if inLibraryFolder {
-			// A library folder's provider tags do not make every titled
-			// release folder in it a season; a matching title still does.
-			parent = stripFolderTags(parent)
+			// A library folder's provider tags, bare IMDb id included, do not
+			// make every titled release folder in it a season; a matching
+			// title still does.
+			parent = strings.TrimSpace(trailingImdbIDPattern.ReplaceAllString(stripFolderTags(parent), ""))
 		}
 		_, isSeason := seasonDirectoryNumber(segment, parent, allowNumeric, topLevel)
 		// A bare "Season" folder only marks the season level when it holds the
