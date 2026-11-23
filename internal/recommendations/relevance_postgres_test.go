@@ -41,6 +41,11 @@ func newRelevanceFixture(t *testing.T, name string) *relevanceFixture {
 	pool := newEngineTestPool(t)
 	prefix := "trel-" + name + "-" + uuid.NewString()[:8] + "-"
 	cleanupRecoMediaItems(t, pool, prefix)
+	return relevanceFixtureOn(pool, prefix)
+}
+
+// relevanceFixtureOn is the fixture over pool, its titles under prefix.
+func relevanceFixtureOn(pool *pgxpool.Pool, prefix string) *relevanceFixture {
 	store := pgstore.NewPostgresProvider(pool)
 	ratings := catalog.NewRatingsRepo(pool)
 	engine := NewEngine(pool, ratings, catalog.NewItemRepository(pool), nil, store, config.RecommendationsConfig{DiversityLambda: 0.7})
@@ -501,7 +506,7 @@ func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
 		t.Fatalf("candidates = %d and %d, want 10 movies each", len(nearest), len(clustered))
 	}
 	for _, mediaType := range []string{"audiobook", "ebook"} {
-		extra, _, err := f.repo.FindTasteProfileCandidatesByMediaType(ctx, axisVector(axis, nil), nil, nil, 10, filter, mediaType)
+		extra, _, err := f.repo.FindTasteProfileCandidatesWithDetails(ctx, axisVector(axis, nil), nil, nil, 10, filter, mediaType)
 		if err != nil {
 			t.Fatal(err)
 		}

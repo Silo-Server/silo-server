@@ -84,10 +84,11 @@ func TestPresentMediaTypesPostgres(t *testing.T) {
 	check("no library allowed", catalog.AccessFilter{AllowedLibraryIDs: []int{}})
 }
 
-// The quality rating of a notable title is IMDb's, else TMDB's below 9.5; a
-// title with neither has none. TestCatalogRankLeadsWithNotableTrustedRatingsPostgres
-// covers the notability gate.
-func TestGetItemQualityRatingsPostgres(t *testing.T) {
+// The quality rating a candidate's details carry for a notable title is
+// IMDb's, else TMDB's below 9.5; a title with neither has none.
+// TestCatalogRankLeadsWithNotableTrustedRatingsPostgres covers the
+// notability gate.
+func TestCandidateQualityRatingsPostgres(t *testing.T) {
 	pool := newEngineTestPool(t)
 	ctx := t.Context()
 	const prefix = "tquality-ratings-"
@@ -104,10 +105,7 @@ func TestGetItemQualityRatingsPostgres(t *testing.T) {
 		}
 	}
 
-	got, err := NewRepo(pool).GetItemQualityRatings(ctx, []string{prefix + "both", prefix + "tmdb-only", prefix + "tmdb-high", prefix + "none", prefix + "missing"})
-	if err != nil {
-		t.Fatal(err)
-	}
+	got := candidateQualities(t, NewRepo(pool), []string{prefix + "both", prefix + "tmdb-only", prefix + "tmdb-high", prefix + "none", prefix + "missing"})
 	want := map[string]float64{prefix + "both": 7.1, prefix + "tmdb-only": 6.4}
 	if !maps.Equal(got, want) {
 		t.Fatalf("ratings = %v, want %v", got, want)

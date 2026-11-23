@@ -276,6 +276,10 @@
 # large the catalog.
 ./internal/recommendations TestDefaultRowQueriesWalkTypeIndexesPostgres
 
+# A profile refresh reads its candidates' details with the candidate scans,
+# not in a read per candidate pool.
+./internal/recommendations TestProfileRefreshStatementBudgetPostgres
+
 # Seek preview workers stop after a library or file becomes ineligible.
 ./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
 ./internal/trickplay TestLibraryTypeChangeRetiresFinishedAndExpiredWorkDB
