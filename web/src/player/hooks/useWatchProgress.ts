@@ -38,6 +38,11 @@ export function useWatchProgress(
   const configRef = useRef(config);
   configRef.current = config;
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Tells the player when a refused report shows the server ended the session.
+  const reportSessionEnd = useCallback((error: unknown) => {
+    const reason = playbackSessionEndReason(error);
+    if (reason) onSessionEndedRef.current?.(reason);
+  }, []);
   const skipCleanupReportRef = useRef(false);
 
   const getProgressSnapshot = useCallback(() => {
@@ -102,12 +107,11 @@ export function useWatchProgress(
     } catch (error) {
       // A leave flushes first. When the server already ended the session,
       // say so, as a periodic report would: a minimize then still leaves.
-      const reason = playbackSessionEndReason(error);
-      if (reason && liveSessionRef.current === sessionId) onSessionEndedRef.current?.(reason);
+      if (liveSessionRef.current === sessionId) reportSessionEnd(error);
       throw error;
     }
     skipCleanupReportRef.current = true;
-  }, [reportProgress, sessionId]);
+  }, [reportProgress, reportSessionEnd, sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;
@@ -121,8 +125,7 @@ export function useWatchProgress(
       reportProgress().catch((error: unknown) => {
         // Best effort — don't disrupt playback on progress report failure,
         // unless the server says the session is over.
-        const reason = playbackSessionEndReason(error);
-        if (active && reason) onSessionEndedRef.current?.(reason);
+        if (active) reportSessionEnd(error);
       });
     };
     intervalRef.current = setInterval(report, 10_000);
@@ -143,7 +146,7 @@ export function useWatchProgress(
       // position before the session is deleted (e.g. after a seek).
       reportProgress({ keepalive: true, isPaused: true }).catch(() => {});
     };
-  }, [reportProgress, sessionId, videoRef]);
+  }, [reportProgress, reportSessionEnd, sessionId, videoRef]);
 
   return flushProgress;
 }

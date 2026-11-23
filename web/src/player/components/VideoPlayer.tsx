@@ -2200,8 +2200,10 @@ export function VideoPlayer({
     async (action: "exit" | "minimize") => {
       if (leaveInProgressRef.current) return;
 
+      // A replaced room's minimize exits instead.
+      const minimizes = action === "minimize" && !!onMinimize && !watchTogether.replacementReason;
       leaveInProgressRef.current = true;
-      minimizeInProgressRef.current = action === "minimize";
+      minimizeInProgressRef.current = minimizes;
       setIsLeaving(true);
 
       const exitState = buildExitState();
@@ -2223,7 +2225,7 @@ export function VideoPlayer({
         // room page (WatchPlaybackChrome navigates there when no destination
         // is given). Ending the party is the room page's decision, not a side
         // effect of closing the player.
-        if (action === "minimize" && onMinimize && !watchTogether.replacementReason) {
+        if (minimizes && onMinimize) {
           await onMinimize(exitState);
           return;
         }
