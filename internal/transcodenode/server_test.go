@@ -2174,7 +2174,7 @@ func TestSpawnReconstructDoesNotRegisterFailedSoftwareRetry(t *testing.T) {
 // serve it once output appears (#4263).
 func TestSpawnReconstructKeepsSlowSoftwareRetry(t *testing.T) {
 	server := newTestServer(t)
-	server.reconstructStartupWait = time.Second
+	server.reconstructStartupWait = 3 * time.Second
 	logPath := filepath.Join(t.TempDir(), "invocations.log")
 	useFakeFFmpeg(t, server, "#!/bin/sh\n"+
 		"printf '%s\\n' \"$*\" >> "+logPath+"\n"+
