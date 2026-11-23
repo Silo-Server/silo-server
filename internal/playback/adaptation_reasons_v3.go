@@ -201,7 +201,7 @@ func (p *candidatePlannerV3) attemptedOriginalV3(reasons adaptationReasonsV3) {
 // check it.
 func (p *candidatePlannerV3) capRejectsAudioRemuxV3() bool {
 	a, request, source := &p.video.remuxAudio, p.input.Request, p.source
-	progressiveChannels := aacOutputChannelsV3(request, DeliveryClassProgressiveV3, source.AudioChannels, a.progressiveChannelLimited)
+	progressiveChannels := aacOutputChannelsV3(request, DeliveryClassProgressiveV3, source.AudioChannels, true)
 	return a.progressiveConverts && !audioRemuxFitsServerCapV3(p.input, p.file, progressiveChannels) ||
 		a.hlsConverts && !audioRemuxFitsServerCapV3(p.input, p.file, a.hlsAACChannels)
 }

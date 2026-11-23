@@ -251,9 +251,9 @@ func (p *candidatePlannerV3) remuxAudioFacts() {
 	case a.hlsQuirkConverts:
 		a.hlsAACChannels = aacOutputChannelsV3(request, DeliveryClassHLSV3, source.AudioChannels, false)
 	case a.hlsTranscode:
-		// Non-native codecs keep their surround, as many channels as a
-		// ceiling allows.
-		a.hlsAACChannels = aacOutputChannelsV3(request, DeliveryClassHLSV3, source.AudioChannels, a.hlsChannelLimited || !hlsNativeAudioCodecV3(source.AudioCodec))
+		// Surround stays surround, as many channels as a ceiling allows,
+		// like the full transcode.
+		a.hlsAACChannels = aacOutputChannelsV3(request, DeliveryClassHLSV3, source.AudioChannels, true)
 	}
 }
 
