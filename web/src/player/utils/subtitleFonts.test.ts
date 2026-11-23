@@ -128,6 +128,24 @@ describe("fontFamilyNames", () => {
     ]);
   });
 
+  it("keeps reading a collection past a malformed font", () => {
+    const firstAt = 20;
+    const collection = new Uint8Array(firstAt + font.length);
+    const view = new DataView(collection.buffer);
+    collection.set([..."ttcf"].map((c) => c.charCodeAt(0)));
+    view.setUint32(4, 0x00010000);
+    view.setUint32(8, 2);
+    view.setUint32(12, collection.length + 100);
+    view.setUint32(16, firstAt);
+    collection.set(relocate(font, firstAt), firstAt);
+
+    expect(fontFamilyNames(collection).sort()).toEqual([
+      "adobe arabic",
+      "adobe arabic bold",
+      "adobearabic-bold",
+    ]);
+  });
+
   it("returns no names for data that is not an sfnt font", () => {
     expect(fontFamilyNames(new Uint8Array([1, 2, 3]))).toEqual([]);
     expect(fontFamilyNames(new TextEncoder().encode("wOF2 not parsed here"))).toEqual([]);

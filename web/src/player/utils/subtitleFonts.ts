@@ -208,22 +208,42 @@ const MATCHED_NAME_IDS = new Set([1, 4, 6]);
 export function fontFamilyNames(data: Uint8Array): string[] {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const names = new Set<string>();
-  try {
-    if (data.byteLength >= 12 && view.getUint32(0) === 0x74746366 /* ttcf */) {
-      const count = view.getUint32(8);
-      for (let i = 0; i < count; i += 1) {
-        readSfntNames(view, view.getUint32(12 + i * 4), names);
-      }
-    } else {
-      readSfntNames(view, 0, names);
+  const budget = { bytes: NAME_BYTES_BUDGET };
+  const read = (fontOffset: number) => {
+    try {
+      readSfntNames(view, fontOffset, names, budget);
+    } catch {
+      // A truncated or malformed font: keep the names read so far.
     }
-  } catch {
-    // Truncated or malformed font data: keep the names read so far.
+  };
+  if (data.byteLength >= 12 && view.getUint32(0) === 0x74746366 /* ttcf */) {
+    // Each offset is read once, and a collection can hold no more fonts than
+    // fit in its offset list.
+    const count = Math.min(view.getUint32(8), Math.floor((data.byteLength - 12) / 4));
+    const seen = new Set<number>();
+    for (let i = 0; i < count; i += 1) {
+      const fontOffset = view.getUint32(12 + i * 4);
+      if (seen.has(fontOffset)) continue;
+      seen.add(fontOffset);
+      read(fontOffset);
+    }
+  } else {
+    read(0);
   }
   return [...names];
 }
 
-function readSfntNames(view: DataView, fontOffset: number, names: Set<string>): void {
+// Name bytes decoded per font file. Real fonts use a few KiB; the cap stops a
+// crafted name table (65,535 records pointing at one long string) from
+// stalling the player.
+const NAME_BYTES_BUDGET = 256 * 1024;
+
+function readSfntNames(
+  view: DataView,
+  fontOffset: number,
+  names: Set<string>,
+  budget: { bytes: number },
+): void {
   const version = view.getUint32(fontOffset);
   // TrueType (0x00010000 or "true") and CFF ("OTTO") outlines.
   if (version !== 0x00010000 && version !== 0x74727565 && version !== 0x4f54544f) return;
@@ -239,6 +259,8 @@ function readSfntNames(view: DataView, fontOffset: number, names: Set<string>): 
       const platform = view.getUint16(entry);
       if (!MATCHED_NAME_IDS.has(view.getUint16(entry + 6))) continue;
       const length = view.getUint16(entry + 8);
+      if (length > budget.bytes) return;
+      budget.bytes -= length;
       const start = storage + view.getUint16(entry + 10);
       const name = decodeName(view, platform, start, length).trim().toLowerCase();
       if (name) names.add(name);
