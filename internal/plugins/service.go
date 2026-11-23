@@ -475,7 +475,7 @@ func (s *Service) UpdateToAvailableVersion(ctx context.Context, installationID i
 	// installing it would downgrade the plugin (#4518).
 	if installation.AvailableVersion == nil || *installation.AvailableVersion == "" ||
 		compareVersions(*installation.AvailableVersion, installation.Version) <= 0 {
-		return nil, fmt.Errorf("%w: plugin %q", ErrNoUpdateAvailable, installation.PluginID)
+		return nil, fmt.Errorf("%w %q", ErrNoUpdateAvailable, installation.PluginID)
 	}
 
 	targetVersion := *installation.AvailableVersion

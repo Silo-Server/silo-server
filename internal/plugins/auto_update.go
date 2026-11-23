@@ -275,7 +275,11 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 		if existing.IsBuiltin() {
 			continue
 		}
-		if version := existing.AvailableVersion; version != nil && snapshot.withdrawn(*existing.RepositoryID, existing.PluginID, *version) {
+		// Clear a notice for a withdrawn release, and one that isn't newer
+		// than the installed release: applying that is refused, and a stale
+		// check recorded it before writes were fenced on the package (#4518).
+		if version := existing.AvailableVersion; version != nil && *version != "" &&
+			(snapshot.withdrawn(*existing.RepositoryID, existing.PluginID, *version) || compareVersions(*version, existing.Version) <= 0) {
 			err := s.installations.Update(ctx, existing.ID, UpdateInstallationInput{
 				automatic:          true,
 				AvailableVersion:   new(""),
@@ -288,7 +292,7 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 				clearedNotice = true
 			case isVersionManaged(err), errors.Is(err, ErrInstallationChanged), errors.Is(err, ErrInstallationNotFound), errors.Is(err, errProvisionRestoreHeld):
 			default:
-				summary.recordFailuref("clear withdrawn update notice for %s: %v", existing.PluginID, err)
+				summary.recordFailuref("clear stale update notice for %s: %v", existing.PluginID, err)
 			}
 		}
 		entry, ok := latestByRepositoryPlugin[repositoryPluginKey{
