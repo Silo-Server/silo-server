@@ -3,6 +3,7 @@ package abs
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
@@ -73,15 +74,15 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Real ABS LibraryItemController.findOne sets userMediaProgress to the
-	// caller's row for the item, or null when there is none.
+	// caller's row for the item, or null when there is none. A failed read
+	// also yields null so the book page still opens.
 	var progress map[string]any
 	if h.deps.ProgressStore != nil {
 		p, err := h.deps.ProgressStore.GetProgress(r.Context(), a.UserID, a.ProfileID, contentID)
 		if err != nil {
-			http.Error(w, "load progress: "+err.Error(), http.StatusInternalServerError)
-			return
-		}
-		if p != nil {
+			slog.WarnContext(r.Context(), "abs item detail: media progress unavailable", "component", "audiobooks",
+				"user_id", a.UserID, "profile_id", a.ProfileID, "item_id", contentID, "err", err)
+		} else if p != nil {
 			progress = progressRowToABS(*p)
 		}
 	}

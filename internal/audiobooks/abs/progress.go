@@ -139,6 +139,9 @@ type ProgressRow struct {
 	ProgressPct     float64
 	IsFinished      bool
 	UpdatedAt       time.Time
+	// HideFromContinue is the row's "remove from Continue Listening" flag
+	// (SetHideFromContinue); read-only here, UpsertProgress ignores it.
+	HideFromContinue bool
 }
 
 // ABSPlaybackSession is the in-memory representation of an abs_playback_sessions row.
@@ -215,6 +218,19 @@ func (h *Handler) accessibleProgress(ctx context.Context, a ctxAuth, access cata
 		out = append(out, progressRowToABS(p))
 	}
 	return out, nil
+}
+
+// userMediaProgress returns the progress rows for the user object's
+// mediaProgress. A failed read is logged and yields an empty list: the user
+// object also answers login, and a progress outage must not block sign-in.
+func (h *Handler) userMediaProgress(ctx context.Context, a ctxAuth, access catalog.AccessFilter) []map[string]any {
+	progress, err := h.accessibleProgress(ctx, a, access)
+	if err != nil {
+		slog.WarnContext(ctx, "abs user object: media progress unavailable", "component", "audiobooks",
+			"user_id", a.UserID, "profile_id", a.ProfileID, "err", err)
+		return nil
+	}
+	return progress
 }
 
 // handleGetItemProgress — GET /abs/api/me/progress/{libraryItemId}
@@ -582,16 +598,22 @@ func (h *Handler) audiobookVisible(ctx context.Context, a ctxAuth, contentID str
 func progressRowToABS(p ProgressRow) map[string]any {
 	lastMs := p.UpdatedAt.UnixMilli()
 	out := map[string]any{
-		"id":            p.UserID + "-" + p.ContentID,
-		"libraryItemId": p.ContentID,
-		"mediaItemId":   p.ContentID,
-		"currentTime":   p.CurrentSeconds,
-		"duration":      p.DurationSeconds,
-		"isFinished":    p.IsFinished,
-		"progress":      p.ProgressPct,
-		"startedAt":     lastMs,
-		"finishedAt":    nil,
-		"lastUpdate":    lastMs,
+		"id":                        p.UserID + "-" + p.ContentID,
+		"userId":                    p.UserID,
+		"libraryItemId":             p.ContentID,
+		"episodeId":                 nil,
+		"mediaItemId":               p.ContentID,
+		"mediaItemType":             "book",
+		"currentTime":               p.CurrentSeconds,
+		"duration":                  p.DurationSeconds,
+		"isFinished":                p.IsFinished,
+		"hideFromContinueListening": p.HideFromContinue,
+		"progress":                  p.ProgressPct,
+		"ebookLocation":             nil,
+		"ebookProgress":             0,
+		"startedAt":                 lastMs,
+		"finishedAt":                nil,
+		"lastUpdate":                lastMs,
 	}
 	if p.IsFinished {
 		out["finishedAt"] = lastMs
