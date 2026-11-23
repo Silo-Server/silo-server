@@ -146,6 +146,18 @@ describe("fontFamilyNames", () => {
     ]);
   });
 
+  it("stops reading names once a font's parsing budget is spent", () => {
+    const long = (n: number) => `Family ${n} ${"x".repeat(30_000)}`;
+    const crafted = sfntWithNames([
+      ...[1, 2, 3, 4, 5].map((n) => ({ platform: 3, encoding: 1, nameId: 1, value: long(n) })),
+      { platform: 3, encoding: 1, nameId: 1, value: "Late Name" },
+    ]);
+
+    const names = fontFamilyNames(crafted);
+    expect(names).toHaveLength(4);
+    expect(names).not.toContain("late name");
+  });
+
   it("returns no names for data that is not an sfnt font", () => {
     expect(fontFamilyNames(new Uint8Array([1, 2, 3]))).toEqual([]);
     expect(fontFamilyNames(new TextEncoder().encode("wOF2 not parsed here"))).toEqual([]);

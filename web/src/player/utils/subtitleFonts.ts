@@ -208,8 +208,10 @@ const MATCHED_NAME_IDS = new Set([1, 4, 6]);
 export function fontFamilyNames(data: Uint8Array): string[] {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const names = new Set<string>();
-  const budget = { bytes: NAME_BYTES_BUDGET };
+  const budget = { units: NAME_PARSE_BUDGET };
   const read = (fontOffset: number) => {
+    budget.units -= 1;
+    if (budget.units < 0) return;
     try {
       readSfntNames(view, fontOffset, names, budget);
     } catch {
@@ -233,16 +235,17 @@ export function fontFamilyNames(data: Uint8Array): string[] {
   return [...names];
 }
 
-// Name bytes decoded per font file. Real fonts use a few KiB; the cap stops a
-// crafted name table (65,535 records pointing at one long string) from
-// stalling the player.
-const NAME_BYTES_BUDGET = 256 * 1024;
+// Parsing work per font file: one unit per font and name record visited, plus
+// each name byte decoded. Real fonts use a few thousand; the cap stops a
+// crafted file (65,535 records pointing at one long string, or many fonts
+// sharing one name table) from stalling the player.
+const NAME_PARSE_BUDGET = 256 * 1024;
 
 function readSfntNames(
   view: DataView,
   fontOffset: number,
   names: Set<string>,
-  budget: { bytes: number },
+  budget: { units: number },
 ): void {
   const version = view.getUint32(fontOffset);
   // TrueType (0x00010000 or "true") and CFF ("OTTO") outlines.
@@ -255,12 +258,14 @@ function readSfntNames(
     const count = view.getUint16(table + 2);
     const storage = table + view.getUint16(table + 4);
     for (let j = 0; j < count; j += 1) {
+      budget.units -= 1;
+      if (budget.units < 0) return;
       const entry = table + 6 + j * 12;
       const platform = view.getUint16(entry);
       if (!MATCHED_NAME_IDS.has(view.getUint16(entry + 6))) continue;
       const length = view.getUint16(entry + 8);
-      if (length > budget.bytes) return;
-      budget.bytes -= length;
+      if (length > budget.units) return;
+      budget.units -= length;
       const start = storage + view.getUint16(entry + 10);
       const name = decodeName(view, platform, start, length).trim().toLowerCase();
       if (name) names.add(name);
