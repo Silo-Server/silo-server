@@ -45,10 +45,13 @@ function setup({
   dirtyKeys = [],
   saved = {},
   managedByEnv = {},
+  configured = [],
 }: {
   dirtyKeys?: string[];
   saved?: Record<string, string>;
   managedByEnv?: Record<string, string>;
+  /** Secrets the server holds, which the snapshot leaves out. */
+  configured?: string[];
 } = {}) {
   const values: Record<string, string> = { ...saved };
   const markDone = vi.fn();
@@ -56,6 +59,9 @@ function setup({
   const save = vi.fn().mockResolvedValue(undefined);
   const setValue = vi.fn((key: string, value: string) => {
     values[key] = value;
+  });
+  const resetValue = vi.fn((key: string) => {
+    values[key] = saved[key] ?? "";
   });
   const buildConnectionCheckRequest = vi.fn((_keys: string[]) => ({}));
   wizardMock.mockReturnValue({ markDone, setSummary });
@@ -65,7 +71,8 @@ function setup({
     getValue: (key: string) => values[key] ?? "",
     getPersistedValue: (key: string) => saved[key] ?? "",
     setValue,
-    sensitiveConfigured: [],
+    resetValue,
+    sensitiveConfigured: configured,
     sensitiveManagedByEnv: Object.keys(managedByEnv),
     envVar: (key: string) => managedByEnv[key],
     dirtyCount: 1,
@@ -73,7 +80,7 @@ function setup({
     save,
     isDirty: (key: string) => dirtyKeys.includes(key),
   });
-  return { markDone, setSummary, save, setValue, buildConnectionCheckRequest };
+  return { markDone, setSummary, save, setValue, resetValue, buildConnectionCheckRequest };
 }
 
 describe("StorageStep", () => {
@@ -315,6 +322,31 @@ describe("StorageStep", () => {
     expect(setValue).not.toHaveBeenCalledWith("redis.db", "");
     expect(setValue).toHaveBeenLastCalledWith("redis.db", "3", { stage: true });
     expect(screen.getByLabelText("Database number")).toHaveValue(3);
+  });
+
+  it("keeps a saved access key when the replacement typed over it is erased", async () => {
+    const { setValue, resetValue } = setup({ configured: ["s3.public_access_key"] });
+    const { rerender } = render(<StorageStep />);
+    await userEvent.click(screen.getAllByRole("button", { name: "Set up" })[1]!);
+    for (const value of ["n", ""]) {
+      fireEvent.change(screen.getByLabelText("Access key"), { target: { value } });
+      rerender(<StorageStep />);
+    }
+
+    // An empty value would clear the saved key when Continue saves.
+    expect(setValue).not.toHaveBeenCalledWith("s3.public_access_key", "");
+    expect(resetValue).toHaveBeenCalledWith("s3.public_access_key");
+  });
+
+  it("keeps a storage backend holding an unsaved edit open", () => {
+    setup({ dirtyKeys: ["s3.public_bucket"] });
+    render(<StorageStep />);
+
+    // Continue saves the edit, so its fields stay in view and can't be hidden.
+    expect(screen.getByLabelText("Bucket")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Hide" })).toBeDisabled();
+    expect(screen.getByText("Unsaved changes in this group")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Set up" })).toHaveLength(2);
   });
 
   describe("applying storage that needs a restart", () => {

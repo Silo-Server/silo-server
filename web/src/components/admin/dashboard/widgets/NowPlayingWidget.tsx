@@ -12,6 +12,7 @@ import {
   formatPlaybackPosition,
   getPlaybackSessionSubtitle,
   getSessionClientLabel,
+  isEpisodeSession,
 } from "@/pages/adminActivityPresentation";
 import type { AdminSession } from "@/api/types";
 import { formatRelativeTime } from "@/lib/date";
@@ -61,7 +62,7 @@ export function NowPlayingWidget() {
         </div>
         <Link
           to="/admin/activity"
-          className="text-muted-foreground hover:text-primary shrink-0 text-[11px] transition-colors"
+          className="text-muted-foreground hover:text-primary shrink-0 text-[0.6875rem] transition-colors"
         >
           {t("web.admin.dashboard.widgets.nowPlaying.viewActivity")}
         </Link>
@@ -78,7 +79,7 @@ export function NowPlayingWidget() {
         {sessions.length > 0 && (
           <Link
             to="/admin/activity"
-            className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
+            className="text-muted-foreground hover:text-primary text-[0.6875rem] transition-colors"
           >
             {t("web.admin.dashboard.widgets.nowPlaying.viewAll", {
               count: sessions.length,
@@ -225,18 +226,15 @@ function useFittedCardCount(cardCount: number) {
 // measures either way.
 function StreamCard({ session, showPoster }: { session: AdminSession; showPoster: boolean }) {
   const t = useT();
-  const isEpisode =
-    session.series_title && session.season_number != null && session.episode_number != null;
+  const isEpisode = isEpisodeSession(session);
+  // The show leads for an episode; the episode line follows it.
   const title = isEpisode
-    ? session.media_title ||
-      t("web.admin.dashboard.widgets.nowPlaying.episodeFallback", {
-        season: String(session.season_number),
-        episode: String(session.episode_number),
-      })
+    ? session.series_title
     : session.media_title ||
       t("web.admin.dashboard.widgets.nowPlaying.fileFallback", {
         id: session.media_file_id,
       });
+  const subtitle = getPlaybackSessionSubtitle(session);
   const username =
     session.username ||
     t("web.admin.dashboard.widgets.nowPlaying.userFallback", { id: session.user_id });
@@ -279,50 +277,24 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
 
       {/* Info */}
       <div className="flex min-w-0 flex-1 flex-col">
-        {isEpisode ? (
-          <>
-            {session.media_item_id ? (
-              <Link
-                to={`/item/${session.media_item_id}`}
-                dir="auto"
-                className="bidi-text hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
-              >
-                {title}
-              </Link>
-            ) : (
-              <div dir="auto" className="bidi-text truncate text-sm font-bold">
-                {title}
-              </div>
-            )}
-            {/* Same episode line as the Activity page's Stream column. */}
-            <div className="text-muted-foreground mb-1.5 truncate text-xs">
-              {getPlaybackSessionSubtitle(session)}
+        <div className="mb-1.5 flex min-w-0 flex-col">
+          {session.media_item_id ? (
+            <Link
+              to={`/item/${session.media_item_id}`}
+              dir="auto"
+              className="bidi-text hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
+            >
+              {title}
+            </Link>
+          ) : (
+            <div dir="auto" className="bidi-text truncate text-sm font-bold">
+              {title}
             </div>
-          </>
-        ) : (
-          <>
-            {session.media_item_id ? (
-              <Link
-                to={`/item/${session.media_item_id}`}
-                dir="auto"
-                className="bidi-text hover:text-primary truncate text-sm font-bold transition-colors hover:underline"
-              >
-                {title}
-              </Link>
-            ) : (
-              <div dir="auto" className="bidi-text truncate text-sm font-bold">
-                {title}
-              </div>
-            )}
-            {session.media_type && (
-              <div className="text-muted-foreground mb-1.5 truncate text-xs">
-                {session.media_type === "movie"
-                  ? t("web.admin.dashboard.widgets.nowPlaying.movie")
-                  : t("web.admin.dashboard.widgets.nowPlaying.series")}
-              </div>
-            )}
-          </>
-        )}
+          )}
+          {subtitle ? (
+            <div className="text-muted-foreground truncate text-xs">{subtitle}</div>
+          ) : null}
+        </div>
 
         {/* Tags. Capped at one line so every card has the same height and
             the widget's rows stay even: tags that would wrap are clipped
@@ -332,7 +304,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             Text Size. */}
         <div className="mb-1.5 flex max-h-[calc(1rem+2px)] flex-wrap gap-1 overflow-hidden leading-3 [&>*]:leading-3">
           <span
-            className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodMeta.badgeClass}`}
+            className={`inline-flex rounded border px-1.5 py-0.5 text-[0.5625rem] font-semibold ${methodMeta.badgeClass}`}
           >
             {methodMeta.label}
           </span>
@@ -340,7 +312,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
           {clientLabel ? (
             <span
               title={session.client_user_agent || clientLabel}
-              className="border-border/60 bg-muted/30 text-muted-foreground inline-flex max-w-[9rem] rounded border px-1.5 py-0.5 text-[9px] font-semibold"
+              className="border-border/60 bg-muted/30 text-muted-foreground inline-flex max-w-[9rem] rounded border px-1.5 py-0.5 text-[0.5625rem] font-semibold"
             >
               <span dir="auto" className="truncate">
                 {clientLabel}
@@ -357,7 +329,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             the name truncates and the times keep their full width. */}
         <div className="mt-auto flex items-center gap-1.5">
           <div
-            className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
+            className="text-primary-foreground flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full text-[0.5625rem] font-bold"
             style={{ background: `var(--primary)` }}
           >
             {getInitial(username)}
@@ -365,7 +337,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
           <span dir="auto" className="min-w-0 truncate text-xs font-medium">
             {username}
           </span>
-          <span className="text-muted-foreground ms-auto shrink-0 text-[10px] whitespace-nowrap">
+          <span className="text-muted-foreground ms-auto shrink-0 text-[0.625rem] whitespace-nowrap">
             <span className="tabular-nums">{position}</span>
             {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- punctuation separating two already-formatted times */}
             <span> · {elapsed}</span>

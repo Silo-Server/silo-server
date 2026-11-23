@@ -61,7 +61,7 @@ export function WatchTogetherPanel({
       }`}
     >
       {/* Label + status */}
-      <div className="flex items-center gap-2 text-[10px] font-semibold tracking-[0.16em] text-white/60 uppercase">
+      <div className="flex items-center gap-2 text-[0.625rem] font-semibold tracking-[0.16em] text-white/60 uppercase">
         <span>{t("web.player.watchTogether.title")}</span>
         <ConnectionStatusDot state={connectionState} className="size-1.5" />
         <span>
@@ -83,9 +83,9 @@ export function WatchTogetherPanel({
 
       {/* Policy */}
       {room ? (
-        <div className="mt-1.5 text-[11px] leading-snug text-white/50">{policyLabel}</div>
+        <div className="mt-1.5 text-[0.6875rem] leading-snug text-white/50">{policyLabel}</div>
       ) : (
-        <div className="mt-1.5 text-[11px] leading-snug text-white/50">
+        <div className="mt-1.5 text-[0.6875rem] leading-snug text-white/50">
           {t("web.player.watchTogether.syncingRoom")}
         </div>
       )}
@@ -132,7 +132,7 @@ export function WatchTogetherPanel({
             type="button"
             onClick={onCopyInvite}
             aria-label={t("web.player.watchTogether.copyInviteLabel")}
-            className="rounded-md bg-white/12 px-2.5 py-1 text-[11px] font-medium text-white/90 transition-colors hover:bg-white/20"
+            className="rounded-md bg-white/12 px-2.5 py-1 text-[0.6875rem] font-medium text-white/90 transition-colors hover:bg-white/20"
           >
             {t("web.player.watchTogether.invite")}
           </button>
@@ -141,7 +141,7 @@ export function WatchTogetherPanel({
             onClick={() =>
               onToggleGuestControl(policy === "guest_play_pause" ? "host_only" : "guest_play_pause")
             }
-            className="rounded-md bg-white/12 px-2.5 py-1 text-[11px] font-medium text-white/90 transition-colors hover:bg-white/20"
+            className="rounded-md bg-white/12 px-2.5 py-1 text-[0.6875rem] font-medium text-white/90 transition-colors hover:bg-white/20"
           >
             {policy === "guest_play_pause"
               ? t("web.player.watchTogether.setHostOnly")
@@ -151,14 +151,14 @@ export function WatchTogetherPanel({
             type="button"
             onClick={onStopPlayback}
             title={t("web.player.watchTogether.stopTitle")}
-            className="ms-auto rounded-md bg-white/12 px-2.5 py-1 text-[11px] font-medium text-white/90 transition-colors hover:bg-white/20"
+            className="ms-auto rounded-md bg-white/12 px-2.5 py-1 text-[0.6875rem] font-medium text-white/90 transition-colors hover:bg-white/20"
           >
             {t("web.player.watchTogether.stop")}
           </button>
           <button
             type="button"
             onClick={() => setEndConfirmOpen(true)}
-            className="rounded-md bg-red-500/25 px-2.5 py-1 text-[11px] font-medium text-red-100 transition-colors hover:bg-red-500/35"
+            className="rounded-md bg-red-500/25 px-2.5 py-1 text-[0.6875rem] font-medium text-red-100 transition-colors hover:bg-red-500/35"
           >
             {t("web.player.watchTogether.end")}
           </button>

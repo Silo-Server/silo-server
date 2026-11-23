@@ -81,13 +81,13 @@ export default function ImpersonationBanner({
             <span className="impersonation-pulse absolute inset-0 rounded-full motion-safe:animate-ping" />
             <span className="impersonation-dot relative inline-flex h-2 w-2 rounded-full" />
           </span>
-          <span className="impersonation-label text-[10px] font-semibold uppercase">
+          <span className="impersonation-label text-[0.625rem] font-semibold uppercase">
             {t("web.shell.impersonation.viewingAs")}
           </span>
         </div>
 
         <div className="flex min-w-0 items-center gap-2">
-          <span className="impersonation-chip flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[11px] font-bold">
+          <span className="impersonation-chip flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[0.6875rem] font-bold">
             {initial}
           </span>
           <span

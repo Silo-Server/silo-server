@@ -1,7 +1,7 @@
 # Non-goals
 
-Silo is an early WIP and most of its scope is open. This document is the short list of things
-that are **not** open — features that will not be accepted, in core, in a plugin, or in a client,
+Silo is pre-1.0, and most of its scope is open. This document is the short list that is
+permanently closed — features that will not be accepted, in core, in a plugin, or in a client,
 regardless of implementation quality.
 
 These are product-direction decisions, not "not yet" or "needs a better design." A well-written

@@ -50,7 +50,7 @@ export function PlaybackActivityWidget() {
       <WidgetHeader
         title={rangeTitle(t("web.admin.dashboard.widgets.playbackActivity.title"), range)}
       >
-        <span className="text-muted-foreground text-[11px] tabular-nums">
+        <span className="text-muted-foreground text-[0.6875rem] tabular-nums">
           {t("web.admin.dashboard.widgets.playbackActivity.sessionCount", {
             count: total,
             count_text: total.toLocaleString(formatLocale()),

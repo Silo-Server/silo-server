@@ -127,7 +127,7 @@ export function SortableCollectionCard({
         meta={<CardMeta collection={collection} syncing={syncing} />}
         tag={
           collection.is_shared ? (
-            <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-[11px] font-semibold text-sky-300">
+            <span className="inline-flex items-center gap-1 rounded-full border border-sky-500/40 bg-sky-500/15 px-2 py-0.5 text-[0.6875rem] font-semibold text-sky-300">
               <Users aria-hidden className="size-3" />
               {t("web.collections.tags.shared")}
             </span>

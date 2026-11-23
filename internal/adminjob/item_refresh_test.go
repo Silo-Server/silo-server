@@ -208,6 +208,7 @@ type itemRefreshTestRefresher struct {
 	contentID  string
 	folderID   int
 	reset      bool
+	rebuilt    bool
 	err        error
 	// authorize, when set, stands in for a merge onto these libraries.
 	authorize []int
@@ -300,6 +301,11 @@ func TestItemRefreshHoldsCuratorJobsToTheirLibraries(t *testing.T) {
 func (r *itemRefreshTestRefresher) ResetTargetForLibrary(ctx context.Context, targetType, contentID string, folderID int) error {
 	r.reset = true
 	return r.RefreshTargetForLibrary(ctx, targetType, contentID, folderID)
+}
+
+func (r *itemRefreshTestRefresher) RebuildItemForLibrary(ctx context.Context, contentID string, folderID int) error {
+	r.rebuilt = true
+	return r.RefreshTargetForLibrary(ctx, "item", contentID, folderID)
 }
 
 // newItemRefreshTestExecutor builds an executor over enabled folder 3 with
@@ -669,6 +675,9 @@ func TestItemRefreshExecutorCompleteRefreshRebuildsAndMapsEpisodeTarget(t *testi
 	}
 	if got, want := refresher.targetType, "episode"; got != want {
 		t.Fatalf("RefreshTargetForLibrary() target_type = %q, want %q", got, want)
+	}
+	if refresher.rebuilt {
+		t.Fatal("complete refresh of an episode rebuilt the series, want a refresh of the episode")
 	}
 	if got, want := refresher.contentID, "new-episode-id"; got != want {
 		t.Fatalf("RefreshItem() content_id = %q, want %q", got, want)

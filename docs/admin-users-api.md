@@ -424,6 +424,3 @@ Both PostgreSQL and SQLite paginate by the full setting identity. Writes reuse
 existing validation, normalization, mirror updates, and last-write semantics;
 see [settings API](settings-api.md). Reset `nav.shortcuts` with PUT of its empty
 document; DELETE is rejected. The web bulk-reset flow reports partial completion.
-
-These administrator projections do not alter Jellyfin compatibility contracts.
-There are no corresponding first-party Apple or Android API callers.

@@ -42,6 +42,7 @@ type pluginClient interface {
 	WatchSyncProvider(capabilityID string) (*pluginhost.WatchSyncProviderClient, error)
 	NetworkAccessProvider(capabilityID string) (*pluginhost.NetworkAccessProviderClient, error)
 	NotificationChannel(capabilityID string) (*pluginhost.NotificationChannelClient, error)
+	ConfigurationChecks() (*pluginhost.ConfigurationChecksClient, error)
 }
 
 type Host interface {

@@ -11,9 +11,14 @@ install it.
 native child process through go-plugin. The API server, or the
 [network access](network-access.md) proxy for provider plugins, starts it with:
 
-- **The same OS user.** The shipped image runs as root, so plugins do too.
-  There is no separate user, namespace, seccomp profile, or filesystem
-  confinement.
+- **The same OS user.** Plugins inherit the OS account that runs the Silo
+  process. The shipped omnibus image (`ghcr.io/silo-server/silo-server:latest`)
+  runs Silo as the configured non-root `PUID`/`PGID` user (image default `911`,
+  Compose default `1000`; see [omnibus-image.md](omnibus-image.md)). The base
+  image (`<full SHA>-base`, and the `build-N` and `latest` tags from before the
+  omnibus layout) and any deployment that runs Silo itself as root run plugins
+  as root. Either way, there is no separate per-plugin user, namespace, seccomp
+  profile, or filesystem confinement.
 - **An allowlisted environment.** `pluginhost.ProcessEnv`
   (`internal/pluginhost/process_env.go`) passes only `PATH`, `HOME`, `TMPDIR`,
   `TZ`, the locale, the CA certificate paths, and the proxy variables, and the

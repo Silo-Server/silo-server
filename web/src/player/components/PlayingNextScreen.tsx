@@ -1,5 +1,5 @@
 import "@/styles/player-hud.css";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { MotionConfig, motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Play, Shuffle, X } from "lucide-react";
 import { isStillWatchingGated } from "../stillWatching";
@@ -12,6 +12,7 @@ import { isEpisodeStill, isEpisodeUnwatched, SPOILER_IMAGE_CLASS } from "@/lib/e
 import { useEpisodeSpoilerPrefs } from "@/hooks/useEpisodeSpoilerPrefs";
 import { codeNumber, useT } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { LineTitle, TitleLineParts } from "@/components/TitleLine";
 import WatchProgressBar from "@/components/WatchProgressBar";
 import { useCarouselEmbla } from "@/hooks/useCarouselEmbla";
 import { parseCalendarDate, preferredDateLocale } from "@/lib/datetime";
@@ -38,7 +39,8 @@ interface PlayingNextScreenProps {
    * scope this labels, and the viewer can pick another or stop shuffling.
    */
   shuffle?: {
-    scopeLabel: string;
+    /** The shuffled title, or its parent and it; each in a `LineTitle`. */
+    scopeLabel: ReactNode;
     onStop: () => void;
     onReshuffle: () => void;
   };
@@ -228,8 +230,10 @@ function PlayingNextContent({
           {shuffle && (
             <div className="mb-3 inline-flex max-w-full items-center gap-1.5 rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-[var(--hud-paper)] ring-1 ring-white/10 backdrop-blur-sm">
               <Shuffle className="size-3.5 shrink-0" aria-hidden="true" />
-              <span className="truncate">
-                {t("upNext.shuffling", { scope: shuffle.scopeLabel })}
+              <span className="flex min-w-0 overflow-hidden">
+                <TitleLineParts>
+                  {t("upNext.shuffling", { scope: shuffle.scopeLabel })}
+                </TitleLineParts>
               </span>
             </div>
           )}
@@ -520,11 +524,21 @@ function OnDeckCarousel({
               season: String(detail.season_number),
               episode: String(detail.episode_number),
             };
+            const titledEpisode = detail.series_title && detail.title ? detail.title : null;
             const episodeMeta = !hasEpisodeNumber
               ? null
-              : detail.series_title && detail.title
-                ? t("web.player.episode.codeWithTitle", { ...episodeCode, title: detail.title })
+              : titledEpisode
+                ? t("web.player.episode.codeWithTitle", { ...episodeCode, title: titledEpisode })
                 : t("web.player.episode.code", episodeCode);
+            // The same line with the title in its own box; `episodeMeta` stays
+            // the plain text for the tooltip.
+            const episodeLine =
+              hasEpisodeNumber && titledEpisode
+                ? t("web.player.episode.codeWithTitle", {
+                    ...episodeCode,
+                    title: <LineTitle>{titledEpisode}</LineTitle>,
+                  })
+                : episodeMeta;
             const thumbnailUrl = detail.backdrop_url ?? detail.poster_url;
             const progressPercent =
               item.progress.duration_seconds > 0
@@ -571,12 +585,19 @@ function OnDeckCarousel({
                     )}
                   </div>
                   <div className="mt-1.5 space-y-0.5">
-                    <div className="truncate text-sm font-semibold" title={title}>
+                    <div
+                      dir="auto"
+                      className="bidi-text truncate text-sm font-semibold"
+                      title={title}
+                    >
                       {title}
                     </div>
                     {episodeMeta && (
-                      <div className="truncate text-xs text-[var(--hud-ash)]" title={episodeMeta}>
-                        {episodeMeta}
+                      <div
+                        className="flex flex-wrap overflow-hidden text-xs text-[var(--hud-ash)]"
+                        title={episodeMeta}
+                      >
+                        <TitleLineParts>{episodeLine}</TitleLineParts>
                       </div>
                     )}
                     {timeLeft > 0 && (

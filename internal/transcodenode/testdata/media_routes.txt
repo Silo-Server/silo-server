@@ -19,6 +19,7 @@ GET /status	non-media
 POST /transcode/start	non-media
 DELETE /transcode/{session_id}	non-media
 GET /transcode/{session_id}/master.m3u8	media	manifest	internal_relay	false	true
+GET /transcode/{session_id}/output-bound	non-media
 GET /transcode/{session_id}/segment/{name}	media	playback	internal_relay	false	true
 POST /transcode/{session_id}/segment/{name}/downloaded	non-media
 POST /trickplay/extract	non-media
@@ -43,6 +44,7 @@ GET /status	non-media
 POST /transcode/start	non-media
 DELETE /transcode/{session_id}	non-media
 GET /transcode/{session_id}/master.m3u8	media	manifest	internal_relay	false	true
+GET /transcode/{session_id}/output-bound	non-media
 GET /transcode/{session_id}/segment/{name}	media	playback	internal_relay	false	true
 POST /transcode/{session_id}/segment/{name}/downloaded	non-media
 POST /trickplay/extract	non-media
