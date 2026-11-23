@@ -571,6 +571,10 @@ func clusterTopGenres(clusters []TasteCluster, n int) []string {
 	return genres
 }
 
+// summarySignalLimit is how many of the newest ratings and favorites the
+// taste profile summary reads.
+const summarySignalLimit = 1000
+
 // GetTasteProfileSummary returns a human-readable summary of the user's taste
 // profile. Its genres are those of the taste clusters the personal rows are
 // built from (see clusterTopGenres); its directors those of the titles the
@@ -596,7 +600,9 @@ func (e *Engine) GetTasteProfileSummary(ctx context.Context, userID int, profile
 	topGenres := clusterTopGenres(clusters, summaryTopGenres)
 
 	// Gather top-rated and favorited item IDs to derive director preferences.
-	ratings, err := e.ratingsRepo.ListAll(ctx, userID, profileID)
+	// The summary reads only the newest summarySignalLimit of each: directors
+	// need a sample of the profile's taste, not its whole history.
+	ratings, err := e.ratingsRepo.List(ctx, userID, profileID, summarySignalLimit, 0)
 	if err != nil {
 		return nil, fmt.Errorf("list ratings for summary: %w", err)
 	}
@@ -606,7 +612,7 @@ func (e *Engine) GetTasteProfileSummary(ctx context.Context, userID int, profile
 		return nil, fmt.Errorf("get user store for summary: %w", err)
 	}
 
-	favorites, err := allFavorites(ctx, store, profileID)
+	favorites, err := store.ListFavorites(ctx, profileID, summarySignalLimit, 0)
 	if err != nil {
 		return nil, fmt.Errorf("list favorites for summary: %w", err)
 	}
