@@ -96,9 +96,11 @@ interface ShownChange<T> {
   unsaved?: (error: unknown) => boolean;
   /**
    * Shows and caches what the server holds now. Called when the newest change
-   * failed in a way that may have stored it, after its save settled (so after
-   * the settings re-read the failure triggers). That re-read can return what
-   * the caller already had, so its own sync from the stored value won't run.
+   * failed in a way that may have stored it, once no save made through this
+   * hook is still pending (so after the settings re-read the failure
+   * triggers, and without putting back another preference that is still
+   * saving). That re-read can return what the caller already had, so its own
+   * sync from the stored value won't run.
    */
   reconcile?: () => void;
 }
@@ -130,6 +132,9 @@ interface UnsettledPreference {
  */
 export function useShowThenSave(cacheOwner: string | null) {
   const unsettled = useRef(new Map<string, UnsettledPreference>());
+  // The reconcile owed for a change that may have saved, run once nothing is
+  // saving: a caller reconciles every preference it shows at once.
+  const owedReconcile = useRef<(() => void) | null>(null);
   // A restore shows the value through the provider's current state, so it is
   // skipped once another account or profile owns the appearance.
   const currentOwner = useRef(cacheOwner);
@@ -171,6 +176,12 @@ export function useShowThenSave(cacheOwner: string | null) {
       const settle = () => {
         if (--pending.saving === 0) unsettled.current.delete(entryKey);
       };
+      const reconcileOnceSettled = () => {
+        const owed = owedReconcile.current;
+        if (!owed || unsettled.current.size > 0) return;
+        owedReconcile.current = null;
+        if (currentOwner.current === cacheOwner) owed();
+      };
       const showStored = () => {
         // Once another owner holds the appearance, leave it alone: writing the
         // cache would also make this owner the signed-out fallback. This
@@ -193,18 +204,21 @@ export function useShowThenSave(cacheOwner: string | null) {
           // It landed after the newest change failed and put back an older
           // value, with nothing picked since: show what is stored now.
           if (pending.restored) showStored();
+          reconcileOnceSettled();
         },
         (error: unknown) => {
           settle();
           // A newer change to this preference settles it instead.
-          if (pending.latest !== token) return;
-          if (!unsaved(error)) {
-            // It may have saved: the settings re-read has the answer.
-            if (currentOwner.current === cacheOwner) reconcile?.();
-            return;
+          if (pending.latest === token) {
+            if (!unsaved(error)) {
+              // It may have saved: the settings re-read has the answer.
+              if (reconcile) owedReconcile.current = reconcile;
+            } else {
+              pending.restored = true;
+              showStored();
+            }
           }
-          pending.restored = true;
-          showStored();
+          reconcileOnceSettled();
         },
       );
     },

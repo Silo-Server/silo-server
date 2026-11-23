@@ -137,4 +137,34 @@ describe("useShowThenSave after an online failure", () => {
       reconciled: 0,
     });
   });
+
+  it("reconciles only once another preference's save has settled", async () => {
+    const { result } = renderHook(() => useShowThenSave(null));
+    const settles: Array<(outcome: unknown) => void> = [];
+    let reconciled = 0;
+    for (const key of ["ui.text_scale", "ui.text_weight"]) {
+      result.current({
+        key,
+        value: "picked",
+        previous: "stored",
+        show: () => {},
+        save: () =>
+          new Promise((resolve, reject) =>
+            settles.push((outcome) => (outcome instanceof Error ? reject(outcome) : resolve(0))),
+          ),
+        reconcile: () => {
+          reconciled++;
+        },
+      });
+    }
+
+    settles[0]!(problem(502));
+    await settled();
+    // Reconciling now would put back the text weight that is still saving.
+    expect(reconciled).toBe(0);
+
+    settles[1]!("saved");
+    await settled();
+    expect(reconciled).toBe(1);
+  });
 });

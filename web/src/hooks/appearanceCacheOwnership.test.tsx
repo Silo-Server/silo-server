@@ -1,4 +1,4 @@
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { v2Problem } from "@/api/v2/problems.test-support";
@@ -361,14 +361,15 @@ describe("appearance cache ownership", () => {
       mocks.mutate.mockRejectedValue(v2Problem(502, "bad_gateway", "Bad gateway"));
       const view = renderAppearance();
 
-      await act(async () => {
+      act(() => {
         view.captured.setTextScale("x-large");
-        // A macrotask runs only after the failed save's handlers have.
-        await new Promise((resolve) => setTimeout(resolve, 0));
       });
+      expect(document.documentElement.getAttribute("data-text-scale")).toBe("x-large");
 
+      await waitFor(() =>
+        expect(document.documentElement.getAttribute("data-text-scale")).toBe(shown),
+      );
       expect(view.captured.textScale).toBe(shown);
-      expect(document.documentElement.getAttribute("data-text-scale")).toBe(shown);
       expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe(cached);
     },
   );
