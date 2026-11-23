@@ -830,17 +830,19 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     font-size: 125%;
     --ui-text-scale-factor: 1.25;
   }
+  /* Bolder moves every weight up a step. Tailwind's weight utilities read its
+     --font-weight-* theme variables, so redefining them here reaches every
+     form of the class: `font-medium`, `focus:font-medium`, `md:font-semibold`,
+     `file:font-medium`. */
   html[data-text-weight="strong"] {
     --font-weight-ui: 520;
-    --font-weight-medium-ui: 600;
-    --font-weight-semibold-ui: 700;
-    --font-weight-bold-ui: 800;
+    --font-weight-normal: 520;
+    --font-weight-medium: 600;
+    --font-weight-semibold: 700;
+    --font-weight-bold: 800;
   }
   html[data-text-weight="default"] {
     --font-weight-ui: 400;
-    --font-weight-medium-ui: 500;
-    --font-weight-semibold-ui: 600;
-    --font-weight-bold-ui: 700;
   }
   /* Every token here pushes toward --contrast-boost, never toward white
      directly. Hard-coded white raises contrast on a dark page and destroys it
@@ -908,18 +910,6 @@ html[data-navigation-direction]::view-transition-new(main-content) {
   html[data-high-contrast="true"] .border-border\/70,
   html[data-high-contrast="true"] .border-border\/80 {
     border-color: var(--border) !important;
-  }
-  html[data-text-weight="strong"] .font-normal {
-    font-weight: var(--font-weight-ui, 520) !important;
-  }
-  html[data-text-weight="strong"] .font-medium {
-    font-weight: var(--font-weight-medium-ui, 600) !important;
-  }
-  html[data-text-weight="strong"] .font-semibold {
-    font-weight: var(--font-weight-semibold-ui, 700) !important;
-  }
-  html[data-text-weight="strong"] .font-bold {
-    font-weight: var(--font-weight-bold-ui, 800) !important;
   }
   /* Buttons are activatable, so they get the activatable cursor. Declared in
      `base` rather than as a utility, so an explicit `cursor-*` class — a
