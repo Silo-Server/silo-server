@@ -84,8 +84,9 @@ func TestPresentMediaTypesPostgres(t *testing.T) {
 	check("no library allowed", catalog.AccessFilter{AllowedLibraryIDs: []int{}})
 }
 
-// The quality rating is IMDb's, else TMDB's below 9.5; a title with neither
-// has none.
+// The quality rating of a notable title is IMDb's, else TMDB's below 9.5; a
+// title with neither has none. TestCatalogRankLeadsWithNotableTrustedRatingsPostgres
+// covers the notability gate.
 func TestGetItemQualityRatingsPostgres(t *testing.T) {
 	pool := newEngineTestPool(t)
 	ctx := t.Context()
@@ -98,7 +99,7 @@ func TestGetItemQualityRatingsPostgres(t *testing.T) {
 		"none":      {nil, nil},
 	} {
 		seedRecoMediaItem(t, pool, prefix+id, "movie", "matched")
-		if _, err := pool.Exec(ctx, `UPDATE media_items SET rating_imdb = $2, rating_tmdb = $3 WHERE content_id = $1`, prefix+id, ratings[0], ratings[1]); err != nil {
+		if _, err := pool.Exec(ctx, `UPDATE media_items SET rating_imdb = $2, rating_tmdb = $3, logo_path = '/logo.png', keywords = ARRAY['a', 'b', 'c', 'd', 'e'] WHERE content_id = $1`, prefix+id, ratings[0], ratings[1]); err != nil {
 			t.Fatal(err)
 		}
 	}

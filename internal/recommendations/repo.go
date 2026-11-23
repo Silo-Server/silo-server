@@ -2607,17 +2607,21 @@ func (r *Repo) PresentMediaTypes(ctx context.Context, mediaTypes []string, filte
 }
 
 // itemQualityRatingsQuery reads the rating the quality prior uses,
-// catalogRatingSQL, as the taste-seed picker orders by.
+// catalogRatingSQL, for notable titles only (notableSQL). An obscure title's
+// rating rests on a handful of votes, so it is read as no rating, which the
+// prior leaves neutral, rather than as a top rating it would lift.
 const itemQualityRatingsQuery = `
 		SELECT content_id, quality
 		FROM   (
 			SELECT mi.content_id, ` + catalogRatingSQL + ` AS quality
 			FROM   media_items mi
 			WHERE  mi.content_id = ANY($1)
+			  AND  ` + notableSQL + `
 		) rated
 		WHERE  quality IS NOT NULL`
 
-// GetItemQualityRatings returns the quality rating of each item that has one.
+// GetItemQualityRatings returns the quality rating of each notable item that
+// has one.
 func (r *Repo) GetItemQualityRatings(ctx context.Context, itemIDs []string) (map[string]float64, error) {
 	result := make(map[string]float64, len(itemIDs))
 	if len(itemIDs) == 0 {

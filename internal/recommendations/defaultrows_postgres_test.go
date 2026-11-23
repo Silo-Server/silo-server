@@ -650,7 +650,8 @@ func TestHighlyRatedReusesTitleCountsPostgres(t *testing.T) {
 // first and do not trust an IMDb rating of 9.6 or more or a TMDB rating of
 // 9.5 or more: in a large catalog those are an obscure title's handful of
 // votes or a TMDB score copied into the IMDb field. Highly Rated, the genre
-// rows and the quality prior read the same ratings.
+// rows and the quality prior read the same ratings; the quality prior reads
+// none for a title that is not notable, which leaves it neutral.
 func TestCatalogRankLeadsWithNotableTrustedRatingsPostgres(t *testing.T) {
 	pool := newEngineTestPool(t)
 	const prefix = "tdefault-rank-"
@@ -681,11 +682,11 @@ func TestCatalogRankLeadsWithNotableTrustedRatingsPostgres(t *testing.T) {
 	if got := itemIDs(items); !slices.Equal(got, append(slices.Clone(want), copied)) {
 		t.Fatalf("genre row = %v, want %v then the untrusted title", got, want)
 	}
-	quality, err := repo.GetItemQualityRatings(t.Context(), []string{copied, inflated, obscure})
+	quality, err := repo.GetItemQualityRatings(t.Context(), []string{copied, inflated, obscure, classic, known, fewKeywords})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if wantQuality := map[string]float64{inflated: 8.0, obscure: 9.2}; !maps.Equal(quality, wantQuality) {
+	if wantQuality := map[string]float64{classic: 9.3, known: 8.0}; !maps.Equal(quality, wantQuality) {
 		t.Fatalf("quality ratings = %v, want %v", quality, wantQuality)
 	}
 }
