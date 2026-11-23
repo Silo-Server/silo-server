@@ -575,9 +575,10 @@ func (s *Postgres) ExpireIdleAttempt(ctx context.Context, sessionID, stopID stri
 // ExpirePausedAttempt stops a live attempt under stopID only while it is
 // paused and has been since before the timeout: its last accepted sample is
 // paused and its native lifecycle row has said paused for at least timeout,
-// by the database's clock. The exemptions the sweep selected by are checked
-// again here: no Cast receiver renders the attempt, and no open Watch
-// Together room lists the session.
+// by the database's clock. What the sweep selected by is checked again here:
+// the client still reports (it accepted a sample within
+// PausedStreamSlotGrace), no Cast receiver renders the attempt, and no open
+// Watch Together room lists the session.
 //
 // The attempt is locked first, the lock ApplyProgress takes, so a resume
 // either commits before (and the lock re-reads the row it changed) or waits
@@ -602,8 +603,9 @@ func (s *Postgres) ExpirePausedAttempt(ctx context.Context, sessionID, stopID st
 		SELECT true FROM playback_v3_attempts
 		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL
 		  AND COALESCE((last_sample->>'is_paused')::boolean, false)
+		  AND updated_at >= NOW() - make_interval(secs => $3)
 		  AND COALESCE(normalized_request #>> '{client_playback_context,output,current_sink}', '') <> $2
-		FOR UPDATE`, sessionID, playback.CastReceiverSinkV3).Scan(&locked)
+		FOR UPDATE`, sessionID, playback.CastReceiverSinkV3, playback.PausedStreamSlotGrace.Seconds()).Scan(&locked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

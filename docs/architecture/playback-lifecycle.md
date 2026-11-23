@@ -149,8 +149,9 @@ before the attempt expires, and the existing expiry then ends the session.
   `ApplyProgress` takes), requiring a paused last sample, then reads the
   lifecycle row in a second statement, whose snapshot is taken after the lock
   is held, and requires it to have said paused for the whole timeout. Both
-  statements check the exemptions again: the first that the attempt's sink is
-  not `cast_receiver`, the second that no open Watch Together room lists the
+  statements check the selection again: the first that the client accepted a
+  sample within `PausedStreamSlotGrace` and that the attempt's sink is not
+  `cast_receiver`, the second that no open Watch Together room lists the
   session. Only then does it stop the attempt under `pausedTimeoutStopID`.
   A resume that commits first, or while the claim waits on the lock, keeps
   the session live. A single `UPDATE` that joined the lifecycle row would read that row as

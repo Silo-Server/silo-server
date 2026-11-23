@@ -160,6 +160,19 @@ func TestExpirePausedAttemptDB(t *testing.T) {
 	})
 }
 
+// TestExpirePausedAttemptNeedsAReportingClientDB pins that the claim rechecks,
+// under the attempt's lock, that the client still reports: one that went quiet
+// after the sweep selected it is left to the idle expiry.
+func TestExpirePausedAttemptNeedsAReportingClientDB(t *testing.T) {
+	f := newPausedAttemptFixture(t)
+	f.pausedFor(pausedAttemptTimeout + time.Minute)
+	f.exec(`UPDATE playback_v3_attempts SET updated_at = NOW() - make_interval(secs => $2) WHERE session_id = $1`,
+		f.session, (playback.PausedStreamSlotGrace + time.Minute).Seconds())
+	if f.expire(t, uuid.NewString()) {
+		t.Fatal("a session whose client stopped reporting was ended by the paused timeout")
+	}
+}
+
 // TestExpirePausedAttemptExemptionsDB pins the exemptions the claim checks
 // again under the attempt's lock: a Cast receiver's play and a member of an
 // open Watch Together room are not ended, and a room whose runtime holds no
