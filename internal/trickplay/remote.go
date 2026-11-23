@@ -45,7 +45,8 @@ const (
 )
 
 // ExtractError is a node's failure to make sheets. Permanent names a cause in
-// the file itself (invalid data, no video stream), which marks it unusable.
+// the file itself (invalid data, no video stream), which counts toward
+// marking it unusable.
 type ExtractError struct {
 	Reason    string `json:"reason"`
 	Permanent bool   `json:"permanent,omitempty"`

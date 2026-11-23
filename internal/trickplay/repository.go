@@ -53,6 +53,12 @@ func backoffAfter(failures int) time.Duration {
 	return failureBackoff[min(max(failures, 1), len(failureBackoff))-1]
 }
 
+// damagedAttempts is how many Damaged outcomes in a row make a file
+// unusable. ffmpeg reports bytes that storage served wrong during an outage
+// the same way as a damaged file, so the earlier ones back off like any
+// failure: the attempts span about seven hours.
+const damagedAttempts = 4
+
 // abandonedGrace is the minimum time an abandoned or displaced revision
 // stays in storage. Issued URLs can extend a published revision's deadline.
 const abandonedGrace = 48 * time.Hour
@@ -118,7 +124,10 @@ func (r *Repository) claim(ctx context.Context, db reconcileConn, owner string, 
 		UPDATE public.media_file_trickplay t
 		SET state = 'running', lease_owner = $1, lease_expires_at = now() + make_interval(secs => $2),
 		    work_revision = NULL, source_size = mf.file_size, source_hash = mf.file_hash,
-		    source_duration = mf.duration, recipe_version = $3, updated_at = now()
+		    source_duration = mf.duration, recipe_version = $3, updated_at = now(),
+		    -- Verdicts on a file that has since been replaced do not count.
+		    damaged_failures = CASE WHEN t.source_size IS DISTINCT FROM mf.file_size
+		        OR t.source_hash IS DISTINCT FROM mf.file_hash THEN 0 ELSE t.damaged_failures END
 		FROM next, public.media_files mf JOIN public.media_folders f ON f.id = mf.media_folder_id
 		WHERE t.media_file_id = next.media_file_id AND mf.id = t.media_file_id
 		  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($5::text[])
@@ -267,9 +276,11 @@ type Outcome int
 const (
 	// Failed counts a failure and backs off.
 	Failed Outcome = iota
-	// Unusable records that the file cannot yield sheets (no video, broken
-	// data): it waits until the file changes.
-	Unusable
+	// Damaged is a failure that blames the file's data (no video, broken
+	// data). It counts and backs off like Failed, and the damagedAttempts-th
+	// in a row records that the file cannot yield sheets: it waits until the
+	// file changes.
+	Damaged
 	// Released returns the file to the queue after a delay without counting
 	// a failure: the cause was this server's, such as a shutdown or no
 	// transcode node able to run the work.
@@ -287,20 +298,25 @@ func (r *Repository) Finish(ctx context.Context, fileID int, leaseToken string, 
 				return false, err
 			}
 		}
-		state, failures, wait := statePending, current.failures, delay
+		state, failures, damaged, wait := statePending, current.failures, current.damaged, delay
 		switch outcome {
 		case Failed:
-			failures++
+			failures, damaged = failures+1, 0
 			wait = backoffAfter(failures)
-		case Unusable:
-			state, failures, wait = stateUnusable, failures+1, 0
+		case Damaged:
+			failures, damaged = failures+1, damaged+1
+			wait = backoffAfter(failures)
+			if damaged >= damagedAttempts {
+				state, wait = stateUnusable, 0
+			}
 		}
 		_, err := tx.Exec(ctx, `
 			UPDATE public.media_file_trickplay
 			SET state = $2, lease_owner = NULL, lease_expires_at = NULL, work_revision = NULL,
-			    failure_count = $3, last_error = $4, available_at = now() + make_interval(secs => $5), updated_at = now()
+			    failure_count = $3, damaged_failures = $4, last_error = $5,
+			    available_at = now() + make_interval(secs => $6), updated_at = now()
 			WHERE media_file_id = $1`,
-			fileID, state, failures, cleanError(cause), wait.Seconds())
+			fileID, state, failures, damaged, cleanError(cause), wait.Seconds())
 		if err != nil {
 			return false, fmt.Errorf("finish trickplay work: %w", err)
 		}
@@ -314,7 +330,10 @@ type fencedRow struct {
 	workRevision *int64
 	urlExpiresAt *time.Time
 	failures     int
-	eligible     bool
+	// damaged counts the Damaged outcomes among the latest failures. The
+	// paths that reset failures leave the stored count, so it is capped there.
+	damaged  int
+	eligible bool
 }
 
 // fenced runs apply in a transaction holding fileID's row, if leaseToken
@@ -328,6 +347,7 @@ func (r *Repository) fenced(ctx context.Context, fileID int, leaseToken string, 
 	var row fencedRow
 	err = tx.QueryRow(ctx, `
 		SELECT t.revision, t.work_revision, t.published_expires_at, t.failure_count,
+		       LEAST(t.damaged_failures, t.failure_count),
 		       COALESCE(f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($3::text[])
 		       AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
 		       AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0, false)
@@ -335,7 +355,7 @@ func (r *Repository) fenced(ctx context.Context, fileID int, leaseToken string, 
 		JOIN public.media_files mf ON mf.id = t.media_file_id
 		JOIN public.media_folders f ON f.id = mf.media_folder_id
 		WHERE t.media_file_id = $1 AND t.lease_owner = $2 AND t.state = 'running' AND t.lease_expires_at > now()
-		FOR UPDATE OF t`, fileID, leaseToken, videoLibraryTypes).Scan(&row.revision, &row.workRevision, &row.urlExpiresAt, &row.failures, &row.eligible)
+		FOR UPDATE OF t`, fileID, leaseToken, videoLibraryTypes).Scan(&row.revision, &row.workRevision, &row.urlExpiresAt, &row.failures, &row.damaged, &row.eligible)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -647,7 +667,7 @@ const reclaimSQL = `
 	)
 	UPDATE public.media_file_trickplay t
 	SET state = 'pending', lease_owner = NULL, lease_expires_at = NULL, work_revision = NULL,
-	    failure_count = expired.failures, last_error = 'lease expired',
+	    failure_count = expired.failures, damaged_failures = 0, last_error = 'lease expired',
 	    available_at = now() + make_interval(secs => ($1::float8[])[LEAST(expired.failures, cardinality($1::float8[]))]),
 	    updated_at = now()
 	FROM expired
