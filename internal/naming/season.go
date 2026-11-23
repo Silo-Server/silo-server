@@ -117,8 +117,9 @@ func seasonDirectoryNumber(segment, parent string, allowNumeric, topLevel bool) 
 	parentTitle := normalizeInferComparable(parentName)
 	// A provider-tagged parent names one show, so its season folders may
 	// carry another title for it (an original-title show folder holding
-	// international-title seasons: فوضى {tmdb-227604}/Fauda - S01).
-	parentTagged := hasExplicitFolderIDs(parent)
+	// international-title seasons: فوضى {tmdb-227604}/Fauda - S01). A folder
+	// with its own provider tag names its own show.
+	parentTagged := hasExplicitFolderIDs(parent) && !hasExplicitFolderIDs(segment)
 	for _, match := range seasonDirectoryTokenRe.FindAllStringSubmatchIndex(segment, -1) {
 		prefix := normalizeInferComparable(segment[:match[0]])
 		if prefix != "" && !parentTagged && (parentTitle == "" || prefix != parentTitle) {

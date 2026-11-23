@@ -275,6 +275,7 @@ func TestResolvePathContext(t *testing.T) {
 	tests := []struct {
 		name                    string
 		path                    string
+		libraryRoots            []string
 		libraryType             string
 		wantType                string
 		wantRoot                string
@@ -484,6 +485,36 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: false,
 		},
 		{
+			// A season folder with its own provider tag names another show.
+			name:                    "tagged release folder under another tagged show folder keeps its own root",
+			path:                    "/tv/Doctor Who (2005) {tvdb-78804}/Torchwood - S01 {tvdb-79551}/Torchwood - S01E01.mkv",
+			libraryRoots:            []string{"/tv"},
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/Doctor Who (2005) {tvdb-78804}/Torchwood - S01 {tvdb-79551}",
+			wantTitle:               "Torchwood",
+			wantSeason:              1,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// A tagged configured library folder is not a parent show folder.
+			name:                    "season folder in a tagged library folder keeps its own root",
+			path:                    "/tv/فوضى - 2015 {tmdb-227604}/Fauda - S02/E01.mkv",
+			libraryRoots:            []string{"/tv/فوضى - 2015 {tmdb-227604}"},
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/فوضى - 2015 {tmdb-227604}/Fauda - S02",
+			wantTitle:               "Fauda",
+			wantSeason:              2,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
 			name:                    "series daily date has air date but no episode number",
 			path:                    "/tv/Jeopardy! (1984)/Season 2026/Jeopardy! (1984) - 2026_04_24 - Jamie Ding.mkv",
 			libraryType:             "series",
@@ -537,7 +568,7 @@ func TestResolvePathContext(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := ResolvePathContext(tt.path, tt.libraryType)
+			ctx := ResolvePathContext(tt.path, tt.libraryType, tt.libraryRoots...)
 			if ctx == nil {
 				t.Fatal("expected non-nil PathContext")
 			}
