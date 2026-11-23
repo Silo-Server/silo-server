@@ -3,10 +3,12 @@ package apiv2
 import (
 	"bufio"
 	"context"
+	"fmt"
 	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -21,6 +23,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/database/queryattr"
 	"github.com/Silo-Server/silo-server/internal/httpstream"
+	"github.com/Silo-Server/silo-server/internal/logredact"
 	"github.com/Silo-Server/silo-server/internal/telemetry"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -127,7 +130,8 @@ func observationFrom(ctx context.Context) *observation {
 
 // observe is the outermost v2 chi middleware after requestID: it records the
 // request once, whatever answered it (an operation, a gate, the 404/405
-// fallbacks, or the panic recovery inside bufferResponse).
+// fallbacks, the panic recovery inside bufferResponse, or recoverRaw for a
+// panic that reached no Huma operation).
 func observe(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -142,7 +146,7 @@ func observe(next http.Handler) http.Handler {
 		o.clientName, o.clientVersion = clientIdentity(r)
 		r = r.WithContext(context.WithValue(r.Context(), observationKey{}, o))
 		sw := &statusRecorder{ResponseWriter: w}
-		httpstream.Serve(next, sw, r, func(aborted bool) {
+		httpstream.Serve(recoverRaw(next, sw), sw, r, func(aborted bool) {
 			status := sw.status
 			if activitylog.RecordedStatus(r, status, status != 0) == activitylog.StatusClientClosedRequest {
 				// The client went away, and its server error is recorded as
@@ -172,6 +176,51 @@ func observe(next http.Handler) http.Handler {
 			report(r, o, status, aborted, sw.hijacked, sw.bytes, time.Since(start))
 		})
 	})
+}
+
+// recoverRaw answers a panic that bufferResponse did not catch: one from a raw
+// registration or from a v2 chi middleware. Without it the panic would unwind
+// past observe unrecorded, to the listener-wide recoverer, whose empty 500
+// differs from the internal_error problem every Huma operation answers with.
+// A response that is already committed (or a hijacked connection) cannot be
+// replaced, so it is broken with http.ErrAbortHandler and recorded as aborted,
+// as a handler that aborts itself is. That sentinel passes through untouched.
+func recoverRaw(next http.Handler, sw *statusRecorder) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// The headers the outer middleware set (the request ID among them),
+		// so a half-built raw response's headers do not reach the problem.
+		outer := w.Header().Clone()
+		defer func() {
+			rec := recover()
+			if rec == nil {
+				return
+			}
+			if rec == http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
+				panic(rec)
+			}
+			logHandlerPanic(r, rec)
+			if sw.status != 0 || sw.hijacked {
+				panic(http.ErrAbortHandler)
+			}
+			h := w.Header()
+			clear(h)
+			for name, values := range outer {
+				h[name] = values
+			}
+			writeProblem(w, r, NewProblem(TypeInternalError, "An unexpected error occurred."))
+		}()
+		next.ServeHTTP(w, r)
+	})
+}
+
+// logHandlerPanic logs a recovered v2 handler panic with its stack. The panic
+// value is free text that may quote a credential, so it is masked first.
+func logHandlerPanic(r *http.Request, rec any) {
+	slog.ErrorContext(r.Context(), "apiv2 handler panic",
+		"component", "apiv2",
+		"request_id", requestIDFrom(r.Context()),
+		"panic", logredact.SanitizeText(fmt.Sprint(rec)),
+		"stack", string(debug.Stack()))
 }
 
 // statusRecorder captures structured and raw response statuses and counts the
