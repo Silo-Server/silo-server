@@ -76,8 +76,8 @@ export function RestartBanner({
           their own row instead of squeezing the message to a few characters,
           and on a wide page everything still shares one line. */}
       <div className="min-w-0 flex-1 basis-64">
-        <p className="text-[13px] font-medium">{t("web.admin.common.restartBanner.title")}</p>
-        <p className="text-muted-foreground text-[11.5px]">
+        <p className="text-[0.8125rem] font-medium">{t("web.admin.common.restartBanner.title")}</p>
+        <p className="text-muted-foreground text-[0.71875rem]">
           {description ?? t("web.admin.common.restartBanner.description")}
         </p>
       </div>

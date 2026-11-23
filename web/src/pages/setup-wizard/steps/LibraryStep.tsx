@@ -75,7 +75,7 @@ function LibraryEditor({
       </h2>
       <GeneralFields form={form} />
       <div className="space-y-2">
-        <p className="text-[13px] font-medium">{t("web.setup.library.folders")}</p>
+        <p className="text-[0.8125rem] font-medium">{t("web.setup.library.folders")}</p>
         <FolderFields form={form} />
       </div>
       <div className="flex flex-wrap items-center gap-3 pt-1">

@@ -185,7 +185,7 @@ export function ScheduleField(props: ScheduleFieldProps) {
             <SelectItem value={CUSTOM}>{t("web.collections.fields.customSchedule")}</SelectItem>
           </SelectContent>
         </Select>
-        <span id={`${id}-zone`} className="text-muted-foreground text-[13px]">
+        <span id={`${id}-zone`} className="text-muted-foreground text-[0.8125rem]">
           {serverTimeLabel(props.timeZone)}
         </span>
       </div>
@@ -199,7 +199,7 @@ export function ScheduleField(props: ScheduleFieldProps) {
             value={value}
             onChange={(event) => onChange(event.target.value)}
           />
-          <p id={`${id}-cron-help`} className="text-muted-foreground text-[12.5px]">
+          <p id={`${id}-cron-help`} className="text-muted-foreground text-[0.78125rem]">
             {t("web.collections.fields.cronHelp")}
           </p>
         </div>

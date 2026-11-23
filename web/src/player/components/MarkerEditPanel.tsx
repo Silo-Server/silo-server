@@ -86,7 +86,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
             <span className="text-sm font-semibold tracking-tight">
               {t("web.markers.editTitle")}
             </span>
-            <span className="text-[11px] leading-tight text-white/40">
+            <span className="text-[0.6875rem] leading-tight text-white/40">
               {t("web.markers.panel.hint")}
             </span>
           </div>
@@ -130,7 +130,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
                 />
                 <span
                   className={[
-                    "text-[13px] font-medium transition-colors",
+                    "text-[0.8125rem] font-medium transition-colors",
                     isActive ? "text-white" : "text-white/70",
                   ].join(" ")}
                 >
@@ -138,7 +138,7 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
                 </span>
                 <span
                   className={[
-                    "ms-auto font-mono text-[11px] tabular-nums",
+                    "ms-auto font-mono text-[0.6875rem] tabular-nums",
                     range ? "text-white/75" : "text-white/35",
                   ].join(" ")}
                 >
@@ -189,14 +189,14 @@ export function MarkerEditPanel({ editor, currentTime }: MarkerEditPanelProps) {
       </div>
 
       {error && (
-        <div className="mx-4 mb-2 rounded-md bg-red-500/15 px-2.5 py-1.5 text-[11px] text-red-300">
+        <div className="mx-4 mb-2 rounded-md bg-red-500/15 px-2.5 py-1.5 text-[0.6875rem] text-red-300">
           {error}
         </div>
       )}
 
       {/* Footer */}
       <div className="flex items-center justify-between gap-3 border-t border-white/[0.06] bg-black/20 px-4 py-3">
-        <span className="shrink-0 font-mono text-[11px] whitespace-nowrap text-white/40 tabular-nums">
+        <span className="shrink-0 font-mono text-[0.6875rem] whitespace-nowrap text-white/40 tabular-nums">
           {formatTime(currentTime)}
         </span>
         <div className="flex shrink-0 items-center gap-1.5">
@@ -244,7 +244,7 @@ function EdgeButton({ onClick, children }: { onClick: () => void; children: Reac
     <button
       type="button"
       onClick={onClick}
-      className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[11px] font-medium text-white/85 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white active:bg-white/[0.16]"
+      className="rounded-md border border-white/10 bg-white/[0.05] px-2.5 py-1 text-[0.6875rem] font-medium text-white/85 transition-colors hover:border-white/20 hover:bg-white/10 hover:text-white active:bg-white/[0.16]"
     >
       {children}
     </button>

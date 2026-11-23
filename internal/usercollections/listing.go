@@ -44,11 +44,15 @@ const serverVisibleListLimit = 500
 // collection with no library_ids is treated as library-agnostic and therefore
 // visible in every library tab. Other logins' collections and Audiobookshelf
 // rows are never returned.
+//
+// The list keeps the order ListCollections gives (GET /api/v2/collections):
+// profileID's own collections in its saved order, then shared ones grouped by
+// creator, each in its creator's order. The tab's manual sort mode keeps it.
 func ListServerVisibleByLibrary(ctx context.Context, pool *pgxpool.Pool, userID int, profileID string, libraryID int) ([]ServerVisibleCollection, error) {
 	rows, err := pool.Query(ctx,
 		`WITH visible_collections AS (
 			SELECT upc.id, upc.creator_profile_id, upc.name, upc.description, upc.collection_type,
-			       upc.item_count, upc.query_definition, COALESCE(upc.display_query_definition::text, '') AS display_query_definition, upc.poster_url, upc.poster_thumbhash, upc.created_at, upc.updated_at,
+			       upc.item_count, upc.query_definition, COALESCE(upc.display_query_definition::text, '') AS display_query_definition, upc.poster_url, upc.poster_thumbhash, upc.sort_order, upc.created_at, upc.updated_at,
 			       CASE
 			         WHEN upc.collection_type = 'smart' THEN upc.query_definition
 			         WHEN upc.source_config ? 'library_ids' THEN upc.source_config
@@ -69,7 +73,7 @@ func ListServerVisibleByLibrary(ctx context.Context, pool *pgxpool.Pool, userID 
 		     OR jsonb_array_length(COALESCE(scope_config->'library_ids', '[]'::jsonb)) = 0
 		     OR scope_config->'library_ids' @> to_jsonb($3::bigint)
 		   )
-		 ORDER BY name ASC
+		 ORDER BY (creator_profile_id = $2) DESC, creator_profile_id ASC, sort_order ASC, created_at ASC, id ASC
 		 LIMIT $4`,
 		userID, profileID, libraryID, serverVisibleListLimit,
 	)

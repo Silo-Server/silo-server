@@ -282,7 +282,7 @@ function AccessGroupCard({ group, onClick }: { group: AccessGroup; onClick: () =
               {group.name}
             </h2>
             {group.is_default && (
-              <span className="border-border text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide uppercase">
+              <span className="border-border text-muted-foreground shrink-0 rounded-full border px-2 py-0.5 text-[0.625rem] font-medium tracking-wide uppercase">
                 {t("web.admin.access.groups.card.default")}
               </span>
             )}

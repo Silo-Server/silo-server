@@ -335,7 +335,7 @@ export default function WatchPartyHub() {
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-12 px-6 py-12 sm:px-8">
       <header className="flex flex-col gap-3">
-        <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+        <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
           {t("watchParty.title")}
         </p>
         <h1 className="max-w-2xl text-3xl font-semibold tracking-tight text-balance sm:text-4xl">
@@ -506,7 +506,7 @@ export default function WatchPartyHub() {
 
       {visibleRecent.length > 0 ? (
         <section className="flex flex-col gap-3">
-          <h2 className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+          <h2 className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
             {t("web.watchTogether.hub.recentTitle")}
           </h2>
           <ul className="flex flex-col gap-2">
@@ -596,7 +596,7 @@ function RecentRoomRow({
           {t("web.watchTogether.hub.rejoin")}
         </Button>
       ) : (
-        <span className="text-muted-foreground text-[11px] font-semibold tracking-[0.14em] uppercase">
+        <span className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.14em] uppercase">
           {status === "checking" ? "" : t("web.watchTogether.hub.recentEnded")}
         </span>
       )}

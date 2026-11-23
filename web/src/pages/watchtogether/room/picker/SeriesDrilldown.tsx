@@ -275,7 +275,7 @@ export function SeriesDrilldown({
             ) : null}
           </div>
           <div className="min-w-0 flex-1 pb-0.5">
-            <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+            <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
               {t("web.watchTogether.series.eyebrow")}
             </p>
             <h3 className="line-clamp-2 text-base leading-tight font-semibold">{series.title}</h3>
@@ -327,7 +327,7 @@ export function SeriesDrilldown({
               >
                 <span className="text-xs font-semibold whitespace-nowrap">{seasonName(s, t)}</span>
                 {progress ? (
-                  <span className={`text-[10px] ${active ? "text-background/70" : ""}`}>
+                  <span className={`text-[0.625rem] ${active ? "text-background/70" : ""}`}>
                     {t("web.watchTogether.series.youProgress", { progress })}
                   </span>
                 ) : null}
@@ -338,7 +338,7 @@ export function SeriesDrilldown({
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <div className="border-border/60 flex shrink-0 items-center justify-between gap-3 border-b px-4 py-2">
-            <span className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+            <span className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
               {!loadingEpisodes && episodes.length > 0
                 ? t("web.watchTogether.series.seasonEpisodes", {
                     season: seasonHeading,
@@ -395,7 +395,7 @@ export function SeriesDrilldown({
                         />
                         <span className="min-w-0 flex-1">
                           {isNext && nextUp ? (
-                            <span className="block text-[10px] font-semibold tracking-[0.16em] text-emerald-300/90 uppercase">
+                            <span className="block text-[0.625rem] font-semibold tracking-[0.16em] text-emerald-300/90 uppercase">
                               {t("web.watchTogether.series.nextUp", {
                                 count: nextUp.count,
                                 count_text: nextUp.count,
@@ -461,7 +461,7 @@ export function SeriesDrilldown({
       {picked && onConfirm ? (
         <div className="border-border/60 flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-t px-4 py-3">
           <div className="min-w-0 flex-1">
-            <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+            <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
               {t("web.watchTogether.series.yourPick")}
             </p>
             <p className="truncate text-sm font-semibold">

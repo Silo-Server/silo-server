@@ -12,12 +12,22 @@ const NOTE_PREFIX = 'foliate-note:'
 // a whole-book search ends with { truncated: true } when more matches exist,
 // and long sections yield to the event loop so an aborted search stops before
 // its section is exhausted. A section yields every SEARCH_YIELD_INTERVAL
-// matches and whenever it has run for SEARCH_TIME_BUDGET ms, so a section with
-// few or no matches cannot block the page either.
+// matches and whenever the search has run for SEARCH_TIME_BUDGET ms, so a
+// section with few or no matches cannot block the page either. A whole-book
+// search keeps one budget across sections, so many short sections cannot
+// block it between them.
 export const SEARCH_RESULT_LIMIT = 1000
 const SEARCH_YIELD_INTERVAL = 100
 const SEARCH_TIME_BUDGET = 25
 const yieldToEventLoop = () => new Promise(resolve => setTimeout(resolve))
+// Yields once `clock` has run for SEARCH_TIME_BUDGET ms, or always with
+// `force`, and resolves true when `signal` aborted meanwhile.
+const pauseSearch = async (clock, signal, force = false) => {
+    if (!force && performance.now() - clock.resumed < SEARCH_TIME_BUDGET) return false
+    await yieldToEventLoop()
+    clock.resumed = performance.now()
+    return !!signal?.aborted
+}
 
 const isZip = async file => {
     const arr = new Uint8Array(await file.slice(0, 4).arrayBuffer())
@@ -598,12 +608,12 @@ export class View extends HTMLElement {
         return this.book.dir === 'rtl' ? this.prev() : this.next()
     }
     // Yields at most `limit` results for one section, pausing for the event
-    // loop every SEARCH_YIELD_INTERVAL matches or SEARCH_TIME_BUDGET ms; ends
-    // early once `signal` aborts.
-    async * #matchSection(matcher, query, index, doc, limit, signal) {
+    // loop every SEARCH_YIELD_INTERVAL matches or once `clock` has run for
+    // SEARCH_TIME_BUDGET ms; ends early once `signal` aborts.
+    async * #matchSection(matcher, query, index, doc, limit, signal,
+        clock = { resumed: performance.now() }) {
         let count = 0
         if (limit <= 0) return
-        let resumed = performance.now()
         for (const result of matcher(doc, query)) {
             let pause = false
             if (!result.checkpoint) {
@@ -612,11 +622,7 @@ export class View extends HTMLElement {
                 if (++count >= limit) return
                 pause = count % SEARCH_YIELD_INTERVAL === 0
             }
-            if (pause || performance.now() - resumed >= SEARCH_TIME_BUDGET) {
-                await yieldToEventLoop()
-                if (signal?.aborted) return
-                resumed = performance.now()
-            }
+            if (await pauseSearch(clock, signal, pause)) return
         }
     }
     async * #searchSection(matcher, query, index, limit, signal) {
@@ -629,14 +635,18 @@ export class View extends HTMLElement {
     async * #searchBook(matcher, query, limit, signal) {
         const { sections } = this.book
         let remaining = limit
+        // One budget for the whole book: a section's document can load
+        // without a real wait (FB2 parses synchronously), so short sections
+        // would otherwise run back to back in one task.
+        const clock = { resumed: performance.now() }
         for (const [index, { createDocument }] of sections.entries()) {
             if (!createDocument) continue
             const doc = await createDocument()
-            if (signal?.aborted) return
+            if (signal?.aborted || await pauseSearch(clock, signal)) return
             const subitems = []
             for await (const item of this.#matchSection(
-                matcher, query, index, doc, remaining + 1, signal)) subitems.push(item)
-            if (signal?.aborted) return
+                matcher, query, index, doc, remaining + 1, signal, clock)) subitems.push(item)
+            if (signal?.aborted || await pauseSearch(clock, signal)) return
             const truncated = subitems.length > remaining
             if (truncated) subitems.length = remaining
             remaining -= subitems.length

@@ -192,7 +192,7 @@ export function HomeRowsPage({
       size={narrow ? "lg" : "sm"}
       disabled={addRow.disabled}
       onClick={addRow.onClick}
-      className={cn(narrow && "h-12 rounded-[14px] text-[15px]")}
+      className={cn(narrow && "h-12 rounded-[14px] text-[0.9375rem]")}
     >
       <Plus /> {t("web.home.rows.page.addRow")}
     </Button>
@@ -233,7 +233,7 @@ export function HomeRowsPage({
           summary={summary}
         />
       ) : summary ? (
-        <p className="text-muted-foreground text-[13px]">{summary}</p>
+        <p className="text-muted-foreground text-[0.8125rem]">{summary}</p>
       ) : null}
       {page.kind === "library" ? <LibraryPageNote libraryName={label} /> : null}
       {adapter.conflict ? (

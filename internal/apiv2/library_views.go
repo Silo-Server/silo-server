@@ -291,9 +291,9 @@ func registerLibraryViews(reg *Registry) {
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/sections/{section_id}/items", "getLibrarySectionItems", "libraries",
 		"One section of the library with its cards.")), reg.getLibrarySectionItems)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/collections", "getLibraryCollections", "libraries",
-		"The library's Collections tab: curated collections, their groups, and the viewer's opted-in personal collections.")), reg.getLibraryCollections)
+		"The library's Collections tab: curated collections, their groups, and opted-in personal collections (the viewer's own, plus shared ones from other profiles on the same login).")), reg.getLibraryCollections)
 	Register(reg, viewerOperation(humaOp(http.MethodGet, Prefix+"/library/{id}/user-collections", "listLibraryUserCollections", "libraries",
-		"The viewer's own personal collections opted into this library's tab.")), reg.listLibraryUserCollections)
+		"Personal collections opted into this library's tab: the viewer's own, plus shared ones from other profiles on the same login.")), reg.listLibraryUserCollections)
 }
 
 // viewerIdentity is the profile-scoped caller; the gate guarantees both.

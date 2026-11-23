@@ -106,7 +106,7 @@ export function LearnedLimitRow() {
         )}
       />
       {failed && (
-        <p className="text-muted-foreground text-[13px] leading-relaxed" role="status">
+        <p className="text-muted-foreground text-[0.8125rem] leading-relaxed" role="status">
           {t("web.settings.playbackConnection.resetFailed")}
         </p>
       )}
@@ -247,12 +247,12 @@ export function PlaybackConnection({ ignoresLearnedLimit = false }) {
         }
       />
       {message && (
-        <p className="text-muted-foreground text-[13px] leading-relaxed" role="status">
+        <p className="text-muted-foreground text-[0.8125rem] leading-relaxed" role="status">
           {message.text}
         </p>
       )}
       {budget !== undefined && !note && (
-        <p className="text-muted-foreground text-[13px] leading-relaxed">
+        <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
           {t("web.settings.playbackConnection.autoBudget", {
             rate: formatConnectionRateKbps(budget),
           })}

@@ -34,7 +34,7 @@ export function WidgetViewToggle<T extends string>({
             aria-pressed={active}
             aria-label={option.ariaLabel}
             className={cn(
-              "cursor-pointer rounded-full px-1.5 py-0.5 text-[10px] leading-none font-semibold transition-colors",
+              "cursor-pointer rounded-full px-1.5 py-0.5 text-[0.625rem] leading-none font-semibold transition-colors",
               "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
               active
                 ? "border-primary/40 bg-primary/15 text-foreground"

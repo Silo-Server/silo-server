@@ -80,7 +80,7 @@ function ProviderRow({ provider }: { provider: WatchProviderStats }) {
         )}
       </span>
       {errors > 0 ? (
-        <span className="bg-destructive/10 text-destructive-label flex-shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium tabular-nums">
+        <span className="bg-destructive/10 text-destructive-label flex-shrink-0 rounded-full px-2 py-0.5 text-[0.6875rem] font-medium tabular-nums">
           {t("web.admin.dashboard.widgets.watchProviders.errorCount", {
             count: errors,
             count_text: errors.toLocaleString(formatLocale()),
@@ -89,7 +89,7 @@ function ProviderRow({ provider }: { provider: WatchProviderStats }) {
       ) : null}
       <Link
         to="/admin/tasks/sync_watch_providers"
-        className="text-muted-foreground hover:text-primary ms-auto text-[11px] whitespace-nowrap transition-colors"
+        className="text-muted-foreground hover:text-primary ms-auto text-[0.6875rem] whitespace-nowrap transition-colors"
       >
         {t("web.admin.dashboard.widgets.watchProviders.manage")}
       </Link>
@@ -159,7 +159,7 @@ function ProviderMark({ provider }: { provider: WatchProviderStats }) {
   return (
     <span
       aria-hidden="true"
-      className="bg-primary/10 text-primary flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-[10px] font-extrabold tracking-tight"
+      className="bg-primary/10 text-primary flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg text-[0.625rem] font-extrabold tracking-tight"
     >
       {initials}
     </span>

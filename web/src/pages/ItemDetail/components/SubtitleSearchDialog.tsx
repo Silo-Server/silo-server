@@ -359,7 +359,7 @@ export default function SubtitleSearchDialog({
                         </span>
                         <span
                           className={cn(
-                            "text-[9px] tracking-[0.12em] uppercase opacity-70",
+                            "text-[0.5625rem] tracking-[0.12em] uppercase opacity-70",
                             tone.text,
                           )}
                         >
@@ -369,22 +369,22 @@ export default function SubtitleSearchDialog({
 
                       <div className="flex min-w-0 flex-1 flex-col gap-1.5">
                         <div className="flex flex-wrap items-center gap-1.5">
-                          <Badge className={cn("h-5 px-1.5 text-[10px]", provider.className)}>
+                          <Badge className={cn("h-5 px-1.5 text-[0.625rem]", provider.className)}>
                             {provider.abbr}
                           </Badge>
-                          <Badge variant="outline" className="h-5 px-1.5 text-[10px] uppercase">
+                          <Badge variant="outline" className="h-5 px-1.5 text-[0.625rem] uppercase">
                             {result.format}
                           </Badge>
-                          <Badge variant="outline" className="h-5 px-1.5 text-[10px]">
+                          <Badge variant="outline" className="h-5 px-1.5 text-[0.625rem]">
                             {getLanguageName(result.language)}
                           </Badge>
                           {result.hearing_impaired && (
-                            <Badge variant="outline" className="h-5 gap-1 px-1.5 text-[10px]">
+                            <Badge variant="outline" className="h-5 gap-1 px-1.5 text-[0.625rem]">
                               <Ear className="size-2.5" /> {hearingImpairedLabel}
                             </Badge>
                           )}
                           {result.downloads > 0 && (
-                            <span className="text-muted-foreground ms-0.5 text-[11px] tabular-nums">
+                            <span className="text-muted-foreground ms-0.5 text-[0.6875rem] tabular-nums">
                               {t("web.detail.subtitleSearch.downloadCount", {
                                 count: result.downloads,
                                 count_text: result.downloads.toLocaleString(formatLocale()),
@@ -397,7 +397,7 @@ export default function SubtitleSearchDialog({
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <p
-                                className="text-foreground hover:text-foreground/90 block cursor-default truncate font-mono text-[13px] leading-snug"
+                                className="text-foreground hover:text-foreground/90 block cursor-default truncate font-mono text-[0.8125rem] leading-snug"
                                 tabIndex={0}
                               >
                                 {primary}
@@ -410,7 +410,7 @@ export default function SubtitleSearchDialog({
                             >
                               {hasExtras ? (
                                 <div className="space-y-1.5">
-                                  <p className="text-muted-foreground font-sans text-[10px] tracking-[0.12em] uppercase">
+                                  <p className="text-muted-foreground font-sans text-[0.625rem] tracking-[0.12em] uppercase">
                                     {t("web.detail.subtitleSearch.releaseNameCount", {
                                       count: names.length,
                                     })}
@@ -428,7 +428,7 @@ export default function SubtitleSearchDialog({
                           </Tooltip>
 
                           {hasExtras && expanded && (
-                            <ul className="border-border/60 text-muted-foreground space-y-0.5 border-s ps-2 font-mono text-[12px] leading-snug">
+                            <ul className="border-border/60 text-muted-foreground space-y-0.5 border-s ps-2 font-mono text-[0.75rem] leading-snug">
                               {extras.map((name, i) => (
                                 <li key={i} className="truncate" title={name}>
                                   {name}
@@ -440,7 +440,7 @@ export default function SubtitleSearchDialog({
                             <button
                               type="button"
                               onClick={() => toggleExpanded(key)}
-                              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-[11px] font-medium transition-colors"
+                              className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-[0.6875rem] font-medium transition-colors"
                             >
                               <ChevronDown
                                 className={cn(

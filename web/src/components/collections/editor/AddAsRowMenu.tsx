@@ -70,7 +70,7 @@ export function AddAsRowMenu({
         {others.length > 0 ? (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-muted-foreground text-[12px] font-medium">
+            <DropdownMenuLabel className="text-muted-foreground text-[0.75rem] font-medium">
               {otherLibraries()}
             </DropdownMenuLabel>
             {others.map(libraryItem)}
