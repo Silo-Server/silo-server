@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { toast } from "sonner";
 
-import { readableErrorText } from "@/api/v2/request";
 import type { SkippableStep } from "./setupStorage";
 import { useWizardContext } from "./WizardContext";
 
@@ -35,7 +34,7 @@ export function useStepSubmit(
       if ((await beforeDone?.()) === false) return;
       markDone(step);
     } catch (err) {
-      toast.error(readableErrorText(err, errorMessage));
+      toast.error(err instanceof Error ? err.message : errorMessage);
     } finally {
       setSubmitting(false);
     }
