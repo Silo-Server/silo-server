@@ -125,9 +125,12 @@ func (r *Repository) claim(ctx context.Context, db reconcileConn, owner string, 
 		SET state = 'running', lease_owner = $1, lease_expires_at = now() + make_interval(secs => $2),
 		    work_revision = NULL, source_size = mf.file_size, source_hash = mf.file_hash,
 		    source_duration = mf.duration, recipe_version = $3, updated_at = now(),
-		    -- Verdicts on a file that has since been replaced do not count.
+		    -- Verdicts on a file that has since been replaced do not count. Keep
+		    -- this identity in step with staleSQL's unusable branch.
 		    damaged_failures = CASE WHEN t.source_size IS DISTINCT FROM mf.file_size
-		        OR t.source_hash IS DISTINCT FROM mf.file_hash THEN 0 ELSE t.damaged_failures END
+		        OR (t.source_hash IS NOT NULL AND mf.file_hash IS NOT NULL AND t.source_hash <> mf.file_hash)
+		        OR abs(COALESCE(t.source_duration, 0) - COALESCE(mf.duration, 0)) > 2
+		        THEN 0 ELSE t.damaged_failures END
 		FROM next, public.media_files mf JOIN public.media_folders f ON f.id = mf.media_folder_id
 		WHERE t.media_file_id = next.media_file_id AND mf.id = t.media_file_id
 		  AND f.trickplay_enabled AND f.enabled IS NOT FALSE AND lower(btrim(f.type)) = ANY($5::text[])

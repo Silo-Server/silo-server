@@ -29,7 +29,7 @@ manifest.
 | `pending` | Waiting for `available_at`, then for a server to claim it. |
 | `running` | Leased by `lease_owner` until `lease_expires_at`. |
 | `ready` | The last generation published. |
-| `unusable` | The file cannot yield sheets: four permanent-cause failures in a row (`no_stream`, `invalid_data`); it waits until the file changes. |
+| `unusable` | The file cannot yield sheets: four permanent-cause failures in a row (`no_stream`, `invalid_data`); it waits until the file changes. Rows marked `unusable` before `damaged_failures` existed got there on one such failure; the migration leaves them, and only the usual requeues (a changed file, a newer algorithm, an administrator's regenerate) bring them back. |
 
 A row in any state may also carry a published manifest (`revision` and the
 sheet geometry): a regeneration keeps serving the previous sheets until its
@@ -64,7 +64,8 @@ serializes it across servers.
   serves bad bytes during an outage looks like a damaged file to ffmpeg.
   `damaged_failures` counts permanent causes among the row's latest
   failures; the fourth in a row marks the row `unusable`. Any other
-  failure, an expired lease, a changed file, a publish, or a requeue
+  failure, an expired lease, a changed file (size, hash, or duration, as
+  the stale check compares them), a publish, or a requeue
   (regenerate, recipe or tone-map change) starts the count again. A cause that is the server's own
   (a shutdown, no transcode node to run on) returns the row without counting
   a failure.

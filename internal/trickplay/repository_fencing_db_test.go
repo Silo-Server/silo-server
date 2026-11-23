@@ -140,7 +140,7 @@ func TestFinishMakesRepeatedDamageUnusableDB(t *testing.T) {
 	folder := f.library(t, "movies", true)
 	for _, tc := range []struct {
 		name  string
-		steps string // D: Damaged, F: Failed, E: lease expired, R: regenerated, C: file changed
+		steps string // D: Damaged, F: Failed, E: lease expired, R: regenerated, C: file size changed, L: duration changed
 		state string
 	}{
 		{"first verdict backs off", "D", statePending},
@@ -149,6 +149,7 @@ func TestFinishMakesRepeatedDamageUnusableDB(t *testing.T) {
 		{"an expired lease restarts the count", "DDDED", statePending},
 		{"a regenerate restarts the count", "DDDRD", statePending},
 		{"a replaced file restarts the count", "DDDCD", statePending},
+		{"a changed duration restarts the count", "DDDLD", statePending},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file := f.file(t, folder, tc.name)
@@ -162,6 +163,9 @@ func TestFinishMakesRepeatedDamageUnusableDB(t *testing.T) {
 					continue
 				case 'C':
 					f.exec(t, `UPDATE public.media_files SET file_size = file_size + 1 WHERE id = $1`, file)
+					continue
+				case 'L':
+					f.exec(t, `UPDATE public.media_files SET duration = duration + 3 WHERE id = $1`, file)
 					continue
 				}
 				f.exec(t, `UPDATE public.media_file_trickplay SET available_at = now() WHERE media_file_id = $1`, file)
