@@ -150,6 +150,7 @@ These are the protocol-v3 feature strings this server version advertises:
 | `progressive_range_refusal_v1` | Sent by the client in `deliveries.progressive.features` rather than `client_features`. The client reopens a progressive remux at its current position when the stream refuses a mid-stream range. Its `server_remux_progressive` URLs then carry `remux_range=refuse`, except one served by a proxy that does not advertise `remux_range_refusal_v1` (§4.1), and a GET whose `Range` starts past byte 0, or is a suffix range, answers `409` before the remux starts instead of streaming from the origin, which a browser would read again from byte zero ([playback API](../playback-api.md#delivery)) |
 | `surround_bitstream_conversion_v1` | Advertised only. A client whose exact audio evidence shows it would decode a surround track to PCM, while its sink validates E-AC-3 or AC-3 5.1 but not the source codec, may receive a copy-video `server_remux_hls` that converts the track to that codec (`decision_reason: surround_bitstream_conversion`, §11) |
 | `parallel_range_origin_v1` | The client sends it in `client_features`; the plan's `stream.parallel_range_url` may then name where to read the file's ranges over several connections (§4.2), unless the client also sends `header_authenticated_media_v1`. The client promises to use that URL exactly as given, adding no account token to it, and to read `stream.url` when the plan has none |
+| `paused_timeout_v1` | The client sends it in `client_features` and promises to leave the player, with its own notice, on `410 playback_session_paused_timeout`: the server ended the session because it stayed paused longer than the administrator allows (§6.3). A client without it gets `410 playback_session_ended` for the same end. Attempt-sticky |
 
 `plan_source_duration_v1` is the reason feature detection is a list and not a version
 number: without it, a client cannot tell a server that never sends the runtime
@@ -261,7 +262,8 @@ body cap: 256 KiB. Body: `ReplanRequestV3`
 | `404` | `not_found` | No such session, or its session has ended |
 | `409` | `conflict` | `failed_plan_id` is not the session's current plan, `playback_attempt_id` is not the session's attempt, or a newer replacement is already active (`detail` names which); this `replan_request_id` was used for a different replan; or an earlier request with this `replan_request_id` left an unexpired lease without finishing, for example because its server stopped mid-replan |
 | `409` | `installation_changed` | `installation_id` is not this server's (§2) |
-| `410` | `playback_session_ended` | An administrator ended the session ([Playback API](../playback-api.md#progress-and-stop)) |
+| `410` | `playback_session_ended` | An administrator ended the session, or the server ended it after it stayed paused too long and the attempt did not list `paused_timeout_v1` ([Playback API](../playback-api.md#progress-and-stop)) |
+| `410` | `playback_session_paused_timeout` | The server ended the session after it stayed paused too long, and the attempt listed `paused_timeout_v1` (§6.3) |
 | `422` | `validation_failed` | Failed validation, or no `X-Profile-Id` |
 | `500` | `internal_error` | Store outage |
 | `503` | `dependency_unavailable` | The request was cancelled while it waited for a replan slot (each API process runs at most 8 replans at once, half the plan store's connection pool when that is less than 8, and queues the rest), or the server began shutting down before it could publish the replacement transport, which ends the session |
@@ -412,7 +414,8 @@ A client therefore:
 3. Treats `404 not_found` from `replan` or progress as the end of the session
    and, if the viewer is still watching, starts a new attempt (§6.2). A
    `410 playback_session_ended` means an administrator ended it, and the
-   client leaves playback instead.
+   client leaves playback instead. So does
+   `410 playback_session_paused_timeout` (§6.3).
 4. If it opens the control socket, answers every command it receives with a
    `result` before the command's `deadline_ms` (below).
 
@@ -436,7 +439,8 @@ Both can answer these errors:
 | `404` | `not_found` | No such session, (progress only) it has ended, or `X-Profile-Id` names no profile on this account |
 | `409` | `progress_conflict` | (progress only) The sequence was already used for a different sample |
 | `409` | `installation_changed` | `installation_id` is not this server's (§2) |
-| `410` | `playback_session_ended` | (progress only) An administrator ended the session |
+| `410` | `playback_session_ended` | (progress only) An administrator ended the session, or the server ended it after it stayed paused too long and the attempt did not list `paused_timeout_v1` |
+| `410` | `playback_session_paused_timeout` | (progress only) The server ended the session after it stayed paused too long, and the attempt listed `paused_timeout_v1` (§6.3) |
 | `422` | `validation_failed` | Failed validation (a non-positive sequence, a `stop_id` that is not a canonical UUID or is one the server reserves, a final sample missing `sequence` or `position`), or no `X-Profile-Id` |
 | `503` | `dependency_unavailable` | Store outage |
 
@@ -455,7 +459,9 @@ position or pause state. The client first mints a single-use ticket with
 `POST /playback/sessions/{session_id}/control/ws-ticket` and offers it in the
 WebSocket subprotocols; [Realtime API](../realtime-api.md#owner-bound-playback-control-handshake)
 defines the handshake and its problem answers (`404 not_found` for an unknown
-session, `410 playback_session_ended` for a stopped one). The server treats the
+session, `410 playback_session_ended` for a stopped one, and
+`410 playback_session_paused_timeout` for one the paused timeout ended when the
+attempt listed `paused_timeout_v1`). The server treats the
 socket as connected only after the player sends a valid `hello`:
 
 ```json
@@ -1319,6 +1325,7 @@ and a replan can neither add nor drop them:
 | `software_video_decode_v1` | It widens the direct-play evidence tiers. Dropping it converts a direct route into a transcode and persists that downgrade into the durable request |
 | `subrip_sidecar_v1` | It picks the representation of every SRT sidecar URL. A mid-attempt switch would publish one track under two URLs (§8) |
 | `marker_thumbnails_v1` | It decides whether the session's realtime connection receives `marker_thumbnail_ready` events, which go only to attempts that opted in at start |
+| `paused_timeout_v1` | It picks the problem type the attempt's end answers when it stayed paused too long. The server reads it from the durable request, which a replan rewrites, so a replan that dropped it would turn the client's notice into the legacy answer (§6.3) |
 | `hls_subtitle_renditions_v1`, `hls_remux_subtitle_renditions_v1`, `hls_subtitle_renditions_all_v1` | They decide whether a transcode's or a copy remux's stream URL is a multivariant playlist carrying the subtitle, or every embedded text track, or a media playlist beside a sidecar. A reused HLS transport keeps the shape it was built with (§8) |
 
 The server silently restores the negotiated state of each, whatever the replan
@@ -1486,9 +1493,12 @@ route, so a direct-play viewer would come back on a transcode. The web player
    as for any failed route, rather than a fresh start that could pick the
    same remux again. A server restart or a dead node can also drop the stream
    there, so a failed request (a `404`, `installation_changed`, an unreachable
-   server) goes back to the reconnect cycle, which starts a new session for any
-   answer that is not a plan.
-3. A network failure, a 5xx, `408`, or `429` waits for the next attempt. Any other answer means the session did not survive (a
+   server) goes back to the reconnect cycle, and step 3 says what each of its
+   answers means.
+3. A network failure, a 5xx, `408`, or `429` waits for the next attempt. A
+   `410 playback_session_ended` or `410 playback_session_paused_timeout` means
+   the server ended the session for good: the client leaves playback (§6.3)
+   and starts nothing. Any other answer means the session did not survive (a
    server restart answers 404), and the client starts a new attempt at the
    saved position with the current tracks. That includes `installation_changed`:
    a replan always carries the old session's installation and cannot succeed,
@@ -1529,6 +1539,37 @@ A network failure before a transport's own first frame stays on the ordinary
 failure path, even when an earlier transport of the same viewing played: the
 new route may be one this client cannot reach. If that recovery then cannot
 reach the server, it joins the reconnect and continues the same budget.
+
+### 6.3 `paused_timeout_v1` — a session paused too long
+
+The server ends a native session that has stayed paused longer than the
+administrator's `playback.paused_session_timeout_minutes` (default 15 minutes,
+`0` turns it off), so an abandoned pause stops holding a stream slot and its
+transcode. It ends only a session whose client still reports progress: one that
+went quiet is the idle expiry's (§2.5). Watch Together members, Cast receivers
+(`output.current_sink: "cast_receiver"`) and audio-only files are never ended
+this way. [Playback lifecycle](playback-lifecycle.md#paused-timeout) gives the
+server side.
+
+The end is recorded as `expired`, and the session's requests answer `410`:
+
+| Request | Attempt listed `paused_timeout_v1` | Otherwise |
+| --- | --- | --- |
+| Progress | `playback_session_paused_timeout` | `playback_session_ended` |
+| Replan | `playback_session_paused_timeout` | `playback_session_ended` |
+| Control-socket ticket | `playback_session_paused_timeout` | `playback_session_ended` |
+| Media (HLS, ranges, sidecars, fonts) | `playback_session_ended` | `playback_session_ended` |
+
+No control-socket frame announces it. A client that lists `paused_timeout_v1`
+leaves the player on `playback_session_paused_timeout` from progress, replan or
+the ticket mint, the way it leaves after an administrator's end, and tells the
+viewer playback stopped because it was paused too long, not that an
+administrator ended it. A media `410` goes through the client's usual recovery,
+a replan, which then reaches the same answer; a client whose recovery restarts
+playback directly must ask the server first (one progress post) and leave on
+`410`. The feature is attempt-sticky (§6). A client lists it only on the starts
+it can leave this way: the first-party clients leave it off Cast and audiobook
+starts.
 
 ---
 

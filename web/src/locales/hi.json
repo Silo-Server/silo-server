@@ -521,6 +521,12 @@
       "value": "यह प्लेबैक सेशन खत्म हो गया है। फिर से चलाना शुरू करें।"
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "प्लेबैक बहुत देर तक रुका रहा, इसलिए उसे बंद कर दिया गया। फिर से चलाना शुरू करें।"
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -66921,6 +66927,24 @@
       "value": "लाइब्रेरी में सेव करें"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "रुका हुआ प्लेबैक"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "रुके हुए प्लेबैक को बंद करने की अवधि"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 से 1440। किसी Silo ऐप में इतनी देर तक रुके हुए वीडियो का प्लेबैक बंद कर दिया जाता है, जिससे उसकी स्ट्रीम और कोई भी ट्रांसकोड खाली हो जाता है; उसे फिर से चलाने पर वह उसी जगह से जारी रहता है। साथ में देखें, कास्टिंग और ऑडियोबुक पर इसका असर नहीं पड़ता। 0 डालने पर यह सुविधा बंद हो जाती है।"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67383,6 +67407,12 @@
     {
       "type": 0,
       "value": "दिन"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "मिनट"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73317,6 +73347,12 @@
       "value": "सॉफ़्टवेयर HDR टोन मैपिंग चालू करें"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "रुके हुए प्लेबैक को बंद करने की अवधि (मिनट)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73375,6 +73411,12 @@
     {
       "type": 0,
       "value": "मार्कर सोर्स"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "रुका हुआ प्लेबैक"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -75341,6 +75383,36 @@
     {
       "type": 0,
       "value": "पहले कोई साइन-इन प्रोवाइडर चालू करें। पासवर्ड साइन-इन बंद और कोई प्रोवाइडर चालू न होने पर, सिर्फ़ ब्रेक-ग्लास एडमिन ही साइन इन कर पाएँगे।"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "8 से 72 वर्णों तक। नियम पासवर्ड चुनने या बदलने पर लागू होते हैं; पहले से सेट किए गए पासवर्ड काम करते रहते हैं।"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "पासवर्ड की न्यूनतम लंबाई"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "कोई भी विराम चिह्न या सिंबल, जैसे ! या #। अक्षर, अंक और स्पेस नहीं गिने जाते।"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "विशेष वर्ण ज़रूरी"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "कैपिटल लेटर ज़रूरी"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -87171,6 +87243,20 @@
       "value": "सेट हो रहा है…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "इसे खुद "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " के साथ शेयर करें।"
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -89679,10 +89765,64 @@
       "value": " की ओर से इस डिवाइस को इस सर्वर में साइन इन करने की अनुमति नहीं है।"
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "कम से कम "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " वर्ण।"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "कम से कम "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " वर्ण।"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "पासवर्ड मेल नहीं खाते।"
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "कम से कम एक विशेष वर्ण शामिल करें, जैसे ! या #।"
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "कम से कम एक कैपिटल लेटर शामिल करें।"
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -89695,6 +89835,48 @@
     {
       "type": 0,
       "value": "कम से कम 8 वर्ण इस्तेमाल करें।"
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "कम से कम "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " वर्ण इस्तेमाल करें।"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "कम से कम "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " वर्ण इस्तेमाल करें।"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -123669,6 +123851,12 @@
     {
       "type": 0,
       "value": "एडमिनिस्ट्रेटर ने यह प्लेबैक सेशन खत्म कर दिया।"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "प्लेबैक बहुत देर तक रुका रहा, इसलिए उसे बंद कर दिया गया।"
     }
   ],
   "web.player.shuffle.scopeWithParent": [

@@ -521,6 +521,12 @@
       "value": "Šī atskaņošanas sesija ir beigusies. Sāciet atskaņošanu no jauna."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Atskaņošana tika apturēta, jo tā bija pauzēta pārāk ilgi. Sāciet atskaņošanu no jauna."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -75198,6 +75204,24 @@
       "value": "Saglabāt bibliotēkā"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pauzēta atskaņošana"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Beigt pauzētu atskaņošanu pēc"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "No 0 līdz 1440. Beidz video, kas Silo lietotnē ir pauzēts tik ilgi, atbrīvojot tā straumi un jebkādu pārkodēšanu; atskaņojot to vēlreiz, skatīšanās turpinās no tās pašas vietas. Tas neietekmē funkciju „Skatīties kopā”, apraidi un audiogrāmatas. Vērtība 0 šo funkciju izslēdz."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -75688,6 +75712,12 @@
     {
       "type": 0,
       "value": "dienas"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minūtēm"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -81669,6 +81699,12 @@
       "value": "Iespējot programmatūras HDR toņu kartēšanu"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Beigt pauzētu atskaņošanu pēc (minūtēm)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -81727,6 +81763,12 @@
     {
       "type": 0,
       "value": "Marķieru avots"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pauzēta atskaņošana"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -83741,6 +83783,36 @@
     {
       "type": 0,
       "value": "Vispirms ieslēdziet pierakstīšanās nodrošinātāju. Ja pierakstīšanās ar paroli ir izslēgta un neviens nodrošinātājs nav ieslēgts, pierakstīties varētu tikai ārkārtas piekļuves administratori."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "No 8 līdz 72 rakstzīmēm. Noteikumi tiek piemēroti, kad kāds izvēlas vai maina paroli; jau iestatītās paroles turpina darboties."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Paroles minimālais garums"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Jebkura pieturzīme vai simbols, piemēram, ! vai #. Burti, cipari un atstarpes netiek ieskaitīti."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Pieprasīt speciālo rakstzīmi"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Pieprasīt lielo burtu"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -96511,6 +96583,20 @@
       "value": "Notiek iestatīšana…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Paroli lietotājam "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " nododiet personīgi."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -99306,10 +99392,80 @@
       "value": " neļauj šai ierīcei pierakstīties šajā serverī."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vismaz "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " rakstzīmes."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vismaz "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " rakstzīme."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vismaz "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " rakstzīmes."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Paroles nesakrīt."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Iekļaujiet vismaz vienu speciālo rakstzīmi, piemēram, ! vai #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Iekļaujiet vismaz vienu lielo burtu."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -99322,6 +99478,64 @@
     {
       "type": 0,
       "value": "Izmantojiet vismaz 8 rakstzīmes."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Izmantojiet vismaz "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " rakstzīmes."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Izmantojiet vismaz "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " rakstzīmi."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Izmantojiet vismaz "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " rakstzīmes."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -137290,6 +137504,12 @@
     {
       "type": 0,
       "value": "Administrators beidza šo atskaņošanas sesiju."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Atskaņošana tika apturēta, jo tā bija pauzēta pārāk ilgi."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

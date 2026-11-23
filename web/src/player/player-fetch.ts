@@ -24,16 +24,26 @@ export class PlayerFetchError extends Error {
   }
 }
 
+/** Why the server ended a playback session for good. */
+export type PlaybackSessionEndReason = "ended" | "paused_timeout";
+
+function hasProblemType(error: PlayerFetchError, type: string): boolean {
+  return error.code === type || error.rawBody?.includes(`/problems/${type}"`) === true;
+}
+
 /**
- * Whether the server answered that this playback session was ended for good
- * (410 `playback_session_ended`), as it does after an administrator stops a
- * player that did not confirm the command. The player exits instead of
- * starting a fresh session.
+ * Why the server answered that this playback session was ended for good, or
+ * null when it did not: 410 `playback_session_paused_timeout` when the server
+ * ended it after it stayed paused too long (the video player advertises
+ * `paused_timeout_v1`), and 410 `playback_session_ended` otherwise, as after
+ * an administrator stops a player that did not confirm the command. The
+ * player exits instead of starting a fresh session.
  */
-export function isPlaybackSessionEndedError(error: unknown): boolean {
-  if (!(error instanceof PlayerFetchError) || error.status !== 410) return false;
-  if (error.code === "playback_session_ended") return true;
-  return /\/problems\/playback_session_ended"/.test(error.rawBody ?? "");
+export function playbackSessionEndReason(error: unknown): PlaybackSessionEndReason | null {
+  if (!(error instanceof PlayerFetchError) || error.status !== 410) return null;
+  if (hasProblemType(error, "playback_session_paused_timeout")) return "paused_timeout";
+  if (hasProblemType(error, "playback_session_ended")) return "ended";
+  return null;
 }
 
 /**
