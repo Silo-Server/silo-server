@@ -751,6 +751,9 @@
 ./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
 ./internal/api/handlers TestLifecycleSweepBacksOffFailedEndsDB
 ./internal/api/handlers TestPausedTimeoutSweepEndsPausedSessionsDB
+./internal/api/handlers TestPausedTimeoutSweepDropsCopyItCannotFinishDB
+./internal/api/handlers TestPausedTimeoutSweepDropsCopiesStoppedElsewhereDB
+./internal/api/handlers TestPausedTimeoutSweepPagesPastSkippedRowsDB
 ./internal/api/handlers TestLifecycleSweepKeepsARecordedSubtitleDB
 ./internal/api/handlers TestLifecycleSweepTakesALaterSyncedSubtitleDB
 # A live row names an episode as the history entry its play leaves does.

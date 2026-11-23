@@ -125,15 +125,6 @@ type ProgressStoreV3 interface {
 	ClaimStopFinalization(ctx context.Context, sessionID string, leaseUntil time.Time) (bool, error)
 }
 
-// PausedAttemptExpirerV3 ends an attempt left paused too long: it stops the
-// live attempt under stopID only while its last accepted sample is paused and
-// the session has been paused for at least timeout, judged under the lock
-// that orders progress, so a resume that lands first keeps it live. It
-// reports whether this call stopped the attempt.
-type PausedAttemptExpirerV3 interface {
-	ExpirePausedAttempt(ctx context.Context, sessionID, stopID string, timeout time.Duration) (bool, error)
-}
-
 type AttemptRecordV3 struct {
 	PlaybackAttemptID      string
 	SessionID              string

@@ -331,6 +331,10 @@ type PlaybackHandler struct {
 	// sweep enforces; built on first use from SettingsRepo.
 	pausedTimeoutOnce    sync.Once
 	pausedTimeoutSetting *config.CachedSetting[time.Duration]
+	// pausedTimeoutCursor is where the paused timeout's next candidate page
+	// starts; nil starts from the oldest pause.
+	pausedTimeoutCursorMu sync.Mutex
+	pausedTimeoutCursor   *pausedTimeoutCursor
 }
 
 type PlaybackWatchScrobbler interface {
