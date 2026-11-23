@@ -59,6 +59,12 @@ func (h *PlaybackHandler) startRemotePlaybackTransport(ctx context.Context, node
 		// Drain the (small) error body so the transport can reuse the
 		// connection instead of tearing it down on every failed start.
 		_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 4096))
+		// A node at its own job cap takes no new work from here until its
+		// next health check; the caller tries another executor, as it does
+		// after any refused start.
+		if nodepool.RefusedAtCapacity(response) {
+			nodepool.ReportAtCapacity(h.NodePlanner, nodeURL)
+		}
 		if request.ToneMapMode != "" {
 			if validationErr := transcodenode.ToneMapExecutionErrorForResponse(
 				response.StatusCode,

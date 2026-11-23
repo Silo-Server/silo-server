@@ -214,7 +214,7 @@ func (w *FanoutWorker) titleToldElsewhere(ctx context.Context, tx pgx.Tx, waiter
 // arrival and queues its channel attempts in the fanout transaction. The
 // caller holds the recipients' inbox locks. It returns the IDs of the rows
 // actually inserted; a profile already told about the item dedupes away.
-func (w *FanoutWorker) deliverWatchlistArrivals(ctx context.Context, tx pgx.Tx, arrivals []watchlistArrival) ([]string, error) {
+func (w *FanoutWorker) deliverWatchlistArrivals(ctx context.Context, tx pgx.Tx, arrivals []watchlistArrival) ([]InsertedDelivery, error) {
 	if len(arrivals) == 0 {
 		return nil, nil
 	}
@@ -256,10 +256,15 @@ func (w *FanoutWorker) deliverWatchlistArrivals(ctx context.Context, tx pgx.Tx, 
 	if err != nil || len(inserted) == 0 {
 		return nil, err
 	}
-	// Webhooks carry it under their request switch: both say a wanted title
-	// arrived.
+	// Webhooks and plugin destinations carry it under their request switch:
+	// both say a wanted title arrived.
 	if err := w.enqueueWebhookOutbox(ctx, tx, inserted, func(_ InsertedDelivery, hook Webhook) bool {
 		return hook.NotifyRequests
+	}); err != nil {
+		return nil, err
+	}
+	if err := w.enqueuePluginDestinationOutbox(ctx, tx, inserted, func(_ InsertedDelivery, destination PluginDestination) bool {
+		return destination.NotifyRequests
 	}); err != nil {
 		return nil, err
 	}
@@ -269,24 +274,21 @@ func (w *FanoutWorker) deliverWatchlistArrivals(ctx context.Context, tx pgx.Tx, 
 	if err := w.enqueuePushOutbox(ctx, tx, inserted); err != nil {
 		return nil, err
 	}
-	ids := make([]string, len(inserted))
-	for i, row := range inserted {
-		ids[i] = row.ID
-	}
-	return ids, nil
+	return inserted, nil
 }
 
 // dispatchInserted publishes rows the fanout transaction committed, reloading
 // each with its display fields. Failures are tolerable: the durable rows
 // appear on reconnect.
-func (w *FanoutWorker) dispatchInserted(ctx context.Context, ids []string) {
-	for _, id := range ids {
-		row, err := w.deliveries.GetRowByID(ctx, id)
+func (w *FanoutWorker) dispatchInserted(ctx context.Context, inserted []InsertedDelivery) {
+	for _, delivery := range inserted {
+		row, err := w.deliveries.GetRowByID(ctx, delivery.ID)
 		if err == nil && row != nil {
+			row.pluginAttempts = delivery.pluginAttempts
 			err = w.dispatcher.Dispatch(ctx, *row)
 		}
 		if err != nil {
-			w.logger.WarnContext(ctx, "notification dispatch failed", "delivery_id", id, "error", err)
+			w.logger.WarnContext(ctx, "notification dispatch failed", "delivery_id", delivery.ID, "error", err)
 		}
 	}
 }

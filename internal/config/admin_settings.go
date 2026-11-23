@@ -23,6 +23,13 @@ import (
 	"github.com/robfig/cron/v3"
 )
 
+// Direct connection settings control the hidden self-check, not a running engine.
+const (
+	DirectConnectionsEnabledSettingKey     = "direct_connections.enabled"
+	DirectConnectionsPortMappingSettingKey = "direct_connections.port_mapping"
+	DirectConnectionsSTUNServersSettingKey = "direct_connections.stun_servers"
+)
+
 const (
 	cloudflareURLMode                  = "cloudflare_token"
 	playbackSegmentRetentionSettingKey = "playback.segment_retention_seconds"
@@ -234,6 +241,9 @@ const MarkersDetectionWorkersSettingKey = "markers.detection_workers"
 // takes effect on restart.
 const ServerLANDiscoverySettingKey = "server.lan_discovery"
 
+// serverLogFormatSettingKey selects text or JSON console logs.
+const serverLogFormatSettingKey = "server.log_format"
+
 // Backup settings (docs/architecture/backups.md). internal/backup reads them
 // live at each run, so none needs a restart.
 const (
@@ -298,6 +308,15 @@ func ParseBackupTime(value string) (hour, minute int, ok bool) {
 // they can reach it (docs/architecture/server-identity.md, "Local network TLS").
 // Read per request, so a change applies without restart.
 const ServerLocalURLSettingKey = "server.local_url"
+
+// WebMediaURLSettingKey is an optional https origin that serves the same API
+// over HTTP/1.1 only, for a deployment whose main address speaks HTTP/2. The
+// web player stripes direct-play range reads across it (parallel_range_url in
+// the playback plan) when the API serves the file; the URL's st authorizes each
+// range. Empty names no media origin: the player then stripes on the page's own
+// origin when the page loaded over HTTP/1.1, and on a proxy node's own URL.
+// Read per request, so a change applies without restart.
+const WebMediaURLSettingKey = "server.web_media_url"
 
 // External sign-in settings (docs/architecture/external-sign-in.md).
 const (
@@ -390,18 +409,22 @@ const ServerSettingsMutationLock = "silo:server_settings:mutation"
 //
 //nolint:goconst
 var adminSettingDefaults = map[string]string{
-	"auth.access_token_expiry":  "8h",
-	"auth.refresh_token_expiry": "30d",
-	"server.log_level":          "info",
-	"server.log_quiet":          "",
-	"server.public_url":         "",
-	"branding.server_name":      "Silo",
-	"branding.login_subtitle":   "Sign in with an existing account.",
-	"clientip.trusted_proxies":  "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128",
-	"theme.catalog_url":         DefaultThemeCatalogURL,
+	DirectConnectionsEnabledSettingKey:     "false",
+	DirectConnectionsPortMappingSettingKey: "true",
+	DirectConnectionsSTUNServersSettingKey: "stun.cloudflare.com:3478,stun.l.google.com:19302",
+	"auth.access_token_expiry":             "8h",
+	"auth.refresh_token_expiry":            "30d",
+	"server.log_level":                     "info",
+	"server.log_quiet":                     "",
+	"server.public_url":                    "",
+	"branding.server_name":                 "Silo",
+	"branding.login_subtitle":              "Sign in with an existing account.",
+	"clientip.trusted_proxies":             "10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 127.0.0.0/8, ::1/128",
+	"theme.catalog_url":                    DefaultThemeCatalogURL,
 
 	ServerLANDiscoverySettingKey:              "true",
 	ServerLocalURLSettingKey:                  "",
+	WebMediaURLSettingKey:                     "",
 	AuthLocalPasswordLoginSettingKey:          "true",
 	AuthEmailAutoMatchSettingKey:              "false",
 	AuthUserAPIKeysSettingKey:                 "false",
@@ -480,6 +503,7 @@ var adminSettingDefaults = map[string]string{
 	Allow4KTranscodeSettingKey:                       "true",
 	playback.TranscodeThrottleEnabledSettingKey:      strconv.FormatBool(playback.DefaultTranscodeThrottleEnabled),
 	playback.TranscodeThrottleSecondsSettingKey:      strconv.Itoa(playback.DefaultTranscodeThrottleSeconds),
+	playback.PausedSessionTimeoutSettingKey:          strconv.Itoa(playback.DefaultPausedSessionTimeoutMinutes),
 
 	"audiobookshelf_compat.enabled":            "true",
 	"jellyfin_compat.enabled":                  "true",
@@ -546,14 +570,7 @@ var adminSettingDefaults = map[string]string{
 	"email.smtp_security": "starttls",
 	"email.from_name":     "Silo",
 
-	"notifications.release_events_enabled":                     "true",
-	"notifications.fanout_enabled":                             "true",
 	"notifications.ui_enabled":                                 "true",
-	"notifications.fanout.settle_seconds":                      "30",
-	"notifications.fanout.max_event_age_hours":                 "72",
-	"notifications.retention.read_days":                        "90",
-	"notifications.retention.unread_days":                      "180",
-	"notifications.retention.event_days":                       "30",
 	"notifications.webhooks_enabled":                           "false",
 	"notifications.webhooks.max_per_profile":                   "10",
 	"notifications.webhooks.allow_private_destinations":        "false",
@@ -747,7 +764,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 	value := strings.TrimSpace(raw)
 
 	switch key {
-	case "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey, PlaybackPreferLowerVersionTranscodeSettingKey,
+	case DirectConnectionsEnabledSettingKey, DirectConnectionsPortMappingSettingKey, "metadata.cache_images", "playback.transcode_enabled", PlaybackAllowHEVCEncodingSettingKey, PlaybackPreferLowerVersionTranscodeSettingKey,
 		PlaybackKeyframePlaylistSettingKey, PlaybackBandwidthProbeAutomaticSettingKey,
 		ChapterThumbnailSoftwareToneMapSettingKey, PlaybackTranscodeHardwareToneMapSettingKey,
 		PlaybackTranscodeSoftwareToneMapSettingKey, CatalogScopeVersionsToLibrarySettingKey,
@@ -758,7 +775,7 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		"email.enabled", "signup.enabled", "password_reset.self_service_enabled", SetupCompletedSettingKey,
 		"scanner.empty_trash_after_scan", "scanner.realtime_monitoring", "matcher.enable_tv_series_root_queue",
 		"matcher.enable_tv_series_group_queue", "policy.editor_enabled",
-		"overlays.enabled", "notifications.release_events_enabled", "notifications.fanout_enabled",
+		"overlays.enabled",
 		"notifications.ui_enabled", "notifications.webhooks_enabled",
 		"notifications.webhooks.allow_private_destinations", "media_servers.allow_private_destinations",
 		"notifications.email_enabled",
@@ -787,6 +804,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminURL(key, value)
 	case BackupS3KeyPrefixSettingKey:
 		return strings.Trim(value, "/"), nil
+	case DirectConnectionsSTUNServersSettingKey:
+		return normalizeSTUNServers(key, value)
 
 	case AuthProviderRecheckIntervalSettingKey:
 		parsed, err := parseDuration(value)
@@ -853,6 +872,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 99)
 	case playback.TranscodeThrottleSecondsSettingKey:
 		return normalizeAdminInt(key, value, 60, 86400)
+	case playback.PausedSessionTimeoutSettingKey:
+		// Zero turns the timeout off.
+		return normalizeAdminInt(key, value, 0, playback.MaxPausedSessionTimeoutMinutes)
 	case playbackSegmentRetentionSettingKey:
 		normalized, err := normalizeAdminInt(key, value, 0, 86400)
 		if err != nil {
@@ -892,13 +914,6 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 60000)
 	case "email.smtp_port":
 		return normalizeAdminInt(key, value, 1, 65535)
-	case "notifications.fanout.settle_seconds":
-		return normalizeAdminInt(key, value, 0, 3600)
-	case "notifications.fanout.max_event_age_hours":
-		return normalizeAdminInt(key, value, 1, 24*365)
-	case "notifications.retention.read_days", "notifications.retention.unread_days",
-		"notifications.retention.event_days":
-		return normalizeAdminInt(key, value, 1, 3650)
 	case "notifications.webhooks.max_per_profile":
 		return normalizeAdminInt(key, value, 1, 100)
 	case "notifications.webhooks.deliveries_per_minute_per_profile":
@@ -947,6 +962,12 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 
 	case "server.log_level":
 		return normalizeAdminEnum(key, value, "debug", "info", "warn", "error")
+	case serverLogFormatSettingKey:
+		// Empty keeps the text default, as an unset row does.
+		if value == "" {
+			return "", nil
+		}
+		return normalizeAdminEnum(key, value, "text", "json")
 	case "opslog.capture_level":
 		// "warning" is accepted because the startup reader in cmd/silo treats
 		// it as an alias for "warn".
@@ -1020,6 +1041,8 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminURL(key, value)
 	case ServerLocalURLSettingKey:
 		return normalizeLocalURL(value)
+	case WebMediaURLSettingKey:
+		return normalizeWebMediaURL(value)
 	case "redis.url":
 		return NormalizeRedisURL(value)
 	case RedisDBSettingKey:
@@ -1525,18 +1548,67 @@ func normalizeAdminEnum(key, value string, allowed ...string) (string, error) {
 // normalizeLocalURL accepts an http(s) origin: clients reach the API at its
 // root, and the connections document publishes origins only.
 func normalizeLocalURL(value string) (string, error) {
-	normalized, err := normalizeAdminURL(ServerLocalURLSettingKey, value)
+	return normalizeOriginURL(ServerLocalURLSettingKey, value)
+}
+
+// normalizeWebMediaURL accepts an https origin: an HTTPS page cannot fetch
+// plain HTTP, and the stream reference travels to this origin.
+func normalizeWebMediaURL(value string) (string, error) {
+	normalized, err := normalizeOriginURL(WebMediaURLSettingKey, value)
+	if err != nil || normalized == "" {
+		return normalized, err
+	}
+	if !strings.HasPrefix(normalized, "https://") {
+		return "", fmt.Errorf("%s must use https", WebMediaURLSettingKey)
+	}
+	// url.Parse accepts an empty hostname and any digits as a port. A browser
+	// accepts neither, and the web player parses this origin before it plays
+	// anything.
+	if host, port, err := net.SplitHostPort(strings.TrimPrefix(normalized, "https://")); err == nil {
+		if host == "" {
+			return "", fmt.Errorf("%s must include a hostname", WebMediaURLSettingKey)
+		}
+		if n, err := strconv.Atoi(port); err != nil || n < 1 || n > 65535 {
+			return "", fmt.Errorf("%s must use a port from 1 to 65535", WebMediaURLSettingKey)
+		}
+	}
+	// url.Parse also accepts a hostname with a character a browser refuses, such
+	// as "a<b.example". Refuse the forbidden domain code points of the WHATWG URL
+	// host parser (https://url.spec.whatwg.org/#forbidden-domain-code-point). An
+	// IP literal is exempt: its colons are valid, and url.Parse checks its form.
+	host := strings.TrimPrefix(normalized, "https://")
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if !strings.Contains(host, ":") && strings.ContainsFunc(host, isForbiddenDomainCodePoint) {
+		return "", fmt.Errorf("%s must use a valid hostname", WebMediaURLSettingKey)
+	}
+	return normalized, nil
+}
+
+// isForbiddenDomainCodePoint reports whether a browser's URL host parser
+// rejects r in a domain: a C0 control, U+007F, space, or one of
+// # % / : < > ? @ [ \ ] ^ |.
+func isForbiddenDomainCodePoint(r rune) bool {
+	return r <= 0x20 || r == 0x7f || strings.ContainsRune(`#%/:<>?@[\]^|`, r)
+}
+
+// normalizeOriginURL accepts an http(s) origin and returns it as scheme://host,
+// so a stray "?" or "#" with nothing after it never reaches a URL built from it.
+// Empty is accepted as off.
+func normalizeOriginURL(key, value string) (string, error) {
+	normalized, err := normalizeAdminURL(key, value)
 	if err != nil || normalized == "" {
 		return normalized, err
 	}
 	parsed, err := url.Parse(normalized)
 	if err != nil {
-		return "", fmt.Errorf("%s must include a URL scheme and host", ServerLocalURLSettingKey)
+		return "", fmt.Errorf("%s must include a URL scheme and host", key)
 	}
 	if parsed.Path != "" || parsed.RawQuery != "" || parsed.Fragment != "" || parsed.User != nil {
-		return "", fmt.Errorf("%s must be a scheme, host and optional port, such as http://192.168.1.20:8080", ServerLocalURLSettingKey)
+		return "", fmt.Errorf("%s must be a scheme, host and optional port, such as https://media.example.com or http://192.168.1.20:8080", key)
 	}
-	return normalized, nil
+	return parsed.Scheme + "://" + parsed.Host, nil
 }
 
 func normalizeAdminURL(key, value string) (string, error) {
@@ -1551,4 +1623,62 @@ func normalizeAdminURL(key, value string) (string, error) {
 		return "", fmt.Errorf("%s must use http or https", key)
 	}
 	return strings.TrimRight(value, "/"), nil
+}
+
+func normalizeSTUNServers(key, value string) (string, error) {
+	if value == "" {
+		return "", nil
+	}
+	entries := strings.Split(value, ",")
+	if len(entries) > 8 {
+		return "", fmt.Errorf("%s accepts at most 8 entries", key)
+	}
+	out := make([]string, 0, len(entries))
+	seen := make(map[string]bool, len(entries))
+	for _, entry := range entries {
+		host, port, err := net.SplitHostPort(strings.ToLower(strings.TrimSpace(entry)))
+		if err != nil {
+			return "", fmt.Errorf("%s requires host:port entries: %w", key, err)
+		}
+		n, err := strconv.ParseUint(port, 10, 16)
+		if err != nil || n == 0 {
+			return "", fmt.Errorf("%s requires ports between 1 and 65535", key)
+		}
+		ip := net.ParseIP(host)
+		// The prober gives an IPv4-mapped literal no IPv4 attempt; the plain
+		// endpoint probes the same address and deduplicates against it.
+		if v4 := ip.To4(); v4 != nil {
+			host = v4.String()
+		}
+		if ip == nil && !validSTUNHostName(host) {
+			return "", fmt.Errorf("%s contains an invalid IP address or DNS host", key)
+		}
+		normalized := net.JoinHostPort(host, strconv.FormatUint(n, 10))
+		if !seen[normalized] {
+			seen[normalized] = true
+			out = append(out, normalized)
+		}
+	}
+	return strings.Join(out, ","), nil
+}
+
+// validSTUNHostName reports whether host is a lowercase DNS name. A
+// top-level label is never all digits, so a host such as 192.168.1.256 is a
+// mistyped IP address, not a DNS name.
+func validSTUNHostName(host string) bool {
+	if len(host) == 0 || len(host) > 253 {
+		return false
+	}
+	labels := strings.Split(strings.TrimSuffix(host, "."), ".")
+	for _, label := range labels {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '-' {
+				return false
+			}
+		}
+	}
+	return strings.Trim(labels[len(labels)-1], "0123456789") != ""
 }

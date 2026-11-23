@@ -70,9 +70,13 @@ When the API relays a transcode whose node it can no longer reach, it moves
 the transcode to another node with an ordinary `POST /transcode/start`: the
 same `session_id` (transport id), the recorded recipe, `throttle_seconds` from
 that recipe, `require_ready`, and a start position resumed at the requested
-segment. The response is checked with the same attestations as a fresh start,
-and a node that fails them is stopped and skipped. The API then sends a
-best-effort `DELETE /transcode/{session_id}` to the node it left. See
+segment, plus a fresh `start_id`. The response is checked with the same
+attestations as a fresh start, and a node that fails them is released with
+`fence=0&start_id=<that id>` and skipped, so the release cannot end a later
+start of the same transport there. The API then sends a
+best-effort release (`DELETE /transcode/{session_id}?fence=0`, no `start_id`)
+to the node it left, which ends the job running there when the release arrives, or a rebuild
+that publishes while it waits, but not a newer start's job. See
 [Transcode node lost under the API relay](architecture/restart-resilient-playback.md#transcode-node-lost-under-the-api-relay).
 
 The start response also reports `hw_accel`, the backend retained for video

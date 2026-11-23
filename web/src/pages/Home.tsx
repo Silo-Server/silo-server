@@ -2,7 +2,7 @@
 import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSectionTitle } from "@/lib/sectionTitle";
 import { useT, type Translate } from "@/i18n";
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { isCancelledError, useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { LayoutDashboard } from "lucide-react";
 import HeroBanner from "@/components/HeroBanner";
@@ -218,8 +218,8 @@ export default function Home() {
             return next;
           });
         })
-        .catch(() => {
-          if (loadGenerationRef.current !== generation) return;
+        .catch((error: unknown) => {
+          if (loadGenerationRef.current !== generation || isCancelledError(error)) return;
 
           setFailedIds((prev) => {
             const next = new Set(prev);

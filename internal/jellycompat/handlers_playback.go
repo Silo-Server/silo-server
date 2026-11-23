@@ -38,6 +38,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -65,7 +66,10 @@ const (
 )
 
 type playbackInfoRequest struct {
-	serverBitrateCapKbps                int
+	serverBitrateCapKbps int
+	// episode says the item is an episode, which picks its end-credits
+	// window (see PlaybackMediaSource.EndCreditsStart).
+	episode                             bool
 	streamLocation                      string
 	SiloSeekReanchor                    bool            `json:"SiloSeekReanchor"`
 	UserID                              string          `json:"UserId"`
@@ -466,6 +470,19 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 		if pct, err := strconv.Atoi(v); err == nil && pct > 0 {
 			t.MinResumePct = pct
 		}
+	}
+	return t
+}
+
+// sourceThresholds is playbackThresholds with the end credits of source, the
+// version whose runtime a report's position is measured against. identified
+// is false when source is only a guess at what plays (the first listed one),
+// whose credits could belong to another cut; the percentage rule alone
+// applies then.
+func (h *PlaybackHandler) sourceThresholds(ctx context.Context, source *PlaybackMediaSource, identified bool) userstore.ProgressThresholds {
+	t := h.playbackThresholds(ctx)
+	if identified && source != nil {
+		t.CreditsStartSeconds = source.EndCreditsStart
 	}
 	return t
 }
@@ -2036,6 +2053,11 @@ func (h *PlaybackHandler) startRemoteTranscodeWithToneMapMode(
 		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusAccepted {
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+			// The caller tries the next candidate on any refused start; a
+			// node at its own job cap is also held back from the next one.
+			if nodepool.RefusedAtCapacity(resp) {
+				nodepool.ReportAtCapacity(h.NodePlanner, transcodeNodeURL)
+			}
 			if request.ToneMapMode != "" {
 				if validationErr := transcodenode.ToneMapExecutionErrorForResponse(
 					resp.StatusCode,
@@ -2507,6 +2529,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "PlaybackUnavailable", "Item does not have playable media")
 		return
 	}
+	req.episode = detail.Type == compatEpisodeType
 
 	routeItemID := h.codec.EncodeStringID(EncodedIDItem, detail.ContentID)
 	if pathMediaSourceID != "" {
@@ -3091,6 +3114,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	return PlaybackMediaSource{
 		ServerBitrateCapKbps:       req.serverBitrateCapKbps,
 		StreamLocation:             req.streamLocation,
+		EndCreditsStart:            markers.CreditsLimitsFor(!req.episode).EndCreditsStart(version.EffectiveMarkerSegments(), float64(version.Duration)),
 		CanBurnSubtitle:            enableTranscoding && (maxBitrate <= 0 || targetBitrateKbps >= compatMinEncodeKbps) && (allow4KTranscode || !is4KResolution(version.Resolution)) && canEncodeOutput,
 		TargetBitrateKbps:          max(targetBitrateKbps, 0),
 		TargetResolution:           targetResolution,
@@ -3457,11 +3481,14 @@ func appendSubtitleMediaStreams(streams []mediaStreamDTO, routeItemID, mediaSour
 	return streams
 }
 
+// compatNegotiationVariant writes source ids in their canonical spelling, so a
+// negotiation stored while media-source ids still had dashes is replaced by the
+// same negotiation made after the upgrade.
 func compatNegotiationVariant(sources []PlaybackMediaSource) string {
 	var variant strings.Builder
 	for _, source := range sources {
 		fmt.Fprintf(&variant, "%s|a=%s|s=%s|r=%t|ts=%t|ta=%t|dv=%t;",
-			source.ID,
+			canonicalCompatID(source.ID),
 			compatOptionalIndex(source.SelectedAudioStreamIndex),
 			compatOptionalIndex(source.SelectedSubtitleStreamIndex),
 			source.HLSRemux,

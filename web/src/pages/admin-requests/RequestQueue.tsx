@@ -230,7 +230,7 @@ export function RequestQueue() {
               placeholder={t("web.admin.requests.queue.searchPlaceholder")}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
-              className="h-8 ps-9 text-[13px]"
+              className="h-8 ps-9 text-[0.8125rem]"
             />
           </div>
           <div
@@ -388,7 +388,7 @@ function ViewCount({
         count > 0 && view === "needs_approval"
           ? "bg-primary text-primary-foreground"
           : count > 0 && view === "failed"
-            ? "bg-destructive text-white"
+            ? "bg-destructive-fill text-destructive-foreground"
             : "bg-foreground/10",
       )}
     >

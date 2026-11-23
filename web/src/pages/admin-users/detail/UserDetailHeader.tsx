@@ -149,7 +149,9 @@ export function UserDetailHeader({
           {t("web.admin.users.detail.header.breadcrumbUsers")}
         </Link>
         <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
-        <span className="text-foreground min-w-0 truncate font-medium">{user.username}</span>
+        <span dir="auto" className="text-foreground min-w-0 truncate font-medium">
+          {user.username}
+        </span>
       </nav>
 
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start">

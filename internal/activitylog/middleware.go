@@ -8,6 +8,8 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -35,8 +37,14 @@ var excludedPrefixes = []string{
 	"/api/internal/nodes/",
 }
 
-// streamPrefixes are paths logged only at session-start (not per-chunk), so
-// a playback session does not write one activity row per chunk.
+// streamPrefixes are paths logged once per play, not per request. A segment or
+// manifest chunk (isStreamChunk) writes no row. A range request that continues a
+// play (isRangeContinuation) writes none either when it succeeds or its client
+// abandons it; one that fails keeps its row, so a refused or broken range stays
+// visible, and so does a GET answered 200, which is a stream started again from
+// its origin. A request with no Range header, or a range from byte 0, is a
+// play's start and writes a row. An answered CORS preflight is no play and
+// writes none.
 var streamPrefixes = []string{
 	"/api/v2/stream/",
 	"/api/v2/playback/transcode/",
@@ -96,11 +104,10 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 			}
 
 			// Skip per-chunk stream requests (segments, manifests after start)
-			for _, prefix := range streamPrefixes {
-				if strings.HasPrefix(path, prefix) && isStreamChunk(path) {
-					next.ServeHTTP(rw, r)
-					return
-				}
+			onStreamPath := slices.ContainsFunc(streamPrefixes, func(prefix string) bool { return strings.HasPrefix(path, prefix) })
+			if onStreamPath && isStreamChunk(path) {
+				next.ServeHTTP(rw, r)
+				return
 			}
 
 			start := time.Now()
@@ -138,6 +145,10 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 			if skipRoute != nil && skipRoute(pathPattern) {
 				return
 			}
+			status := RecordedStatus(r, wrapped.status, wrapped.wroteHeader)
+			if onStreamPath && skipsStreamRow(r, status) {
+				return
+			}
 			path = RedactSecretPathParams(r, path)
 
 			// After handler chain completes, auth middleware has populated lc
@@ -153,7 +164,7 @@ func NewFilteredMiddleware(w Writer, nodeID string, skipRoute func(pattern strin
 				Method:             r.Method,
 				Path:               path,
 				PathPattern:        pathPattern,
-				StatusCode:         RecordedStatus(r, wrapped.status, wrapped.wroteHeader),
+				StatusCode:         status,
 				UserAgent:          auditmutation.BoundUserAgent(r.UserAgent()),
 				DurationMs:         int(time.Since(start).Milliseconds()),
 			}
@@ -205,6 +216,55 @@ func isStreamChunk(path string) bool {
 	return strings.Contains(path, "/segment/") ||
 		strings.Contains(path, "/master.m3u8") ||
 		strings.Contains(path, "/subtitles/")
+}
+
+// skipsStreamRow reports whether a finished request on a stream path writes no
+// row. A range that continues a play adds a row only by failing; an abandoned
+// one is a seek or a stripe deadline, which the client does on purpose. A GET
+// answered 200 sent the stream again from its start, as a progressive remux
+// does for a range past byte 0, so it keeps its row. An answered OPTIONS is the
+// media origin's CORS preflight.
+func skipsStreamRow(r *http.Request, status int) bool {
+	if status >= http.StatusBadRequest && status != StatusClientClosedRequest {
+		return false
+	}
+	if r.Method == http.MethodOptions {
+		return true
+	}
+	if r.Method == http.MethodGet && status == http.StatusOK {
+		return false
+	}
+	return isRangeContinuation(r.Header.Get("Range"))
+}
+
+// isRangeContinuation reports whether a Range header asks for bytes after a
+// play's start: a bytes range whose first range starts past byte 0, or a suffix
+// range. A value that does not parse is no continuation, so its request stays
+// visible.
+func isRangeContinuation(header string) bool {
+	spec, ok := strings.CutPrefix(header, "bytes=")
+	if !ok {
+		return false
+	}
+	first, _, _ := strings.Cut(spec, ",")
+	from, to, ok := strings.Cut(first, "-")
+	if !ok {
+		return false
+	}
+	if from == "" {
+		// bytes=-N: the last N bytes.
+		n, err := strconv.ParseUint(to, 10, 64)
+		return err == nil && n > 0
+	}
+	start, err := strconv.ParseUint(from, 10, 64)
+	if err != nil || start == 0 {
+		return false
+	}
+	if to == "" {
+		return true
+	}
+	_, err = strconv.ParseUint(to, 10, 64)
+	return err == nil
 }
 
 // statusWriter wraps http.ResponseWriter to capture the status code.

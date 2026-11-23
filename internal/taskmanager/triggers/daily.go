@@ -39,12 +39,15 @@ func (d *DailyTrigger) SetStartSpread(spread time.Duration) {
 	d.spread = spread
 }
 
+// calcNextRun returns the first slot after now. Slots come from calendar
+// dates rather than from adding 24 hours, so a day that a daylight-saving
+// change makes 23 or 25 hours long keeps the configured wall-clock time.
 func (d *DailyTrigger) calcNextRun(now time.Time) time.Time {
-	slot := time.Date(now.Year(), now.Month(), now.Day(), d.hour, d.minute, 0, 0, now.Location())
-	if !slot.After(now) {
-		slot = slot.Add(24 * time.Hour)
+	for days := 0; ; days++ {
+		if slot := wallClock(now, days, d.hour, d.minute); slot.After(now) {
+			return spreadStart(slot, d.spread)
+		}
 	}
-	return spreadStart(slot, d.spread)
 }
 
 func (d *DailyTrigger) Start(_ *taskmanager.ExecutionResult) {

@@ -342,3 +342,57 @@ func TestScanFileAudiobookDiscPartsAgainstConcurrentRowDB(t *testing.T) {
 		"Copied Author/CD2/01.mp3 "+audiobookMultipartKind+" 2/2",
 	)
 }
+
+// TestScanAudiobookFolderKeepsBookRestoredUnchangedDB covers a book that is
+// gone when a library scan walks and comes back, with its old modification
+// time, while that scan marks it missing. A single-file scan sees the book
+// unchanged and skips it. The library scan must leave the book present.
+func TestScanAudiobookFolderKeepsBookRestoredUnchangedDB(t *testing.T) {
+	f := newConcurrentBookFixture(t)
+	if err := f.copyPart("01.mp3"); err != nil {
+		t.Fatal(err)
+	}
+	restored := filepath.Join(f.root, "Restored Author", "01.mp3")
+	writeRestored := func() error {
+		if err := os.MkdirAll(filepath.Dir(restored), 0o755); err != nil {
+			return err
+		}
+		return os.WriteFile(restored, []byte("restored"), 0o644)
+	}
+	if err := writeRestored(); err != nil {
+		t.Fatal(err)
+	}
+	other := NewScanner(NewFileRepository(f.pool), f.ffprobe, nil, 2, false, time.Hour)
+	if err := other.ScanAudiobookFolder(t.Context(), f.folder, true); err != nil {
+		t.Fatalf("initial scan: %v", err)
+	}
+	info, err := os.Stat(restored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.RemoveAll(filepath.Dir(restored)); err != nil {
+		t.Fatal(err)
+	}
+	var otherErr error
+	ran := false
+	s := f.hookedScanner(t, "SET missing_since = $1", func() {
+		ran = true
+		if otherErr = writeRestored(); otherErr == nil {
+			otherErr = os.Chtimes(restored, info.ModTime(), info.ModTime())
+		}
+		if otherErr == nil {
+			otherErr = other.ScanFile(context.Background(), restored, f.folder)
+		}
+	})
+
+	if err := s.ScanAudiobookFolder(t.Context(), f.folder, true); err != nil {
+		t.Fatalf("library scan: %v", err)
+	}
+	if !ran {
+		t.Fatal("the other scan never ran; the missing mark was not traced")
+	}
+	if otherErr != nil {
+		t.Fatalf("other scan: %v", otherErr)
+	}
+	requirePresentFilePaths(t, f.pool, f.folder.ID, filepath.Join(f.bookDir, "01.mp3"), restored)
+}

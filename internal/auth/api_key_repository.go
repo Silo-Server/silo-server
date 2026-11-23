@@ -138,7 +138,41 @@ func (r *APIKeyRepository) CreateAsActor(ctx context.Context, actorID, userID in
 	if err := CheckOwnerTarget(actor, target); err != nil {
 		return nil, err
 	}
+	if err := requestCredentialLive(ctx, tx); err != nil {
+		return nil, err
+	}
 	return insertAPIKey(ctx, tx, userID, "", label, scopes)
+}
+
+// requestCredentialLive refuses a key request whose own login session or API
+// key was revoked after the request authenticated. Callers hold the
+// requesting account's row locked; revoking an account's sign-ins locks that
+// row FOR UPDATE first, so a revocation either committed before this read or
+// waits for the caller's commit and then revokes or deletes what it wrote.
+// The credential's own row is locked too, so revoking just that session or
+// deleting just that key also waits for the new key. A context without claims
+// (a trusted internal caller) passes.
+func requestCredentialLive(ctx context.Context, tx pgx.Tx) error {
+	claims := ClaimsFromContext(ctx)
+	var live bool
+	var err error
+	switch {
+	case claims == nil:
+		return nil
+	case claims.TokenType == TokenTypeAPIKey:
+		err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM api_keys WHERE id = $1 FOR KEY SHARE)`, claims.APIKeyID).Scan(&live)
+	case claims.SessionID != "":
+		err = tx.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM auth_sessions WHERE id = $1 AND revoked_at IS NULL FOR SHARE)`, claims.SessionID).Scan(&live)
+	default:
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("checking the request's credential: %w", err)
+	}
+	if !live {
+		return ErrSessionRevoked
+	}
+	return nil
 }
 
 // MaxUserAPIKeys bounds the keys one account may hold once it creates them
@@ -213,6 +247,9 @@ func (r *APIKeyRepository) CreatePersonal(ctx context.Context, userID int, actin
 	if _, err := tx.Exec(ctx, `SELECT id FROM users WHERE id = ANY($1) ORDER BY id FOR KEY SHARE`,
 		append([]int{userID}, auditmutation.ActorIDs(ctx)...)); err != nil {
 		return nil, fmt.Errorf("locking api key account: %w", err)
+	}
+	if err := requestCredentialLive(ctx, tx); err != nil {
+		return nil, err
 	}
 	if acting.ID != "" {
 		var revision int64

@@ -5,6 +5,22 @@ package userstore
 type ProgressThresholds struct {
 	WatchedPct   int // mark completed above this % (default 90)
 	MinResumePct int // discard progress below this % (default 5)
+	// CreditsStartSeconds is where the played file's end credits start, on
+	// the timeline the duration measures; zero when unknown. Reaching it
+	// marks the item watched even below WatchedPct.
+	CreditsStartSeconds float64
+}
+
+// Watched reports whether position finishes an item of duration seconds:
+// past the watched threshold, or into its end credits.
+func (t ProgressThresholds) Watched(position, duration float64) bool {
+	if duration <= 0 {
+		return false
+	}
+	if position/duration > WatchedFraction(t.WatchedPct) {
+		return true
+	}
+	return t.CreditsStartSeconds > 0 && t.CreditsStartSeconds < duration && position >= t.CreditsStartSeconds
 }
 
 // WatchedFraction converts a watched-threshold percentage (e.g. 90) to a
@@ -26,9 +42,11 @@ func MinResumeFraction(pct int) float64 {
 }
 
 // ResolveProgressState classifies one progress event against the thresholds:
-// skip (below the min-resume floor — discard entirely), completed (above the
-// watched threshold — the returned position resets to 0 so completed rows
-// hold no resume point, matching MarkWatched), or a plain in-progress update.
+// completed (Watched — the returned position resets to 0 so completed rows
+// hold no resume point, matching MarkWatched), skip (below the min-resume
+// floor — discard entirely), or a plain in-progress update. Completion is
+// decided first, so credits that start below the min-resume floor still
+// finish the item.
 // The single home of the rule shared by both store backends and the
 // offline-sync ingest; `completed` remains a one-way latch at the write site.
 func ResolveProgressState(position, duration float64, t ProgressThresholds) (pos float64, completed, skip bool) {
@@ -40,12 +58,11 @@ func ResolveProgressState(position, duration float64, t ProgressThresholds) (pos
 	if duration < 0 {
 		duration = 0
 	}
+	if t.Watched(position, duration) {
+		return 0, true, false
+	}
 	if duration > 0 && position > 0 && position/duration < MinResumeFraction(t.MinResumePct) {
 		return position, false, true
 	}
-	completed = duration > 0 && position/duration > WatchedFraction(t.WatchedPct)
-	if completed {
-		position = 0
-	}
-	return position, completed, false
+	return position, false, false
 }

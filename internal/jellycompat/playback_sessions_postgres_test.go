@@ -127,6 +127,28 @@ func TestAcquireNegotiatedSessionAdvisoryLockBridgesLegacyThenBigint(t *testing.
 	}
 }
 
+// Processes from before media-source ids lost their dashes lock a route that
+// names a media source by its dashed id, so newer processes must take the same
+// locks for its compact id.
+func TestAcquireNegotiatedSessionAdvisoryLockIgnoresMediaSourceIDSpelling(t *testing.T) {
+	t.Parallel()
+
+	sourceID := EncodeNumericID(EncodedIDMediaSource, 43)
+	dashed := &negotiatedSessionAdvisoryLockRecorder{}
+	compact := &negotiatedSessionAdvisoryLockRecorder{}
+	for recorder, routeID := range map[*negotiatedSessionAdvisoryLockRecorder]string{
+		dashed:  sourceID.String(),
+		compact: jellyfinGUID(sourceID),
+	} {
+		if err := acquireNegotiatedSessionAdvisoryLock(context.Background(), recorder, "token", "device", routeID); err != nil {
+			t.Fatalf("acquire advisory lock for %q: %v", routeID, err)
+		}
+	}
+	if fmt.Sprint(compact.calls) != fmt.Sprint(dashed.calls) {
+		t.Fatalf("compact route id locks %v, dashed route id locks %v", compact.calls, dashed.calls)
+	}
+}
+
 func TestMarshalPlaybackSessionStripsNestedNUL(t *testing.T) {
 	wantLiteral := `literal\u0000text`
 	data, err := marshalPlaybackSession(PlaybackSession{
@@ -219,6 +241,43 @@ func TestDurablePutNegotiatedFailureKeepsDisplacedNegotiation(t *testing.T) {
 	}
 	if _, found, _ := store.Lookup(second.ID); found {
 		t.Fatal("unpersisted negotiation is still cached")
+	}
+}
+
+// A route that names a media source was stored with its dashed id before
+// #4491. After the upgrade, the same negotiation on another replica must still
+// replace that row rather than leave a second unstarted negotiation beside it.
+func TestDurablePutNegotiatedReplacesRowStoredWithDashedRouteID(t *testing.T) {
+	pool := newCompatTestPool(t)
+	sourceID := EncodeNumericID(EncodedIDMediaSource, 43)
+	negotiation := func(id, sourceSpelling string) PlaybackSession {
+		session := PlaybackSession{
+			ID:             id,
+			CompatToken:    t.Name(),
+			ClientDeviceID: "device",
+			RouteItemID:    sourceSpelling,
+			MediaSources:   []PlaybackMediaSource{{ID: sourceSpelling}},
+		}
+		session.NegotiationVariant = compatNegotiationVariant(session.MediaSources)
+		return session
+	}
+	legacy := negotiation(t.Name()+"-legacy", sourceID.String())
+	upgraded := negotiation(t.Name()+"-upgraded", jellyfinGUID(sourceID))
+	before := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	after := NewDurableCompatPlaybackStore(pool, time.Hour, nil)
+	t.Cleanup(func() {
+		before.Delete(legacy.ID)
+		after.Delete(upgraded.ID)
+	})
+
+	if err := before.PutNegotiated(legacy); err != nil {
+		t.Fatalf("store legacy negotiation: %v", err)
+	}
+	if err := after.PutNegotiated(upgraded); err != nil {
+		t.Fatalf("store upgraded negotiation: %v", err)
+	}
+	if _, found, err := after.load(legacy.ID); err != nil || found {
+		t.Fatalf("legacy negotiation row: found=%v err=%v, want it replaced", found, err)
 	}
 }
 

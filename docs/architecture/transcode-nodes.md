@@ -66,7 +66,9 @@ bytes, and text that re-encodes to itself.
   so issuing a key moves neither `config_etag` nor the pool generation. After a
   `SECRET_KEY` change the ciphertexts no longer decrypt and every node is
   keyless until it is issued a new key (see
-  [secret encryption](secret-encryption.md)).
+  [secret encryption](secret-encryption.md)); a
+  [declared node](#declared-nodes) takes its key again at the next API server
+  start.
 - **Issue and rotate.** `POST /api/v2/admin/nodes/{id}/key`
   (`Repository.IssueNodeKey`, `NodeHandler.IssueAdminNodeKey`) returns
   `201 {"node_key": "..."}` with `Cache-Control: no-store`, once. Every call
@@ -78,7 +80,7 @@ bytes, and text that re-encodes to itself.
   streams fail at their next signed call until it restarts with the new key, so
   drain a node before rotating. A node still running with the replaced key
   shuts down at once on SIGTERM (see [Drain and health](#drain-and-health)). The admin API is in
-  [admin API: node keys](../admin-api.md#node-keys-v2).
+  [admin API: node keys](../admin-api.md#node-keys).
 - **Rejected key.** When the core answers the node's configuration read with
   `401`, `nodeconfig.Remote` sets `key_rejected`, which the node's
   `/api/v1/health` carries (still `200`, so a liveness probe does not restart a
@@ -99,6 +101,78 @@ bytes, and text that re-encodes to itself.
 - **Unique address.** Two transcode nodes cannot be saved at one canonical URL
   (`nodepool.ErrTranscodeNodeURLTaken`, `409`), because the registry finds a node
   by that address.
+
+### Declared nodes
+
+An API server (integrated or `api` mode) can create transcode nodes and their
+keys from its deployment configuration, so a declarative deployment needs no
+admin step per node. It reads one document from `SILO_TRANSCODE_NODES` (JSON)
+or `SILO_TRANSCODE_NODES_FILE` (a YAML or JSON regular file up to 1 MiB);
+setting both stops startup, and a blank value counts as unset
+(`nodepool.ReadNodeProvisioning`):
+
+```yaml
+apiVersion: 1
+nodes:
+  gpu-1:
+    url: http://gpu-1:8090
+    key: { fromFile: /run/secrets/gpu-1-node-key }   # or { fromEnv: GPU1_NODE_KEY }
+```
+
+A key is always a reference, never inline, so the document can live where
+secrets do not. The operator chooses each node's id by the key it writes:
+`silo node-key generate --id <n>` prints one, or a secret store can template
+`snk1_<n>_` followed by 43 base64url characters of 32 random bytes. A declared
+id is at most 2147483646, so the identity sequence always has room. The node
+gets the same key in `SILO_NODE_KEY`. Field names match exactly and an unknown
+one is refused. Parse errors name the variable and the node, never a key or an
+unknown field's name, where a misplaced key could sit.
+
+`nodepool.ProvisionTranscodeNodes` applies the document at startup, before the
+first pool and credential loads, in one transaction under the transcode URL
+lock and an `EXCLUSIVE` lock on `stream_nodes`. Row locks, writes and
+`nextval` wait; plain reads go on; API servers starting together run one after
+the other. A weaker mode admits the `SELECT ... FOR UPDATE` that admin edits and
+node declarations take without the URL lock, and the two deadlock when both then
+write that row.
+Every decision is made before anything is written, so a refusal changes
+nothing, and any refusal stops startup:
+
+- A declared id with no row is created: transcode, enabled, with the declared
+  name and URL and the key, and the identity sequence is moved past it first
+  with `ALTER SEQUENCE ... RESTART`, which rolls back with a failed pass (a
+  `setval` would not, and the retry would refuse the ids as used).
+  Only an id the sequence has never handed out is created, so no id ever names
+  two machines. The URL is checked against every row, proxies included, as a
+  node's own declaration is.
+- A row the deployment manages keeps its ciphertext when the declared key is
+  the stored one, and takes the declared key otherwise (rotation, or a stored
+  key that no longer decrypts after a `SECRET_KEY` change).
+- An unmanaged transcode row is adopted only when it already holds the declared
+  key. A proxy row, a keyless row, or one with another key stops startup: a
+  declaration never takes over a row it did not create, so an existing node
+  comes under the document only with the key it already holds.
+- A managed row the document no longer lists is released. `nodes: {}` releases
+  every node; an API server with neither variable set leaves them as they are.
+
+`stream_nodes.deployment_managed` records ownership. While it is set, key
+issue (`Repository.IssueNodeKey`, in its `UPDATE`) and delete
+(`AdminConfigurationStore.Delete`, after the `If-Match` guard, under the row
+lock) refuse with `ErrNodeDeploymentManaged`, so every API server refuses
+alike. A released node keeps its row and key and is managed in the admin API
+again; releasing does not revoke the key, rotating it does. Name and URL are
+used only to create a row; afterwards they belong to the node's own
+[declaration](#registration) or the administrator. When the pass changed
+anything it publishes `node_pool_changed`; a missed event is caught by the
+periodic registry and pool reloads.
+
+Every API server needs the same document, or the last to start wins. A
+declared key changes only when an API server starts with the new one; until the
+node restarts with it, its running streams fail, as after an admin rotation.
+`ALTER SEQUENCE` needs the role that owns `stream_nodes`, which every API server
+already uses to run migrations. An API server that predates
+`deployment_managed` ignores the document and still lets an administrator issue
+a key or delete the node.
 
 ### Credential registry
 
@@ -195,16 +269,113 @@ cipher or event bus.
 | Variable | |
 |---|---|
 | `SILO_CORE_URL` | Required. Absolute `http` or `https` URL of the API. With several API replicas, use their load-balanced address. A plain-HTTP URL that is not loopback logs a warning at startup. |
-| `SILO_NODE_KEY` | Required. A malformed key refuses startup (`transcodeNodeKey`). |
+| `SILO_NODE_KEY` | Required (or `SILO_NODE_KEY_FILE` naming a file that holds it; surrounding whitespace is removed from either): the key an administrator issued, or the one the API servers' [declaration](#declared-nodes) references. A malformed key, or both variables set, refuses startup (`transcodeNodeKey`). |
 | `PORT` | Listen port, default `8080`. |
 | `SILO_NODE_DRAIN_TIMEOUT` | See [node drain](node-drain.md). |
-| `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY`, `NODE_URL`, `NODE_NAME` | Ignored, with one warning, so a shared env file keeps working. |
+| `SILO_NODE_NAME`, `SILO_NODE_URL`, `SILO_NODE_GROUP`, `SILO_NODE_MAX_TRANSCODES`, `SILO_NODE_SOURCE_ACCESS`, `SILO_NODE_HW_ACCEL`, `SILO_NODE_HW_DEVICE`, `SILO_NODE_DOWNLOAD_ARTIFACT_DIR`, `SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES` | Optional. The node's declaration of its own row; see [Registration](#registration). A bad value refuses startup, naming the variable (`nodedeclare.FromEnv`). |
+| `DATABASE_URL`, `REDIS_URL`, `SECRET_KEY` (and their `_FILE` variants), `NODE_URL`, `NODE_NAME` | Ignored, with one warning, so a shared env file keeps working. `NODE_URL` and `NODE_NAME` stay ignored although the node declares a URL and name: an env file shared with a proxy sets them, and honoring them would rewrite rows on upgrade. |
 
-The node reads its configuration, retrying with backoff from one second to 30
-seconds until a read succeeds or it is signalled, and only then opens its
+Before its first configuration read the node sends its declaration
+([Registration](#registration)), so the configuration it loads already
+reflects it. The node then reads its configuration, retrying with backoff from one second to 30
+seconds until a read succeeds or it is signaled, and only then opens its
 listener. A configuration that names another node id than the key is refused
 (`Client.FetchConfig`). Each call to the core has a 10-second timeout
 (`nodecontrol.Client`).
+
+## Registration
+
+`PUT /api/internal/nodes/self/registration` (`nodecontrol.Server.HandleRegistration`)
+carries the configuration the node declares from its environment,
+`nodecontrol.Registration`. Every field is optional and absent means not
+declared:
+
+```json
+{
+  "name": "gpu-1",
+  "url": "http://10.0.0.5:8082",
+  "group": "rack-a",
+  "max_jobs": 0,
+  "source_access": "core",
+  "hw_accel_override": "vaapi",
+  "hw_device_override": "/dev/dri/renderD128",
+  "download_artifact_dir_override": "/srv/artifacts",
+  "download_artifact_max_bytes_override": 0
+}
+```
+
+The core applies it to the row the key names, never one named in the body,
+through the admin node service (`NodeHandler.DeclareNode`, then
+`nodepool.AdminConfigurationStore.Declare`): each field is validated as an
+administrator update is, a changed URL must be free among transcode nodes
+under the canonical-URL lock, the fields are written, and `env_managed`
+becomes exactly the declared field names in one transaction. A changed row
+then reaches every API server's registry and pools and every proxy's registry
+as an administrator's edit does; the core does not ask the node to reload,
+since it reads its configuration next. An empty body unlocks every field and
+changes nothing else, which is what a node with no declaration variables sends.
+A body with a field the core does not know is refused whole, so a misspelled
+field cannot read as an empty declaration.
+
+The table is for a node that declares something. A node that declares nothing
+sends its empty body once and starts whatever the answer: a failure is tried
+again every 30 seconds in the background, a missing route included, since a
+gateway that briefly refused the route looks the same. It logs once, at info
+level, that the fields stay read-only until the core takes it.
+
+The core also answers `404` when the node's row was deleted between
+authentication and the write. The node cannot tell that from a missing route
+and treats both alike; its next configuration read then gets `401`.
+
+| Answer | Body | Node |
+|---|---|---|
+| `200` | `{"node": {"id", "name", "url"}, "env_managed": [...], "changed": bool}` | Continues to the configuration read. |
+| `422` | `{"reason": "invalid", "field", "detail"}` | Exits, naming the variable for `field`; `field` is empty for a body the core could not read. |
+| `409` | `{"reason": "url_taken", "field": "url", "detail"}` | Exits, naming `SILO_NODE_URL`. |
+| `401`, `429`, `5xx` other than `501`, no answer | text | Retries with the configuration read's backoff, 1 to 30 seconds. |
+| `403`, `404`, `405`, `501` (a core without the route, or a gateway in front of it that blocks the request) | text | Starts, warns once, and offers the declaration every 30 seconds until it is accepted, then rereads its configuration. |
+
+The route has its own per-node budget on each API replica, far below the
+background routes': a burst of six, refilled one every ten seconds, and a 16
+KiB body. A changed declaration commits a configuration revision and makes
+every API server reload its node pools, so a node cannot repeat it quickly.
+Changing a variable takes a restart.
+
+A node that declared something sends its declaration again every minute while
+it runs (`nodeconfig.MaintainDeclaration`, `DeclarationRefreshInterval`), so a
+row or an `env_managed` list changed on the core, by SQL or otherwise, is put
+back within a minute without a restart. `changed` in the answer says whether
+it was, and the node logs it. An unchanged declaration commits no
+configuration revision, moves no pool generation, publishes no
+`node_pool_changed` and asks no server to reload: it costs one transaction
+that rewrites the node's row with its own values and leaves `env_managed`
+alone. One send a minute is a sixth of the budget's refill, so restarts keep
+the burst. A refusal on a re-send never stops the node: it logs it once (again
+only after a later send succeeds) and keeps running with its own values. A
+node that started against a core without the route keeps offering it every 30
+seconds, as before, and moves to the one-minute cadence once it is taken.
+
+## What the node enforces
+
+The row is what the core's planner and the node editor read, and whoever runs
+the core can change it. A node can be run by someone else (a rented or lent
+GPU), so the node itself holds the values it acts on to what its environment
+says, whatever its row or its configuration document says:
+
+| Variable | Enforced by |
+|---|---|
+| `SILO_NODE_MAX_TRANSCODES` | The node: it refuses new work past the cap ([worker protocol](worker-http-protocol.md)). The planner also reads the row's `max_jobs`. |
+| `SILO_NODE_HW_ACCEL` | The node: `nodeconfig.Remote` uses it over the document's `hw_accel`, and a start runs with it whatever backend the request names (`Server.jobHWAccel`). The core may still ask for `none`. Only a node that declares `auto` lets a hardware tone map name its backend, chosen from the node's own capability report; a node that declares a backend runs that one for a hardware tone map too. |
+| `SILO_NODE_HW_DEVICE` | The node: used over the document's `hw_device`. |
+| `SILO_NODE_SOURCE_ACCESS` | The node: `Remote.SourceAccess` returns it over the document's. With `local` the node never fetches source bytes over HTTP; with `core` it never opens a local path. The core still grants and serves sources either way. |
+| `SILO_NODE_DOWNLOAD_ARTIFACT_DIR` | The node: used over the document's `artifact_dir`. |
+| `SILO_NODE_DOWNLOAD_ARTIFACT_MAX_BYTES` | The node, as a ceiling: it refuses a new preparation once its last measurement of the directory reaches the budget. Clean-up and the core's own budget check still read the row. |
+| `SILO_NODE_GROUP` | The row only. A group is placement on the main server's side; the node does not act on it. |
+| `SILO_NODE_NAME`, `SILO_NODE_URL` | The row only. They are the node's identity and address in the main server's pools. The node cannot stop the main server from naming or addressing it otherwise; the minute re-send puts them back. |
+
+The node never sees which planner, if any, sends it work, so the row-only
+fields are as strong as the main server's operator allows. The values the
+node enforces hold even against a main server that ignores the row.
 
 ## Configuration
 
@@ -343,13 +514,119 @@ node and a clock more than 30 seconds off as the causes; it still records the no
 drain state. A binary from before this design has no version, so it is never
 placed.
 
+## macOS node build
+
+Docker on a Mac runs Linux in a VM with no VideoToolbox, so a Mac transcodes
+with a native node beside a server in Docker. The base image (and the omnibus
+image built on it) carries that node at
+`/usr/share/silo/nodes/silo-darwin-arm64`, from the `node_darwin` stage of the
+root `Dockerfile`: `CGO_ENABLED=0 GOOS=darwin GOARCH=arm64` with
+`-tags silo_node`, cross-compiled on the build host and signed ad hoc by the Go
+linker. The binary is the image's own revision, so a node copied from an image
+matches the server that runs it. `make build-node-darwin` runs the same build;
+the Go vet CI job runs it and vets the node build for darwin, which no Linux
+build compiles.
+
+- **The `silo_node` tag** leaves libvips and the web app out.
+  `internal/imageutil` keeps the declarations both builds share in
+  `shared.go`, and the node build replaces the functions with
+  `imageutil_node.go`, the same exported API with every function failing.
+  `web/embed_node.go` replaces `web/embed.go` with an empty `DistFS`. A node
+  processes no images: its one image job, `chapterthumbs.ExtractFrame`, is
+  FFmpeg's. The binary links only system frameworks, so no Homebrew library
+  can stop it from loading. A new exported `imageutil` function needs a stub,
+  and a new cgo import the node links fails the build.
+- **Node builds run only as a node.** `main` refuses every subcommand but
+  `silo node`, and, after the transcode branch, any run without
+  `MODE=transcode` (`nodebuild.Node`, `internal/nodebuild/node.go`).
+- **Version.** `silo node version` and the installer name the build as Admin
+  shows the server's and each node's: the build number and the display
+  revision.
+- **Installer.** `silo node install` and `silo node uninstall`
+  (`internal/nodeinstall/node_command.go`; the install, swap and file work
+  in `node_install_darwin.go`, launchctl in `launchd_darwin.go`) manage one
+  per-user LaunchAgent,
+  `org.siloserver.node`, and nothing system-wide. The cgo darwin build refuses
+  to install itself, since it loads Homebrew libraries, and other platforms
+  refuse both commands.
+
+| File | |
+|---|---|
+| `~/Library/Application Support/Silo/node/silo` | The binary. |
+| `~/Library/Application Support/Silo/node/node.env` | Mode 0600. The installer manages `MODE=transcode`, `SILO_CORE_URL`, `SILO_NODE_KEY_FILE` naming `node-key`, and `PORT` (default 8100, since Docker Desktop often publishes 8080). Any other variable in the file, such as one from [Startup and environment](#startup-and-environment), is kept across reruns, except `SILO_NODE_KEY`, which would clash with the key file. |
+| `~/Library/Application Support/Silo/node/node-key` | Mode 0600: the node key. |
+| `~/Library/LaunchAgents/org.siloserver.node.plist` | Runs the binary with `-env` and `node.env`, `RunAtLoad`, `KeepAlive` with `SuccessfulExit` false (launchd restarts the node after a crash or a non-zero exit, not after the clean exit that ends a drain), and an `ExitTimeOut` of the drain timeout `node.env` sets plus a minute (660 seconds with the default). Current macOS caps `ExitTimeOut` at 60 seconds, so a logout or shutdown stops the node's streams a minute after SIGTERM; the installer's own stop does not depend on it. |
+| `~/Library/Application Support/Silo/node-install.lock` | Mode 0600, in a 0700 folder: the lock every install and uninstall holds. It sits outside the node's folder, which uninstall removes while it holds the lock, and is never removed, so two runs always lock the same file. |
+| `~/Library/Logs/Silo/node.log` | The node's output. Uninstall keeps it. |
+
+An install is also the upgrade: a rerun takes every value its flags leave out
+from the existing install, and replaces the binary unless it runs from the
+installed one. The key is never a command-line argument, which other users of
+the Mac could read: a first install, and a rerun with `--new-key`, ask for it at
+a hidden prompt, or read it from standard input when that isn't a terminal. It checks everything it can before it writes anything: the
+flags and key (`--server` must be a plain `http` or `https` URL: no userinfo,
+which would go out as Basic auth, and no query or fragment, which would swallow
+the paths joined onto it), a `SILO_NODE_DRAIN_TIMEOUT` the node would ignore
+(`transcodenode.ParseDrainTimeout`, which the node parses it with), FFmpeg (Homebrew's `ffmpeg-full`, as `playback`'s discovery
+finds it), the server's `GET /api/v1/ready` (joined onto the URL's path, so a
+server behind a path prefix works; a `200` within five seconds, no redirects,
+so a server that is restarting or migrating stops the run), and the
+port (nothing else may answer on it). It then takes the lock, reads the
+install again under it, stages the new files beside the old ones, stops the
+old job, swaps the files in, bootstraps the job, and waits up to 60 seconds
+for the node's `GET /api/v1/health`.
+
+The stop drains before it boots the job out. `launchctl bootout` returns at
+once and launchd kills the job a minute after it, whatever `ExitTimeOut` asks,
+so the installer sends SIGTERM itself (`launchctl kill SIGTERM`), polls
+`launchctl print` until the signaled pid is gone, and only then boots the job
+out and waits for launchd to let it go. A `launchctl print` error while it
+waits is retried, not taken for the exit. A job an older plist keeps alive
+unconditionally restarts under a new pid; the signaled pid's exit still ends
+the drain. Each wait is bounded by the running node's drain timeout plus two
+minutes: the longer of the one `node.env` sets and the one the installed
+plist's `ExitTimeOut` recorded, since the node read `node.env` when it started
+and the file may have changed since. A node still running at that deadline is booted out anyway, and
+the installer says it is stopping a node that is still finishing streams, so a
+stop never leaves the job stopped without the install's restart or rollback
+running. Uninstall stops the job the same way.
+
+The swap moves each file to `<file>.old` and keeps it until the new node is
+ready; a `<file>.old` already there is the last working file of a run that
+stopped mid-swap, so it stays the backup and the unverified file in its place
+is dropped. For the same reason, an install reads its stored settings from
+`node.env.old` and `node-key.old` when `node.env` or `node-key` is missing, so a
+rerun after such a run keeps the previous server, port, key and other
+variables instead of starting over as a first install.
+
+The node is ready when that answers `200` with a `node_control_version`, which
+neither the API server's health nor a proxy's carries, and without
+`key_rejected`. A drained node is ready: an administrator's drain outlasts the
+restart, and the installer says so. The node opens its port only once the core
+accepted its key, so a ready node also shows that the key and core URL work.
+
+When the new job does not start or become ready, or the run is interrupted
+after the files were swapped, the previous files come back, with a context of
+their own, and the previous job is bootstrapped only if launchd had it before
+the install, so a node that was stopped stays stopped. A rollback first stops
+the new job, and restores nothing until launchd confirms it is gone: when the
+stop fails, every file and backup stays where it is and the installer reports
+the recovery as incomplete, naming the backups. The installer exits
+non-zero with the end of the log. A stop interrupted, or failed in launchctl, after its signal went out
+waits until launchd lets the old job go and bootstraps its plist again, so the
+old node is not left stopped. Only `launchctl print`'s "not found" status
+(113) counts as a job launchd does not have. A bootout that answers
+`EINPROGRESS` (36), a job still shutting down, went out, and the installer
+waits for the job to go as it does after a bootout that timed out. Each
+launchctl call has its own timeout.
+
 ## Rate limit
 
 Each API replica gives each node three in-memory token buckets and answers
 `429` with `Retry-After: 1` past any of them:
 
 - **Background** (`nodecontrol.(*Server).LimitNode`): 20 requests a second with
-  bursts of 60 across config, report, logs, health-changed and revoke-recipes.
+  bursts of 60 across config, registration, report, logs, health-changed and revoke-recipes.
   A healthy node sends about one and a half a second.
 - **Viewer path** (`LimitNodePlayback`): 200 requests a second with bursts of
   600 across resolve and sources/open, so a burst of one never refuses the
@@ -498,8 +775,18 @@ resolve and never deletes from it.
   it because it names another node. A move rechecks the deny markers before it
   commits and before it serves from the new executor. A candidate that refuses
   or fails a move's start is released in the background; the card is not
-  touched. A move to the API process deletes the card. Jellyfin-compatible
-  moves write their record at commit too, then release the old node
+  touched. A release is fenced to the job it was sent for, since another API
+  server's move may have started the transport on that node by the time it
+  lands. A move's start carries a fresh `start_id`, and its rollback names it,
+  so the node ends only that start's job. A retire of the node the transport
+  left names none, since that job may be a rebuild or another server's start;
+  the node then ends the job it held when the release arrived, or a rebuild
+  published while the release waited for the lifecycle lock, but not a job a
+  start published then.
+  A retire that arrives after a newer job on that node is already running
+  still ends it, and the next request rebuilds it from the card. A move to the
+  API process deletes the card. Jellyfin-compatible moves write their record at
+  commit too, then release the old node
   ([transcode node lost mid-stream](restart-resilient-playback.md#transcode-node-lost-mid-stream)).
 - **Force reload.** The node, under its reload gate, asks the core to revoke
   its recipes (`POST /api/internal/nodes/self/revoke-recipes`,
@@ -640,8 +927,11 @@ path the core approves for it, never a path the job request names.
 | `412` | The file's size or modification time differs from the grant's revision. |
 | `503` | Transient: no grant key, the catalog cannot be read, or the file could not be examined (an I/O error, a stale mount). |
 
-Each open and renewal reads the catalog once and stats the file once, so the
-catalog check is never more than one renewal interval stale.
+Each open and renewal reads the catalog once and stats the file once, then
+signs a grant valid for one lifetime from that moment. While a node's renewals
+succeed, its last check is at most one renewal interval old. When they fail
+transiently, the grant it holds stays valid until it expires, so the check can
+be up to one grant lifetime old, plus the time the core spent on that check.
 
 On the node, `nodesource.Opener` exchanges the grant through
 `nodecontrol.Client.OpenSource`. With local source access it stats the approved
@@ -712,7 +1002,16 @@ the way never record it.
 
 1. The grant must verify, be unexpired, be younger than `MaxGrantAge` and name
    the calling node (`403`). There is no catalog query: the catalog is checked
-   at open and at every renewal, so it is at most one renewal interval stale.
+   when the grant is minted, from the row its caller read, and again at open
+   and at every renewal. A request needs an unexpired grant, so the last check
+   behind it is up to one grant lifetime old (see [sources/open](#sourcesopen)),
+   plus, for a grant never renewed, the time between the caller's read and the
+   mint.
+   The core does not cut a response it is already sending when the source is
+   withdrawn, and keeps serving new requests that carry an unexpired grant. A
+   node that renews ends the source at its next renewal, which the core refuses
+   with `410`, and that interrupts its reads in flight. The grant's expiry is
+   the core's own bound on a node that does not renew.
 2. The core opens the granted path through `internal/fspath` without blocking
    on a FIFO, `fstat`s the descriptor, and compares the size and the
    modification time at microseconds with the grant: `410` when gone or not a
@@ -931,6 +1230,7 @@ the trickplay, media sample and chapter routes.
 | Grant reaches `MaxGrantAge` | Renewal and reads answer `403`; the job fails like any refused renewal. |
 | Relayed text burn-in cannot be staged | The node answers the start `409` and the start runs elsewhere. |
 | Node binary from before this design | Health has no `node_control_version`, so the node is unhealthy and never placed; it could not verify the core's signatures anyway. |
+| Current node, core from before node declarations | The registration route answers `404`; the node starts on its row as the administrator left it and offers its declaration every 30 seconds (see [Registration](#registration)). |
 | Current node, core from before this design | The node's first configuration read never succeeds, so it never opens its listener and the core sees it as unreachable. |
 
 ## Security properties

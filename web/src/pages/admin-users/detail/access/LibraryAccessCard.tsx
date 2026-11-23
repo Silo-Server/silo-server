@@ -342,7 +342,7 @@ export function LibraryAccessCard({
                       <label
                         key={library.id}
                         className={cn(
-                          "border-border/70 inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-[13px] max-lg:min-h-11",
+                          "border-border/70 inline-flex cursor-pointer items-center gap-2 rounded-full border px-3 py-1 text-[0.8125rem] max-lg:min-h-11",
                           checked && "border-amber-500/40 bg-amber-500/10",
                         )}
                       >

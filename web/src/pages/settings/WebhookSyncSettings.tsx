@@ -49,6 +49,7 @@ import {
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { v2ErrorText } from "@/api/v2/request";
 import type {
   WebhookSyncConnection,
   WebhookSyncDiscoveredUser,
@@ -271,7 +272,10 @@ function EventMatrix({ sections }: { sections: EventMatrixSection[] }) {
           </p>
           <ul className="space-y-1">
             {section.items.map((item) => (
-              <li key={item.event} className="text-muted-foreground text-[13px] leading-relaxed">
+              <li
+                key={item.event}
+                className="text-muted-foreground text-[0.8125rem] leading-relaxed"
+              >
                 {t("web.settings.webhooks.setup.eventLine", {
                   event: t(item.event),
                   note: t(item.note),
@@ -639,7 +643,7 @@ export default function WebhookSyncSettings() {
                 <Label className="text-sm font-medium">
                   {t("web.settings.webhooks.add.plexAccount")}
                 </Label>
-                <p className="text-muted-foreground text-[13px] leading-relaxed">
+                <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
                   {hasSignedInToPlex
                     ? t("web.settings.webhooks.add.plexServers", {
                         count: plexServers.length,
@@ -674,7 +678,7 @@ export default function WebhookSyncSettings() {
                   <Label className="text-sm font-medium">
                     {t("web.settings.webhooks.add.server")}
                   </Label>
-                  <p className="text-muted-foreground text-[13px] leading-relaxed">
+                  <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
                     {t("web.settings.webhooks.add.serverHint")}
                   </p>
                 </div>
@@ -720,7 +724,7 @@ export default function WebhookSyncSettings() {
             <Label className="text-sm font-medium">
               {t("web.settings.webhooks.defaultProfile")}
             </Label>
-            <p className="text-muted-foreground text-[13px] leading-relaxed">
+            <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
               {t("web.settings.webhooks.add.defaultProfileHint")}
             </p>
           </div>
@@ -775,9 +779,7 @@ export default function WebhookSyncSettings() {
           <div className="flex items-start gap-2.5 rounded-md bg-red-500/10 px-3 py-2.5">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
             <p className="text-sm leading-relaxed text-red-300">
-              {connectionsQuery.error instanceof Error
-                ? connectionsQuery.error.message
-                : t("web.settings.webhooks.servers.loadFailed")}
+              {v2ErrorText(connectionsQuery.error, t("web.settings.webhooks.servers.loadFailed"))}
             </p>
           </div>
         ) : connections.length === 0 ? (
@@ -864,13 +866,13 @@ export default function WebhookSyncSettings() {
                             time: formatTimestamp(t, selectedConnection.last_webhook_error_at),
                           })}
                         </p>
-                        <p className="text-[13px] leading-relaxed text-red-300/80">
+                        <p className="text-[0.8125rem] leading-relaxed text-red-300/80">
                           {selectedConnection.last_webhook_error_message}
                         </p>
                       </div>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-2 text-[13px]">
+                    <div className="flex items-center gap-2 text-[0.8125rem]">
                       <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
                       <span className="text-muted-foreground">
                         {t("web.settings.webhooks.detail.ready")}
@@ -884,7 +886,7 @@ export default function WebhookSyncSettings() {
                       {t("web.settings.webhooks.detail.webhookUrl")}
                     </Label>
                     <div className="flex flex-col gap-2 sm:flex-row">
-                      <Input value={webhookURL} readOnly className="font-mono text-xs" />
+                      <Input dir="ltr" value={webhookURL} readOnly className="font-mono text-xs" />
                       <div className="flex gap-2">
                         <Button
                           variant="outline"
@@ -1008,7 +1010,7 @@ export default function WebhookSyncSettings() {
                       <Label className="text-sm font-medium">
                         {t("web.settings.webhooks.mapping.title")}
                       </Label>
-                      <p className="text-muted-foreground text-[13px] leading-relaxed">
+                      <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
                         {t("web.settings.webhooks.mapping.description")}
                       </p>
                     </div>
@@ -1022,9 +1024,10 @@ export default function WebhookSyncSettings() {
                       <div className="flex items-start gap-2.5 rounded-md bg-red-500/10 px-3 py-2.5">
                         <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
                         <p className="text-sm leading-relaxed text-red-300">
-                          {mappingsQuery.error instanceof Error
-                            ? mappingsQuery.error.message
-                            : t("web.settings.webhooks.mapping.loadFailed")}
+                          {v2ErrorText(
+                            mappingsQuery.error,
+                            t("web.settings.webhooks.mapping.loadFailed"),
+                          )}
                         </p>
                       </div>
                     ) : mappingRows.length > 0 ? (
@@ -1202,9 +1205,7 @@ export default function WebhookSyncSettings() {
               <div className="flex items-start gap-2.5 rounded-md bg-red-500/10 px-3 py-2.5">
                 <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-400" />
                 <p className="text-sm leading-relaxed text-red-300">
-                  {eventsQuery.error instanceof Error
-                    ? eventsQuery.error.message
-                    : t("web.settings.webhooks.deliveries.loadFailed")}
+                  {v2ErrorText(eventsQuery.error, t("web.settings.webhooks.deliveries.loadFailed"))}
                 </p>
               </div>
             ) : (eventsQuery.data?.length ?? 0) > 0 ? (

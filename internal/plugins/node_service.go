@@ -22,7 +22,6 @@ func NewNodeService(installations *InstallationStore, configs *RuntimeConfigStor
 		archiveCache:  NewArchiveCacheAt(installations, cacheDir),
 		host:          host,
 	}
-	svc.AddLifecycleHook(func(context.Context) { svc.InvalidateInstallationCache() })
 	svc.resident = newResidentSupervisor(svc, ResidentOptions{})
 	svc.AddLifecycleHook(func(ctx context.Context) { svc.resident.Reconcile(ctx) })
 	return svc

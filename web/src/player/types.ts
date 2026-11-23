@@ -3,6 +3,7 @@
  * Zero imports from app-specific code.
  */
 
+import type { PlaybackNetworkTier } from "./bandwidth-probe";
 import type { BufferingMode } from "./buffering-quality";
 
 /** Subtitle display mode. */
@@ -30,6 +31,9 @@ export interface PlayerFileVersion {
   presentation_kind?: string;
   presentation_group_key?: string;
   presentation_part_index?: number;
+  presentation_part_total?: number;
+  multi_episode_start?: number;
+  multi_episode_end?: number;
   effective_audio_track_index?: number;
   effective_audio_language?: string;
   audio_channels?: number;
@@ -271,6 +275,8 @@ export interface PlayerPlaybackStateChange {
   currentTime: number;
   duration: number;
   playing: boolean;
+  /** The file playing now, once the player has chosen one. */
+  fileId?: number;
 }
 
 export interface PlayerPlaybackTransport {
@@ -316,6 +322,8 @@ export interface WatchPageProps {
   qualityPreference?: string | null;
   /** Bandwidth cap in kbps from playback.max_bitrate_kbps; null/undefined is uncapped. */
   maxBitrateKbps?: number | null;
+  /** Current network tier (`unmetered`, `metered`, `low_data`) for mid-session cap replans. */
+  networkTier?: PlaybackNetworkTier;
   explicitAudioTrackIndex?: number | null;
   /** Initial server subtitle ordinal keyed by file ID. Missing entries mean subtitles start off. */
   initialSubtitleTrackIndexByFileId?: Record<number, number>;
@@ -342,9 +350,6 @@ export interface WatchPageProps {
   recap?: PlayerTimeRange | null;
   preview?: PlayerTimeRange | null;
   autoSkipRecap?: boolean;
-  autoPlayNextPreview?: boolean;
-  /** The viewer's Auto-play next episode setting; off, the Up next card does not count down. */
-  autoPlayNext?: boolean;
   canEditMarkers?: boolean;
   seriesContext?: SeriesContext;
   onNavigateEpisode?: (contentId: string, trigger: PlaybackStartTrigger) => void;

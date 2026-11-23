@@ -1,13 +1,18 @@
 package blobstore
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"sync/atomic"
+	"syscall"
 	"testing"
+	"testing/iotest"
 	"time"
 )
 
@@ -418,4 +423,216 @@ func TestFilesystemCanceledStreamIsNeverPublished(t *testing.T) {
 	if err != nil || len(entries) != 0 {
 		t.Fatalf("left behind %v (%v)", entries, err)
 	}
+}
+
+// A local store stops at its free-space reserve instead of filling the disk,
+// and still deletes, which is how an admin makes room again.
+func TestFilesystemStopsAtFreeSpaceReserve(t *testing.T) {
+	root := t.TempDir()
+	s, err := NewFilesystem(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	// A 100 GiB filesystem with 10 bytes above the reserve, less whatever is
+	// written to the store after the seed below, temporary files included.
+	// The reserve is the 2 GiB cap, which a tenth of 100 GiB exceeds. The
+	// fake goes in before the seed, so the real disk's free space never
+	// decides the test.
+	const total, reserve = 100 << 30, 2 << 30
+	stored := func() int64 {
+		var n int64
+		_ = filepath.WalkDir(root, func(_ string, d os.DirEntry, err error) error {
+			if err == nil && d.Type().IsRegular() {
+				if info, err := d.Info(); err == nil {
+					n += info.Size()
+				}
+			}
+			return nil
+		})
+		return n
+	}
+	var start int64
+	realStat := statSpace
+	statSpace = func(string) (int64, int64, error) { return reserve + 10 - (stored() - start), total, nil }
+	t.Cleanup(func() { statSpace = realStat })
+	if err = s.Put(ctx, "kept/poster.jpg", []byte("image")); err != nil {
+		t.Fatal(err)
+	}
+	start = stored()
+
+	// A write that would cut into the reserve is refused before it creates
+	// anything, and one whose length is unknown stops when it reaches it.
+	if err = s.Put(ctx, "new/poster.jpg", make([]byte, 11)); !errors.Is(err, ErrStorageFull) || !errors.Is(err, syscall.ENOSPC) {
+		t.Fatalf("put past the reserve: %v", err)
+	}
+	if _, err = os.Stat(filepath.Join(root, "new")); !os.IsNotExist(err) {
+		t.Fatalf("refused put left a directory: %v", err)
+	}
+	if err = s.PutStream(ctx, "kept/sheet.jpg", bytes.NewReader(make([]byte, 64<<10)), ""); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("stream past the reserve: %v", err)
+	}
+	if _, err = s.Stat(ctx, "kept/sheet.jpg"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("refused stream was published: %v", err)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "kept"))
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("refused stream left files behind: %v %v", entries, err)
+	}
+
+	// Writes in flight share the budget, and each byte counts once. Stream A
+	// writes 2 of the 10 bytes.
+	settledBefore := s.space.settled.Load()
+	waitSettled := func(n int64) {
+		t.Helper()
+		for deadline := time.Now().Add(5 * time.Second); s.space.settled.Load() != settledBefore+n; {
+			if time.Now().After(deadline) {
+				t.Fatalf("stream never wrote its bytes: %d of %d settled", s.space.settled.Load()-settledBefore, n)
+			}
+			runtime.Gosched()
+		}
+	}
+	pr, pw := io.Pipe()
+	streamed := make(chan error, 1)
+	streamDone := make(chan struct{})
+	// Runs before statSpace is restored, so the stream never reads the
+	// real function mid-test.
+	t.Cleanup(func() { _ = pw.Close(); <-streamDone })
+	go func() {
+		defer close(streamDone)
+		err := s.PutStream(ctx, "kept/stream.jpg", pr, "")
+		_ = pr.CloseWithError(err)
+		streamed <- err
+	}()
+	if _, err = pw.Write(make([]byte, 2)); err != nil {
+		t.Fatal(err)
+	}
+	waitSettled(2)
+	// A competing stream writes 8 bytes, fails, and removes its file. A's
+	// next 7 bytes then fit, although A's earlier reading still counts them.
+	errSource := errors.New("source failed")
+	if err = s.PutStream(ctx, "kept/failed.jpg", io.MultiReader(bytes.NewReader(make([]byte, 8)), iotest.ErrReader(errSource)), ""); !errors.Is(err, errSource) {
+		t.Fatalf("competing stream: %v", err)
+	}
+	if _, err = pw.Write(make([]byte, 7)); err != nil {
+		t.Fatal(err)
+	}
+	waitSettled(17)
+	// A 1-byte put fits beside A's 9 bytes, which statfs already counts, and
+	// then A's next byte does not.
+	if err = s.Put(ctx, "kept/during.jpg", make([]byte, 1)); err != nil {
+		t.Fatalf("put that fits beside a stream: %v", err)
+	}
+	if _, err = pw.Write(make([]byte, 1)); err != nil {
+		t.Fatal(err)
+	}
+	_ = pw.Close()
+	if err = <-streamed; !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("stream past the budget another write took: %v", err)
+	}
+	// A's failure removed its 9 bytes. Fill them, so the store sits at the
+	// reserve: an existing key still reports ErrExists, which a restore run
+	// again relies on, and deletes still work.
+	if err = s.Put(ctx, "kept/fill.jpg", make([]byte, 9)); err != nil {
+		t.Fatalf("put that fills the budget: %v", err)
+	}
+	if err = s.Put(ctx, "kept/more.jpg", make([]byte, 1)); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("put at the reserve: %v", err)
+	}
+	if err = s.CreateExclusive(ctx, "kept/poster.jpg", bytes.NewReader(make([]byte, 64<<10)), ""); !errors.Is(err, ErrExists) {
+		t.Fatalf("exclusive create of an existing key at the reserve: %v", err)
+	}
+	if n, err := s.Delete(ctx, []string{"kept/poster.jpg", "kept/during.jpg", "kept/fill.jpg"}); err != nil || n != 3 {
+		t.Fatalf("delete while full: %d %v", n, err)
+	}
+}
+
+// A restore's rollback putting a replaced file back may use the reserve,
+// which other writes may not.
+func TestFilesystemRollbackWritesMayUseTheReserve(t *testing.T) {
+	s, err := NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	realStat := statSpace
+	statSpace = func(string) (int64, int64, error) { return 2 << 30, 100 << 30, nil }
+	t.Cleanup(func() { statSpace = realStat })
+	if err = s.PutStream(t.Context(), "posters/1.jpg", bytes.NewReader([]byte("original")), ""); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("write at the reserve: %v", err)
+	}
+	if err = s.PutStream(WithoutFreeSpaceReserve(t.Context()), "posters/1.jpg", bytes.NewReader([]byte("original")), ""); err != nil {
+		t.Fatalf("rollback write at the reserve: %v", err)
+	}
+}
+
+// A long stream reads free space again as it goes, so space another writer
+// takes meanwhile (PostgreSQL growing beside a backup) stops the stream at
+// the reserve instead of letting it run on its first reading.
+func TestFilesystemStreamSeesSpaceTakenByOthers(t *testing.T) {
+	root := t.TempDir()
+	s, err := NewFilesystem(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const total, reserve = 100 << 30, 2 << 30
+	var written, others atomic.Int64
+	realStat := statSpace
+	statSpace = func(string) (int64, int64, error) {
+		return reserve + 3*streamRecheckBytes - written.Load() - others.Load(), total, nil
+	}
+	t.Cleanup(func() { statSpace = realStat })
+	// After the stream's first streamRecheckBytes, another writer takes
+	// enough that the rest of the stream no longer fits above the reserve.
+	src := &countingReader{n: 2 * streamRecheckBytes, written: &written, onPast: streamRecheckBytes, past: func() { others.Store(2 * streamRecheckBytes) }}
+	if err = s.PutStream(t.Context(), "backups/archive.tar", src, ""); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("stream after another writer took the room: %v", err)
+	}
+}
+
+// A free-space reading that fails partway through a stream does not leave
+// the rest of it unlimited: the next reading still stops it.
+func TestFilesystemStreamRechecksAfterAFailedReading(t *testing.T) {
+	s, err := NewFilesystem(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	const total, reserve = 100 << 30, 2 << 30
+	var written, others atomic.Int64
+	var reads atomic.Int32
+	realStat := statSpace
+	statSpace = func(string) (int64, int64, error) {
+		if reads.Add(1) == 2 {
+			return 0, 0, errors.New("statfs: interrupted")
+		}
+		return reserve + 4*streamRecheckBytes - written.Load() - others.Load(), total, nil
+	}
+	t.Cleanup(func() { statSpace = realStat })
+	// The first recheck fails; another writer then takes the room, which
+	// the second recheck sees.
+	src := &countingReader{n: 3 * streamRecheckBytes, written: &written, onPast: streamRecheckBytes, past: func() { others.Store(3 * streamRecheckBytes) }}
+	if err = s.PutStream(t.Context(), "backups/archive.tar", src, ""); !errors.Is(err, ErrStorageFull) {
+		t.Fatalf("stream after a failed reading: %v", err)
+	}
+}
+
+// countingReader yields n zero bytes, counting them in written, and calls
+// past once more than onPast bytes have been read.
+type countingReader struct {
+	n, onPast int64
+	written   *atomic.Int64
+	past      func()
+}
+
+func (r *countingReader) Read(p []byte) (int, error) {
+	if r.n <= 0 {
+		return 0, io.EOF
+	}
+	k := min(int64(len(p)), r.n)
+	clear(p[:k])
+	r.n -= k
+	if r.written.Add(k) > r.onPast && r.past != nil {
+		r.past()
+		r.past = nil
+	}
+	return int(k), nil
 }

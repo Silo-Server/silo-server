@@ -41,7 +41,9 @@ Jellyfin serializes a Guid: 32 lowercase hex digits without dashes, in the user
 DTO, `SessionInfo.UserId`, `/Sessions`, and `UserDataChanged` socket messages.
 Seerr's avatar proxy rejects any other shape. Routes and queries that take a
 user ID also accept the dashed form, which clients that signed in before this
-format still send. Item, library, and server IDs keep the dashed form.
+format still send. Media-source IDs take the same form (see
+[Playback negotiation and media](#playback-negotiation-and-media)). Item,
+library, and server IDs keep the dashed form.
 
 The user DTO carries `PrimaryImageTag` when the profile has an uploaded avatar
 and the caller signed in (a session for an `sa_` API key is never stored, so
@@ -461,8 +463,15 @@ media-source id there and resolve it to the item that owns its file (the
 episode for an episode file). On `PlaybackInfo` the id selects that version
 unless the body names a `MediaSourceId`. A stale body `MediaSourceId` falls back
 to the route's version, and a route version the item no longer has answers
-`404`. The negotiated session keeps the client's id as its route item id, so the
-stream URLs it hands out and later session reports can carry that id.
+`404`. The negotiated session keeps that media-source id as its route item id,
+in the form Silo sends it, so the stream URLs it hands out and later session
+reports can carry that id.
+
+Media-source ids take Jellyfin's Guid form, 32 lowercase hex digits without
+dashes, like user ids. Infuse cuts a dashed `MediaSourceId` at its first dash
+when it sends it back in a `PlaybackInfo` body, which made that body name no
+version. Every route and body still accepts the dashed form that clients stored
+earlier.
 
 Every compat user is a non-administrator, and only a viewer who may curate
 metadata sees where a file lives or what it is called (see
@@ -474,8 +483,10 @@ and `MediaSources[i].Name` is the version's edition and quality, such as
 `GET` and `HEAD /Items/{id}/Download` serve the original file through the
 native direct download, the same service as `/api/v2/direct-download`, so they
 follow its rules. Both answer `403` when **Allow downloads** is off, the
-account's download permission is off, or the policy engine refuses the
-download, and `404` for a file outside the viewer's library or quality scope.
+account's download permission is off, the policy engine refuses the
+download, or the original is above the download policy's quality ceiling. A file
+the viewer cannot open under its catalog and file access (library, rating, and
+the profile's playback quality limit) answers `404`.
 The server and per-user download bandwidth limits pace the transfer. Like
 native downloads, each API server process applies them on its own, to its
 native and Jellyfin downloads together. As with the native
@@ -707,14 +718,39 @@ transcode node that advertises `server_dv7_to_hdr10`. With no such executor,
 or when the file's RPUs cannot be parsed, negotiation falls back to a full
 encode, which needs tone mapping.
 
+Chrome on macOS decodes H.264 with VideoToolbox, which rejects some open-GOP
+Blu-ray encodes whose I-frames carry recovery points instead of IDR frames and
+a new PPS per GOP. Copied video from such a file stops with
+`PIPELINE_ERROR_DECODE` (`-12909`); Jellyfin Web then reloads the stream, which
+shows as periodic stutter. The bitstream is valid, and Jellyfin copies H.264 the
+same way. Turning off hardware video decoding in Chrome avoids it.
+
+Repeated unstarted playback negotiations replace only negotiations with the same
+source and track-selection variant. Distinct audio or subtitle selections keep
+their own playback grants until they start or expire.
+
+### Subtitle delivery
+
 Subtitle inventory preserves text and bitmap tracks. Selected embedded text or
 bitmap subtitles can burn through the existing local or remote full-encode
 path when that output is supported. Unsupported output combinations are not
 advertised as playable.
 
+Playback negotiation reads `DeviceProfile.SubtitleProfiles`. For a text track
+delivered separately from the video, it prefers a matching external format and
+otherwise uses an advertised external WebVTT format. This applies to embedded
+text, external sidecars, and downloaded subtitles. Embedded tracks keep
+`IsExternal: false`; `DeliveryMethod: "External"` describes delivery, not where
+the track is stored. An embedded track keeps Embed delivery when the profile
+supports it. Delivery method and format are negotiated for every available text
+track, including when playback starts with subtitles off, so a track enabled or
+switched during playback uses the same client-compatible URL. Each track's
+delivery settings are stored with the playback source, so rebuilding it produces
+the same delivery URL.
+
 | Routes | Behavior |
 |---|---|
-| `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/stream.{format}` | VTT/SRT conversion, Jellyfin `.js` track-event JSON, and requested timing windows; raw ASS when compatible with the request. |
+| `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/stream.{format}` | VTT/SRT conversion, Jellyfin `.js` track-event JSON, and requested timing windows; raw ASS when compatible with the request. Subtitle bytes are sent with `Content-Length`, which Infuse needs to load an external subtitle. |
 | `GET /Videos/{itemId}/{mediaSourceId}/Subtitles/{index}/{startPositionTicks}/stream.{format}` | Path start position, with query `StartPositionTicks` taking precedence. |
 | `GET /Videos/{itemId}/{mediaSourceId}/Attachments/{index}` | Actual embedded font bytes by original container stream index, with item/source access checks. |
 | `GET /Playback/BitrateTest` | Returns `Size` random bytes, 1 to 100,000,000; default 102,400. Random bytes keep a compressing proxy from shrinking the probe and inflating the measured bandwidth. |
@@ -761,12 +797,13 @@ switch to any text track is served from the cache. Background extractions share
 the subtitle cache's two server-wide warm slots and are skipped when both are
 busy.
 
-Chrome on macOS decodes H.264 with VideoToolbox, which rejects some open-GOP
-Blu-ray encodes whose I-frames carry recovery points instead of IDR frames and
-a new PPS per GOP. Copied video from such a file stops with
-`PIPELINE_ERROR_DECODE` (`-12909`); Jellyfin Web then reloads the stream, which
-shows as periodic stutter. The bitstream is valid, and Jellyfin copies H.264 the
-same way. Turning off hardware video decoding in Chrome avoids it.
+The cache key covers the source path, modification time, size, track ordinal,
+and output format. A source that changes during extraction is not published, nor
+is an incomplete extract; a cache write failure does not stop the extracted
+subtitle from being delivered. A node already running as many subtitle demuxes
+as it allows answers `503 ServiceUnavailable` with `Retry-After` instead of
+starting another.
+
 
 ## Sessions and socket
 
@@ -864,7 +901,9 @@ A play ends at the first Stopped report carrying its per-play identifier or
 `DELETE /Videos/ActiveEncodings`; for ID-less players and clients that never
 stop, idle cleanup ends it. Silo then records the play the way it records native
 playback: a watch-history row with source `playback` once the position passes the
-minimum resume threshold, completed past the watched threshold, and an admin
+minimum resume threshold or finishes the item, completed past the watched
+threshold or inside the played version's end credits (which finishes the item
+even below the minimum resume threshold), and an admin
 playback-history row. Each play is recorded once across retried stops, API
 replicas, and idle cleanup; a later copy of the session that saw more of the play
 completes the row and updates the admin row's watched time. The play's resume
@@ -957,9 +996,9 @@ configured servers that never stored a Jellyfin Web version to the previous
 default, `10.11.6`. Existing servers keep what they report and install until an
 admin changes it in the Jellyfin compatibility settings.
 
-Jellyfin 12 behavior not yet provided: `MediaStream.IsOriginal` (needs the
-probed `original` disposition in the native track model), the
-`VideoRotation` profile condition and `VideoRotationNotSupported` reason
+`MediaStream.IsOriginal` is serialized for the Jellyfin 12 SDK models but is
+always `false`: Silo does not record which audio track is the original language.
+Jellyfin 12 behavior not provided: the `VideoRotation` profile condition and `VideoRotationNotSupported` reason
 (rotation is not probed), external delivery of PGS and VobSub tracks during
 direct play or remux (they burn in), `excludeActiveSessions` on resume lists,
 and `Accept-Language` localization.
@@ -1006,7 +1045,7 @@ is unknown, `MaxStreamingBitrate` uses Jellyfin's conservative 40 Mbps estimate.
 stream routes treat `AudioCodec` as a constraint on the original audio.
 Themes do not create playback sessions or update watched state.
 
-See [local theme songs](catalog-api.md#local-theme-songs-v2) for file conventions,
+See [local theme songs](catalog-api.md#local-theme-songs) for file conventions,
 ownership, inheritance, and routing.
 
 ## HEVC video encoding

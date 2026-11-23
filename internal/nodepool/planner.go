@@ -136,6 +136,10 @@ type Planner struct {
 	// health checker can recheck the node and tell other API servers. Without
 	// it a report only marks the pool.
 	unreachable atomic.Pointer[func(nodeURL string) bool]
+	// atCapacity records, by normalized URL, when a transcode node last
+	// refused new work at its own job cap. Guarded by mu. See
+	// ReportAtCapacity.
+	atCapacity map[string]time.Time
 }
 
 // NewPlanner creates a planner over the given pools.
@@ -973,7 +977,12 @@ func (p *Planner) pickProxy(proxies []*Node, groupHealthy map[string]bool, group
 }
 
 // underCap reports whether a node can take one more job.
+// A node that refused new work at its own cap is not, until its next health
+// check (ReportAtCapacity).
 func (p *Planner) underCap(n *Node, now time.Time) bool {
+	if p.heldAtCapacity(n, now) {
+		return false
+	}
 	return n.MaxJobs == nil || p.effectiveJobs(n, now) < *n.MaxJobs
 }
 
@@ -1033,4 +1042,5 @@ func (p *Planner) pruneReservations(now time.Time) {
 			delete(p.reserved, id)
 		}
 	}
+	p.pruneAtCapacity(now)
 }

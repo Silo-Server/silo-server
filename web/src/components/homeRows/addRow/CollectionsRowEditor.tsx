@@ -4,6 +4,7 @@ import { SortableContext, arrayMove, verticalListSortingStrategy } from "@dnd-ki
 import { CSS } from "@dnd-kit/utilities";
 import { AlertTriangle, ArrowDown, ArrowUp, Check, GripVertical, Plus, X } from "lucide-react";
 import { PosterArt } from "@/components/calm/PosterTile";
+import { LineName, MetaLine } from "@/components/MetaLine";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useProfiles } from "@/hooks/queries/profiles";
@@ -57,7 +58,7 @@ export function CollectionsRowEditor({
       return {
         title: option.title,
         option,
-        meta: [collectionOptionMeta(option), owner(option)].filter(Boolean).join(" · "),
+        meta: <MetaLine parts={[collectionOptionMeta(option), owner(option)]} />,
       };
     }
     return { title: settled ? t("web.home.addRow.collections.unavailable") : "", missing: settled };
@@ -74,13 +75,15 @@ export function CollectionsRowEditor({
 
   return (
     <div className="grid gap-4">
-      <div className="grid gap-2">
+      {/* grid-cols-1 holds the column to the editor's width. An implicit auto
+          column grows to fit the longest name instead of cutting it. */}
+      <div className="grid grid-cols-1 gap-2">
         <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
           <span id={chosenId} className="text-sm font-medium">
             {t("web.home.addRow.collections.chosenLabel")}
           </span>
           {refs.length > 0 ? (
-            <span className="text-muted-foreground text-[13px]">
+            <span className="text-muted-foreground text-[0.8125rem]">
               {t("web.home.addRow.collections.count", {
                 count: refs.length,
                 count_text: refs.length,
@@ -89,14 +92,14 @@ export function CollectionsRowEditor({
           ) : null}
         </div>
         {refs.length === 0 ? (
-          <p className="border-border text-muted-foreground rounded-xl border border-dashed px-3 py-3 text-[13px]">
+          <p className="border-border text-muted-foreground rounded-xl border border-dashed px-3 py-3 text-[0.8125rem]">
             {t("web.home.addRow.collections.empty")}
           </p>
         ) : (
           <ChosenList labelId={chosenId} refs={refs} describe={describe} onChange={onChange} />
         )}
         {full ? (
-          <p role="status" className="text-muted-foreground text-[13px]">
+          <p role="status" className="text-muted-foreground text-[0.8125rem]">
             {t("web.home.addRow.collections.limit", {
               count: MAX_ROW_COLLECTIONS,
               count_text: MAX_ROW_COLLECTIONS,
@@ -120,13 +123,13 @@ export function CollectionsRowEditor({
 interface ChosenLine {
   title: string;
   option?: CollectionOption;
-  meta?: string;
+  meta?: ReactNode;
   /** The collection is gone, hidden or no longer shared. */
   missing?: boolean;
 }
 
 /** "Yours" or "by Name" on a personal collection; nothing on a server one. */
-function useOwnerLine(): (option: CollectionOption) => string | undefined {
+function useOwnerLine(): (option: CollectionOption) => ReactNode {
   const t = useT();
   const { data: profiles = [] } = useProfiles();
   const { profile } = useCurrentProfile();
@@ -134,7 +137,7 @@ function useOwnerLine(): (option: CollectionOption) => string | undefined {
     if (option.source !== "user" || !option.creator_profile_id) return undefined;
     if (option.creator_profile_id === profile?.id) return t("web.home.addRow.collections.yours");
     return t("web.collections.posterCard.byOwner", {
-      owner: ownerName(profiles, option.creator_profile_id),
+      owner: <LineName name={ownerName(profiles, option.creator_profile_id)} />,
     });
   };
 }
@@ -282,19 +285,22 @@ function ChosenItem({ id, line, children }: { id: string; line: ChosenLine; chil
       )}
       <span className="min-w-0 flex-1">
         {line.title ? (
+          // A cut name keeps its start in either script; w-fit keeps a short
+          // one on the page's start side.
           <span
+            dir="auto"
             className={cn(
-              "block truncate text-sm font-semibold",
+              "block w-fit max-w-full truncate text-sm font-semibold",
               line.missing && "text-warning font-medium",
             )}
           >
             {line.title}
           </span>
         ) : (
-          <Skeleton className="h-4 w-32" />
+          <Skeleton className="h-4 w-32 max-w-full" />
         )}
         {line.meta ? (
-          <span className="text-muted-foreground block truncate text-[13px]">{line.meta}</span>
+          <span className="text-muted-foreground block truncate text-[0.8125rem]">{line.meta}</span>
         ) : null}
       </span>
       {children}
@@ -368,7 +374,7 @@ function Chooser({
   collections: RowCollections;
   chosen: ReadonlySet<string>;
   full: boolean;
-  owner: (option: CollectionOption) => string | undefined;
+  owner: (option: CollectionOption) => ReactNode;
   onToggle: (option: CollectionOption) => void;
 }) {
   const t = useT();
@@ -426,12 +432,12 @@ function ChooserOption({
   added: boolean;
   /** The row is full: only a chosen collection can be pressed, to take it out. */
   disabled: boolean;
-  ownerLine?: string;
+  ownerLine?: ReactNode;
   onToggle: () => void;
 }) {
   const t = useT();
   const metaId = useId();
-  const meta = [collectionOptionMeta(option), ownerLine].filter(Boolean).join(" · ");
+  const meta = <MetaLine parts={[collectionOptionMeta(option), ownerLine]} />;
   return (
     <li>
       <button

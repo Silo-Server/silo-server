@@ -26,7 +26,7 @@ export function ConflictBanner({
       ref={banner}
       role="alert"
       tabIndex={-1}
-      className="border-warning/50 bg-warning/10 flex flex-wrap items-center gap-3 rounded-2xl border px-4 py-3 text-[13.5px] outline-none"
+      className="border-warning/50 bg-warning/10 flex flex-wrap items-center gap-3 rounded-2xl border px-4 py-3 text-[0.84375rem] outline-none"
     >
       <AlertTriangle aria-hidden className="text-warning size-4 shrink-0" />
       <p className="min-w-0 flex-1">

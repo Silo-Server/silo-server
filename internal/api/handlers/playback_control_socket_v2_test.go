@@ -451,21 +451,25 @@ func TestControlSocketMintReadsTheDurableAttemptOnAMemoryMiss(t *testing.T) {
 	ctx := t.Context()
 	store := playback.NewMemoryPlanStoreV3()
 	f.pb.PlanStoreV3 = store
-	save := func(sessionID string, stop bool) {
+	save := func(sessionID, stopID string, features ...string) {
 		t.Helper()
-		record := playback.AttemptRecordV3{PlaybackAttemptID: "attempt-" + sessionID, SessionID: sessionID, UserID: 7, ProfileID: "profile-7", ExpiresAt: time.Now().Add(time.Hour)}
+		record := playback.AttemptRecordV3{PlaybackAttemptID: "attempt-" + sessionID, SessionID: sessionID, UserID: 7, ProfileID: "profile-7", ExpiresAt: time.Now().Add(time.Hour),
+			NormalizedRequest: playback.StartRequestV3{ClientFeatures: features}}
 		if err := store.SaveAttempt(ctx, record); err != nil {
 			t.Fatal(err)
 		}
-		if stop {
-			if _, _, err := store.StopAttempt(ctx, sessionID, uuid.NewString(), nil); err != nil {
+		if stopID != "" {
+			if _, _, err := store.StopAttempt(ctx, sessionID, stopID, nil); err != nil {
 				t.Fatal(err)
 			}
 		}
 	}
 	liveID, endedID, absentID := uuid.NewString(), uuid.NewString(), uuid.NewString()
-	save(liveID, false)
-	save(endedID, true)
+	pausedID, legacyPausedID := uuid.NewString(), uuid.NewString()
+	save(liveID, "")
+	save(endedID, uuid.NewString(), playback.FeaturePausedTimeoutV3)
+	save(pausedID, pausedTimeoutStopID(pausedID), playback.FeaturePausedTimeoutV3)
+	save(legacyPausedID, pausedTimeoutStopID(legacyPausedID))
 
 	for name, tc := range map[string]struct {
 		identity evt.SocketIdentity
@@ -473,6 +477,8 @@ func TestControlSocketMintReadsTheDurableAttemptOnAMemoryMiss(t *testing.T) {
 		want     error
 	}{
 		"ended attempt is gone for good":       {f.identity(7, "profile-7"), endedID, ErrPlaybackControlSocketSessionEnded},
+		"paused timeout says why":              {f.identity(7, "profile-7"), pausedID, ErrPlaybackControlSocketPausedTimeout},
+		"paused timeout without the feature":   {f.identity(7, "profile-7"), legacyPausedID, ErrPlaybackControlSocketSessionEnded},
 		"live attempt is not rebuilt here yet": {f.identity(7, "profile-7"), liveID, ErrPlaybackControlSocketSessionResuming},
 		"no attempt stays not found":           {f.identity(7, "profile-7"), absentID, playback.ErrSessionNotFound},
 		"other account sees not found":         {f.identity(8, "profile-7"), endedID, playback.ErrSessionNotFound},

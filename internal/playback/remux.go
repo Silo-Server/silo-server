@@ -99,6 +99,12 @@ func discoverFFmpegPath(goos string, lookPath func(string) (string, error)) stri
 	return ffmpegExecutable
 }
 
+// HomebrewFFmpegFull reports whether path is Homebrew's keg-only ffmpeg-full,
+// the build discovery prefers on a Mac.
+func HomebrewFFmpegFull(path string) bool {
+	return path == homebrewFFmpegFullAppleSilicon || path == homebrewFFmpegFullIntel
+}
+
 // ResolveFFmpegPath returns the ffmpeg binary the playback pipeline executes
 // for the given configured path: the configured path when set, otherwise the
 // process-global discovery (jellyfin-ffmpeg install, then PATH). Capability

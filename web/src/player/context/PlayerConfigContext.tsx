@@ -14,8 +14,12 @@ export interface PlayerConfig {
   getProfileId: () => string | null;
   /** Sync getter for the current verified profile token, when one exists. */
   getProfileToken?: () => string | null;
-  /** Stable device identity used for device-scoped playback settings. */
-  getDeviceId: () => string;
+  /**
+   * The device headers every player request carries: at least the stable
+   * `X-Silo-Device-Id` used for device-scoped playback settings, plus the
+   * device name and platform the server records on the session.
+   */
+  getDeviceHeaders: () => Record<string, string>;
   /** Optional async token refresh callback on 401 response. */
   refreshToken?: () => Promise<boolean>;
   /** Account/server generation; unchanged by automatic token rotation. */

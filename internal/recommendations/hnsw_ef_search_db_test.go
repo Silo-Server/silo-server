@@ -14,10 +14,9 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
-// TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB covers the
-// Watch Tonight discover path: a genre filter multiplies the candidate pool by
-// five, so a pool of 240 asks pgvector for 1200 ANN candidates, more than the
-// largest hnsw.ef_search it accepts. The scan runs with a fixed
+// TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB covers a
+// genre-filtered candidate scan that asks pgvector for more ANN candidates
+// than the largest hnsw.ef_search it accepts. The scan runs with a fixed
 // hnsw.ef_search and iterative scans, whatever its LIMIT.
 func TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB(t *testing.T) {
 	newEngineTestPool(t) // skips without a migrated database
@@ -61,7 +60,7 @@ func TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB(t *testing.T
 	for i := range embedding {
 		embedding[i] = float32(i%2 + 1)
 	}
-	const watchTonightGenrePool = 240
+	const aboveEfSearchMaximum = 1200 // pgvector accepts hnsw.ef_search up to 1000
 	repo := NewRepo(pool)
 	if err := repo.withHNSWCandidateScan(ctx, func(tx pgx.Tx) error {
 		var efSearch, iterativeScan string
@@ -75,9 +74,9 @@ func TestFindTasteProfileCandidatesWithGenresAboveEfSearchMaximumDB(t *testing.T
 	}); err != nil {
 		t.Fatal(err)
 	}
-	items, genres, err := repo.FindTasteProfileCandidates(ctx, embedding, nil, []string{"Drama"}, watchTonightGenrePool, catalog.AccessFilter{})
+	items, genres, err := repo.FindTasteProfileCandidates(ctx, embedding, nil, []string{"Drama"}, aboveEfSearchMaximum, catalog.AccessFilter{})
 	if err != nil {
-		t.Fatalf("FindTasteProfileCandidates with genres and limit %d: %v", watchTonightGenrePool, err)
+		t.Fatalf("FindTasteProfileCandidates with genres and limit %d: %v", aboveEfSearchMaximum, err)
 	}
 	var got []string
 	for _, item := range items {
