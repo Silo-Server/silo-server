@@ -14,12 +14,21 @@ import (
 // anchor avoids reading the rest of a long-running series entirely.
 func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, args []any, fileConditions, keysByOrd []string, progress string) (map[string]PlayableTarget, error) {
 	fileSQL := strings.Join(fileConditions, " AND ")
-	completedSQL := fmt.Sprintf(`AND NOT EXISTS (
-		SELECT 1 FROM %s progress
-		WHERE progress.media_item_id = episode.content_id AND progress.completed
-		-- Keep the unique-key lookup when profile statistics lag a bulk import.
-		OFFSET 0
-	)`, progress)
+	availableSQL := fmt.Sprintf(`EXISTS (SELECT 1 FROM media_files mf WHERE mf.episode_id = episode.content_id AND %s)`, fileSQL)
+	// An episode whose ID carries its series' prefix finds a completed row in
+	// completed_progress. Any other episode, such as one of a local series,
+	// keeps the single-row lookup. CASE tests completion before the file
+	// lookup, so a long-running series skips the file lookups for every
+	// episode the profile has finished.
+	unwatchedSQL := fmt.Sprintf(`CASE WHEN episode.content_id = ANY (SELECT completed.media_item_id FROM completed_progress completed)
+			OR (NOT (scope.series_id LIKE 'series-%%' AND starts_with(episode.content_id, `+seriesEpisodePrefixSQL+` || '-'))
+				AND EXISTS (
+					SELECT 1 FROM %s progress
+					WHERE progress.media_item_id = episode.content_id AND progress.completed
+					-- Keep the unique-key lookup when profile statistics lag a bulk import.
+					OFFSET 0
+				))
+			THEN false ELSE %s END`, progress, availableSQL)
 	query := fmt.Sprintf(`
 		WITH requested AS (
 			SELECT content_id, media_type, series_id, season_number, preferred_content_id, ord
@@ -37,6 +46,22 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 			JOIN seasons season ON requested.media_type = 'season' AND season.content_id = requested.content_id
 			WHERE NOT (requested.series_id <> '' AND requested.season_number >= 0
 				AND requested.series_id = season.series_id AND requested.season_number = season.season_number)
+		), completed_progress AS MATERIALIZED (
+			-- The profile's completed episodes in the requested series, read once.
+			-- An episode ID embeds its series' anchor
+			-- (episode-<provider>-<id>-<season>-<episode>, contentid.ForEpisode),
+			-- so each provider-anchored series is one range of the progress
+			-- primary key. Walking a long-running series then tests each
+			-- episode against this set instead of looking up its progress row.
+			SELECT progress.media_item_id
+			FROM (
+				SELECT DISTINCT `+strings.ReplaceAll(seriesEpisodePrefixSQL, "scope.", "")+` AS prefix
+				FROM target_scopes WHERE series_id LIKE 'series-%%'
+			) series
+			JOIN %[2]s progress
+			  ON progress.media_item_id >= (series.prefix || '-') COLLATE "C"
+			 AND progress.media_item_id < (series.prefix || '.') COLLATE "C"
+			WHERE progress.completed
 		), resumable AS MATERIALIZED (
 			-- Every card's newest resumable episode, chosen once per statement.
 			-- The progress relation's truncated updated_at keeps an index from
@@ -83,7 +108,7 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 		-- One primary-key probe per winner, not per candidate.
 		LEFT JOIN episodes target_episode ON target_episode.content_id = target.play_content_id
 		WHERE target.play_content_id IS NOT NULL
-	`, fileSQL, progress, firstPlayableEpisodeSQL(fileSQL, completedSQL), firstPlayableEpisodeSQL(fileSQL, ""))
+	`, fileSQL, progress, firstPlayableEpisodeSQL(unwatchedSQL), firstPlayableEpisodeSQL(availableSQL))
 
 	result := make(map[string]PlayableTarget, len(keysByOrd))
 	// queryPlayableTargets keeps one generic plan per connection. Planning
@@ -110,6 +135,11 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 	return result, nil
 }
 
+// seriesEpisodePrefixSQL is the episode content ID prefix of a provider-anchored
+// series (series-<provider>-<id> becomes episode-<provider>-<id>), for a scope
+// whose series_id starts with "series-".
+const seriesEpisodePrefixSQL = `'episode-' || substr(scope.series_id, 8)`
+
 // firstPlayableEpisodeSQL takes one ordered winner per scope before comparing
 // those winners. A season with stale explicit identity can have two scopes;
 // picking each scope's first match preserves the legacy union's global order.
@@ -118,7 +148,7 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 // The season is a range bound rather than "IS NULL OR equal" so that the
 // episode index applies it and a season card reads only its own season. With
 // the OR, each season card of a long-running series read the whole series.
-func firstPlayableEpisodeSQL(fileSQL, progressSQL string) string {
+func firstPlayableEpisodeSQL(episodeSQL string) string {
 	first := func(seasonSQL string) string {
 		return fmt.Sprintf(`(SELECT winner.content_id
 			FROM target_scopes scope
@@ -129,14 +159,13 @@ func firstPlayableEpisodeSQL(fileSQL, progressSQL string) string {
 				  AND episode.season_number BETWEEN COALESCE(scope.season_number, -2147483648)
 				    AND COALESCE(scope.season_number, 2147483647)
 				  AND %s
-				  AND EXISTS (SELECT 1 FROM media_files mf WHERE mf.episode_id = episode.content_id AND %s)
-				  %s
+				  AND %s
 				ORDER BY episode.season_number, episode.episode_number, episode.content_id
 				LIMIT 1
 			) winner
 			WHERE scope.ord = requested.ord
 			ORDER BY winner.season_number, winner.episode_number, winner.content_id
-			LIMIT 1)`, seasonSQL, fileSQL, progressSQL)
+			LIMIT 1)`, seasonSQL, episodeSQL)
 	}
 	return "COALESCE(" + first("episode.season_number IS DISTINCT FROM 0") + ", " + first("episode.season_number = 0") + ")"
 }

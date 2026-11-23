@@ -176,10 +176,13 @@ supplies the visible-progress relation, so profile history hiding and the
 second-precision `updated_at` used for resume ties stay defined in `pgstore`.
 Availability, history hiding, library access, and quality limits apply to every
 branch. First-episode selection compares indexed winners from each
-scope, with regular seasons before specials. Completed-progress checks keep
-their unique-key lookup when statistics lag a bulk import, avoiding repeated
-scans of a materialized profile history. Other stores retain their own progress
-reads, and leaf-only cards retain the existing query.
+scope, with regular seasons before specials. The first-unwatched walk reads
+the profile's completed episodes in the requested series once, as one primary-key
+range per provider-anchored series (an episode ID embeds its series anchor), and
+tests each episode against that set before looking for its file. Episodes whose
+ID lacks the series prefix keep the unique-key lookup, which also holds when
+statistics lag a bulk import. Other stores retain their own progress reads, and
+leaf-only cards retain the existing query.
 
 Database tests in `scripts/ci/db-pins.txt` enforce document and ordering parity,
 cursor behavior, winner accuracy, and query/row/function-call budgets. Timing
