@@ -178,9 +178,10 @@ func (b outboundBundle) clear(ctx context.Context, tx pgx.Tx, cipher *secret.Cip
 
 // carryOutboundSettings takes the outbound settings from the live server
 // (liveURL, or none for "") and says what it cleared. A cleared bundle
-// with a setting among liveOwn, the server-specific settings the live
+// with a credential among liveOwn, the server-specific settings the live
 // server supplies afterwards, is the live server's, so it is reported as
-// kept.
+// kept; its other settings alone, such as a push relay's address while it
+// waits to be registered again, connect nowhere.
 func carryOutboundSettings(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, cipher *secret.Cipher, liveOwn []string, out io.Writer) error {
 	carried, cleared, err := loader.CarryOutboundSettings(ctx, dbURL, liveURL, cipher)
 	if err != nil {
@@ -188,7 +189,7 @@ func carryOutboundSettings(ctx context.Context, loader DatabaseLoader, dbURL, li
 	}
 	cleared = slices.DeleteFunc(cleared, func(name string) bool {
 		i := slices.IndexFunc(outboundBundles, func(b outboundBundle) bool { return b.name == name })
-		if i < 0 || !slices.ContainsFunc(outboundBundles[i].keys, func(k string) bool { return slices.Contains(liveOwn, k) }) {
+		if i < 0 || !slices.ContainsFunc(outboundBundles[i].secrets, func(k string) bool { return slices.Contains(liveOwn, k) }) {
 			return false
 		}
 		carried = append(carried, name)
@@ -263,9 +264,8 @@ func carriedServerSpecific(key string) bool {
 // liveURL holds a value for that CarryServerSpecificSettings gives a
 // restored database. What supplies no connection is left out: an empty
 // value, an AI provider registry with no providers (which a server's first
-// start writes), ChatGPT credentials with no connected account, and the AI
-// sign-in mode, which only chooses between those. cipher (nil for none)
-// opens the encrypted ones; one it cannot open is listed.
+// start writes), and ChatGPT credentials with no connected account. cipher
+// (nil for none) opens the encrypted ones; one it cannot open is listed.
 func (l PGLoader) ServerSpecificSettingKeys(ctx context.Context, liveURL string, cipher *secret.Cipher) ([]string, error) {
 	live, err := allSettingsAt(ctx, liveURL, carriedServerSpecific)
 	if err != nil {
@@ -283,8 +283,6 @@ func (l PGLoader) ServerSpecificSettingKeys(ctx context.Context, liveURL string,
 			return err == nil && len(registry.Providers) == 0
 		case chatgpt.CredentialsKey:
 			return !secret.IsEncrypted(value) && !chatgpt.Connected(value)
-		case config.AIAuthModeSettingKey:
-			return true
 		}
 		return strings.TrimSpace(value) == ""
 	})

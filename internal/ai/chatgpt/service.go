@@ -167,9 +167,9 @@ func decode(raw string) (credentials, error) {
 }
 
 // Connected reports whether the stored credentials (the CredentialsKey
-// value) hold an active account TokenSource can sign in with, its plan
-// accepted and no new login needed. A disconnected account's record does
-// not.
+// value) hold an active account with its plan accepted and no new login
+// needed. A disconnected account's record does not; a usage-limited one
+// does, since its limit lifts on its own.
 func Connected(raw string) bool {
 	c, err := decode(raw)
 	if err != nil {

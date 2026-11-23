@@ -1692,8 +1692,8 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 		}
 	}
 	// The restore's report leaves out the settings the carry takes from the
-	// live server, except the sign-in mode and a ChatGPT record ("live")
-	// with no connected account.
+	// live server, except a ChatGPT record ("live") with no connected
+	// account.
 	liveOwn, err := (PGLoader{}).ServerSpecificSettingKeys(ctx, liveURL, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1703,8 +1703,7 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 	}
 	var fromLive []string
 	for i, key := range keys {
-		noConnection := key == config.AIAuthModeSettingKey || key == chatgpt.CredentialsKey
-		if _, rotated := rotatedSettings[key]; i%2 == 0 && !rotated && key != plugins.ProvisionRestoreHoldKey && !noConnection {
+		if _, rotated := rotatedSettings[key]; i%2 == 0 && !rotated && key != plugins.ProvisionRestoreHoldKey && key != chatgpt.CredentialsKey {
 			fromLive = append(fromLive, key)
 		}
 	}
@@ -1713,9 +1712,9 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 		t.Errorf("ServerSpecificSettingKeys = %v, want the settings the carry takes from the live server %v", liveOwn, fromLive)
 	}
 	// A server that never set one up still holds an empty AI provider
-	// registry, which its first start writes, empty search settings, the
-	// AI sign-in mode, and a ChatGPT account it disconnected: they supply
-	// no connection, so the report still lists what the backup loses.
+	// registry, which its first start writes, empty search settings, and a
+	// ChatGPT account it disconnected: they supply no connection, so the
+	// report still lists what the backup loses.
 	cipher, err := secret.New([]byte("server-specific-test-key-0123456789"))
 	if err != nil {
 		t.Fatal(err)
@@ -1732,15 +1731,13 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 	oneProvider := `{"version":2,"providers":[{"id":"custom-now","type":"custom","name":"Now","base_url":"http://ai.now.invalid/v1","capabilities":["chat"]}]}`
 	disconnected := `{"active":"","has_connected":true,"accounts":[{"client_id":"c1","refresh_token":"r","needs_login":true}]}`
 	connected := `{"active":"c1","accounts":[{"client_id":"c1","refresh_token":"r"}]}`
-	ineligible := `{"active":"c1","accounts":[{"client_id":"c1","refresh_token":"r","plan_ineligible":true}]}`
 	for _, tc := range []struct {
 		registry, chatGPT string
 		want              []string
 	}{
-		{noProviders[config.AIProvidersSettingKey], disconnected, []string{"notifications.web_push.vapid_keypair"}},
-		{oneProvider, disconnected, []string{config.AIProvidersSettingKey, "notifications.web_push.vapid_keypair"}},
-		{noProviders[config.AIProvidersSettingKey], connected, []string{chatgpt.CredentialsKey, "notifications.web_push.vapid_keypair"}},
-		{noProviders[config.AIProvidersSettingKey], ineligible, []string{"notifications.web_push.vapid_keypair"}},
+		{noProviders[config.AIProvidersSettingKey], disconnected, []string{config.AIAuthModeSettingKey, "notifications.web_push.vapid_keypair"}},
+		{oneProvider, disconnected, []string{config.AIAuthModeSettingKey, config.AIProvidersSettingKey, "notifications.web_push.vapid_keypair"}},
+		{noProviders[config.AIProvidersSettingKey], connected, []string{config.AIAuthModeSettingKey, chatgpt.CredentialsKey, "notifications.web_push.vapid_keypair"}},
 	} {
 		empty, emptyURL := open()
 		for key, value := range map[string]string{

@@ -872,20 +872,22 @@ func TestSwapCarriesOnlyForTheSameDeployment(t *testing.T) {
 // backup's key cannot read and the outbound credentials it cannot carry, so
 // it never tells the operator to enter again what the live server supplies,
 // such as its AI providers. What the live server does not have is still
-// listed.
+// listed, as is a unit it holds no credential of: a push relay waiting to
+// be registered again.
 func TestSwapReportsOnlyWhatTheRestoredServerLacks(t *testing.T) {
 	f := newSwapFixture(t)
 	f.ctl.liveServerID = "another-deployment"
 	f.validate = ValidateOptions{KeyCheck: "another-key", AcceptLostCredentials: true}
 	f.ctl.unreadable = []string{"ai.providers", "notifications.web_push.vapid_keypair", "tmdb.api_key"}
-	f.ctl.cleared = []string{"mail (SMTP)", "AI providers"}
-	f.ctl.liveOwn = []string{"ai.providers", "ai.text_provider_id", "notifications.web_push.vapid_keypair"}
+	f.ctl.cleared = []string{"mail (SMTP)", "AI providers", "the push relay"}
+	f.ctl.liveOwn = []string{"ai.providers", "ai.text_provider_id", "notifications.push_relay_reregistration_required",
+		"notifications.push_relay_url", "notifications.web_push.vapid_keypair"}
 	if err, _ := f.restore(); err != nil {
 		t.Fatalf("%v\n%s", err, f.output.String())
 	}
 	// Each report ends with its list.
 	out := f.output.String()
-	for _, want := range []string{"after Silo starts: tmdb.api_key\n", "in place of the backup's: AI providers.\n", "to use them: mail (SMTP).\n"} {
+	for _, want := range []string{"after Silo starts: tmdb.api_key\n", "in place of the backup's: AI providers.\n", "to use them: mail (SMTP), the push relay.\n"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("output lacks %q:\n%s", want, out)
 		}
