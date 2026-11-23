@@ -487,17 +487,17 @@ func TestResolvePathContext(t *testing.T) {
 		{
 			// A season folder with its own provider tag names another show.
 			name:                    "tagged release folder under another tagged show folder keeps its own root",
-			path:                    "/tv/Doctor Who (2005) {tvdb-78804}/Torchwood - S01 {tvdb-79551}/Torchwood - S01E01.mkv",
+			path:                    "/tv/Doctor Who (2005) {tvdb-78804}/Torchwood - S01 tt0485301/Torchwood - S01E01.mkv",
 			libraryRoots:            []string{"/tv"},
 			libraryType:             "series",
 			wantType:                "series",
-			wantRoot:                "/tv/Doctor Who (2005) {tvdb-78804}/Torchwood - S01 {tvdb-79551}",
+			wantRoot:                "/tv/Doctor Who (2005) {tvdb-78804}/Torchwood - S01 tt0485301",
 			wantTitle:               "Torchwood",
 			wantSeason:              1,
 			wantEpisode:             1,
 			wantEpisodePattern:      true,
 			wantSeasonStructure:     false,
-			wantMovieFolderEvidence: false,
+			wantMovieFolderEvidence: true,
 		},
 		{
 			// A tagged configured library folder is not a parent show folder.
