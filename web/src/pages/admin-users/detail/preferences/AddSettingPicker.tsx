@@ -119,7 +119,7 @@ export function AddSettingPicker({
           ) : (
             visible.map((group) => (
               <div key={group.category} role="group" aria-label={group.category}>
-                <div className="text-muted-foreground flex items-center justify-between px-2.5 pt-2.5 pb-1 text-[11px] font-semibold tracking-[0.06em] uppercase">
+                <div className="text-muted-foreground flex items-center justify-between px-2.5 pt-2.5 pb-1 text-[0.6875rem] font-semibold tracking-[0.06em] uppercase">
                   <span>{group.category}</span>
                   <span className="tabular-nums">
                     {query.trim()

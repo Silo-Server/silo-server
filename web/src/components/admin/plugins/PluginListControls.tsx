@@ -74,7 +74,7 @@ export function FilterChips<T extends string>({
             aria-pressed={selected}
             onClick={() => onChange(chip.value)}
             className={cn(
-              "focus-visible:ring-ring inline-flex h-[30px] items-center gap-1.5 rounded-full border px-3 text-[13px] transition-colors focus-visible:ring-2 focus-visible:outline-none",
+              "focus-visible:ring-ring inline-flex h-7.5 items-center gap-1.5 rounded-full border px-3 text-[0.8125rem] transition-colors focus-visible:ring-2 focus-visible:outline-none",
               selected
                 ? "bg-foreground text-background border-foreground"
                 : "text-muted-foreground hover:text-foreground border-border",
@@ -83,7 +83,10 @@ export function FilterChips<T extends string>({
             {chip.label}
             {chip.count !== undefined ? (
               <span
-                className={cn("text-[11px] tabular-nums", !selected && "text-muted-foreground")}
+                className={cn(
+                  "text-[0.6875rem] tabular-nums",
+                  !selected && "text-muted-foreground",
+                )}
               >
                 {chip.count}
               </span>

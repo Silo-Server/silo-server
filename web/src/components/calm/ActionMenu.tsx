@@ -64,7 +64,7 @@ function ItemBody({ id, item }: { id: string; item: ActionMenuEntry }) {
         <span id={`${id}-label`} className="font-medium">
           {item.label}
         </span>
-        <span id={`${id}-help`} className="text-muted-foreground text-[12.5px] leading-snug">
+        <span id={`${id}-help`} className="text-muted-foreground text-[0.78125rem] leading-snug">
           {item.help}
         </span>
       </span>

@@ -9747,7 +9747,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The library's Collections tab: curated collections, their groups, and the viewer's opted-in personal collections. */
+    /** The library's Collections tab: curated collections, their groups, and opted-in personal collections (the viewer's own, plus shared ones from other profiles on the same login). */
     get: operations["getLibraryCollections"];
     put?: never;
     post?: never;
@@ -9832,7 +9832,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The viewer's own personal collections opted into this library's tab. */
+    /** Personal collections opted into this library's tab: the viewer's own, plus shared ones from other profiles on the same login. */
     get: operations["listLibraryUserCollections"];
     put?: never;
     post?: never;

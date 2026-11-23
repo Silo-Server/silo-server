@@ -220,7 +220,7 @@ function LibraryEditorBody({
                 {errorSections.has(id) ? (
                   <span className="bg-destructive size-1.5 shrink-0 rounded-full sm:ms-auto" />
                 ) : id === "folders" && folderCount > 0 ? (
-                  <span className="text-muted-foreground font-mono text-[10px] tabular-nums sm:ms-auto">
+                  <span className="text-muted-foreground font-mono text-[0.625rem] tabular-nums sm:ms-auto">
                     {folderCount}
                   </span>
                 ) : null}

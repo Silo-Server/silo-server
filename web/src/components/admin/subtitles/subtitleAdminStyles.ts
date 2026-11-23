@@ -42,7 +42,7 @@ export function languageChipClass(): string {
 }
 
 export function formatChipClass(): string {
-  return "border-border/60 bg-muted/30 font-mono text-[10px] uppercase tracking-[0.14em] text-muted-foreground";
+  return "border-border/60 bg-muted/30 font-mono text-[0.625rem] uppercase tracking-[0.14em] text-muted-foreground";
 }
 
 export function basenameFromPath(filePath: string): string {

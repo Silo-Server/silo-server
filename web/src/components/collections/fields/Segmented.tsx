@@ -16,7 +16,7 @@ export function Segmented<Value extends string>({
   const id = useId();
   return (
     <div className="grid content-start gap-2">
-      <span id={id} className="text-[14px] font-semibold">
+      <span id={id} className="text-[0.875rem] font-semibold">
         {label}
       </span>
       <RadioGroupPrimitive.Root
@@ -31,7 +31,7 @@ export function Segmented<Value extends string>({
             key={option.value}
             value={option.value}
             disabled={option.disabled}
-            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 data-[state=checked]:bg-background data-[state=checked]:text-foreground h-9 rounded-lg px-3.5 text-[13.5px] font-medium outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-45"
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 data-[state=checked]:bg-background data-[state=checked]:text-foreground h-9 rounded-lg px-3.5 text-[0.84375rem] font-medium outline-none focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:opacity-45"
           >
             {option.label}
           </RadioGroupPrimitive.Item>
