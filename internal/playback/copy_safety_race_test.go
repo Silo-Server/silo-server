@@ -130,7 +130,11 @@ func TestCopySafetyRaceRescansAfterAStaleScanAbsorbedARequest(t *testing.T) {
 	race := raceFixture(scanner)
 
 	race.RaceScan(100)
-	<-scanner.scanning
+	select {
+	case <-scanner.scanning:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the first scan never started")
+	}
 	race.RaceScan(100)
 	close(scanner.release)
 	waitForScans(t, scanner, 2)

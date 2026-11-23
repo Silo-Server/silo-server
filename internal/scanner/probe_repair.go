@@ -323,9 +323,8 @@ func (e *PlaybackProbeEnsurer) EnsureProbeOnly(ctx context.Context, file *models
 //
 // An unknown verdict is left unknown: VideoTrack.MultiplePPS stays nil and
 // VideoCopyUnsafe stays false, which the planner reads as "stream copy is
-// allowed". That is the optimistic half of the race — the caller is expected to
-// kick off ScanCopySafety asynchronously and switch live sessions off the copy
-// route if the scan comes back multi-PPS.
+// allowed". The caller is expected to kick off ScanCopySafety asynchronously so
+// the verdict reaches the row the download policy reads.
 func (e *PlaybackProbeEnsurer) EnsureCopySafetyCached(ctx context.Context, file *models.MediaFile) (*models.MediaFile, error) {
 	current, err := e.ensureProbeRepair(ctx, file)
 	if err != nil || current == nil || e == nil {

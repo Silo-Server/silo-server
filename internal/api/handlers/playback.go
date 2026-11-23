@@ -251,8 +251,8 @@ type PlaybackHandler struct {
 	ProbeEnsurer       PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
 	// CopySafetyRacer resolves an unknown H.264 copy-safety verdict behind an
 	// already-issued stream-copy plan. Optional: without it an unknown verdict
-	// stays unknown, and a failed copy of a copy-unsafe source walks to the
-	// next copy delivery before the encode.
+	// stays unknown, and strict web decoders and downloads treat the file as
+	// copy-safe.
 	CopySafetyRacer        PlaybackCopySafetyRacer
 	ChapterThumbnailQueuer PlaybackChapterThumbnailQueuer
 	IntroAnalyzer          PlaybackEpisodeAnalyzer
@@ -1342,7 +1342,7 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
 	h.cleanupStoppedSessionTransport(ctx, session)
 	if reason.userInitiated() || session.TranscodeNodeURL != "" {
-		// A system teardown (an FFmpeg exit, a copy-safety stop) leaves the
+		// A system teardown (an FFmpeg exit) leaves the
 		// attempt live for the client's next request to rebuild, as a stream
 		// token would; only a real stop retires the recovery card. A remote
 		// transport is the exception: the teardown above stopped its node job

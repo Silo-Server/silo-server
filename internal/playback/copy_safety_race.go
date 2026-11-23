@@ -54,11 +54,12 @@ type CopySafetyFileLoader interface {
 // been rendered for a file no session exists for yet).
 //
 // A play never waits on the scan. Its verdict is persisted for the download
-// policy, which encodes a copy-unsafe source because a download cannot
-// recover. Streaming plans such a source like any other, and the verdict never
-// withdraws a copy that is playing: decoders that apply in-band parameter sets
-// play it fine, and the ones that do not report the failure that starts the
-// replan.
+// policy, which never remuxes a copy-unsafe source because a download cannot
+// recover, and for web clients whose decoders are known to be strict, which
+// get the encode up front. For every other client the planner treats such a
+// source like any other, and the verdict never withdraws a copy that is
+// playing: decoders that apply in-band parameter sets play it fine, and the
+// ones that do not report the failure that starts the replan.
 type CopySafetyRace struct {
 	scanner CopySafetyScanner
 	files   CopySafetyFileLoader
@@ -224,7 +225,7 @@ func (r *CopySafetyRace) scan(fileID int) {
 		slog.InfoContext(ctx, "discarding a video copy-safety verdict for a superseded generation of the file",
 			"component", "playback", "file_id", fileID)
 	case multi:
-		slog.InfoContext(ctx, "video copy-safety scan found conflicting parameter sets; downloads of this source are encoded",
+		slog.InfoContext(ctx, "video copy-safety scan found conflicting parameter sets; downloads of this source are not remuxed",
 			"component", "playback", "file_id", fileID)
 	}
 }

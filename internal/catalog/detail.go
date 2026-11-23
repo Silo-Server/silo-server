@@ -5081,8 +5081,9 @@ func fileIDOrZero(version *FileVersion) int {
 //
 // It deliberately does not wait for an unknown verdict: the bitstream scan is
 // started in the background instead, so opening the watch page costs nothing
-// even for a file nobody has played yet, and the verdict is usually on the row
-// before the first play's recovery would need it.
+// even for a file nobody has played yet. The verdict is persisted for the
+// download policy and for the strict web decoders that encode a copy-unsafe
+// source up front.
 func (s *DetailService) preparePlaybackFiles(ctx context.Context, files []*models.MediaFile) []*models.MediaFile {
 	return s.prepareFiles(ctx, files, true)
 }

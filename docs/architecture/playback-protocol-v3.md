@@ -330,8 +330,7 @@ client sending them is not an error, it just achieves nothing.
 ### 2.5 Session liveness
 
 A playback session lasts until the client stops it, the server stops it (for
-example an administrator's stop, or a withdrawn plan the client does not replan
-off, §6.1), or the server decides it was abandoned. The four endpoints above
+example an administrator's stop), or the server decides it was abandoned. The four endpoints above
 are not a heartbeat: a client that calls only those, while its player fetches
 no media from this server, loses its session 90 to 105 seconds after its
 `start` or its last `replan` that returned a playable plan (about five minutes
@@ -1402,23 +1401,35 @@ The source itself carries the conflict, so a strict decoder fails direct play
 of it as well as every copy. Streaming plans a copy-unsafe source
 (`source.video_copy_unsafe`) like any other and relies on ordinary recovery: a
 strict decoder reports the failure, each failed route's key joins the attempted
-keys, and the walk ends at the encode (`copy_routes_exhausted`). A browser on
-VideoToolbox therefore fails direct play, the progressive copy and the HLS copy
-before it gets the encode. Downloads cannot recover, so the download policy
-(`playback.Resolve`) still encodes these sources.
+keys, and the walk ends at the encode (`copy_routes_exhausted`) when the server
+can transcode. A strict decoder therefore fails each copy route it is offered
+(direct play when it accepts the source container, then the progressive and HLS
+copies) before it gets the encode.
+
+Web clients other than Firefox are the exception. Their decoders (Media Source
+Extensions, Safari's HLS) are the strict ones, and a track, quality or reconnect
+replan starts over with no attempted keys, so recovery alone would fail the
+copies again on every such change. The planner gives them the encode for a
+copy-unsafe source up front, as it did before the walk existed
+(`strictParameterSetWebV3`). Firefox decodes these sources and keeps the copy.
+
+Downloads cannot recover, so the download policy
+(`playback.Resolve`) never remuxes these sources: a download keeps the original
+file when the client plays its container and codecs, and encodes it otherwise.
 
 Detecting the condition means reading the opening seconds of the source, which
 on remote storage costs seconds, so a play never waits for it. An unresolved
 verdict plans as copy-safe. `CopySafetyRace` scans behind a plan that copies
 the video and persists the verdict on the `media_files` row, where the download
-policy reads it. The verdict never stops a copy that is playing, and a copy
+policy and the web exception above read it. The verdict never stops a copy that is playing, and a copy
 revived after a replica restart, a node loss or a rehome is rebuilt like any
 other recipe: a copy that plays has proven the decoder handles it, and one that
 does not reports the failure that starts the recovery.
 
 The verdict write is conditional on the row still holding the size and mtime
-that were scanned. A file rewritten in place while the scan read it produces a
-verdict about bytes nobody is serving, and that verdict is not persisted. A
+that were scanned. When the catalog has recorded a rewrite of the file by the
+time the scan ends, the verdict describes a generation the row no longer holds
+and is not persisted. A
 scan request for the file that arrived during that scan gets one more scan when
 it ends.
 
