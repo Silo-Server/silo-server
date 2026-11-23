@@ -118,7 +118,9 @@ The last four rows are the [extended item artwork](#extended-item-artwork); only
 `medium` is the width the server chose before this parameter existed, which is
 why it is not always the middle rung. `original` is the cached original at the
 source's full resolution, re-encoded as WebP and capped on ingest at 3840px on
-its longest edge — it is not the provider's untouched file.
+its longest edge — it is not the provider's untouched file. An SVG source, such
+as a TMDB logo, has no resolution of its own and is drawn at 3840px on its
+longest edge.
 
 Artwork hosted by a metadata plugin rather than cached in the bucket has no
 fixed width. For those the size is forwarded to the plugin as a semantic variant
