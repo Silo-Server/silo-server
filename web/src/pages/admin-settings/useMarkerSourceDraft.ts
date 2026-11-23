@@ -17,7 +17,8 @@ interface LazyPlaybackBefore {
   value: string;
 }
 
-function sources(mode: string) {
+/** Which marker sources a `markers.mode` value turns on. */
+export function markerSources(mode: string) {
   return {
     online: mode === "online" || mode === "both",
     local: mode === "local" || mode === "both",
@@ -30,8 +31,8 @@ function sources(mode: string) {
  * source off stops that. Dropping one of two sources leaves it alone.
  */
 function lazyPlaybackForMode(saved: string, next: string): string | undefined {
-  const before = sources(saved);
-  const after = sources(next);
+  const before = markerSources(saved);
+  const after = markerSources(next);
   if ((after.online && !before.online) || (after.local && !before.local)) return "true";
   if (!after.online && !after.local) return "false";
   return undefined;
@@ -40,19 +41,22 @@ function lazyPlaybackForMode(saved: string, next: string): string | undefined {
 /**
  * Edits to the marker source and online storage, which stage
  * `markers.lazy_playback` along with them: on-demand online storage turns it
- * on, and where `modeStagesLazyPlayback` is set (the setup wizard, which has no
- * lazy playback row), so does the source change itself. The staged value is
- * worked out from the source and storage edits still standing, not from the
- * order they were made in, and once none of them implies one, lazy playback
- * goes back to what it held before. Save therefore never writes it without
- * the visible edit that caused it. Setting it directly makes it the admin's
- * own edit.
+ * on while online markers are, and where `modeStagesLazyPlayback` is set (the
+ * setup wizard, which has no lazy playback row), so does the source change
+ * itself. The value is worked out from the source and storage edits still
+ * standing, not from the order they were made in. It is staged only when that
+ * worked-out value changes, so a later source change never overrides the
+ * admin's own lazy playback edit, and once no standing edit implies one, lazy
+ * playback goes back to what it held before. Save therefore never writes it
+ * without the visible edit that caused it.
  */
 export function useMarkerSourceDraft(
   form: MarkerForm,
   { modeStagesLazyPlayback = false }: { modeStagesLazyPlayback?: boolean } = {},
 ) {
   const lazyBefore = useRef<LazyPlaybackBefore | null>(null);
+  // The value the standing edits last implied.
+  const implied = useRef<string | undefined>(undefined);
 
   function change(key: string, value: string) {
     // With nothing staged, a remembered value is from before a save or
@@ -63,6 +67,7 @@ export function useMarkerSourceDraft(
       !form.isDirty(MARKER_LAZY_PLAYBACK_KEY)
     ) {
       lazyBefore.current = null;
+      implied.current = undefined;
     }
     form.setValue(key, value);
 
@@ -71,12 +76,18 @@ export function useMarkerSourceDraft(
     const savedMode = form.getPersistedValue(MARKER_MODE_KEY);
     const storage = draft(MARKER_ONLINE_STORAGE_KEY);
     let lazyPlayback: string | undefined;
-    if (storage === "on_demand" && storage !== form.getPersistedValue(MARKER_ONLINE_STORAGE_KEY)) {
+    if (
+      markerSources(mode).online &&
+      storage === "on_demand" &&
+      storage !== form.getPersistedValue(MARKER_ONLINE_STORAGE_KEY)
+    ) {
       lazyPlayback = "true";
     } else if (modeStagesLazyPlayback && mode !== savedMode) {
       lazyPlayback = lazyPlaybackForMode(savedMode, mode);
     }
 
+    if (lazyPlayback === implied.current) return;
+    implied.current = lazyPlayback;
     if (lazyPlayback !== undefined) {
       lazyBefore.current ??= {
         dirty: form.isDirty(MARKER_LAZY_PLAYBACK_KEY),
@@ -95,6 +106,8 @@ export function useMarkerSourceDraft(
   return {
     setMarkerMode: (value: string) => change(MARKER_MODE_KEY, value),
     setOnlineStorage: (value: string) => change(MARKER_ONLINE_STORAGE_KEY, value),
+    // The admin's own edit: nothing to go back to, and it stands until the
+    // standing source edits imply a different value.
     setLazyPlayback: (value: string) => {
       lazyBefore.current = null;
       form.setValue(MARKER_LAZY_PLAYBACK_KEY, value);
@@ -103,12 +116,14 @@ export function useMarkerSourceDraft(
 }
 
 /**
- * On-demand online storage staged in the draft: it carries the lazy playback
- * value it turned on, so that value needs no row of its own.
+ * Lazy playback staged on by on-demand online storage, which shows it; it
+ * needs no row of its own. A different staged value is the admin's own.
  */
-export function onDemandStorageStaged(form: MarkerForm) {
+export function lazyPlaybackCarriedByStorage(form: MarkerForm) {
   return (
+    markerSources(form.getValue(MARKER_MODE_KEY)).online &&
     form.isDirty(MARKER_ONLINE_STORAGE_KEY) &&
-    form.getValue(MARKER_ONLINE_STORAGE_KEY) === "on_demand"
+    form.getValue(MARKER_ONLINE_STORAGE_KEY) === "on_demand" &&
+    form.getValue(MARKER_LAZY_PLAYBACK_KEY) === "true"
   );
 }

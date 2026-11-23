@@ -104,6 +104,9 @@ describe("FeaturesStep keeps unsaved edits in view", () => {
   });
 
   it("keeps the online storage edit in view after online markers are turned off", async () => {
+    // Lazy playback saved off: the storage choice left in view doesn't turn
+    // it on while every source is off.
+    settings.current["markers.lazy_playback"] = "false";
     render(<FeaturesStep />);
     const online = screen.getByRole("switch", { name: "Skip markers from TheIntroDB and Silo" });
     await userEvent.click(online);

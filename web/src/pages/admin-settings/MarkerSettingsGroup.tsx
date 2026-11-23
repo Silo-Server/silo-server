@@ -10,7 +10,11 @@ import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
 import { SettingField } from "./SettingField";
 import { MARKER_KEYS } from "./playbackSettings.keys";
-import { onDemandStorageStaged, useMarkerSourceDraft } from "./useMarkerSourceDraft";
+import {
+  lazyPlaybackCarriedByStorage,
+  markerSources,
+  useMarkerSourceDraft,
+} from "./useMarkerSourceDraft";
 
 /** The Skip markers group on Playback settings. */
 export function MarkerSettingsGroup({
@@ -26,9 +30,8 @@ export function MarkerSettingsGroup({
   const { data: markerCapabilities } = useAdminMarkerCapabilities();
   const detectionKindSettings = markerCapabilities?.detection_kind_settings === true;
   const markerMode = form.getValue("markers.mode") || "both";
-  const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
+  const { online: onlineMarkersEnabled, local: localMarkersEnabled } = markerSources(markerMode);
   const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
-  const localMarkersEnabled = markerMode === "local" || markerMode === "both";
   const showLazyPlayback =
     markerMode !== "off" && (!onlineMarkersEnabled || onlineMarkerStorage === "stored");
   const markerDraft = useMarkerSourceDraft(form);
@@ -41,7 +44,9 @@ export function MarkerSettingsGroup({
   const detectionWorkersKept = !localMarkersEnabled && form.isDirty("markers.detection_workers");
   const onlineStorageKept = !onlineMarkersEnabled && form.isDirty("markers.online_storage");
   const lazyPlaybackKept =
-    !showLazyPlayback && form.isDirty("markers.lazy_playback") && !onDemandStorageStaged(form);
+    !showLazyPlayback &&
+    form.isDirty("markers.lazy_playback") &&
+    !lazyPlaybackCarriedByStorage(form);
 
   // Detection behavior lives here; which online providers answer a lookup,
   // and on what terms, is provider configuration and lives with the other

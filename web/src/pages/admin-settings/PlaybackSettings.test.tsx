@@ -131,7 +131,9 @@ describe("marker settings kept for an unsaved change", () => {
     expect(screen.getByRole("combobox", { name: "Save online markers" })).toHaveTextContent(
       "Fetch when needed",
     );
-    expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
+    // Lazy playback went back with online markers; only the kept storage
+    // choice is staged.
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
 
     await pick("Save online markers", "Save to library");
     expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();

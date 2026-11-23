@@ -11,7 +11,7 @@ import { MARKER_SHARING_DISCLOSURE_KEY } from "@/lib/markers";
 import { EmbeddingProviderField } from "@/pages/admin-settings/AIProviders";
 import { ModelField } from "@/pages/admin-settings/AIModelField";
 import { SettingField } from "@/pages/admin-settings/SettingField";
-import { useMarkerSourceDraft } from "@/pages/admin-settings/useMarkerSourceDraft";
+import { markerSources, useMarkerSourceDraft } from "@/pages/admin-settings/useMarkerSourceDraft";
 
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
 import { useStepSubmit, useStepSummary } from "../useStep";
@@ -76,8 +76,7 @@ export function FeaturesStep() {
   const embeddingProviderKept = !recsEnabled && form.isDirty(EMBEDDING_PROVIDER_KEY);
   const embeddingModelKept = !recsEnabled && form.isDirty(EMBEDDING_MODEL_KEY);
   const markerMode = form.getValue("markers.mode");
-  const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
-  const localMarkersEnabled = markerMode === "local" || markerMode === "both";
+  const { online: onlineMarkersEnabled, local: localMarkersEnabled } = markerSources(markerMode);
   const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
   // The storage choice stays in view while it holds an edit, after online
   // markers are turned off.
