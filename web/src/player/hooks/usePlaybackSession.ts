@@ -539,7 +539,7 @@ interface ReplanFailurePolicy {
    * plan, instead of showing an error. The stream showed a frame, so this
    * holds even when it never played.
    */
-  reconnectWhenSessionGone?: boolean;
+  reconnectOnRequestFailure?: boolean;
 }
 
 const NO_RETIRE_POLICY: ReplanFailurePolicy = {};
@@ -1843,7 +1843,7 @@ export function usePlaybackSession(
         }
         if (
           isFailureRecovery &&
-          (failurePolicy.reconnectWhenSessionGone ||
+          (failurePolicy.reconnectOnRequestFailure ||
             (playbackStartedRef.current && isRetryableReconnectError(err, "replan")))
         ) {
           // The stream broke and the server could not be reached to replace
@@ -2472,7 +2472,7 @@ export function usePlaybackSession(
         planTransportShownRef.current = false;
         // A server restart or a dead node can also drop the stream there.
         recoverFromFailure(PROGRESSIVE_DROP_REPEATED_FAILURE, positionSeconds, {
-          reconnectWhenSessionGone: true,
+          reconnectOnRequestFailure: true,
         });
         return;
       }
