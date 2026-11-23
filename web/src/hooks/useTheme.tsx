@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useReducer, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
@@ -144,6 +144,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     ? (apiHighContrast ?? highContrastPreference)
     : highContrastPreference;
 
+  // A setter shows its value before saving it. When the save fails in a way
+  // that may have stored it, the settings re-read can come back unchanged, so
+  // the effects below would leave that value shown and cached; bumping this
+  // re-runs them on what the server holds.
+  const [reconciles, reconcile] = useReducer((count: number) => count + 1, 0);
+
   // Mirror the server's values into this identity's namespace so the next cold
   // start paints them before the settings request resolves. Without this the
   // cache would only ever hold choices made on this device, and a user who
@@ -195,19 +201,27 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (cleared.textScale) setTextScalePreference(parseTextScale(undefined));
     if (cleared.textWeight) setTextWeightPreference(parseTextWeight(undefined));
     if (cleared.highContrast) setHighContrastPreference(parseHighContrast(undefined));
-  }, [loadApi, effectiveSettings, apiTextScale, apiTextWeight, apiHighContrast, cacheOwner]);
+  }, [
+    loadApi,
+    effectiveSettings,
+    apiTextScale,
+    apiTextWeight,
+    apiHighContrast,
+    cacheOwner,
+    reconciles,
+  ]);
 
   useEffect(() => {
     applyTextScaleToDOM(textScale);
-  }, [textScale]);
+  }, [textScale, reconciles]);
 
   useEffect(() => {
     applyTextWeightToDOM(textWeight);
-  }, [textWeight]);
+  }, [textWeight, reconciles]);
 
   useEffect(() => {
     applyHighContrastToDOM(highContrast);
-  }, [highContrast]);
+  }, [highContrast, reconciles]);
 
   // With no stored choice, high contrast follows the system setting, so follow
   // it while the app is open too. Re-parsing the cache keeps a stored choice
@@ -242,6 +256,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           applyTextScaleToDOM(v);
         },
         save: (v) => saveProfileDefault(SETTING_KEYS.UI_TEXT_SCALE, v),
+        reconcile,
       }),
     [saveProfileDefault, showThenSave, textScale],
   );
@@ -258,6 +273,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           applyTextWeightToDOM(v);
         },
         save: (v) => saveProfileDefault(SETTING_KEYS.UI_TEXT_WEIGHT, v),
+        reconcile,
       }),
     [saveProfileDefault, showThenSave, textWeight],
   );
@@ -274,6 +290,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
           applyHighContrastToDOM(v);
         },
         save: (v) => saveProfileDefault(SETTING_KEYS.UI_HIGH_CONTRAST, v),
+        reconcile,
       }),
     [saveProfileDefault, showThenSave, highContrast],
   );

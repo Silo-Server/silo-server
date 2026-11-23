@@ -1,6 +1,7 @@
 import { act, render } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { v2Problem } from "@/api/v2/problems.test-support";
 import { appearanceCache, storage } from "@/utils/storage";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 
@@ -15,7 +16,11 @@ vi.mock("@/hooks/useAuth", () => ({
   useOptionalAuth: () => mocks.useOptionalAuth(),
 }));
 
-vi.mock("@/hooks/queries/settingValues", () => ({
+vi.mock("@/hooks/queries/settingValues", async (importOriginal) => ({
+  // The real failure classification, which decides how a failed save settles.
+  isDefinitiveSettingMutationRejection: (
+    await importOriginal<typeof import("@/hooks/queries/settingValues")>()
+  ).isDefinitiveSettingMutationRejection,
   useEffectiveSettings: (options?: { keys?: readonly string[]; enabled?: boolean }) =>
     mocks.useEffectiveSettings(options),
   useSetSettingValue: () => ({ mutate: mocks.mutate, mutateAsync: mocks.mutate, isPending: false }),
@@ -340,4 +345,31 @@ describe("appearance cache ownership", () => {
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe("x-large");
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p2")).toBeNull();
   });
+
+  // A 502 may or may not have stored the change, and the settings re-read that
+  // settles it can come back unchanged; the page then shows and caches that.
+  it.each([
+    ["a stored value", { value: "large" }, "large", "large"],
+    ["no stored value", { value: "default", source: "default" }, "default", null],
+  ])(
+    "shows what the server holds after a save that may have stored it fails, given %s",
+    async (_label, stored, shown, cached) => {
+      signedInAs(1);
+      mocks.useEffectiveSettings.mockReturnValue(
+        effectiveAnswer({ [SETTING_KEYS.UI_TEXT_SCALE]: stored }),
+      );
+      mocks.mutate.mockRejectedValue(v2Problem(502, "bad_gateway", "Bad gateway"));
+      const view = renderAppearance();
+
+      await act(async () => {
+        view.captured.setTextScale("x-large");
+        // A macrotask runs only after the failed save's handlers have.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+      });
+
+      expect(view.captured.textScale).toBe(shown);
+      expect(document.documentElement.getAttribute("data-text-scale")).toBe(shown);
+      expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe(cached);
+    },
+  );
 });

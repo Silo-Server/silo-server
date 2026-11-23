@@ -1,4 +1,11 @@
-import { createContext, useCallback, useContext, useEffect, useSyncExternalStore } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useReducer,
+  useSyncExternalStore,
+} from "react";
 import type { ReactNode } from "react";
 
 import {
@@ -85,6 +92,12 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
       ? parseTimeFormatPreference(appearanceCache.get(storage.KEYS.UI_TIME_FORMAT, cacheOwner))
       : local.timeFormat;
 
+  // A setter shows its format before saving it. When the save fails in a way
+  // that may have stored it, the settings re-read can come back unchanged, so
+  // the effect below would leave that format shown and cached; bumping this
+  // re-runs it on what the server holds.
+  const [reconciles, reconcile] = useReducer((count: number) => count + 1, 0);
+
   useEffect(() => {
     setDateTimeFormatPreferences({ dateFormat, timeFormat });
     // Mirror the resolved values into this identity's namespace so the next
@@ -94,7 +107,7 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
       appearanceCache.set(storage.KEYS.UI_DATE_FORMAT, dateFormat, cacheOwner);
       appearanceCache.set(storage.KEYS.UI_TIME_FORMAT, timeFormat, cacheOwner);
     }
-  }, [dateFormat, timeFormat, apiLoaded, cacheOwner]);
+  }, [dateFormat, timeFormat, apiLoaded, cacheOwner, reconciles]);
 
   const showThenSave = useShowThenSave(cacheOwner);
 
@@ -113,6 +126,7 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
             value: v,
             identity: PROFILE_SCOPE,
           }),
+        reconcile,
       }),
     [settingMutation, showThenSave],
   );
@@ -132,6 +146,7 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
             value: v,
             identity: PROFILE_SCOPE,
           }),
+        reconcile,
       }),
     [settingMutation, showThenSave],
   );

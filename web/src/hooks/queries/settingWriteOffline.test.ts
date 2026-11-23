@@ -39,6 +39,7 @@ describe("useShowThenSave after an online failure", () => {
    */
   async function run(steps: Array<string | [number, unknown]>) {
     const settles: Array<(outcome: unknown) => void> = [];
+    let reconciled = 0;
     const { result } = renderHook(() => useShowThenSave(null));
     let current = "normal";
     for (const step of steps) {
@@ -60,9 +61,12 @@ describe("useShowThenSave after an online failure", () => {
           new Promise((resolve, reject) =>
             settles.push((outcome) => (outcome instanceof Error ? reject(outcome) : resolve(0))),
           ),
+        reconcile: () => {
+          reconciled++;
+        },
       });
     }
-    return { shown: current, cached: appearanceCache.get(CACHE_KEY, null) };
+    return { shown: current, cached: appearanceCache.get(CACHE_KEY, null), reconciled };
   }
 
   // A 4xx other than 408 means the server stored nothing.
@@ -70,6 +74,7 @@ describe("useShowThenSave after an online failure", () => {
     expect(await run(["large", [0, problem(status)]])).toEqual({
       shown: "normal",
       cached: "normal",
+      reconciled: 0,
     });
     expect(toastError).toHaveBeenCalledTimes(1);
   });
@@ -78,6 +83,7 @@ describe("useShowThenSave after an online failure", () => {
     expect(await run(["large", "x-large", [0, REJECTED], [1, REJECTED]])).toEqual({
       shown: "normal",
       cached: "normal",
+      reconciled: 0,
     });
   });
 
@@ -85,6 +91,7 @@ describe("useShowThenSave after an online failure", () => {
     expect(await run(["large", "x-large", [0, "saved"], [1, REJECTED]])).toEqual({
       shown: "large",
       cached: "large",
+      reconciled: 0,
     });
   });
 
@@ -92,28 +99,42 @@ describe("useShowThenSave after an online failure", () => {
     expect(await run(["large", "x-large", [1, problem(429)], [0, "saved"]])).toEqual({
       shown: "large",
       cached: "large",
+      reconciled: 0,
     });
   });
 
   it("puts back an earlier change that saved while a later one was pending", async () => {
     expect(
       await run(["large", "x-large", [1, REJECTED], "small", [0, "saved"], [2, REJECTED]]),
-    ).toEqual({ shown: "large", cached: "large" });
+    ).toEqual({ shown: "large", cached: "large", reconciled: 0 });
   });
 
   it("keeps a later change that saved over an earlier one that lands after it", async () => {
     expect(
       await run(["large", "x-large", [1, REJECTED], "small", [2, "saved"], [0, "saved"]]),
-    ).toEqual({ shown: "small", cached: "small" });
+    ).toEqual({ shown: "small", cached: "small", reconciled: 0 });
   });
 
-  // These may have saved; the effective-settings re-read decides what shows.
+  // These may have saved, so the settings re-read decides what shows: the
+  // caller shows and caches what the server holds once it has finished.
   it.each([
     ["500", problem(500)],
     ["408", problem(408)],
     ["network", new TypeError("Failed to fetch")],
-  ])("keeps the change after an ambiguous %s failure", async (_label, error) => {
-    expect(await run(["large", [0, error]])).toEqual({ shown: "large", cached: "large" });
+  ])("hands an ambiguous %s failure to the caller to reconcile", async (_label, error) => {
+    expect(await run(["large", [0, error]])).toEqual({
+      shown: "large",
+      cached: "large",
+      reconciled: 1,
+    });
     expect(toastError).not.toHaveBeenCalled();
+  });
+
+  it("leaves an ambiguous failure superseded by a newer change to that change", async () => {
+    expect(await run(["large", "x-large", [0, problem(502)], [1, "saved"]])).toEqual({
+      shown: "x-large",
+      cached: "x-large",
+      reconciled: 0,
+    });
   });
 });

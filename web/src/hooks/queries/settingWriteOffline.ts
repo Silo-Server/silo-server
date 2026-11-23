@@ -94,6 +94,13 @@ interface ShownChange<T> {
    * Defaults to reportUnsavedSettingChange.
    */
   unsaved?: (error: unknown) => boolean;
+  /**
+   * Shows and caches what the server holds now. Called when the newest change
+   * failed in a way that may have stored it, after its save settled (so after
+   * the settings re-read the failure triggers). That re-read can return what
+   * the caller already had, so its own sync from the stored value won't run.
+   */
+  reconcile?: () => void;
 }
 
 interface UnsettledPreference {
@@ -117,7 +124,9 @@ interface UnsettledPreference {
  * the newest change known to have landed, or else the value from before the
  * first unsettled change. An earlier change that lands after that, with
  * nothing picked since, is then shown. Callers' sync effects re-run only when
- * the stored value changes, which a failed save never does.
+ * the stored value changes, which a failed save never does. When the newest
+ * change failed in a way that may have saved, `reconcile` shows what the
+ * server holds instead.
  */
 export function useShowThenSave(cacheOwner: string | null) {
   const unsettled = useRef(new Map<string, UnsettledPreference>());
@@ -136,6 +145,7 @@ export function useShowThenSave(cacheOwner: string | null) {
       show,
       save,
       unsaved = reportUnsavedSettingChange,
+      reconcile,
     }: ShownChange<T>) => {
       const token = {};
       // Per owner: another profile's unsettled change says nothing about this one's.
@@ -187,7 +197,12 @@ export function useShowThenSave(cacheOwner: string | null) {
         (error: unknown) => {
           settle();
           // A newer change to this preference settles it instead.
-          if (pending.latest !== token || !unsaved(error)) return;
+          if (pending.latest !== token) return;
+          if (!unsaved(error)) {
+            // It may have saved: the settings re-read has the answer.
+            if (currentOwner.current === cacheOwner) reconcile?.();
+            return;
+          }
           pending.restored = true;
           showStored();
         },
