@@ -192,6 +192,8 @@ func (r *PgExecutionRepository) ListPage(ctx context.Context, key string, before
 
 // Prune deletes bounded batches of execution history outside the retention
 // policy. A database advisory lock ensures only one Silo node prunes at a time.
+// The lock lives on a session outside the pool, so the prune's own queries
+// still find a connection when database.max_connections is 1.
 // It always preserves the newest execution for every task, including tasks
 // that are no longer registered.
 //
@@ -208,7 +210,7 @@ func (r *PgExecutionRepository) Prune(
 	batchSize int,
 	maxBatches int,
 ) (pruneResult taskmanager.HistoryPruneResult, returnErr error) {
-	lock, acquired, err := pglock.TryAcquire(ctx, r.pool, taskHistoryCleanupAdvisoryLock)
+	lock, acquired, err := pglock.TryAcquireSession(ctx, r.pool, taskHistoryCleanupAdvisoryLock)
 	if err != nil {
 		return pruneResult, fmt.Errorf("acquiring task history cleanup lock: %w", err)
 	}
