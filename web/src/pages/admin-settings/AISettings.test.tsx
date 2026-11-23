@@ -9,8 +9,9 @@ import AISettings from "./AISettings";
 
 stubRadixDom();
 
-const { settings } = vi.hoisted(() => ({
+const { settings, capabilitiesFailed } = vi.hoisted(() => ({
   settings: { current: {} as Record<string, string> },
+  capabilitiesFailed: { current: false },
 }));
 
 vi.mock("@/hooks/queries/admin/settings", () => ({
@@ -34,15 +35,18 @@ vi.mock("@/hooks/queries/admin/aiProviders", () => ({
   useAIProviderModels: () => ({ data: { models: [] } }),
 }));
 vi.mock("@/hooks/queries/admin/chatgpt", () => ({
-  useAdminAICapabilities: () => ({
-    data: {
-      chatgpt_sign_in: true,
-      reasoning_levels: [],
-      openai_service_tiers: ["default", "priority"],
-    },
-    isSuccess: true,
-    isFetching: false,
-  }),
+  useAdminAICapabilities: () =>
+    capabilitiesFailed.current
+      ? { data: undefined, isSuccess: false, isFetching: false }
+      : {
+          data: {
+            chatgpt_sign_in: true,
+            reasoning_levels: [],
+            openai_service_tiers: ["default", "priority"],
+          },
+          isSuccess: true,
+          isFetching: false,
+        },
   useChatGPTStatus: () => ({ data: undefined }),
   useChatGPTModels: () => ({ data: undefined }),
 }));
@@ -68,6 +72,7 @@ async function openTextTile() {
 describe("AI text model edits stay where the admin can see them", () => {
   beforeEach(() => {
     localStorage.clear();
+    capabilitiesFailed.current = false;
     settings.current = {
       "ai.auth_mode": "api_key",
       "ai.text_provider_id": "oa",
@@ -87,6 +92,25 @@ describe("AI text model edits stay where the admin can see them", () => {
     expect(screen.getByRole("combobox", { name: "Service tier" })).toHaveTextContent(
       "Fast/Priority",
     );
+  });
+
+  it("lets a kept service tier go back to Default while capabilities are unavailable", async () => {
+    const { rerender } = render(page);
+    await openTextTile();
+    const advanced = screen.getAllByRole("button", { name: /Advanced/ })[0]!;
+    if (advanced.getAttribute("aria-expanded") !== "true") await userEvent.click(advanced);
+    await pick("Service tier", "Fast/Priority");
+    capabilitiesFailed.current = true;
+    // A new element, so the page renders again with the failed request.
+    rerender(
+      <MemoryRouter>
+        <AISettings />
+      </MemoryRouter>,
+    );
+    await pick("Service tier", "Default");
+
+    expect(screen.queryByRole("combobox", { name: "Service tier" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
   });
 
   it("takes back a staged provider when the ChatGPT plan is chosen", async () => {

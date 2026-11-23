@@ -311,8 +311,10 @@ function TextModelTile({
   // see.
   const serviceTierKept = !supportsServiceTier && serviceTierDirty;
   const showServiceTier = supportsServiceTier || serviceTierKept;
-  // A kept tier may not be one the current model lists.
-  const tierOptions = [...new Set([...serviceTiers, serviceTier || "default"])];
+  // A kept tier may not be one the current model lists, and the list is empty
+  // while capabilities load or after they fail; Default is always offered so
+  // the kept tier can still be set back.
+  const tierOptions = [...new Set(["default", ...serviceTiers, serviceTier || "default"])];
 
   return (
     <ProviderTile
