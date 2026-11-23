@@ -373,4 +373,33 @@ describe("appearance cache ownership", () => {
       expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe(cached);
     },
   );
+
+  // When the re-read fails too, the cached answer is no newer than the change,
+  // which may have been stored: the page waits for a read that succeeds.
+  it("waits for a successful settings read before showing the server's value", async () => {
+    signedInAs(1);
+    const answer = effectiveAnswer({ [SETTING_KEYS.UI_TEXT_SCALE]: { value: "large" } });
+    mocks.useEffectiveSettings.mockReturnValue({ ...answer, isError: true });
+    mocks.mutate.mockRejectedValue(v2Problem(502, "bad_gateway", "Bad gateway"));
+    const view = renderAppearance();
+
+    act(() => {
+      view.captured.setTextScale("x-large");
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(document.documentElement.getAttribute("data-text-scale")).toBe("x-large");
+    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe("x-large");
+
+    // A later read succeeds with the same answer.
+    mocks.useEffectiveSettings.mockReturnValue({ ...answer, isError: false });
+    act(() => {
+      view.rerender();
+    });
+    await waitFor(() =>
+      expect(document.documentElement.getAttribute("data-text-scale")).toBe("large"),
+    );
+    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe("large");
+  });
 });

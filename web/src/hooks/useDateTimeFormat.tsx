@@ -1,11 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useReducer,
-  useSyncExternalStore,
-} from "react";
+import { createContext, useCallback, useContext, useEffect, useSyncExternalStore } from "react";
 import type { ReactNode } from "react";
 
 import {
@@ -22,7 +15,7 @@ import type {
 } from "@/lib/datetime";
 import { useEffectiveSettings, useSetSettingValue } from "@/hooks/queries/settingValues";
 import type { SettingIdentity } from "@/hooks/queries/settingValues";
-import { useShowThenSave } from "@/hooks/queries/settingWriteOffline";
+import { useReconcileFromRead, useShowThenSave } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { useAppearanceCacheOwner } from "@/hooks/themePreferences";
 import { appearanceCache, storage } from "@/utils/storage";
@@ -64,7 +57,7 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
   // ownership can never move one provider and leave this one behind.
   const cacheOwner = useAppearanceCacheOwner();
   const loadApiSettings = cacheOwner !== null;
-  const { data: effectiveSettings } = useEffectiveSettings({
+  const { data: effectiveSettings, isError: settingsReadFailed } = useEffectiveSettings({
     keys: FORMAT_KEYS,
     enabled: loadApiSettings,
   });
@@ -94,9 +87,9 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
 
   // A setter shows its format before saving it. When the save fails in a way
   // that may have stored it, the settings re-read can come back unchanged, so
-  // the effect below would leave that format shown and cached; bumping this
-  // re-runs it on what the server holds.
-  const [reconciles, reconcile] = useReducer((count: number) => count + 1, 0);
+  // the effect below would leave that format shown and cached; this count
+  // re-runs it on what the server holds, once a settings read has succeeded.
+  const [reconciles, reconcile] = useReconcileFromRead(settingsReadFailed);
 
   useEffect(() => {
     setDateTimeFormatPreferences({ dateFormat, timeFormat });
@@ -128,7 +121,7 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
           }),
         reconcile,
       }),
-    [settingMutation, showThenSave],
+    [reconcile, settingMutation, showThenSave],
   );
 
   const setTimeFormat = useCallback(
@@ -148,7 +141,7 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
           }),
         reconcile,
       }),
-    [settingMutation, showThenSave],
+    [reconcile, settingMutation, showThenSave],
   );
 
   return (

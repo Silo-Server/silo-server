@@ -1,8 +1,8 @@
-import { createContext, useContext, useEffect, useReducer, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
-import { useShowThenSave } from "@/hooks/queries/settingWriteOffline";
+import { useReconcileFromRead, useShowThenSave } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { appearanceCache, storage } from "@/utils/storage";
 import type { StorageKey } from "@/utils/storage";
@@ -114,7 +114,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // that must stay distinguishable from an explicit choice so the local warm
   // start keeps its layering, so those values are dropped here rather than
   // treated as the profile's preference.
-  const { data: effectiveSettings } = useEffectiveSettings({
+  const { data: effectiveSettings, isError: settingsReadFailed } = useEffectiveSettings({
     keys: APPEARANCE_KEYS,
     enabled: loadApi,
   });
@@ -146,9 +146,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   // A setter shows its value before saving it. When the save fails in a way
   // that may have stored it, the settings re-read can come back unchanged, so
-  // the effects below would leave that value shown and cached; bumping this
-  // re-runs them on what the server holds.
-  const [reconciles, reconcile] = useReducer((count: number) => count + 1, 0);
+  // the effects below would leave that value shown and cached; this count
+  // re-runs them on what the server holds, once a settings read has succeeded.
+  const [reconciles, reconcile] = useReconcileFromRead(settingsReadFailed);
 
   // Mirror the server's values into this identity's namespace so the next cold
   // start paints them before the settings request resolves. Without this the
@@ -258,7 +258,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         save: (v) => saveProfileDefault(SETTING_KEYS.UI_TEXT_SCALE, v),
         reconcile,
       }),
-    [saveProfileDefault, showThenSave, textScale],
+    [reconcile, saveProfileDefault, showThenSave, textScale],
   );
 
   const setTextWeight = useCallback(
@@ -275,7 +275,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         save: (v) => saveProfileDefault(SETTING_KEYS.UI_TEXT_WEIGHT, v),
         reconcile,
       }),
-    [saveProfileDefault, showThenSave, textWeight],
+    [reconcile, saveProfileDefault, showThenSave, textWeight],
   );
 
   const setHighContrast = useCallback(
@@ -292,7 +292,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         save: (v) => saveProfileDefault(SETTING_KEYS.UI_HIGH_CONTRAST, v),
         reconcile,
       }),
-    [saveProfileDefault, showThenSave, highContrast],
+    [reconcile, saveProfileDefault, showThenSave, highContrast],
   );
 
   return (

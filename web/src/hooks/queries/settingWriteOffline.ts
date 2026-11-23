@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { onlineManager } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -227,4 +227,24 @@ export function useShowThenSave(cacheOwner: string | null) {
     },
     [cacheOwner],
   );
+}
+
+/**
+ * The `reconcile` for useShowThenSave, for a provider that shows what a
+ * settings read holds. Returns a count for the provider's sync effects to
+ * depend on, which moves when a reconcile is due, and the callback. A
+ * reconcile waits until the read last succeeded: when the re-read after the
+ * failure failed too, its cached answer is no newer than the change, which
+ * may have been stored, so it must not replace it on screen or in the cache.
+ */
+export function useReconcileFromRead(readFailed: boolean): [number, () => void] {
+  const [owed, setOwed] = useState(false);
+  const [reconciles, setReconciles] = useState(0);
+  // Adjusted during render, as React re-runs this pass before committing.
+  if (owed && !readFailed) {
+    setOwed(false);
+    setReconciles(reconciles + 1);
+  }
+  const reconcile = useCallback(() => setOwed(true), []);
+  return [reconciles, reconcile];
 }
