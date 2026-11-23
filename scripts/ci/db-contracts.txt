@@ -8,6 +8,7 @@
 ./internal/catalog TestCatalogQueryRequestedLibraryOutsideAccessDB
 ./internal/catalog TestCatalogSearchSortsByProfilePlaysDB
 ./internal/catalog TestCatalogQuerySortsDateViewedUnwatchedLastDB
+./internal/catalog TestCatalogQuerySortsSeriesByEpisodeDateViewedDB
 ./internal/catalog TestLibraryCollectionDrawsFromItsRulesLibrariesDB
 ./internal/catalog TestLibraryCollectionReplaceItemsWritesOnlyTheDifferenceDB
 ./internal/catalog TestLibraryCollectionReplaceItemsRacesMemberDeleteDB
@@ -61,6 +62,8 @@
 ./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
 ./internal/scanner TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB
 ./internal/scanner TestHDR10PlusBackfillWaitsADayAfterANoFrameReadDB
+./internal/scanner TestAttachmentBitrateBackfillRecomputesFontHeavyFilesOnceDB
+./internal/scanner TestAttachmentBitrateBackfillResumesAfterStorageStallDB
 ./internal/scanner TestRescanKeepsSidecarsItCouldNotListDB
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
@@ -370,7 +373,12 @@
 ./internal/taskmanager/tasks TestRefreshRequestDownloadsSkipsDuringReconcilePostgres
 ./internal/taskmanager/tasks TestReconcileWaitsForADownloadRefreshPostgres
 ./internal/taskmanager/tasks TestReconcileSkipsWhileAnotherReconcileRunsPostgres
+./internal/taskmanager/tasks TestAdvisoryClusterLockLeavesASingleConnectionPoolFreePostgres
 ./internal/taskmanager/repository TestPgExecutionRepositoryPruneReportsBatchLimit
+
+# A task run whose server stops renewing its lease is recorded once, as an
+# interrupted failure ending at its last heartbeat; a renewed lease is kept.
+./internal/taskmanager/repository TestPgExecutionRepositoryRecordsStaleRunLeasesAsInterrupted
 
 # A plugin scheduled task's firing runs on one API server: of claims taken at
 # once one wins, a server whose timer fires seconds later (across an interval
@@ -423,6 +431,14 @@
 ./internal/notifications TestLegacyMobilePushPreservesOrderedProofDB
 ./internal/notifications TestLegacyMobilePushWaitsForOwnershipDB
 ./internal/notifications TestLegacyPushRegistrationStaysOnTheAccount
+
+# A browser or device removed after a delivery listed it gets no attempt and
+# leaves the delivery transaction intact. A retention sweep skips a target a
+# delivery holds instead of waiting on it; the unbound push sweep then waits for
+# it one row at a time, before session cleanup removes its evidence.
+./internal/notifications TestPushEnqueueSkipsTargetsRemovedAfterListingDB
+./internal/notifications TestPushRetentionSkipsTargetsADeliveryHoldsDB
+./internal/notifications TestPushRetentionKeepsTheLastChanceForAnExpiredAppleLoginDB
 
 # Push stops when the login session that registered the device ends, however it
 # ended, including for a push already queued, and retention removes the token.
@@ -597,6 +613,13 @@
 ./internal/notifications TestFanoutSkipsProfilesThatMutedTheSeries
 ./internal/notifications TestSeriesMutesList
 ./internal/notifications TestSeriesMutesUnmuteAndPurge
+./internal/notifications TestWebhookRejectionsAutoDisableDB
+./internal/notifications TestWebhookRejectionsNeverOutrunFailuresDB
+./internal/notifications TestWebhookFinishIsAtomicDB
+./internal/notifications TestWebhookExhaustedScheduleDisablesOnceDB
+./internal/notifications TestWebhookRetryAfterIsAMinimumDB
+./internal/notifications TestWebhookLateFinishAfterReclaimCountsOnceDB
+./internal/notifications TestWebhookSkipsSendWithoutEnoughLeaseDB
 ./internal/metadata TestCanonicalizeMediaItemReferencesMergesNotificationMutesPostgres
 ./internal/catalog/reattribute TestMovePairsMovesNotificationMutesDB
 ./internal/catalog/reattribute TestMovedHistoryKeepsItsCutoffsDB
@@ -654,6 +677,7 @@
 ./internal/downloads TestLateCompletionStopsItsPreparationDB
 ./internal/downloads TestStaleAbandonedPreparationsAreRetiredNotClaimedDB
 ./internal/userstore/pgstore TestPostgresClearResumePosition
+./internal/userstore/pgstore TestPostgresSeriesLatestViewedAtDB
 ./internal/userstore/pgstore TestPostgresCollectionContinuation
 ./internal/userstore/pgstore TestPostgresCollectionsHolding
 ./internal/userstore/pgstore TestPostgresFailedSyncKeepsANewerResult

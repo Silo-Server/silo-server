@@ -521,6 +521,12 @@
       "value": "Diese Wiedergabesitzung ist beendet. Starte die Wiedergabe erneut."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Dieser Stream wurde ersetzt. Die Wiedergabe läuft mit dem aktuellen Stream weiter."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -24093,6 +24099,12 @@
       "value": "Der Spracherkennungsanbieter ist vorübergehend nicht verfügbar. Versuche es später erneut."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Der Text-KI-Anbieter hat kein verfügbares Guthaben, oder ein Nutzungs- oder Ausgabenlimit wurde erreicht. Prüfe dein Guthaben und deine Limits beim Anbieter oder die Nutzungseinstellungen von ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24103,6 +24115,80 @@
     {
       "type": 0,
       "value": "Text-KI-Verbindung fehlgeschlagen. Prüfe das Modell, die Reasoning-Stufe, die Service-Stufe, die Kontoverbindung und die Nutzungslimits des Anbieters."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Der Zugriff auf die Text-KI wurde verweigert. Prüfe, ob der API-Schlüssel oder das ChatGPT-Konto dieses Modell verwenden darf."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Endpunkt oder Modell der Text-KI ist nicht verfügbar. Prüfe die Basis-URL des Anbieters und das Modell."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Das verbundene ChatGPT-Konto kann die Nutzung seines Tarifs nicht teilen. Prüfe die Nutzungseinstellungen von ChatGPT oder verbinde ein anderes Konto."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Der Text-KI-Anbieter begrenzt die Anzahl der Anfragen. Versuche es später erneut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Der Text-KI-Anbieter hat die Prüfanfrage zurückgewiesen. Prüfe das Modell, die Reasoning-Stufe und die Nutzungseinstellungen des Kontos. Das Serverprotokoll enthält den Fehler des Anbieters."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Der Text-KI-Anbieter hat die Prüfanfrage abgelehnt (Status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Prüfe das Modell, die Reasoning-Stufe und die Service-Stufe. Das Serverprotokoll enthält den Fehler des Anbieters."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Zeitüberschreitung bei der Verbindungsprüfung der Text-KI. Prüfe die Verfügbarkeit des Anbieters und versuche es erneut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Der Text-KI-Anbieter hat die Zugangsdaten abgelehnt. Ersetze den API-Schlüssel des Anbieters oder melde dich erneut mit ChatGPT an."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Der Text-KI-Anbieter ist vorübergehend nicht verfügbar. Versuche es später erneut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo konnte den Text-KI-Anbieter nicht erreichen. Prüfe die Basis-URL des Anbieters und ob dieser Server eine Verbindung zu ihm herstellen kann."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Das Textmodell hat eine Antwort geliefert, die Silo nicht verwenden kann. Wähle ein anderes Modell."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -67413,6 +67499,12 @@
       "value": "Als gesehen markieren bei"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titel mit Abspann-Markierung gelten auch als gesehen, sobald die Wiedergabe den Abspann erreicht."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -102208,6 +102300,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

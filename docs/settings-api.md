@@ -41,8 +41,7 @@ All paths below are absolute. Errors are RFC 9457 problem documents; a rejected 
 | `updateSettingValue`                     | `PUT /api/v2/settings/values/{key}`                  |
 | `deleteSettingValue`                     | `DELETE /api/v2/settings/values/{key}`               |
 
-The untyped v1 settings routes had no v2 successor; see
-[v1-scope.md](architecture/v1-scope.md). The admin projection is not part of the settings
+The admin projection is not part of the settings
 section; it has its own operations, `listAdminUserSettingValues` (`GET /api/v2/admin/users/{id}/settings/values`),
 `setAdminUserSettingValue` (`PUT /api/v2/admin/users/{id}/settings/values/{key}`) and
 `deleteAdminUserSettingValue` (`DELETE /api/v2/admin/users/{id}/settings/values/{key}`).
@@ -54,9 +53,9 @@ overlay-config and plugin operations. `X-Profile-Token` is optional everywhere.
 ### Contract discovery and capabilities
 
 `GET /api/v2/settings/contract` returns the canonical public manifest bytes and their `ETag`,
-with `Cache-Control: private, no-cache`. A conditional
-`If-None-Match` GET is not carried yet; it lands with the foundation caching rules, so a v2
-client compares the `ETag` (or the capability document's `contract_etag`) itself and re-fetches.
+with `Cache-Control: private, no-cache`. It does not answer a conditional `If-None-Match` GET
+with `304`, so a client compares the `ETag` (or the capability document's `contract_etag`)
+itself and re-fetches.
 
 `GET /api/v2/settings/contract/capabilities` returns eleven settings-specific members plus the
 common `revision`, `state` and `allowed` fields. The previous numeric `revision` is now
@@ -126,13 +125,13 @@ Every list-valued query parameter is sent once per value. `keys=<csv>` becomes
 `listEffectiveSettings`. A comma inside a value is part of the key name and will be rejected as
 an unknown key.
 
-The examples in this section mirror the committed v2 fixtures, which use `ui.theme`. That
-key is deprecated and no client reads it (see [Retired theme settings](#retired-theme-settings));
-the request and response mechanics are the same for every key.
+The examples here use active keys. The committed fixtures they follow use `ui.theme`, which
+is deprecated and no client reads (see [Retired theme settings](#retired-theme-settings)); the
+request and response mechanics are the same for every key.
 
 ```http
-GET /api/v2/settings/values?scope=profile&keys=ui.theme&keys=playback.preferred_quality
-GET /api/v2/settings/values/effective?keys=ui.theme&library_ids=3&library_ids=7
+GET /api/v2/settings/values?scope=profile&keys=playback.subtitle_mode&keys=playback.preferred_quality
+GET /api/v2/settings/values/effective?keys=playback.subtitle_mode&library_ids=3&library_ids=7
 ```
 
 `scope` is a required enum on `listSettingValues`, `getSettingValue`, `updateSettingValue` and
@@ -149,15 +148,15 @@ Every settings collection uses the common collection envelope `{items: [...]}`. 
 `items`. These collections are unpaginated — they are bounded by the requested keys or the
 installed plugins — so `page` is never present.
 
-`GET /api/v2/settings/values/effective?keys=ui.theme&keys=playback.preferred_quality`
-(`list_effective_settings_ok.json`):
+`GET /api/v2/settings/values/effective?keys=playback.subtitle_mode&keys=playback.preferred_quality`
+(shaped like `list_effective_settings_ok.json`):
 
 ```json
 {
   "items": [
     {
-      "key": "ui.theme",
-      "value": "cinema-light",
+      "key": "playback.subtitle_mode",
+      "value": "always",
       "source": "profile",
       "definition_revision": 3,
       "updated_at": "2026-01-02T03:04:05.678Z",
@@ -233,10 +232,10 @@ X-Profile-Id: <profile-id>
 X-Silo-Client-Family: web
 Content-Type: application/json
 
-{"keys":["ui.theme"],"contexts":[{"context_id":"row-1","library_id":"3"},{"context_id":"row-2","series_id":"tv:12345"}]}
+{"keys":["playback.subtitle_mode"],"contexts":[{"context_id":"row-1","library_id":"3"},{"context_id":"row-2","series_id":"tv:12345"}]}
 ```
 
-Response (`resolve_effective_settings_ok.json`); each item is `{context_id, settings}` in
+Response (shaped like `resolve_effective_settings_ok.json`); each item is `{context_id, settings}` in
 request order:
 
 ```json
@@ -246,8 +245,8 @@ request order:
       "context_id": "row-1",
       "settings": [
         {
-          "key": "ui.theme",
-          "value": "cinema-light",
+          "key": "playback.subtitle_mode",
+          "value": "always",
           "source": "profile",
           "definition_revision": 3,
           "updated_at": "2026-01-02T03:04:05.678Z",
@@ -263,8 +262,8 @@ request order:
       "context_id": "row-2",
       "settings": [
         {
-          "key": "ui.theme",
-          "value": "cinema-light",
+          "key": "playback.subtitle_mode",
+          "value": "always",
           "source": "profile",
           "definition_revision": 3,
           "updated_at": "2026-01-02T03:04:05.678Z",
@@ -334,13 +333,11 @@ plugin installation id that names nothing (numeric or not; identifiers are opaqu
 ### Writes have no mutation id
 
 `updateSettingValue` and `updateNavigationShortcut` declare no `X-Silo-Mutation-Id` header; a
-client sends none, and there is no idempotent replay. The reason is sequencing: idempotent replay
-is a foundation concern for every v2 mutation, and the foundation mutation-retry work owns it.
-Until it lands, a client retries a write as a plain desired-state
-`PUT`: the same body converges on the same stored value, and the shortcut mutation is still
-atomic on the server (an already-satisfied mutation is a successful no-op that does not advance
-the revision). Once the header is declared on both writes, the web client's compile-time guard
-flips and `supports_idempotent_writes` becomes meaningful.
+client sends none, and the server keeps no replay receipt. Neither needs one: each write is a
+desired-state `PUT`, which the server classifies as naturally idempotent, so a client retries it
+by sending the same request again. The same body converges on the same stored value, and the
+shortcut mutation is atomic on the server (an already-satisfied mutation is a successful no-op
+that does not advance the revision).
 
 `updateSettingValue` accepts `{value}`, validated and normalized against the key's `value_schema`
 (a refusal is `422` at `body.value`), and answers `200` with the same
@@ -466,8 +463,7 @@ Branding remains public so it can render before sign-in:
 Discovery uses the existing branding service. When dependencies are absent,
 configuration returns default branding; capabilities
 report availability explicitly. Discovery responses are not cached. The bundled web
-uses these v2 reads. Native server-identity discovery must adopt the same public
-endpoint through its negotiated API-version handling.
+uses these reads.
 
 Asset URLs include `?v=<content-reference>`. Only an exact current reference receives
 immutable caching; a stale reference returns `404`, so newer bytes cannot be cached
@@ -535,9 +531,7 @@ authority rules. Both operations remain registered when the service is absent;
 discovery returns `available: false`, and listing returns `dependency_unavailable`.
 The bundled web keeps numeric library IDs at its UI boundary, rejects unsafe
 numeric conversions, and fences responses/cache keys against account/profile
-changes. Apple and Android have existing library-discovery callers and require
-coordinated adoption before this migration row is ratified. Jellyfin's separate
-library projection is unchanged.
+changes. Jellyfin's separate library projection is unchanged.
 
 ### Administrator device metadata
 
@@ -641,8 +635,7 @@ Connection list/create/update and secret rotation emit
 `/api/v2/webhook-sync/webhooks/{secret}` receiver URLs. An external server still
 configured with a retired `/api/v1/webhook-sync/...` or `/api/v1/plex-sync/...`
 URL gets `410 Gone` until it is given the current URL.
-The web management screen consumes the emitted URL. No native receiver or
-management caller was found; no Jellyfin-protocol endpoint needs migration.
+The web management screen consumes the emitted URL.
 
 Connection management is account-wide and requires the existing
 [household-manager authority](architecture/api-contract.md#credential-continuity):
@@ -678,15 +671,13 @@ The three routes require a verified active profile; progress is demo-restricted.
 
 Both SQLite and PostgreSQL atomically check revisions on insertion/update.
 Database triggers advance the revision on every write, so a concurrent write
-invalidates a held validator. Completed/skipped timestamps remain monotonic. The
-migration adds a revision column without changing existing state.
+invalidates a held validator. Completed/skipped timestamps remain monotonic.
 
 Clients serialize intents for a captured account/profile, wait for each response
 before advancing/dismissing, and use only the acknowledged next ETag. Progress is
 `non_retryable`: on 412 or an uncertain response, stop and reload canonical state.
 Never fetch a fresh validator merely to replay an old intent. The web follows
-this sequence and requires reload after failure. Apple and Android adoption must
-apply the same rule before these migration rows can be ratified. Jellyfin has no
+this sequence and requires reload after failure. Jellyfin has no
 onboarding counterpart.
 
 
@@ -997,8 +988,7 @@ created at startup.
 The first write to the assets store records its storage identity; writes to a
 shared local root count too. At startup, Silo records any configured private
 bucket, even if it is empty. A direct settings write that changes a recorded
-location is rejected with `409` (problem type `conflict` in `/api/v2`;
-`artwork_storage_locked` in the frozen `/api/v1`): a change of `artwork.storage_backend`, of
+location is rejected with `409` (problem type `conflict`): a change of `artwork.storage_backend`, of
 `artwork.local_path` for a local store, of `s3.public_endpoint`,
 `s3.public_bucket`, or `s3.public_key_prefix` for an S3 store, or of
 `s3.private_bucket` on either backend. While a private bucket is configured, its

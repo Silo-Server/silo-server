@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 29,
+  "revision": 30,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -576,7 +576,7 @@
           { "value": "2160p", "label": "2160p / 4K" }
         ]
       },
-      "default_value": "720p",
+      "default_value": "auto",
       "constrained_by": {
         "policy_input": "max_playback_quality",
         "constraint": "ceiling"
@@ -586,7 +586,7 @@
       "label": "Cellular quality",
       "description": "The resolution to play at on mobile data or another metered connection.",
       "recommended_control": "select",
-      "notes": "The resolution axis that replaces playback.preferred_quality while the device is on mobile data or a connection the OS marks metered or expensive (a phone hotspot, Android metered Wi-Fi, iOS Low Data Mode). Clients detect the connection and send this pair as quality_preference and bandwidth_cap_kbps; the web app does so when the browser reports Data Saver or a cellular connection; the server never sees which network the device is on, which is why metered on the playback request is ignored. When the connection changes mid-playback the client replans with the other pair. Clients show the pair as one preset list, since bitrate is what matters on a data plan. The members match playback.preferred_quality without the deprecated original."
+      "notes": "The resolution axis that replaces playback.preferred_quality while the device is on mobile data or a connection the OS marks metered or expensive (a phone hotspot, Android metered Wi-Fi, iOS Low Data Mode). Clients detect the connection and send this pair as quality_preference and bandwidth_cap_kbps; the web app does so when the browser reports Data Saver or a cellular connection; the server never sees which network the device is on, which is why metered on the playback request is ignored. When the OS reports Low Data Mode or Data Saver, clients additionally apply a 2000 kbps bitrate ceiling on top of this pair. When the connection changes mid-playback the client replans with the other pair. Clients show the pair as one preset list, since bitrate is what matters on a data plan. The members match playback.preferred_quality without the deprecated original. Revision 30 raised the default pair from (720p, 2000) to (auto, 10000)."
     },
     {
       "key": "playback.cellular_max_bitrate_kbps",
@@ -600,14 +600,14 @@
         "minimum": 100,
         "maximum": 200000
       },
-      "default_value": 2000,
+      "default_value": 10000,
       "unit": "kbps",
       "platforms": ["ios", "android", "web"],
       "category": "playback",
       "label": "Cellular maximum bitrate",
       "description": "Cap how much data playback may use on mobile data or another metered connection.",
       "recommended_control": "select",
-      "notes": "The bitrate axis paired with playback.cellular_preferred_quality, with the same bounds and null-is-uncapped meaning as playback.max_bitrate_kbps. The 2000 kbps default matches the 720p preset the clients already offer."
+      "notes": "The bitrate axis paired with playback.cellular_preferred_quality, with the same bounds and null-is-uncapped meaning as playback.max_bitrate_kbps. Revision 30 raised the default from 2000 kbps to 10000 kbps so modern 1080p files direct play on mobile data while still capping high-bitrate 4K streams; clients tighten the cap to 2000 kbps when OS Low Data Mode or Data Saver is on."
     },
     {
       "key": "playback.auto_skip_intro",

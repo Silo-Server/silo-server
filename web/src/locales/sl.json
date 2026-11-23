@@ -521,6 +521,12 @@
       "value": "Ta seja predvajanja se je končala. Znova začnite predvajanje."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Ta pretok je bil zamenjan. Predvajanje se nadaljuje s trenutnim pretokom."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -28759,6 +28765,12 @@
       "value": "Ponudnik pretvorbe govora v besedilo začasno ni na voljo. Poskusite znova pozneje."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Ponudnik besedilne UI nima razpoložljivega dobroimetja ali pa je bila dosežena omejitev uporabe ali porabe. Preverite stanje in omejitve pri ponudniku ali nastavitve uporabe v storitvi ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -28769,6 +28781,80 @@
     {
       "type": 0,
       "value": "Povezava z besedilno UI ni uspela. Preverite model, raven sklepanja, raven storitve, povezavo računa in omejitve uporabe pri ponudniku."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Dostop do besedilne UI je bil zavrnjen. Preverite, ali lahko ključ API ali račun ChatGPT uporablja ta model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Končna točka ali model besedilne UI ni na voljo. Preverite osnovni URL ponudnika in model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Povezani račun ChatGPT ne more deliti uporabe svojega paketa. Preverite nastavitve uporabe v storitvi ChatGPT ali povežite drug račun."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Ponudnik besedilne UI omejuje število zahtev. Poskusite znova pozneje."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Ponudnik besedilne UI je zavrnil zahtevo za preverjanje. Preverite model, raven sklepanja in nastavitve uporabe računa. Napaka ponudnika je zapisana v dnevniku strežnika."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Ponudnik besedilne UI je zavrnil zahtevo za preverjanje (koda stanja "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Preverite model, raven sklepanja in raven storitve. Napaka ponudnika je zapisana v dnevniku strežnika."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Preverjanje povezave z besedilno UI je poteklo. Preverite razpoložljivost ponudnika in poskusite znova."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Ponudnik besedilne UI je zavrnil poverilnice. Zamenjajte ključ API ponudnika ali se znova prijavite s storitvijo ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Ponudnik besedilne UI začasno ni na voljo. Poskusite znova pozneje."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo ne more doseči ponudnika besedilne UI. Preverite osnovni URL ponudnika in ali se ta strežnik lahko poveže z njim."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Besedilni model je vrnil odgovor, ki ga Silo ne more uporabiti. Izberite drug model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -81416,6 +81502,12 @@
       "value": "Označi kot ogledano pri"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Naslovi z oznako za odjavno špico se štejejo za ogledane tudi, ko predvajanje doseže odjavno špico."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -121716,6 +121808,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

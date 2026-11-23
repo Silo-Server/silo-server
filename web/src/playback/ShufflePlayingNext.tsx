@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { V2ProblemError } from "@/api/v2/request";
 import { advanceShuffle, deleteShuffle, skipShuffleItem, type Shuffle } from "@/api/v2/shuffles";
+import { LineTitle } from "@/components/TitleLine";
 import type { ContinueWatchingItem } from "@/hooks/queries/progress";
 import { shuffleKeys } from "@/hooks/queries/keys";
 import { useT, type Translate } from "@/i18n";
@@ -151,9 +152,13 @@ function shuffleNextHeading(shuffle: Shuffle): string {
 }
 
 /** Names what the shuffle draws from: "Movies", "Breaking Bad · Season 2". */
-function shuffleScopeLabel(shuffle: Shuffle, t: Translate): string {
+function shuffleScopeLabel(shuffle: Shuffle, t: Translate): ReactNode {
   const { title, parent_title: parentTitle } = shuffle.scope;
+  const scope = <LineTitle>{title}</LineTitle>;
   return parentTitle
-    ? t("web.player.shuffle.scopeWithParent", { parent: parentTitle, title })
-    : title;
+    ? t("web.player.shuffle.scopeWithParent", {
+        parent: <LineTitle>{parentTitle}</LineTitle>,
+        title: scope,
+      })
+    : scope;
 }

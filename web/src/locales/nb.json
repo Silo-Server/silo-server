@@ -521,6 +521,12 @@
       "value": "Denne avspillingsøkten er avsluttet. Start avspillingen på nytt."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Denne strømmen er erstattet. Avspillingen fortsetter på den gjeldende strømmen."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -24117,6 +24123,12 @@
       "value": "Leverandøren av tale til tekst er midlertidig utilgjengelig. Prøv igjen senere."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Leverandøren av tekst-AI har ingen tilgjengelig kreditt, eller en bruks- eller forbruksgrense er nådd. Kontroller saldoen og grensene hos leverandøren, eller bruksinnstillingene i ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24127,6 +24139,80 @@
     {
       "type": 0,
       "value": "Tilkoblingen til tekst-AI mislyktes. Kontroller modellen, resonneringsnivået, tjenestenivået, kontotilkoblingen og bruksgrensene hos leverandøren."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Tilgang til tekst-AI ble nektet. Kontroller at API-nøkkelen eller ChatGPT-kontoen har tillatelse til å bruke denne modellen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Endepunktet eller modellen for tekst-AI er ikke tilgjengelig. Kontroller leverandørens basis-URL og modellen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Den tilkoblede ChatGPT-kontoen kan ikke dele bruken av abonnementet sitt. Kontroller bruksinnstillingene i ChatGPT, eller koble til en annen konto."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Leverandøren av tekst-AI begrenser antallet forespørsler. Prøv igjen senere."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Leverandøren av tekst-AI avviste testforespørselen. Kontroller modellen, resonneringsnivået og bruksinnstillingene for kontoen. Serverloggen inneholder feilen fra leverandøren."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Leverandøren av tekst-AI avviste testforespørselen (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Kontroller modellen, resonneringsnivået og tjenestenivået. Serverloggen inneholder feilen fra leverandøren."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Tilkoblingstesten for tekst-AI ble tidsavbrutt. Kontroller at leverandøren er tilgjengelig, og prøv igjen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Leverandøren av tekst-AI avviste påloggingsinformasjonen. Erstatt leverandørens API-nøkkel, eller logg på med ChatGPT igjen."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Leverandøren av tekst-AI er midlertidig utilgjengelig. Prøv igjen senere."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo kunne ikke nå leverandøren av tekst-AI. Kontroller leverandørens basis-URL, og at denne serveren kan koble til den."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Tekstmodellen returnerte et svar som Silo ikke kan bruke. Velg en annen modell."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -67633,6 +67719,12 @@
       "value": "Merk som sett ved"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titler med en rulletekstmarkør regnes også som sett når avspillingen når rulleteksten."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -102800,6 +102892,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

@@ -90,7 +90,7 @@ import {
 } from "@/pages/watchRouteHelpers";
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
 import { markPlaybackIntent } from "@/player/first-frame";
-import { onMeteredConnection } from "@/player/bandwidth-probe";
+import { usePlaybackNetworkTier } from "@/hooks/queries/qualityPreference";
 import { isInNextUpPromptWindow } from "./nextUpPrompt";
 import { playbackQualitySettings } from "./playbackQualitySettings";
 
@@ -618,6 +618,7 @@ function WatchPlaybackHostContent() {
   const navigate = useViewTransitionNavigate();
   const { profile: currentProfile } = useCurrentProfile();
   const playbackProfileId = currentProfile?.id ?? null;
+  const networkTier = usePlaybackNetworkTier();
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
   const settingsCapabilities = useSettingsCapabilities({ enabled: signedIn });
   // Three answers, not two: the connected server defines the enum, it provably
@@ -1224,7 +1225,7 @@ function WatchPlaybackHostContent() {
 
   const { qualityPreference: canonicalQuality, maxBitrateKbps } = playbackQualitySettings(
     effectivePlaybackSettings,
-    onMeteredConnection(),
+    networkTier,
   );
   const watchPageProps = buildWatchPageProps({
     request: activeRequest,
@@ -1297,6 +1298,7 @@ function WatchPlaybackHostContent() {
         <WatchPage
           {...watchPageProps}
           maxBitrateKbps={maxBitrateKbps ?? null}
+          networkTier={networkTier}
           introSkipMode={introSkipMode}
           showMarkerConfidence={showMarkerConfidence}
           showMarkerSource={showMarkerSource}
@@ -1398,7 +1400,9 @@ export function WatchPlaybackBar() {
                 <Play className="ml-0.5 h-4 w-4 fill-current" />
               </div>
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-white">{title}</div>
+                <div dir="auto" className="bidi-text truncate text-sm font-semibold text-white">
+                  {title}
+                </div>
                 <div className="text-xs text-white/60">
                   {subtitle ??
                     (snapshot

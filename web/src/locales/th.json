@@ -521,6 +521,12 @@
       "value": "เซสชันการเล่นนี้สิ้นสุดแล้ว โปรดเริ่มเล่นอีกครั้ง"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "มีการแทนที่สตรีมนี้แล้ว การเล่นยังคงดำเนินต่อในสตรีมปัจจุบัน"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -22264,6 +22270,12 @@
       "value": "ผู้ให้บริการแปลงเสียงพูดเป็นข้อความไม่พร้อมใช้งานชั่วคราว โปรดลองอีกครั้งในภายหลัง"
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความไม่มีเครดิตเหลือ หรือถึงขีดจำกัดการใช้งานหรือวงเงินการใช้จ่ายแล้ว ตรวจสอบยอดคงเหลือและขีดจำกัดกับผู้ให้บริการ หรือการตั้งค่าการใช้งาน ChatGPT"
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -22274,6 +22286,80 @@
     {
       "type": 0,
       "value": "เชื่อมต่อ AI ข้อความไม่ได้ ตรวจสอบโมเดล ระดับการให้เหตุผล ระดับบริการ การเชื่อมต่อบัญชี และขีดจำกัดการใช้งานของผู้ให้บริการ"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการปฏิเสธการเข้าถึง AI ข้อความ ตรวจสอบว่าคีย์ API หรือบัญชี ChatGPT ใช้โมเดลนี้ได้"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "ปลายทางหรือโมเดล AI ข้อความไม่พร้อมใช้งาน ตรวจสอบ URL หลักของผู้ให้บริการและโมเดล"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "บัญชี ChatGPT ที่เชื่อมต่อแชร์การใช้งานตามแพ็กเกจไม่ได้ ตรวจสอบการตั้งค่าการใช้งาน ChatGPT หรือเชื่อมต่อบัญชีอื่น"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความกำลังจำกัดอัตราคำขอ โปรดลองอีกครั้งในภายหลัง"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความปฏิเสธคำขอตรวจสอบ ตรวจสอบโมเดล ระดับการให้เหตุผล และการตั้งค่าการใช้งานของบัญชี ดูข้อผิดพลาดจากผู้ให้บริการได้ในล็อกของเซิร์ฟเวอร์"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความปฏิเสธคำขอตรวจสอบ (สถานะ "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ") ตรวจสอบโมเดล ระดับการให้เหตุผล และระดับบริการ ดูข้อผิดพลาดจากผู้ให้บริการได้ในล็อกของเซิร์ฟเวอร์"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "การตรวจสอบการเชื่อมต่อ AI ข้อความหมดเวลา ตรวจสอบความพร้อมใช้งานของผู้ให้บริการแล้วลองอีกครั้ง"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความปฏิเสธข้อมูลรับรอง เปลี่ยนคีย์ API ของผู้ให้บริการ หรือลงชื่อเข้าใช้ด้วย ChatGPT อีกครั้ง"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความไม่พร้อมใช้งานชั่วคราว โปรดลองอีกครั้งในภายหลัง"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo เข้าถึงผู้ให้บริการ AI ข้อความไม่ได้ ตรวจสอบ URL หลักของผู้ให้บริการ และตรวจสอบว่าเซิร์ฟเวอร์นี้เชื่อมต่อกับผู้ให้บริการได้"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "โมเดลข้อความส่งคืนการตอบกลับที่ Silo ใช้ไม่ได้ เลือกโมเดลอื่น"
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -61874,6 +61960,12 @@
       "value": "ทำเครื่องหมายว่าดูแล้วที่"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "รายการที่มีเครื่องหมายช่วงเครดิตจะนับว่าดูแล้วเช่นกันเมื่อเล่นถึงช่วงเครดิต"
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -94521,6 +94613,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

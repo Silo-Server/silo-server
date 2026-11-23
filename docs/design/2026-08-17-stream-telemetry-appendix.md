@@ -81,7 +81,7 @@ Condensed, newest first.
 | Redis failure ⇒ every replica evaluates | **Split-brain**, and worse than useless: replicas could issue *durable* suspensions from divergent local views. Fenced lease; a degraded view stops global evaluation (§2.5). |
 | Violation counter per evaluation pass | A steady condition escalated to suspension in three ticks. Now per *incident transition* (§3.2). |
 | Eight writer wrappers | **Nine** — chi compression is mounted globally on both routers and has no `ReadFrom` (§4.4). |
-| Legacy retirement inside P0 | **Its own project** — nine named consumers including health payloads and two `/api/v1` endpoints (§6). |
+| Legacy retirement inside P0 | **Its own project** — nine named consumers including health payloads and two admin endpoints (§6). |
 | P0 ships as one phase | **Split P0a–P0d** (§6). |
 
 ### Revision 4 — after review round 2
@@ -128,15 +128,11 @@ spine of the design: **an in-flight HTTP transfer is not a playback session.**
 
 ---
 
-## C. Prior art: the `feat/sauron-async-enforcer` branch
+## C. Prior art: an earlier enforcer attempt
 
-This design supersedes an earlier attempt — 26 commits, ~12.5k lines, based on a commit
-70 branches behind `main`. That branch was **mined, not rebased**, and still exists as
-`feat/sauron-async-enforcer` (`d01b5de3`). Its four planning documents were
-copied verbatim into this branch for context and have been removed again now that their
-conclusions are recorded here. They remain on that branch at that commit, with the two
-matrices at `docs/architecture/playback-paths-monitoring-kill-matrix.md` and
-`docs/architecture/stream-abuse-matrix.md`.
+This design supersedes an earlier, much larger stream-enforcer attempt built against a
+`main` that has since moved on. It was mined for ideas, not rebased, and none of its code
+is on `main`; what it taught is recorded below.
 
 **Kept from it — the ideas, not the code:** server-observed existence rather than
 client-reported liveness; every reason collapsing to a small set of enforcement actions;
@@ -155,8 +151,8 @@ of choices this design does not make.
 
 ### Inherited identifiers
 
-Older decision and gap ids still appear in commit messages and code comments. Recorded
-here so they resolve after the prior-art copies were deleted.
+Older decision and gap ids from that attempt still appear in commit messages and code
+comments. Recorded here so they resolve.
 
 | Id | Meaning | Status in this design |
 |---|---|---|
@@ -180,50 +176,22 @@ here so they resolve after the prior-art copies were deleted.
 
 ---
 
-## D. Verification and review record for P0
+## D. Verification requirements for P0
 
-**Gates run on the implementation host** across the whole branch: `gofmt`,
-`go build ./...`, `go vet ./...` clean; `go test ./...` with one pre-existing failure
-(`TestResolveCopySeekAnchorMatchesRealLongGOPHEVC`, which needs ffmpeg ≥ 5.x);
-`golangci-lint run --new-from-merge-base=origin/main` reporting 0 issues;
-`make verify-local-paths` passing; `go test -race -count=3` green on
-`streamtelemetry`, `proxy`, `transcodenode`, `httpstream`, `jellycompat`,
-`audiobooks/...`, `api` and `nodesessions`. The web gates were not run — `pnpm` is
-absent on that host — but no `web/` file was touched.
+The telemetry path sits in every live byte path, so changes to it keep these checks:
 
-**Cross-model review coverage was uneven, and two commits have none.** The Codex side of
-the relay hit its usage limit partway through the final session.
-
-| Commit | Plan | Plan review | Implementation | Result review |
-|---|---|---|---|---|
-| proxy + transcode-node enrolment | Claude | **Codex** — 8 findings | **Codex** | Claude; 3 defects, fixed by Codex |
-| jellycompat + ABS enrolment | Claude | **Codex** — 9 findings, 7 accepted | Claude | Claude |
-| P0d admin parity | Claude | **none** | Claude | Claude |
-
-**The P0d parity commit is the one with no second opinion at all**, and it is also the
-commit that decides what "agrees" means — the semantics the legacy-retirement project
-will lean on. If anything gets re-reviewed, it is that.
-
-**What the review rounds were worth.** Codex's plan reviews caught the sendfile defect,
-the start-time degradation defect, the family-gate default, and an ABS client-info
-helper that had been claimed not to exist — all before any of it shipped. Roughly one
-finding in five was still wrong in one direction or the other, so each was checked
-against the code before being acted on.
-
-**What worked, recorded because it is repeatable:**
-
-- Adversarial plan review *before* writing code. Two rounds, seventeen findings, and
-  the two that mattered most would both have shipped.
-- Measuring instead of arguing. The sendfile question had been settled by reasoning
-  twice, wrongly; `strace` settled it in one command.
-- Driving mounted routers over real sockets. Handler-level tests bypass the middleware
-  under test.
-- Making the merge and the comparison pure functions. No Redis, no Postgres, every rule
-  tested in CI.
-- Writing the test before trusting the semantics. The `agrees`-versus-absence question
-  was settled by a failing test — and the code turned out to be right.
-- Running the gates directly rather than trusting the implementer's report. Codex
-  reported the socket tests as impossible in its sandbox; they run fine on the host.
+- `go test -race` on `streamtelemetry`, `proxy`, `transcodenode`, `httpstream`,
+  `jellycompat`, `audiobooks/...`, `api` and `nodesessions`, alongside the repository's
+  normal lint and test gates.
+- The §4.4 writer-chain conformance suite for every enrolled route, and a measurement
+  (`strace`) rather than an argument whenever sendfile preservation is in question.
+- Mounted routers driven over real sockets, with telemetry both off and on.
+  Handler-level tests bypass the middleware under test.
+- The merge (`BuildGlobalView`) and the comparison (`CompareLiveSessions`) stay pure
+  functions, so every rule is tested in CI without Redis or Postgres.
+- Comparison semantics such as `agrees` versus absence are pinned by tests. The P0d
+  comparison decides what the legacy-retirement project will lean on, so it is the part
+  most worth an independent review before that project relies on it.
 
 ---
 

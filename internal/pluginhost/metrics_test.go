@@ -34,6 +34,9 @@ func TestPluginRPCBoundsMethodsAndRedactsErrors(t *testing.T) {
 	if len(spans) != 1 || spans[0].Name != "plugin.MetadataProvider.Search" || spans[0].Status.Description != "error" || len(spans[0].Events) != 0 {
 		t.Fatalf("unexpected span: %v", spans)
 	}
+	if got := pluginOperation("/silo.plugin.v1.ConfigurationChecks/TestConfiguration"); got != "ConfigurationChecks.TestConfiguration" {
+		t.Fatalf("configuration check operation = %q", got)
+	}
 	for _, method := range []string{"/silo.plugin.v1.MetadataProvider/SecretQuery", "/malicious/secret", "private"} {
 		if pluginOperation(method) != "other" {
 			t.Fatal("unbounded plugin method")

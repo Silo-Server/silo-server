@@ -1,5 +1,7 @@
 # Watch Party synchronization
 
+For how a room moves from lobby to staging to playback, see [Watch Together rooms](watch-together-rooms.md).
+
 Postgres owns the room anchor and its `runtime` JSONB value: connection identities,
 leased presence, attached playback sessions, readiness, and the latest room
 transport command. Each room operation locks its room row and commits the anchor

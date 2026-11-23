@@ -3529,6 +3529,7 @@ func main() {
 		if deps.FileRepo != nil {
 			taskMgr.Register(tasks.NewBackfillMatroskaTrackNumbersTask(deps.DB, scanner.NewMatroskaTrackBackfiller(deps.FileRepo)))
 			taskMgr.Register(tasks.NewBackfillHDR10PlusTask(deps.DB, scanner.NewHDR10PlusBackfiller(deps.FileRepo, scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath))))
+			taskMgr.Register(tasks.NewBackfillAttachmentBitrateTask(deps.DB, scanner.NewAttachmentBitrateBackfiller(deps.FileRepo, scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath))))
 		}
 		taskMgr.Register(tasks.NewRefreshSeriesAirDatesTask(catalog.NewEpisodeRepository(deps.DB)))
 		boxSetSyncer := boxsets.NewSyncer(catalog.NewBoxSetRepository(deps.DB), tmdbClient)
@@ -4565,6 +4566,15 @@ func main() {
 	slog.Info("beginning graceful shutdown")
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer shutdownCancel()
+
+	// Stop admitting tasks and cancel running ones first, while their
+	// dependencies (user store, admin jobs, recommendations, database) are
+	// still open and before the HTTP drain can spend its deadline. Manual
+	// runs use their own context, so appCancel doesn't reach them, and the
+	// deferred Stop would run only after teardown.
+	if deps.TaskManager != nil {
+		deps.TaskManager.Stop()
+	}
 
 	if pluginProvisionDone != nil {
 		select {

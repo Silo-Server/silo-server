@@ -28,6 +28,3 @@ make apiv2-openapi apiv2-fixtures apiv2-web-types
 
 The pinned Swagger UI version, upstream license and update instructions are in
 [`internal/apiv2/docsui/README.md`](../internal/apiv2/docsui/README.md).
-
-This viewer requires no Apple, Android or Jellyfin protocol changes. It presents
-the existing native contract and exposes no new media or account behavior.

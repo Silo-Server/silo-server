@@ -521,6 +521,12 @@
       "value": "Esta sesión de reproducción terminó. Vuelve a reproducir."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Se reemplazó esta transmisión. La reproducción continúa en la actual."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -26450,6 +26456,12 @@
       "value": "El proveedor de voz a texto no está disponible temporalmente. Vuelve a intentarlo más tarde."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "El proveedor de IA de texto no tiene crédito disponible, o se alcanzó un límite de uso o de gasto. Revisa el saldo y los límites del proveedor, o la configuración de uso de ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -26460,6 +26472,80 @@
     {
       "type": 0,
       "value": "No se pudo conectar con la IA de texto. Revisa el modelo, el nivel de razonamiento, el nivel de servicio, la conexión de la cuenta y los límites de uso del proveedor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Se denegó el acceso a la IA de texto. Comprueba que la clave de API o la cuenta de ChatGPT puedan usar este modelo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "El endpoint o el modelo de IA de texto no está disponible. Revisa la URL base del proveedor y el modelo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "La cuenta de ChatGPT conectada no puede compartir el uso de su plan. Revisa la configuración de uso de ChatGPT o conecta otra cuenta."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "El proveedor de IA de texto está limitando la frecuencia de las solicitudes. Vuelve a intentarlo más tarde."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "El proveedor de IA de texto rechazó la solicitud de comprobación. Revisa el modelo, el nivel de razonamiento y la configuración de uso de la cuenta. El registro del servidor contiene el error del proveedor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "El proveedor de IA de texto rechazó la solicitud de comprobación (estado "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Revisa el modelo, el nivel de razonamiento y el nivel de servicio. El registro del servidor contiene el error del proveedor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Se agotó el tiempo de la comprobación de conexión de la IA de texto. Revisa la disponibilidad del proveedor y vuelve a intentarlo."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "El proveedor de IA de texto rechazó las credenciales. Reemplaza la clave de API del proveedor o vuelve a iniciar sesión con ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "El proveedor de IA de texto no está disponible temporalmente. Vuelve a intentarlo más tarde."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo no pudo conectar con el proveedor de IA de texto. Revisa la URL base del proveedor y que este servidor pueda conectarse a él."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "El modelo de texto devolvió una respuesta que Silo no puede usar. Elige otro modelo."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -74471,6 +74557,12 @@
       "value": "Marcar como visto al"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Los títulos con un marcador de créditos también cuentan como vistos cuando la reproducción llega a los créditos."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -112117,6 +112209,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

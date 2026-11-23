@@ -521,6 +521,12 @@
       "value": "Aquesta sessió de reproducció ha finalitzat. Torna a començar la reproducció."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Aquesta transmissió s’ha substituït. La reproducció continua a la transmissió actual."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -26486,6 +26492,12 @@
       "value": "El proveïdor de veu a text no està disponible temporalment. Torna-ho a provar més tard."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "El proveïdor d’IA de text no té crèdit disponible, o s’ha arribat a un límit d’ús o de despesa. Comprova el saldo i els límits del proveïdor, o la configuració d’ús de ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -26496,6 +26508,80 @@
     {
       "type": 0,
       "value": "La connexió d’IA de text ha fallat. Comprova el model, el nivell de raonament, el nivell de servei, la connexió del compte i els límits d’ús del proveïdor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "S’ha denegat l’accés a l’IA de text. Comprova que la clau d’API o el compte de ChatGPT puguin utilitzar aquest model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "El punt final o el model d’IA de text no està disponible. Comprova l’URL base del proveïdor i el model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "El compte de ChatGPT connectat no pot compartir l’ús del seu pla. Comprova la configuració d’ús de ChatGPT o connecta un altre compte."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "El proveïdor d’IA de text està limitant la freqüència de les sol·licituds. Torna-ho a provar més tard."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "El proveïdor d’IA de text ha rebutjat la sol·licitud de comprovació. Comprova el model, el nivell de raonament i la configuració d’ús del compte. El registre del servidor conté l’error del proveïdor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "El proveïdor d’IA de text ha rebutjat la sol·licitud de comprovació (estat "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Comprova el model, el nivell de raonament i el nivell de servei. El registre del servidor conté l’error del proveïdor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "La comprovació de la connexió d’IA de text ha esgotat el temps d’espera. Comprova la disponibilitat del proveïdor i torna-ho a provar."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "El proveïdor d’IA de text ha rebutjat les credencials. Substitueix la clau d’API del proveïdor o torna a iniciar la sessió amb ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "El proveïdor d’IA de text no està disponible temporalment. Torna-ho a provar més tard."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo no ha pogut connectar amb el proveïdor d’IA de text. Comprova l’URL base del proveïdor i que aquest servidor s’hi pugui connectar."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "El model de text ha retornat una resposta que Silo no pot utilitzar. Tria un altre model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -74575,6 +74661,12 @@
       "value": "Marca com a vist al"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Els títols amb un marcador de crèdits també compten com a vistos quan la reproducció arriba als crèdits."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -112355,6 +112447,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

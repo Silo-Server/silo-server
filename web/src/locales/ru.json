@@ -521,6 +521,12 @@
       "value": "Сеанс воспроизведения завершён. Запустите воспроизведение снова."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Этот поток был заменён. Воспроизведение продолжается в текущем потоке."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -29443,6 +29449,12 @@
       "value": "Провайдер распознавания речи временно недоступен. Повторите попытку позже."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "У провайдера текстового ИИ нет доступного баланса, или достигнут лимит использования либо расходов. Проверьте баланс и лимиты у провайдера или настройки использования ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -29453,6 +29465,80 @@
     {
       "type": 0,
       "value": "Не удалось подключиться к текстовому ИИ. Проверьте модель, уровень рассуждений, уровень обслуживания, подключение аккаунта и лимиты использования у провайдера."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "В доступе к текстовому ИИ отказано. Проверьте, разрешено ли ключу API или аккаунту ChatGPT использовать эту модель."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Конечная точка или модель текстового ИИ недоступна. Проверьте базовый URL провайдера и модель."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Привязанный аккаунт ChatGPT не может делиться лимитами своего тарифа. Проверьте настройки использования ChatGPT или подключите другой аккаунт."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Провайдер текстового ИИ ограничивает частоту запросов. Повторите попытку позже."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Провайдер текстового ИИ отказался выполнять проверочный запрос. Проверьте модель, уровень рассуждений и настройки использования аккаунта. Ошибка провайдера записана в журнал сервера."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Провайдер текстового ИИ отклонил проверочный запрос (статус "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Проверьте модель, уровень рассуждений и уровень обслуживания. Ошибка провайдера записана в журнал сервера."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Время проверки подключения к текстовому ИИ истекло. Проверьте доступность провайдера и повторите попытку."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Провайдер текстового ИИ отклонил учётные данные. Замените ключ API провайдера или снова войдите через ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Провайдер текстового ИИ временно недоступен. Повторите попытку позже."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo не удалось связаться с провайдером текстового ИИ. Проверьте базовый URL провайдера и доступ к нему с этого сервера."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Текстовая модель вернула ответ, который Silo не может использовать. Выберите другую модель."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -82498,6 +82584,12 @@
       "value": "Отмечать просмотренным при"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Если у видео есть метка титров, оно также считается просмотренным, когда воспроизведение доходит до титров."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -123072,6 +123164,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [
