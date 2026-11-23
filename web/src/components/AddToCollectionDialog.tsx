@@ -312,7 +312,9 @@ function ItemChip({ title }: { title: string }) {
       >
         <Film className="size-4" />
       </span>
-      <span className="min-w-0 truncate text-sm font-semibold">{title}</span>
+      <span dir="auto" className="bidi-text min-w-0 truncate text-sm font-semibold">
+        {title}
+      </span>
     </div>
   );
 }

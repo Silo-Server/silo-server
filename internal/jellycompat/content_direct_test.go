@@ -375,3 +375,7 @@ func TestEnrichSeriesUserDataRollupFailure(t *testing.T) {
 func (s *progressCountingStore) LatestHistoryIDs(context.Context, string, map[string][]string) (map[string]string, error) {
 	return nil, nil
 }
+
+func (s *seriesRollupCountingStore) SeriesLatestViewedAt(context.Context, string, []string) (map[string]string, error) {
+	return map[string]string{}, nil
+}

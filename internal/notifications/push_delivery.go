@@ -147,37 +147,38 @@ func (r *PushDeviceRepository) ListEnabledPushByProfiles(ctx context.Context, tx
 	return out, rows.Err()
 }
 
-// EnqueuePushAttempts inserts pending APNs relay attempts in the fanout transaction.
+// EnqueuePushAttempts inserts pending push relay attempts in the fanout
+// transaction. A device removed after the caller listed it, at sign-out for
+// one, gets no attempt instead of aborting the delivery transaction on the
+// foreign key. Like enqueueAttemptsForLiveTargets, it key-share locks the
+// devices that still exist, in id order, until the transaction ends.
 func (r *PushDeviceRepository) EnqueuePushAttempts(ctx context.Context, tx pgx.Tx, attempts []PushDeliveryAttempt) error {
 	if len(attempts) == 0 {
 		return nil
 	}
-	var sb strings.Builder
-	sb.WriteString(`
+	n := len(attempts)
+	ids, devices := make([]string, n), make([]string, n)
+	deliveries := make([]*string, n)
+	triggers, providers, platforms := make([]string, n), make([]string, n), make([]string, n)
+	for i, attempt := range attempts {
+		ids[i], deliveries[i], devices[i] = attempt.ID, attempt.NotificationDeliveryID, attempt.PushDeviceID
+		triggers[i] = defaultString(attempt.TriggerType, PushTriggerDelivery)
+		providers[i] = defaultString(attempt.Provider, PushProviderSiloRelay)
+		platforms[i] = defaultString(attempt.Platform, PushPlatformApple)
+	}
+	if _, err := tx.Exec(ctx, `WITH live AS (
+			SELECT d.id FROM push_devices d WHERE d.id = ANY($3::text[])
+			ORDER BY d.id
+			FOR KEY SHARE
+		)
 		INSERT INTO push_delivery_attempts
 			(id, notification_delivery_id, push_device_id, trigger_type, provider, platform, attempt_number, outcome)
-		VALUES `)
-	args := make([]any, 0, len(attempts)*8)
-	for i, attempt := range attempts {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		base := len(args)
-		sb.WriteString(fmt.Sprintf("($%d,$%d,$%d,$%d,$%d,$%d,$%d,$%d)",
-			base+1, base+2, base+3, base+4, base+5, base+6, base+7, base+8))
-		args = append(args,
-			attempt.ID,
-			attempt.NotificationDeliveryID,
-			attempt.PushDeviceID,
-			defaultString(attempt.TriggerType, PushTriggerDelivery),
-			defaultString(attempt.Provider, PushProviderSiloRelay),
-			defaultString(attempt.Platform, PushPlatformApple),
-			0,
-			PushOutcomePending,
-		)
-	}
-	sb.WriteString(" ON CONFLICT DO NOTHING")
-	if _, err := tx.Exec(ctx, sb.String(), args...); err != nil {
+		SELECT a.id, a.delivery_id, live.id, a.trigger_type, a.provider, a.platform, 0, $7
+		FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[])
+			AS a(id, delivery_id, device_id, trigger_type, provider, platform)
+		JOIN live ON live.id = a.device_id
+		ON CONFLICT DO NOTHING`,
+		ids, deliveries, devices, triggers, providers, platforms, PushOutcomePending); err != nil {
 		return fmt.Errorf("enqueue push attempts: %w", err)
 	}
 	return nil
@@ -392,13 +393,45 @@ func (r *PushDeviceRepository) FinalizePushAttempt(ctx context.Context, attemptI
 // login sessions that have ended. Their pushes already stopped at
 // pushDeviceLoginLive. An installation's ordering record stays: a later sign-in
 // registers at a newer generation.
+//
+// The retention sweeps skip a registration another transaction holds, such
+// as a delivery that key-share locked it in EnqueuePushAttempts, and take it
+// on the next sweep: waiting on rows in scan order while that delivery waits
+// on them in id order would deadlock.
 func (r *PushDeviceRepository) DeleteEndedLoginRegistrations(ctx context.Context) (int64, error) {
-	tag, err := r.pool.Exec(ctx, `DELETE FROM push_devices WHERE NOT `+pushDeviceLoginLive)
+	tag, err := r.pool.Exec(ctx, `DELETE FROM push_devices WHERE id IN (
+		SELECT id FROM push_devices WHERE NOT `+pushDeviceLoginLive+`
+		FOR UPDATE SKIP LOCKED)`)
 	if err != nil {
 		return 0, fmt.Errorf("delete registrations of ended logins: %w", err)
 	}
 	return tag.RowsAffected(), nil
 }
+
+// pushDeviceUnboundWithoutLogin selects the registrations, as d, that
+// DeleteRegistrationsWithNoLogin removes, with $1 the Apple platform.
+const pushDeviceUnboundWithoutLogin = `d.login_session_id IS NULL
+	  -- An API key registers with no session, and it has no revoked state.
+	  AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.user_id = d.user_id)
+	  -- Only Apple logins name the push device, on whichever account.
+	  AND NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.device_id = d.device_id AND ` + authSessionLive + `)
+	  AND (
+	    -- The account has no live login. That includes a row carried through a
+	    -- full restore, which leaves auth_sessions empty: the phone has to sign
+	    -- in again anyway, as for a recorded session the restore dropped.
+	    NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_id = d.user_id AND ` + authSessionLive + `)
+	    OR
+	    -- This Apple device's login was live at that write and has ended, since
+	    -- the check above leaves none live. A live login naming no device could
+	    -- be this phone's.
+	    (d.platform = $1
+	     AND EXISTS (SELECT 1 FROM auth_sessions s
+	                 WHERE s.user_id = d.user_id AND s.device_id = d.device_id
+	                   AND s.created_at <= d.last_seen_at
+	                   AND COALESCE(s.revoked_at, s.expires_at) >= d.last_seen_at)
+	     AND NOT EXISTS (SELECT 1 FROM auth_sessions s
+	                     WHERE s.user_id = d.user_id AND s.device_id IS NULL AND ` + authSessionLive + `))
+	  )`
 
 // DeleteRegistrationsWithNoLogin removes registrations with no recorded login
 // whose device has no live login. Such a registration predates login_session_id,
@@ -407,37 +440,44 @@ func (r *PushDeviceRepository) DeleteEndedLoginRegistrations(ctx context.Context
 //
 // Removing a working phone's registration is worse than the alert: its client
 // believes it is registered and sends nothing until a new sign-in. So only the
-// evidence below removes a row, and a signed-out phone it misses keeps delivering.
-// docs/notifications-push-api.md lists what it misses.
+// evidence in pushDeviceUnboundWithoutLogin removes a row, and a signed-out
+// phone it misses keeps delivering. docs/notifications-push-api.md lists what
+// it misses.
+//
+// It first removes every registration no other transaction holds, skipping
+// the rest as the other retention sweeps do. It then removes each one it
+// skipped on its own, waiting for the delivery that holds it, instead of on
+// the next run like the other sweeps: the Apple evidence is an ended login's
+// row, which session cleanup deletes right after notification retention once
+// its expiry has passed, so a login that expired since the last run gets only
+// this run to match. A statement that locks one registration can't deadlock
+// with an enqueue, which is what skipping avoids for the many-row pass.
 func (r *PushDeviceRepository) DeleteRegistrationsWithNoLogin(ctx context.Context) (int64, error) {
 	tag, err := r.pool.Exec(ctx, `
-		DELETE FROM push_devices d
-		WHERE d.login_session_id IS NULL
-		  -- An API key registers with no session, and it has no revoked state.
-		  AND NOT EXISTS (SELECT 1 FROM api_keys k WHERE k.user_id = d.user_id)
-		  -- Only Apple logins name the push device, on whichever account.
-		  AND NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.device_id = d.device_id AND `+authSessionLive+`)
-		  AND (
-		    -- The account has no live login. That includes a row carried through a
-		    -- full restore, which leaves auth_sessions empty: the phone has to sign
-		    -- in again anyway, as for a recorded session the restore dropped.
-		    NOT EXISTS (SELECT 1 FROM auth_sessions s WHERE s.user_id = d.user_id AND `+authSessionLive+`)
-		    OR
-		    -- This Apple device's login was live at that write and has ended, since
-		    -- the check above leaves none live. A live login naming no device could
-		    -- be this phone's.
-		    (d.platform = $1
-		     AND EXISTS (SELECT 1 FROM auth_sessions s
-		                 WHERE s.user_id = d.user_id AND s.device_id = d.device_id
-		                   AND s.created_at <= d.last_seen_at
-		                   AND COALESCE(s.revoked_at, s.expires_at) >= d.last_seen_at)
-		     AND NOT EXISTS (SELECT 1 FROM auth_sessions s
-		                     WHERE s.user_id = d.user_id AND s.device_id IS NULL AND `+authSessionLive+`))
-		  )`, PushPlatformApple)
+		DELETE FROM push_devices WHERE id IN (
+			SELECT d.id FROM push_devices d WHERE `+pushDeviceUnboundWithoutLogin+`
+			FOR UPDATE OF d SKIP LOCKED)`, PushPlatformApple)
 	if err != nil {
 		return 0, fmt.Errorf("delete registrations with no login: %w", err)
 	}
-	return tag.RowsAffected(), nil
+	removed := tag.RowsAffected()
+	rows, err := r.pool.Query(ctx, `SELECT d.id FROM push_devices d WHERE `+pushDeviceUnboundWithoutLogin, PushPlatformApple)
+	if err != nil {
+		return removed, fmt.Errorf("list held registrations with no login: %w", err)
+	}
+	held, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		return removed, fmt.Errorf("list held registrations with no login: %w", err)
+	}
+	for _, id := range held {
+		tag, err := r.pool.Exec(ctx, `DELETE FROM push_devices d WHERE d.id = $2 AND `+pushDeviceUnboundWithoutLogin,
+			PushPlatformApple, id)
+		if err != nil {
+			return removed, fmt.Errorf("delete held registration with no login: %w", err)
+		}
+		removed += tag.RowsAffected()
+	}
+	return removed, nil
 }
 
 func (r *PushDeviceRepository) RecordPushSuccess(ctx context.Context, deviceID string) error {

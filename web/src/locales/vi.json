@@ -281,6 +281,18 @@
       "value": "Mã đăng nhập này đã hết hạn. Bắt đầu lại."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "Tài khoản này đã đạt giới hạn số thiết bị dùng kết nối trực tiếp."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "Một thiết bị khác đã dùng khóa kết nối này. Vui lòng thử lại."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -339,6 +351,12 @@
     {
       "type": 0,
       "value": "Được đặt bởi môi trường. Thay đổi giá trị ở đó rồi khởi động lại dịch vụ liên quan."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "Thiếu giá trị này."
     }
   ],
   "error.field.out_of_range": [
@@ -501,6 +519,12 @@
     {
       "type": 0,
       "value": "Phiên phát này đã kết thúc. Bắt đầu phát lại."
+    }
+  ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Luồng này đã được thay thế. Nội dung vẫn tiếp tục phát trên luồng hiện tại."
     }
   ],
   "error.precondition_failed": [
@@ -24191,6 +24215,12 @@
       "value": "Nhà cung cấp chuyển giọng nói thành văn bản tạm thời không khả dụng. Thử lại sau."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản không còn tín dụng khả dụng, hoặc đã đạt giới hạn sử dụng hay hạn mức chi tiêu. Kiểm tra số dư và hạn mức tại nhà cung cấp, hoặc cài đặt sử dụng ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24201,6 +24231,80 @@
     {
       "type": 0,
       "value": "Kết nối AI văn bản không thành công. Kiểm tra mô hình, mức suy luận, cấp dịch vụ, kết nối tài khoản và giới hạn sử dụng của nhà cung cấp."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Quyền truy cập AI văn bản bị từ chối. Kiểm tra xem khóa API hoặc tài khoản ChatGPT có được phép dùng mô hình này không."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Không có sẵn endpoint hoặc mô hình AI văn bản. Kiểm tra URL cơ sở của nhà cung cấp và mô hình."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Tài khoản ChatGPT đã kết nối không thể chia sẻ mức sử dụng của gói. Kiểm tra cài đặt sử dụng ChatGPT, hoặc kết nối tài khoản khác."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản đang giới hạn tần suất yêu cầu. Thử lại sau."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản đã từ chối yêu cầu kiểm tra. Kiểm tra mô hình, mức suy luận và cài đặt sử dụng của tài khoản. Nhật ký máy chủ có lỗi từ nhà cung cấp."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản đã từ chối yêu cầu kiểm tra (trạng thái "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Kiểm tra mô hình, mức suy luận và cấp dịch vụ. Nhật ký máy chủ có lỗi từ nhà cung cấp."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Hết thời gian kiểm tra kết nối AI văn bản. Kiểm tra tình trạng hoạt động của nhà cung cấp và thử lại."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản đã từ chối thông tin xác thực. Thay khóa API của nhà cung cấp, hoặc đăng nhập lại bằng ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản tạm thời không khả dụng. Thử lại sau."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo không thể kết nối với nhà cung cấp AI văn bản. Kiểm tra URL cơ sở của nhà cung cấp và xem máy chủ này có thể kết nối với nhà cung cấp không."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Mô hình văn bản đã trả về phản hồi mà Silo không thể sử dụng. Chọn mô hình khác."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -24289,6 +24393,12 @@
     {
       "type": 0,
       "value": "Xóa giới hạn"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "Trực tiếp"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -46280,6 +46390,96 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Các lượt quét và làm mới siêu dữ liệu sẽ hiển thị ở đây khi đang chạy."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Không có lượt quét hoặc làm mới nào đang chạy"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Tất cả ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Ẩn hàng đợi"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " thư viện khác"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " thư viện khác"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Làm mới siêu dữ liệu"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Đang làm mới siêu dữ liệu…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Xem hàng đợi"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.confidence.high": [
     {
       "type": 0,
@@ -46736,6 +46936,30 @@
       "value": "Xác nhận dọn dẹp thư mục gốc trống"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Kiểm tra"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Không có mục nào đang chờ trong hàng đợi của bộ khớp siêu dữ liệu."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Chưa ghi nhận thư mục gốc nào bị bỏ qua."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Chưa ghi nhận ID bên ngoài lỗi thời nào."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -46772,6 +46996,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Sửa"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Chưa cấu hình thư viện nào."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -46824,6 +47060,12 @@
       "value": "Ẩn đường dẫn"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Không hoạt động"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -46858,6 +47100,12 @@
       "value": "Quét một phần"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Bổ sung siêu dữ liệu còn thiếu hoặc thay thế toàn bộ"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -46870,6 +47118,12 @@
       "value": "Không truy cập được thư mục gốc"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Quét"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -46880,6 +47134,12 @@
     {
       "type": 0,
       "value": "Hiển thị đường dẫn"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Dừng"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -46898,6 +47158,22 @@
     {
       "type": 0,
       "value": "Kiểm tra điểm gắn kết"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Kiểm tra xem mọi thư mục của thư viện có truy cập được không"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Xem các lượt quét đang chạy của "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -47001,7 +47277,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Quản lý thư mục gốc và các lượt quét thư viện. Nhập/xuất danh mục hiện nằm trong Bảo trì."
+      "value": "Quản lý thư mục phương tiện, theo dõi lượt quét và xử lý sự cố khớp."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -47486,6 +47762,56 @@
     {
       "type": 0,
       "value": "ID bên ngoài lỗi thời"
+    }
+  ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " đang chạy"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " đang chạy"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Hoạt động quét"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Tình trạng danh mục"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Thư viện"
     }
   ],
   "web.admin.libraries.toast.cancelJobFailed": [
@@ -64011,6 +64337,612 @@
       "value": "Đồng bộ điểm đánh dấu trực tuyến"
     }
   ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "Thuật toán: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "đã yêu cầu "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; đang dùng "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "Giá trị cho phép: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "Kiểm soát tắc nghẽn: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "Tài khoản"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "Dùng đường này từ"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "Thiết bị"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "Không có thiết bị nào kết nối trực tiếp."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "Endpoint thiết bị"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "Thiết bị đã kết nối"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "tới cổng "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "Mặc định: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "Kiểm tra mức độ sẵn sàng của máy chủ này cho kết nối trực tiếp."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "Đang áp dụng: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "Bật kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Quyền NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "Bộ máy kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT hairpin"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "Ánh xạ NAT"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "Dự phòng PMTU"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "Khả năng truy cập"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "Bộ đệm nhận của socket"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "Bộ đệm gửi của socket"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "Tinh chỉnh máy chủ"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "Giảm tần suất ACK"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "Chính sách mất gói BBR"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "Giảm tải phân đoạn UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "Cửa sổ nhận của máy khách"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "Cổng UDP kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "Kiểm soát tắc nghẽn TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "Bộ đệm gửi TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "Kiểm tra gần nhất lúc "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "Proxy"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "Trình lắng nghe"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "Địa chỉ công khai ghi nhận được: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "Kiểm tra xem bộ định tuyến có hỗ trợ UPnP, NAT-PMP hoặc PCP không."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "Ánh xạ cổng"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "Lượt kiểm tra mức độ sẵn sàng không bắt đầu phát trực tiếp."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "Quản trị viên đã tắt"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "Đã tắt"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "Không thể khởi động bộ máy kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "Không thể tăng bộ đệm"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "Bộ định tuyến không hỗ trợ ánh xạ cổng"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "Bộ đệm nhỏ hơn mức yêu cầu"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "Trình hỗ trợ tinh chỉnh mạng không khả dụng"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "Giá trị không hợp lệ; đang dùng Tắt"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "Hệ thống không thể áp dụng hoặc đọc cài đặt này"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "Kernel này không hỗ trợ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "Đã đạt giới hạn bộ đệm của máy chủ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "Không thể đọc giới hạn bộ đệm của máy chủ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "Địa chỉ công khai thay đổi theo đích đến"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR không khả dụng"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR chưa được tải hoặc không được cho phép"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "Có nhiều hơn một máy chủ API đang chạy"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "Đã bỏ quyền NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Thiếu quyền NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "Không tìm thấy bộ định tuyến"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "Thiếu quyền NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "Không có quyền"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "Không khả dụng"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "Chưa đo"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "Không cần tăng"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "Chính sách của máy chủ đã chọn thuật toán khác"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "Kiểm tra không thành công"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "Không thể kiểm tra các máy chủ API khác"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "Một máy chủ API khác đang đảm nhận kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "Đang chờ trở thành máy chủ đảm nhận kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "Trạng thái kết nối trực tiếp không khả dụng"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "Không thể mở cổng UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "Cổng UDP không hợp lệ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "Nền tảng này không hỗ trợ"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "Giá trị yêu cầu: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "Yêu cầu: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; được cấp: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "Chạy kiểm tra"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "Bộ đệm gửi: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "Bị giới hạn"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "Suy giảm"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "Dự phòng"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "Không cần"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "Tắt"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "Bật"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "Không rõ"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "Danh sách tối đa tám mục host:port, phân tách bằng dấu phẩy. Để trống để dùng giá trị mặc định."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "Máy chủ STUN"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "Kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "Cho phép thiết bị kết nối với máy chủ này qua đường UDP trực tiếp. Cổng UDP lấy từ "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " và chỉ đọc tại đây."
+    }
+  ],
   "web.admin.settings.network.host.apiServer": [
     {
       "type": 0,
@@ -67009,6 +67941,12 @@
     {
       "type": 0,
       "value": "Đánh dấu đã xem ở mức"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Các tựa phim có điểm đánh dấu phần danh đề cuối cũng được tính là đã xem khi phát đến phần danh đề cuối."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -102254,6 +103192,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -129857,6 +130809,12 @@
     {
       "type": 0,
       "value": "Đọc thông báo của hồ sơ ngay khi đến và đánh dấu đã đọc."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Xem nội dung đang phát ngay lúc này trên hồ sơ, hoặc trên mọi hồ sơ của tài khoản khi khóa không chỉ định hồ sơ nào: tiêu đề, vị trí phát, trạng thái tạm dừng, thiết bị và phương thức phát. Không có quyền điều khiển phát hay thông tin chi tiết về mạng."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

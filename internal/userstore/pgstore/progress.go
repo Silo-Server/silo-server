@@ -1196,6 +1196,51 @@ func (s *PostgresUserStore) SeriesEpisodeWatchCounts(ctx context.Context, profil
 		GROUP BY e.series_id`, profileID, seriesIDs)
 }
 
+// SeriesLatestViewedAt is SeriesEpisodeRollupStore's date viewed rollup. A
+// plain join leaves the planner free to hash the profile's plays or look up
+// each episode's, as with the watch-count rollups above.
+func (s *PostgresUserStore) SeriesLatestViewedAt(ctx context.Context, profileID string, seriesIDs []string) (map[string]string, error) {
+	result := make(map[string]string, len(seriesIDs))
+	if len(seriesIDs) == 0 {
+		return result, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT e.series_id, MAX(v.viewed_at)
+		FROM episodes e
+		JOIN (
+			SELECT h.media_item_id, h.watched_at AS viewed_at
+			FROM user_watch_history h
+			WHERE h.user_id = $1
+			  AND h.profile_id = $2
+			  AND h.completed = TRUE`+completedHistoryVisibleSQL+`
+			UNION ALL
+			SELECT p.media_item_id, p.updated_at
+			FROM user_watch_progress p
+			WHERE p.user_id = $1
+			  AND p.profile_id = $2
+			  AND p.completed = TRUE
+			  AND `+visibleProgressSQL("p")+`
+		) v ON v.media_item_id = e.content_id
+		WHERE e.series_id = ANY($3::text[])
+		GROUP BY e.series_id`, s.userID, profileID, seriesIDs)
+	if err != nil {
+		return nil, fmt.Errorf("listing series viewed times: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seriesID string
+		var viewedAt time.Time
+		if err := rows.Scan(&seriesID, &viewedAt); err != nil {
+			return nil, fmt.Errorf("scanning series viewed time: %w", err)
+		}
+		result[seriesID] = timeToString(viewedAt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating series viewed times: %w", err)
+	}
+	return result, nil
+}
+
 // SeriesSeasonWatchCounts is SeriesEpisodeWatchCounts for one series, grouped
 // by episode season number like catalog's ListBySeriesGroupedBySeason. The
 // season list reads each season's episode count from it as well.

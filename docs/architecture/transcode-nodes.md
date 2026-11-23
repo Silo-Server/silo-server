@@ -80,7 +80,7 @@ bytes, and text that re-encodes to itself.
   streams fail at their next signed call until it restarts with the new key, so
   drain a node before rotating. A node still running with the replaced key
   shuts down at once on SIGTERM (see [Drain and health](#drain-and-health)). The admin API is in
-  [admin API: node keys](../admin-api.md#node-keys-v2).
+  [admin API: node keys](../admin-api.md#node-keys).
 - **Rejected key.** When the core answers the node's configuration read with
   `401`, `nodeconfig.Remote` sets `key_rejected`, which the node's
   `/api/v1/health` carries (still `200`, so a liveness probe does not restart a

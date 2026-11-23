@@ -27,7 +27,7 @@ Neither flag is true for a disabled account or one that must change a
 temporary password first: compatibility sign-ins refuse both. At most one of
 the two flags is true. When the account's sign-in cannot be read,
 the answer is `password_login_available: true`. The web Connect Apps page uses
-this v2 operation.
+this operation.
 
 `GET /api/v2/images/capabilities` reports capability `revision` and `state`, the
 query parameter `param`, ordered `sizes`, per-artwork-type `widths`, and
@@ -37,7 +37,4 @@ operation accepts account-only requests; when an acting profile is supplied,
 viewer-access and PIN verification still apply.
 
 Both are structured Huma reads and return Problem Details for authorization,
-validation, or unavailable wiring. Compatibility listener behavior and image delivery URLs do not change.
-Apple image discovery, including TopShelf, must use the v2 capability path. No
-Android image-discovery or native compatibility-connection consumer was found in
-the pinned migration inventory.
+validation, or unavailable wiring.

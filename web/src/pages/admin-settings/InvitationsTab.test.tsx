@@ -17,6 +17,14 @@ const mocks = vi.hoisted(() => ({
   linkRow: false,
   publicURL: "https://media.example.test" as string | undefined,
 }));
+// The claim link box renders its URL folder by folder, so match its whole text.
+function claimLinkText(url: string) {
+  return (_: string, element: Element | null) =>
+    element?.tagName === "CODE" && element.textContent === url;
+}
+function claimLink(url: string) {
+  return screen.getByText(claimLinkText(url));
+}
 const linkRow = {
   id: "8",
   email: "",
@@ -133,11 +141,13 @@ it("keeps a one-time link after clipboard failure, resets mutation state, and di
   expect(await screen.findByText(/email delivery failed or is uncertain/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
   expect(await screen.findByText(/Could not copy/)).toBeInTheDocument();
-  expect(screen.getByText("https://example.invalid/invite/one-time")).toBeInTheDocument();
+  expect(claimLink("https://example.invalid/invite/one-time")).toBeInTheDocument();
   expect(mocks.reset).toHaveBeenCalled();
   setProfileId("other");
   view.rerender(<InvitationsTab />);
-  expect(screen.queryByText("https://example.invalid/invite/one-time")).not.toBeInTheDocument();
+  expect(
+    screen.queryByText(claimLinkText("https://example.invalid/invite/one-time")),
+  ).not.toBeInTheDocument();
 });
 it("blocks synchronous double submit and dismissal until delivery resolves", async () => {
   let resolve!: (value: unknown) => void;
@@ -220,7 +230,7 @@ it("creates a link invitation without an address and shows the link to share", a
   expect(body).toMatchObject({ delivery: "link", note: "For Sam" });
   expect(body.email).toBeUndefined();
   expect(await screen.findByText(/Invitation link created/)).toBeInTheDocument();
-  expect(screen.getByText("https://example.invalid/invite/link-only")).toBeInTheDocument();
+  expect(claimLink("https://example.invalid/invite/link-only")).toBeInTheDocument();
   expect(screen.getByText(/Anyone with the link can use it/)).toBeInTheDocument();
 });
 it("selects a delivery option when its card text is clicked", () => {
@@ -264,7 +274,7 @@ it("replaces an emailed invitation's link without emailing it", async () => {
       `New link created for ${row.email}. Nothing was emailed; share this link with them yourself.`,
     ),
   ).toBeInTheDocument();
-  expect(screen.getByText("https://example.invalid/invite/replaced")).toBeInTheDocument();
+  expect(claimLink("https://example.invalid/invite/replaced")).toBeInTheDocument();
 });
 it("emails a new link only when asked and email is configured", async () => {
   mocks.resend.mockResolvedValue({
