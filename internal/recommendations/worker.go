@@ -35,14 +35,16 @@ const (
 	cacheJobTimeout         = 45 * time.Minute
 	globalRowsJobTimeout    = 10 * time.Minute
 
-	// staleSweepInterval spaces the stale sweeps. A sweep drains every mark
-	// older than its start, so the interval is the most a mark that no
-	// server queued (an access change, stored embeddings, a deferred or
-	// failed refresh) waits for its sweep to start. Two minutes keeps that
-	// wait short while an idle tick, one advisory lock and one scan of the
-	// taste profiles, stays cheap. It is timed from the end of the last
-	// sweep, so an embeddings reset, which a sweep refuses, always has two
-	// minutes between sweeps.
+	// staleSweepInterval spaces each server's stale sweep attempts. A sweep
+	// drains every mark older than its start, so the interval is about the
+	// most a mark that no server queued (an access change, stored
+	// embeddings, a deferred or failed refresh) waits for a sweep to start.
+	// Two minutes keeps that wait short while an idle attempt, one advisory
+	// lock and one index probe, stays cheap. Each server times it from the
+	// end of its own last attempt, so one server's long sweeps leave gaps,
+	// but in a cluster another server's attempt can follow at once. An
+	// embeddings reset that a running sweep refuses answers the admin with a
+	// conflict to try again.
 	staleSweepInterval = 2 * time.Minute
 	// staleSweepBatch is how many stale profiles the sweep reads at a time.
 	staleSweepBatch = 50
@@ -1267,8 +1269,8 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 
 // stalenessLoop refreshes stale taste profiles every few minutes.
 func (w *Worker) stalenessLoop(ctx context.Context) {
-	// The next sweep is timed from the end of the last one, so a sweep that
-	// overran its budget still leaves an embeddings reset a full interval.
+	// This server's next attempt is timed from the end of its last one, so a
+	// sweep that overran its budget is not followed at once by another here.
 	timer := time.NewTimer(staleSweepInterval)
 	defer timer.Stop()
 
