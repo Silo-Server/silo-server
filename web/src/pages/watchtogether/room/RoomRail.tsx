@@ -143,7 +143,7 @@ export function PeopleList({ room }: { room: WatchTogetherRoomSnapshot | null })
                   {member.display_name}
                 </span>
                 {member.is_host ? (
-                  <span className="text-muted-foreground rounded-full border border-white/10 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide uppercase">
+                  <span className="text-muted-foreground rounded-full border border-white/10 px-1.5 py-0.5 text-[0.625rem] font-semibold tracking-wide uppercase">
                     {t("watchParty.seat.host")}
                   </span>
                 ) : null}
@@ -216,7 +216,7 @@ export function RoomRailBody({
         <TabsTrigger value="people">
           {t("web.watchTogether.rail.people")}
           {room ? (
-            <span className="bg-surface-raised ms-1.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold">
+            <span className="bg-surface-raised ms-1.5 rounded-full px-1.5 py-0.5 text-[0.625rem] font-semibold">
               {room.member_count}
             </span>
           ) : null}

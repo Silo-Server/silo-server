@@ -312,14 +312,14 @@ export const AccountRow = memo(function AccountRow({
         {account.admin ? (
           <span
             title={administrator}
-            className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[11px] @2xl:inline-flex"
+            className="text-muted-foreground hidden shrink-0 items-center gap-1 text-[0.6875rem] @2xl:inline-flex"
           >
             <ShieldCheck aria-hidden="true" className="size-3.5" />
             <span className="sr-only @[52rem]:not-sr-only">{administrator}</span>
           </span>
         ) : null}
         {account.profiles.length > 0 ? (
-          <span className="text-muted-foreground hidden shrink-0 text-[11px] whitespace-nowrap @[52rem]:inline">
+          <span className="text-muted-foreground hidden shrink-0 text-[0.6875rem] whitespace-nowrap @[52rem]:inline">
             {t("web.admin.backups.restore.users.profileCount", {
               count: account.profiles.length,
               count_text: account.profiles.length,
@@ -357,7 +357,7 @@ export const AccountRow = memo(function AccountRow({
               ref={mergeRef}
               title={status}
               className={cn(
-                "text-[13px] wrap-anywhere",
+                "text-[0.8125rem] wrap-anywhere",
                 !merges && "@[52rem]:hidden",
                 mergeOverflows && OVERFLOW_CLIP,
               )}
@@ -442,7 +442,7 @@ export function DataTypesPanel({
   return (
     <div className="bg-background/60 my-2 rounded-lg border p-3">
       <fieldset className="space-y-2">
-        <legend className="mb-2 text-[13px] font-medium">
+        <legend className="mb-2 text-[0.8125rem] font-medium">
           {t("web.admin.backups.restore.users.dataLegend")}
         </legend>
         <div className="grid gap-x-4 gap-y-1.5 sm:grid-cols-2 xl:grid-cols-3">

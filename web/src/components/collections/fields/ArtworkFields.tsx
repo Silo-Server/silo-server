@@ -65,7 +65,7 @@ export function EmptyArtwork({
   return (
     <span
       className={cn(
-        "text-muted-foreground bg-muted/30 grid size-full place-content-center justify-items-center gap-1.5 text-[12px]",
+        "text-muted-foreground bg-muted/30 grid size-full place-content-center justify-items-center gap-1.5 text-[0.75rem]",
         compact ? "[&_svg]:size-3.5" : "[&_svg]:size-4",
       )}
     >
@@ -191,17 +191,17 @@ function ArtworkTile({
         </DropdownMenu>
       </div>
       <div className="grid gap-0.5">
-        <span id={`${id}-label`} className="text-[13px] font-medium">
+        <span id={`${id}-label`} className="text-[0.8125rem] font-medium">
           {label}
         </span>
         {caption ? (
-          <span className="text-muted-foreground text-[12.5px] leading-snug">{caption}</span>
+          <span className="text-muted-foreground text-[0.78125rem] leading-snug">{caption}</span>
         ) : null}
       </div>
       {error ? (
         <p
           role="alert"
-          className="text-destructive flex flex-wrap items-center gap-2 text-[12.5px]"
+          className="text-destructive flex flex-wrap items-center gap-2 text-[0.78125rem]"
         >
           {t("web.collections.fields.artworkSaveFailed", { ...slotValues, error })}
           {onRetry ? (
@@ -211,7 +211,7 @@ function ArtworkTile({
           ) : null}
         </p>
       ) : staged ? (
-        <p className="text-muted-foreground text-[12.5px] leading-snug">
+        <p className="text-muted-foreground text-[0.78125rem] leading-snug">
           {t(
             value?.remove && !value.file && !value.sourceUrl?.trim()
               ? "web.collections.fields.artworkRemovedOnSave"
@@ -269,7 +269,7 @@ function PasteLinkBox({
   };
   return (
     <div className="border-border bg-popover grid max-w-[360px] gap-2.5 rounded-xl border p-3.5">
-      <label htmlFor={`${id}-link`} className="text-[13.5px] font-semibold">
+      <label htmlFor={`${id}-link`} className="text-[0.84375rem] font-semibold">
         {t("web.collections.fields.imageLink", { slot })}
       </label>
       <Input

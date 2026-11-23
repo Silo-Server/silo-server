@@ -101,7 +101,7 @@ export function BadgeImagesControl({
       {def.getValueKey ? (
         <div className="space-y-1.5">
           <p className="text-sm font-medium">{t("web.settings.overlays.images.valueImages")}</p>
-          <p className="text-muted-foreground text-[13px] leading-relaxed">
+          <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
             {t("web.settings.overlays.images.valueImagesHelp")}
           </p>
           {entries.map(([key, ref]) => (

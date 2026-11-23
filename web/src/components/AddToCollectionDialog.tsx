@@ -291,7 +291,7 @@ function AddToCollectionPanel({
           <NewCollectionForm onCreate={createAndAdd} labelled />
         </div>
       </div>
-      <p className="text-muted-foreground text-[13px]">{addToCollectionFootnote()}</p>
+      <p className="text-muted-foreground text-[0.8125rem]">{addToCollectionFootnote()}</p>
       <DialogFooter className="items-center sm:justify-between">
         <p className="text-muted-foreground text-sm">{inCollections(tickedCount)}</p>
         <Button variant="outline" onClick={onClose}>
@@ -391,10 +391,13 @@ function CollectionChoice({
           <span dir="auto" className="block w-fit max-w-full truncate text-sm font-semibold">
             {collection.name}
           </span>
-          <span id={metaId} className="text-muted-foreground flex items-center gap-2 text-[12.5px]">
+          <span
+            id={metaId}
+            className="text-muted-foreground flex items-center gap-2 text-[0.78125rem]"
+          >
             <span className="truncate">{manualTitleCount(collection.item_count ?? 0)}</span>
             {collection.is_shared ? (
-              <span className="bg-info/10 text-info ring-info/30 inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-semibold ring-1 ring-inset">
+              <span className="bg-info/10 text-info ring-info/30 inline-flex h-5 shrink-0 items-center gap-1 rounded-full px-2 text-[0.6875rem] font-semibold ring-1 ring-inset">
                 <Users aria-hidden className="size-3" />
                 {t("web.collections.tags.shared")}
               </span>
@@ -445,7 +448,7 @@ function NewCollectionForm({
     <form onSubmit={(event) => void submit(event)} className={className}>
       <label
         htmlFor={inputId}
-        className={labelled ? "mb-1.5 block text-[13px] font-medium" : "sr-only"}
+        className={labelled ? "mb-1.5 block text-[0.8125rem] font-medium" : "sr-only"}
       >
         {t("web.collections.addToCollection.newManual")}
       </label>

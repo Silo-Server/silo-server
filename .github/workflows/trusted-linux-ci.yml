@@ -1004,20 +1004,20 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.web-cache.outputs.path }}
-          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
-          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
+          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-rules/**', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
+          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-rules/**', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
 
       - name: Restore and save the web check cache
         if: runner.environment == 'github-hosted' && github.event_name != 'pull_request'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ steps.web-cache.outputs.path }}
-          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
-          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
+          key: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-rules/**', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-${{ github.sha }}
+          restore-keys: web-checks-${{ runner.os }}-${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-rules/**', 'web/eslint-suppressions.json', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}-
 
       - name: Lint and format check
         env:
-          ESLINT_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-suppressions.json') }}
+          ESLINT_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/eslint.config.*', 'web/eslint-rules/**', 'web/eslint-suppressions.json') }}
           PRETTIER_CACHE_ID: ${{ hashFiles('web/pnpm-lock.yaml', 'web/.prettierrc*', 'web/.prettierignore', 'web/prettier.config.*', 'web/tailwind.config.*') }}
         run: |
           cache_dir="${XDG_CACHE_HOME:-$RUNNER_TEMP}/silo-web"

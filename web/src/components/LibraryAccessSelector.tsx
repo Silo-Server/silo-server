@@ -86,7 +86,7 @@ export function LibraryAccessSelector({
                   <div className="flex min-w-0 items-center gap-2">
                     <span className="text-sm">{library.name}</span>
                     {!library.enabled && (
-                      <Badge variant="outline" className="px-1 py-0 text-[10px]">
+                      <Badge variant="outline" className="px-1 py-0 text-[0.625rem]">
                         {t("web.profiles.libraryAccess.disabled")}
                       </Badge>
                     )}

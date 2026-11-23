@@ -53,7 +53,7 @@ export function LibrariesWidget() {
         </CardTitle>
         <Link
           to="/admin/libraries"
-          className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
+          className="text-muted-foreground hover:text-primary text-[0.6875rem] transition-colors"
         >
           {t("web.admin.dashboard.widgets.libraries.manage")}
         </Link>
@@ -98,7 +98,7 @@ export function LibrariesWidget() {
                 )}
                 <div className="min-w-0 flex-1">
                   <div className="text-sm font-bold">{lib.name}</div>
-                  <div className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px]">
+                  <div className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[0.6875rem]">
                     <span>
                       {t("web.admin.dashboard.widgets.libraries.typeAndPaths", {
                         count: lib.paths.length,

@@ -26,7 +26,7 @@ export function LobbyEmptyStage({
   const host = hostMember(room)?.display_name ?? t("watchParty.theHost");
   return (
     <div className="surface-panel-subtle flex flex-col items-center gap-3 rounded-xl border border-dashed border-white/10 px-6 py-10 text-center">
-      <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+      <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
         {t("web.watchTogether.lobby.roomOpen")}
       </p>
       <h2 className="text-2xl font-semibold tracking-tight sm:text-3xl">
@@ -176,7 +176,7 @@ export function LobbySuggestions({
       aria-label={t("web.watchTogether.lobby.suggestions")}
     >
       <div className="flex items-baseline justify-between gap-3 px-2 pb-2">
-        <h3 className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+        <h3 className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
           {t("web.watchTogether.lobby.suggestionsCount", { count: suggestions.length })}
         </h3>
         <span className="text-muted-foreground text-xs">

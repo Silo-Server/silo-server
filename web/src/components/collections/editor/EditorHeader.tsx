@@ -56,8 +56,8 @@ function Tag({ icon, children, tone }: { icon?: ReactNode; children: ReactNode; 
     <span
       className={
         tone === "shared"
-          ? "inline-flex items-center gap-1.5 rounded-md bg-sky-500/15 px-2 py-0.5 text-[12px] font-semibold text-sky-300"
-          : "bg-muted text-muted-foreground inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[12px] font-semibold"
+          ? "inline-flex items-center gap-1.5 rounded-md bg-sky-500/15 px-2 py-0.5 text-[0.75rem] font-semibold text-sky-300"
+          : "bg-muted text-muted-foreground inline-flex items-center gap-1.5 rounded-md px-2 py-0.5 text-[0.75rem] font-semibold"
       }
     >
       {icon}
@@ -157,7 +157,7 @@ export function EditorHeader({
     <div className="grid gap-4">
       <Link
         to={back.href}
-        className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-[14px]"
+        className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-[0.875rem]"
       >
         <ChevronLeft aria-hidden className="size-4" />
         {back.label}
@@ -190,7 +190,7 @@ export function EditorHeader({
             ) : null}
             {!created ? <Tag>{notCreatedYet()}</Tag> : null}
           </div>
-          <h1 className="line-clamp-2 text-[26px] leading-[1.15] font-bold tracking-[-0.02em] break-words sm:text-[32px]">
+          <h1 className="line-clamp-2 text-[1.625rem] leading-[1.15] font-bold tracking-[-0.02em] break-words sm:text-[2rem]">
             {name || newCollection()}
           </h1>
           {meta}

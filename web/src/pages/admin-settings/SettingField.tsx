@@ -63,7 +63,7 @@ export function SettingFieldStatus({
   return (
     <span
       className={cn(
-        "inline-flex items-start gap-1.5 text-[13px] leading-snug wrap-anywhere has-[>svg]:pt-[max(0px,calc((0.875rem-1lh)/2))] [&>svg]:mt-[calc((1lh-0.875rem)/2)]",
+        "inline-flex items-start gap-1.5 text-[0.8125rem] leading-snug wrap-anywhere has-[>svg]:pt-[max(0px,calc((0.875rem-1lh)/2))] [&>svg]:mt-[calc((1lh-0.875rem)/2)]",
         tone === "ok" && "text-green-600 dark:text-green-400",
         tone === "warn" && "text-amber-600 dark:text-amber-400",
         tone === "muted" && "text-muted-foreground",
@@ -160,7 +160,7 @@ export function SettingFieldRow({
         {description ? (
           <p
             id={descriptionId}
-            className="text-muted-foreground mt-1 text-[13px] leading-relaxed text-pretty"
+            className="text-muted-foreground mt-1 text-[0.8125rem] leading-relaxed text-pretty"
           >
             {description}
           </p>
@@ -186,7 +186,7 @@ export function SettingFieldRow({
           {children}
         </div>
         {unit ? (
-          <span className="text-muted-foreground shrink-0 text-[13px] whitespace-nowrap sm:w-[var(--settings-unit-w)]">
+          <span className="text-muted-foreground shrink-0 text-[0.8125rem] whitespace-nowrap sm:w-[var(--settings-unit-w)]">
             {unit}
           </span>
         ) : (

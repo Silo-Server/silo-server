@@ -249,7 +249,7 @@ function TitleSearch({
           autoComplete="off"
           disabled={disabled}
           data-title-search
-          className="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-[14.5px] outline-none"
+          className="placeholder:text-muted-foreground min-w-0 flex-1 bg-transparent text-[0.90625rem] outline-none"
           value={query}
           onChange={(event) => {
             setQuery(event.target.value);
@@ -258,17 +258,17 @@ function TitleSearch({
           }}
           onKeyDown={onKeyDown}
         />
-        <span className="text-muted-foreground hidden shrink-0 text-[12.5px] sm:inline">
+        <span className="text-muted-foreground hidden shrink-0 text-[0.78125rem] sm:inline">
           {scopeText}
         </span>
       </div>
       {status ? (
-        <p role="status" className="text-muted-foreground px-1 text-[13px]">
+        <p role="status" className="text-muted-foreground px-1 text-[0.8125rem]">
           {status}
         </p>
       ) : null}
       {showList && results.isError ? (
-        <div role="alert" className="flex flex-wrap items-center gap-2 px-1 text-[13px]">
+        <div role="alert" className="flex flex-wrap items-center gap-2 px-1 text-[0.8125rem]">
           <span>{t("web.collections.manual.searchFailed")}</span>
           <Button type="button" size="sm" variant="outline" onClick={() => void results.refetch()}>
             {t("common.tryAgain")}
@@ -302,14 +302,14 @@ function TitleSearch({
             >
               <Poster url={item.poster_url} />
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[14px] font-semibold">{item.title}</span>
-                <span className="text-muted-foreground block truncate text-[12.5px]">
+                <span className="block truncate text-[0.875rem] font-semibold">{item.title}</span>
+                <span className="text-muted-foreground block truncate text-[0.78125rem]">
                   {metaOf(t, infoOf(item))}
                 </span>
               </span>
               <span
                 className={cn(
-                  "flex shrink-0 items-center gap-1 text-[13px]",
+                  "flex shrink-0 items-center gap-1 text-[0.8125rem]",
                   already ? "text-muted-foreground" : "font-medium",
                 )}
               >
@@ -386,18 +386,18 @@ function TitleRow({
       ) : (
         <span />
       )}
-      <span className="text-muted-foreground text-end text-[13px] tabular-nums">
+      <span className="text-muted-foreground text-end text-[0.8125rem] tabular-nums">
         {numberText(index + 1)}
       </span>
       <Poster url={row.info?.posterUrl} />
       <span className="min-w-0">
-        <span className="block truncate text-[14.5px] font-semibold">{label}</span>
-        <span className="text-muted-foreground block truncate text-[12.5px]">
+        <span className="block truncate text-[0.90625rem] font-semibold">{label}</span>
+        <span className="text-muted-foreground block truncate text-[0.78125rem]">
           {metaOf(t, row.info)}
         </span>
       </span>
       {row.failed ? (
-        <span className="text-destructive text-[12.5px] font-medium">
+        <span className="text-destructive text-[0.78125rem] font-medium">
           {t("web.collections.manual.couldntAdd")}
         </span>
       ) : (
@@ -450,7 +450,7 @@ function UndoToast({
       onMouseLeave={() => setPaused((p) => ({ ...p, hover: false }))}
       onFocus={() => setPaused((p) => ({ ...p, focus: true }))}
       onBlur={() => setPaused((p) => ({ ...p, focus: false }))}
-      className="border-border bg-popover flex w-fit items-center gap-3 rounded-xl border py-1.5 ps-3 pe-1.5 text-[13.5px] shadow-lg"
+      className="border-border bg-popover flex w-fit items-center gap-3 rounded-xl border py-1.5 ps-3 pe-1.5 text-[0.84375rem] shadow-lg"
     >
       <span className="font-medium">{message}</span>
       <Button type="button" size="sm" variant="outline" className="h-8 gap-1.5" onClick={onUndo}>
@@ -786,17 +786,17 @@ export function ManualContentsPanel({
       <header>
         {/* The tag and the tick sit by the heading, not in it, so its name stays "Titles". */}
         <div className="flex items-center gap-2.5">
-          <h2 id={headingId} className="text-[17px] font-semibold">
+          <h2 id={headingId} className="text-[1.0625rem] font-semibold">
             {t("web.collections.manual.heading")}
           </h2>
           {!created ? (
-            <span className="bg-muted text-muted-foreground rounded-md px-2 py-0.5 text-[12px] font-medium">
+            <span className="bg-muted text-muted-foreground rounded-md px-2 py-0.5 text-[0.75rem] font-medium">
               {notCreatedYet()}
             </span>
           ) : null}
           <span
             role="status"
-            className="text-muted-foreground flex items-center gap-1 text-[13px] font-normal"
+            className="text-muted-foreground flex items-center gap-1 text-[0.8125rem] font-normal"
           >
             {saved === "saving" ? (
               <>
@@ -811,7 +811,7 @@ export function ManualContentsPanel({
             ) : null}
           </span>
         </div>
-        <p className="text-muted-foreground mt-1 text-[13.5px]">
+        <p className="text-muted-foreground mt-1 text-[0.84375rem]">
           {!created ? titlesCaption("create") : titlesCaption(scope.kind)}
         </p>
       </header>
@@ -825,7 +825,7 @@ export function ManualContentsPanel({
       />
 
       {problem ? (
-        <p role="alert" className="text-destructive text-[13px]">
+        <p role="alert" className="text-destructive text-[0.8125rem]">
           {problem}
         </p>
       ) : null}
@@ -833,7 +833,7 @@ export function ManualContentsPanel({
       {failedCount > 0 ? (
         <div
           role="alert"
-          className="border-destructive/40 bg-destructive/10 flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2 text-[13.5px]"
+          className="border-destructive/40 bg-destructive/10 flex flex-wrap items-center gap-3 rounded-xl border px-3 py-2 text-[0.84375rem]"
         >
           <span>{createdButNotAdded(failedCount)}</span>
           {onRetryStaged ? (
@@ -866,7 +866,7 @@ export function ManualContentsPanel({
           ))}
         </div>
       ) : created && items.error ? (
-        <div role="alert" className="grid justify-items-start gap-2 text-[13.5px]">
+        <div role="alert" className="grid justify-items-start gap-2 text-[0.84375rem]">
           <p>
             {items.error instanceof Error
               ? items.error.message
@@ -884,7 +884,7 @@ export function ManualContentsPanel({
           </Button>
         </div>
       ) : rows.length === 0 ? (
-        <p className="border-border text-muted-foreground rounded-xl border border-dashed px-4 py-5 text-[13.5px]">
+        <p className="border-border text-muted-foreground rounded-xl border border-dashed px-4 py-5 text-[0.84375rem]">
           {titlesEmpty()}
         </p>
       ) : (
@@ -936,7 +936,7 @@ export function ManualContentsPanel({
             <span />
           )}
           {canReorder ? (
-            <p className="text-muted-foreground text-[12.5px]">
+            <p className="text-muted-foreground text-[0.78125rem]">
               {t("web.collections.manual.reorderHint")}
             </p>
           ) : null}
@@ -945,7 +945,7 @@ export function ManualContentsPanel({
 
       {created && (cursor || items.data?.page?.has_more) ? (
         <div className="grid gap-2">
-          <p className="text-muted-foreground text-[13px]">
+          <p className="text-muted-foreground text-[0.8125rem]">
             {t("web.collections.manual.pagedNote")}
           </p>
           <div className="flex gap-2">

@@ -38,10 +38,10 @@ export function SmartRulesPanel({
       className="surface-panel grid content-start gap-5 rounded-[22px] p-5 sm:p-6"
     >
       <div>
-        <h2 id={`${id}-heading`} className="text-[17px] font-semibold">
+        <h2 id={`${id}-heading`} className="text-[1.0625rem] font-semibold">
           {t("web.collections.editor.rulesHeading")}
         </h2>
-        <p className="text-muted-foreground mt-1 text-[13.5px]">{rulesCaption()}</p>
+        <p className="text-muted-foreground mt-1 text-[0.84375rem]">{rulesCaption()}</p>
       </div>
       <RuleBuilder
         context="collection"
@@ -59,7 +59,7 @@ export function SmartRulesPanel({
         }
       />
       {personal ? (
-        <p className="text-muted-foreground -mt-2 text-[12.5px]">{personalRulesNote()}</p>
+        <p className="text-muted-foreground -mt-2 text-[0.78125rem]">{personalRulesNote()}</p>
       ) : null}
       <OrderBlock
         mode="smart"

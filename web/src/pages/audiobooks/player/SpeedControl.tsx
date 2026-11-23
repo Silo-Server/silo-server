@@ -144,7 +144,7 @@ export function SpeedControl({ value, onChange }: SpeedControlProps) {
             ))}
           </div>
 
-          <p className="text-center text-[11px] text-white/40">
+          <p className="text-center text-[0.6875rem] text-white/40">
             {t("web.audiobooks.player.speedRemembered")}
           </p>
         </div>

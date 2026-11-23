@@ -23,7 +23,7 @@ export function ConflictBanner({ onReload, busy }: { onReload: () => void; busy?
 export function LibraryPageNote({ libraryName }: { libraryName: string }) {
   const t = useT();
   return (
-    <p className="text-muted-foreground -mt-3 flex items-center gap-2 text-[13px]">
+    <p className="text-muted-foreground -mt-3 flex items-center gap-2 text-[0.8125rem]">
       <Info aria-hidden className="size-[15px] shrink-0" />
       {t("web.home.rows.notes.libraryPage", { library: libraryName })}
     </p>
@@ -44,7 +44,7 @@ function Key({ children, label }: { children: ReactNode; label?: string }) {
 export function ReorderHint() {
   const t = useT();
   return (
-    <p className="text-muted-foreground flex items-start gap-2 px-[18px] pt-3 pb-3.5 text-[13px] leading-6">
+    <p className="text-muted-foreground flex items-start gap-2 px-[18px] pt-3 pb-3.5 text-[0.8125rem] leading-6">
       <GripVertical aria-hidden className="mt-1 size-[15px] shrink-0" />
       <span>
         {t("web.home.rows.notes.reorderHint", {

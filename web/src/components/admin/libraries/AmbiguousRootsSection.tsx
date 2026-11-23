@@ -255,13 +255,13 @@ export function AmbiguousRootsSection({
                         <div className="space-y-1">
                           <div className="truncate text-sm font-medium">{row.label}</div>
                           <code
-                            className="text-muted-foreground block w-fit max-w-full truncate text-[11px]"
+                            className="text-muted-foreground block w-fit max-w-full truncate text-[0.6875rem]"
                             dir="ltr"
                           >
                             <PathText path={root.root_path} />
                           </code>
                           {row.evidence !== null ? (
-                            <div className="text-muted-foreground truncate text-[11px]">
+                            <div className="text-muted-foreground truncate text-[0.6875rem]">
                               {row.evidence}
                             </div>
                           ) : null}
