@@ -469,6 +469,21 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: false,
 		},
 		{
+			// #5148: a provider-tagged show folder named by its original title
+			// holds season folders named by the international title.
+			name:                    "season folder titled differently from a tagged show folder",
+			path:                    "/tv/فوضى - 2015 {tmdb-227604}/Fauda - S02/Fauda - S02E01.mkv",
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/فوضى - 2015 {tmdb-227604}",
+			wantTitle:               "فوضى - 2015",
+			wantSeason:              2,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     true,
+			wantMovieFolderEvidence: false,
+		},
+		{
 			name:                    "series daily date has air date but no episode number",
 			path:                    "/tv/Jeopardy! (1984)/Season 2026/Jeopardy! (1984) - 2026_04_24 - Jamie Ding.mkv",
 			libraryType:             "series",

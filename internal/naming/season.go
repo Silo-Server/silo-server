@@ -91,7 +91,8 @@ func mayBeShowFolder(segment, fileStem string) bool {
 
 // seasonDirectoryNumber recognizes a season directory without borrowing numbers
 // from a show title. A title before the season label must match the parent show
-// directory, as in Show/Show.S02.1080p; Season 2 needs no parent evidence.
+// directory, as in Show/Show.S02.1080p, unless the parent carries provider IDs;
+// Season 2 needs no parent evidence.
 // topLevel marks a folder directly in the library folder, which may be the show.
 func seasonDirectoryNumber(segment, parent string, allowNumeric, topLevel bool) (int, bool) {
 	segment = strings.TrimSpace(segment)
@@ -114,9 +115,13 @@ func seasonDirectoryNumber(segment, parent string, allowNumeric, topLevel bool) 
 	parent = filepath.Base(strings.ReplaceAll(parent, `\`, "/"))
 	parentName, _ := parseTitleYearCandidate(parent)
 	parentTitle := normalizeInferComparable(parentName)
+	// A provider-tagged parent names one show, so its season folders may
+	// carry another title for it (an original-title show folder holding
+	// international-title seasons: فوضى {tmdb-227604}/Fauda - S01).
+	parentTagged := hasExplicitFolderIDs(parent)
 	for _, match := range seasonDirectoryTokenRe.FindAllStringSubmatchIndex(segment, -1) {
 		prefix := normalizeInferComparable(segment[:match[0]])
-		if prefix != "" && (parentTitle == "" || prefix != parentTitle) {
+		if prefix != "" && !parentTagged && (parentTitle == "" || prefix != parentTitle) {
 			continue
 		}
 		if prefix == "" && topLevel && !seasonLabelStandsAlone(segment[match[2]:match[3]], segment[match[5]:]) {
