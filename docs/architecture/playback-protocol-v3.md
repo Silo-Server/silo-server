@@ -690,7 +690,7 @@ always send `output.hdr_details` too, because a server without
 `client_capabilities.hdr_details`; the feature token tells the client whether
 the evidence tier is being honored.
 
-There are two delivery-scoped exceptions. An `original_http` capability
+There are three delivery-scoped exceptions. An `original_http` capability
 carrying the validated claim `client_managed_dynamic_range_v1` asserts that its
 executor accepts the declared source range and resolves presentation against
 the live output after receiving the original bytes. The planner may therefore
@@ -734,7 +734,7 @@ The plan carries `decision_reason: client_dv10_base_layer`,
 `dv10_base_layer_decoder_unavailable`, `dv10_base_layer_output_mismatch`, or
 `dv10_base_layer_metadata_mismatch` when it cannot honour the promise.
 
-Neither exception applies to `progressive` or `hls`: those server-packaged
+None of these exceptions applies to `progressive` or `hls`: those server-packaged
 streams remain output-gated. The output snapshot is still retained for plan
 identity, diagnostics, output-change replans, explicit Dolby Vision
 transformation selection, and future server tone-map targeting.
@@ -829,8 +829,8 @@ omits entirely is unavailable — the server will not guess.
 
 `client_managed_dynamic_range_v1`, `client_dv8_base_layer_fallback_v1`, and
 `client_dv10_base_layer_fallback_v1` are valid only as `validated_claims`
-entries on `original_http`. None is a selectable transformation: the server supplies the source and the client
-executor probes and routes it internally. If that
+entries on `original_http`. None is a selectable transformation: the server
+supplies the source and the client executor probes and routes it internally. If that
 executor later reports a typed load failure, normal attempted-plan-key
 exclusion applies. Until a server tone-map recipe exists, an exhausted HDR
 original route terminates honestly rather than pretending an ordinary video
@@ -1556,7 +1556,8 @@ must not branch on an unrecognized value.
 `validated_original_playback`, `container_normalization`, `audio_adaptation`,
 `hls_audio_adaptation`, `hls_packaging_required`, `subtitle_burn_in_required`,
 `client_dv7_to_dv81`, `client_dv7_to_hdr10`, `client_managed_dynamic_range`,
-`client_dv8_base_layer`, `client_dv10_base_layer`, `evidence_insufficient_for_direct`,
+`client_dv8_base_layer`, `client_dv10_base_layer`,
+`evidence_insufficient_for_direct`,
 `surround_bitstream_conversion` (§11; advertised on `/api/v2` as the
 `surround_bitstream_conversion_v1` server feature),
 and the quality reasons `quality_auto_source`, `quality_fixed_rung`,
