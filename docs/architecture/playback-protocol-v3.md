@@ -1495,7 +1495,10 @@ route, so a direct-play viewer would come back on a transcode. The web player
    there, so a failed request (a `404`, `installation_changed`, an unreachable
    server) goes back to the reconnect cycle, which starts a new session for any
    answer that is not a plan.
-3. A network failure, a 5xx, `408`, or `429` waits for the next attempt. Any other answer means the session did not survive (a
+3. A network failure, a 5xx, `408`, or `429` waits for the next attempt. A
+   `410 playback_session_ended` or `410 playback_session_paused_timeout` means
+   the server ended the session for good: the client leaves playback (§6.3)
+   and starts nothing. Any other answer means the session did not survive (a
    server restart answers 404), and the client starts a new attempt at the
    saved position with the current tracks. That includes `installation_changed`:
    a replan always carries the old session's installation and cannot succeed,
