@@ -3609,6 +3609,8 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	}
 
 	r.Use(apimw.RequestLogger(deps.NodeID))
+	// This Recoverer answers a panic in the recording middleware below. A
+	// handler's panic is answered by the one after the activity log.
 	r.Use(middleware.Recoverer)
 	r.Use(apimw.Metrics)
 
@@ -3622,6 +3624,11 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	if deps.ActivityLogWriter != nil {
 		r.Use(activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub))
 	}
+
+	// A handler's panic becomes its 500 here, inside the request metrics and
+	// the activity log, so both record it like any other server error
+	// (#3735), an upgrade request included.
+	r.Use(apimw.Recoverer)
 }
 
 // nodeConfigSettings reads the server settings a transcode node's
