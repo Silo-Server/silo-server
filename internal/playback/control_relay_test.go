@@ -507,19 +507,39 @@ func TestControlRelayWaitsLongerOnlyForARequestThatWaitsForThePlayer(t *testing.
 	b := startRelayTestReplica(t, bus, owners)
 	b.relay.replyTimeout = 50 * time.Millisecond
 
-	a.relay.Handle(func(context.Context, string, string, json.RawMessage) json.RawMessage {
-		//nolint:forbidigo // Stands in for the owner's wait for the player.
-		time.Sleep(150 * time.Millisecond)
+	// The owner holds every request until the gate opens, standing in for
+	// its wait for the player.
+	gate, entered := make(chan struct{}), make(chan struct{}, 2)
+	var openGate sync.Once
+	release := func() { openGate.Do(func() { close(gate) }) }
+	t.Cleanup(release)
+	a.relay.Handle(func(ctx context.Context, _, _ string, _ json.RawMessage) json.RawMessage {
+		entered <- struct{}{}
+		select {
+		case <-gate:
+		case <-ctx.Done():
+		}
 		return json.RawMessage(`{}`)
 	})
 	reg := a.hub.Register("s1", registrationTestConn{})
 	t.Cleanup(func() { a.hub.Unregister(reg) })
 	waitForRelayOwner(t, owners, "s1", a.relay.id)
 
+	waited := make(chan ControlRelayOutcome, 1)
+	go func() {
+		_, outcome := b.relay.ForwardWaiting(context.Background(), "s1", "command", nil, 10*time.Second)
+		waited <- outcome
+	}()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the owner never received the waiting request")
+	}
 	if _, outcome := b.relay.Forward(context.Background(), "s1", "terminate", nil); outcome != ControlRelayNoReply {
 		t.Fatalf("a request without the extra wait = %v, want no reply", outcome)
 	}
-	if _, outcome := b.relay.ForwardWaiting(context.Background(), "s1", "command", nil, time.Second); outcome != ControlRelayHandled {
+	release()
+	if outcome := <-waited; outcome != ControlRelayHandled {
 		t.Fatalf("a request with the extra wait = %v, want handled", outcome)
 	}
 }

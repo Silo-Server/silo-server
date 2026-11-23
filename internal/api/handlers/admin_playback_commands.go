@@ -271,6 +271,9 @@ func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in Admin
 			// "dispatched" before the player's time is up.
 			locked = false
 			h.commandMu.Unlock()
+			if h.beforeReplayWait != nil {
+				h.beforeReplayWait()
+			}
 			<-prior.answer.done
 			view.Delivery = prior.answer.delivery
 		}

@@ -607,11 +607,15 @@ func TestReplayDuringTheWaitReportsThePlayersAnswer(t *testing.T) {
 	waitForPendingMessages(t, control, session.ID)
 	env := conn.messages[len(conn.messages)-1].(playback.CommandEnvelope)
 
+	waiting := make(chan struct{})
+	control.beforeReplayWait = func() { close(waiting) }
 	go send(replay)
 	select {
+	case <-waiting:
 	case view := <-replay:
-		t.Fatalf("replay answered %+v before the player did", view)
-	case <-time.After(100 * time.Millisecond):
+		t.Fatalf("replay answered %+v without waiting for the player", view)
+	case <-time.After(time.Second):
+		t.Fatal("the replay never started waiting for the player")
 	}
 	answerAsPlayer(t, control, playback.RealtimeResultStatusCompleted)(env)
 	if view := <-first; view.Outcome != AdminPlaybackCommandApplied || view.Delivery != deliveryAcknowledged {
