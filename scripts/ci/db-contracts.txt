@@ -1130,6 +1130,7 @@
 ./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
 ./internal/playback/planstore TestProgressCommitsLifecycleStateDB
 ./internal/playback/planstore TestExpirePausedAttemptDB
+./internal/playback/planstore TestExpirePausedAttemptExemptionsDB
 ./internal/playback/planstore TestLatePlaybackProgressCannotOverwriteFinalStopDB
 ./internal/playback/planstore TestPlaybackStopCommitsResumeAndEpisodeSpanOnceDB
 ./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB

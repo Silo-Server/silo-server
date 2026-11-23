@@ -572,12 +572,12 @@ func (s *Postgres) ExpireIdleAttempt(ctx context.Context, sessionID, stopID stri
 	return tag.RowsAffected() == 1, nil
 }
 
-var _ playback.PausedAttemptExpirerV3 = (*Postgres)(nil)
-
 // ExpirePausedAttempt stops a live attempt under stopID only while it is
 // paused and has been since before the timeout: its last accepted sample is
 // paused and its native lifecycle row has said paused for at least timeout,
-// by the database's clock.
+// by the database's clock. The exemptions the sweep selected by are checked
+// again here: no Cast receiver renders the attempt, and no open Watch
+// Together room lists the session.
 //
 // The attempt is locked first, the lock ApplyProgress takes, so a resume
 // either commits before (and the lock re-reads the row it changed) or waits
@@ -602,7 +602,8 @@ func (s *Postgres) ExpirePausedAttempt(ctx context.Context, sessionID, stopID st
 		SELECT true FROM playback_v3_attempts
 		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL
 		  AND COALESCE((last_sample->>'is_paused')::boolean, false)
-		FOR UPDATE`, sessionID).Scan(&locked)
+		  AND COALESCE(normalized_request #>> '{client_playback_context,output,current_sink}', '') <> $2
+		FOR UPDATE`, sessionID, playback.CastReceiverSinkV3).Scan(&locked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -611,9 +612,11 @@ func (s *Postgres) ExpirePausedAttempt(ctx context.Context, sessionID, stopID st
 	}
 	var paused bool
 	err = tx.QueryRow(ctx, `
-		SELECT true FROM playback_session_lifecycle
-		WHERE session_id = $1::uuid AND frontend = 'native' AND state = 'paused'
-		  AND updated_at <= NOW() - make_interval(secs => $2)`, sessionID, timeout.Seconds()).Scan(&paused)
+		SELECT true FROM playback_session_lifecycle lc
+		WHERE lc.session_id = $1::uuid AND lc.frontend = 'native' AND lc.state = 'paused'
+		  AND lc.updated_at <= NOW() - make_interval(secs => $2)
+		  AND NOT EXISTS (SELECT 1 FROM watch_together_rooms r, `+playback.WatchTogetherMembersSQL+` m
+			WHERE r.phase <> 'ended' AND m.value->>'session_id' = lc.session_id::text)`, sessionID, timeout.Seconds()).Scan(&paused)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
