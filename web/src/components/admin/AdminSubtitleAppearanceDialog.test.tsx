@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import { setAccessToken, setProfileId } from "@/api/client";
 import type { AdminDeviceSetting } from "@/hooks/queries/admin/users";
 import { AdminSubtitleAppearanceDialog } from "./AdminSubtitleAppearanceDialog";
 
@@ -124,4 +125,23 @@ it("reopens on the change still saving and sends the next one after it", async (
 
   expect(onSave).toHaveBeenCalledTimes(2);
   expect(savedValue(onSave, 1)).toMatchObject({ fontSize: "large", fontFamily: "monospace" });
+});
+
+it("doesn't join a save still in flight from an earlier sign-in", async () => {
+  setProfileId("admin-profile");
+  setAccessToken("first-session");
+  const first = deferred();
+  const onSave = vi.fn().mockReturnValueOnce(first.promise).mockResolvedValue(undefined);
+  const { unmount } = renderDialog(onSave);
+
+  fireEvent.click(radio("Large"));
+  unmount();
+  setAccessToken("second-session");
+  renderDialog(onSave);
+
+  expect(radio("Medium")).toHaveAttribute("aria-checked", "true");
+  fireEvent.click(radio("Monospace"));
+  expect(onSave).toHaveBeenCalledTimes(2);
+  expect(savedValue(onSave, 1)).toMatchObject({ fontSize: "medium", fontFamily: "monospace" });
+  await act(async () => first.resolve());
 });

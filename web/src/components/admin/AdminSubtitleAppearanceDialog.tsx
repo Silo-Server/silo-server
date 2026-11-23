@@ -1,4 +1,5 @@
 import { useT } from "@/i18n";
+import { adminAuthorityScope } from "@/api/v2/adminAuthority";
 import { useAutosavedDraft } from "@/hooks/useAutosavedDraft";
 import { parseSubtitleAppearance, type SubtitleAppearance } from "@/lib/subtitleAppearance";
 import { SubtitleAppearancePanelView } from "@/components/settings/SubtitleAppearancePanelView";
@@ -48,10 +49,18 @@ export function AdminSubtitleAppearanceDialog({
   onReset,
 }: AdminSubtitleAppearanceDialogProps) {
   const t = useT();
-  // Keyed by the setting's target, so reopening during a save continues from it.
+  // Keyed by the signed-in session and the setting's target, so reopening
+  // during a save continues from it, but a later sign-in or another server
+  // never joins a save the earlier one started.
   const draft = useAutosavedDraft(
     parseSubtitleAppearance(setting.value),
-    JSON.stringify([setting.user_id, setting.profile_id, setting.device_id, setting.key]),
+    JSON.stringify([
+      adminAuthorityScope(),
+      setting.user_id,
+      setting.profile_id,
+      setting.device_id,
+      setting.key,
+    ]),
   );
 
   const handleChange = (patch: Partial<SubtitleAppearance>) =>
