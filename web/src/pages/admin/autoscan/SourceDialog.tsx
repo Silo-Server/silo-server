@@ -684,7 +684,7 @@ export function SourceDialog(props: SourceDialogProps) {
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-h-[calc(100dvh-2rem)] grid-cols-[minmax(0,1fr)] overflow-y-auto sm:max-w-2xl">
           <DialogHeader>
-            <DialogTitle className="pe-6 break-words">
+            <DialogTitle className="break-words">
               {t("web.admin.autoscan.sourceDialog.editTitle", { name: props.title })}
             </DialogTitle>
             <DialogDescription>{props.description}</DialogDescription>
@@ -705,7 +705,7 @@ export function SourceDialog(props: SourceDialogProps) {
                 <TabsTrigger
                   key={tab.id}
                   value={tab.id}
-                  className="flex-none px-1.5 text-[13px] sm:px-3 sm:text-sm"
+                  className="flex-none px-1.5 text-[0.8125rem] sm:px-3 sm:text-sm"
                 >
                   {tab.label}
                   {problemTabs.has(tab.id) && (

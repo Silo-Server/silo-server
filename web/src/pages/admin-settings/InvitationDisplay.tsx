@@ -1,6 +1,7 @@
 import { Copy, Link2, Mail, MailX } from "lucide-react";
 
 import type { AdminInvitation as Invitation } from "@/api/v2/invitations";
+import { PathText } from "@/components/PathText";
 import { Button } from "@/components/ui/button";
 import { useT } from "@/i18n";
 
@@ -8,6 +9,9 @@ import { TOUCH_FIELD_CLASS } from "./touchClasses";
 
 /** Shown in the Delivery column when the delivery is unknown. */
 const NO_DELIVERY = "—";
+
+// A URL's scheme and host, up to the first "/" of its path.
+const URL_ORIGIN = /^[a-z][a-z\d+.-]*:\/\/[^/]*/i;
 
 // The claim-link box shown after create/resend. min-w-0 + overflow-hidden on
 // every level matters: the URL is one unbreakable token, and without them it
@@ -25,11 +29,21 @@ export function ClaimLinkBox({
   onDone: () => void;
 }) {
   const t = useT();
+  const origin = URL_ORIGIN.exec(claimUrl)?.[0] ?? "";
   return (
     <div className="min-w-0 space-y-4">
       <div className="bg-muted min-w-0 overflow-hidden rounded-md p-2.5">
-        <code className="block truncate text-xs max-lg:break-all max-lg:whitespace-normal">
-          {claimUrl}
+        {/* A URL reads left to right in any language, so a cut one keeps its
+            start and its "…", and its wrapped lines line up with the page.
+            PathText keeps folders named in Arabic in a configured public URL
+            in order. The host stays outside it: isolated, a host whose first
+            label is Arabic would turn right to left and swap its labels. */}
+        <code
+          dir="ltr"
+          className="align-with-page block truncate text-xs max-lg:break-all max-lg:whitespace-normal"
+        >
+          {origin}
+          <PathText path={claimUrl.slice(origin.length)} />
         </code>
       </div>
       <p className="text-muted-foreground text-xs">{finePrint}</p>

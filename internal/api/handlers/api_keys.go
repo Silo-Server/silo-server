@@ -147,7 +147,17 @@ func (h *APIKeyHandler) CreatePersonalAPIKey(ctx context.Context, userID int, ac
 	if err != nil {
 		return nil, err
 	}
-	return store.CreatePersonal(ctx, userID, acting, profileID, label, normalized)
+	return store.CreatePersonal(withRequestClaims(ctx), userID, acting, profileID, label, normalized)
+}
+
+// withRequestClaims passes the request's credential to the key store, which
+// refuses a key for a session or API key revoked since the request
+// authenticated.
+func withRequestClaims(ctx context.Context) context.Context {
+	if claims := apimw.GetClaims(ctx); claims != nil {
+		return auth.WithClaims(ctx, claims)
+	}
+	return ctx
 }
 
 // PersonalAPIKeyView decides which of the account's keys the caller acting as
@@ -284,7 +294,7 @@ func (h *APIKeyHandler) CreateAdminAPIKey(ctx context.Context, userID int, label
 // concurrent promotion or ownership transfer cannot leave an admin holding a
 // key it may no longer mint.
 func (h *APIKeyHandler) createAsActor(ctx context.Context, userID int, label string, scopes []string) (*models.APIKey, error) {
-	key, err := h.repo.CreateAsActor(ctx, actorUserID(ctx), userID, label, scopes)
+	key, err := h.repo.CreateAsActor(withRequestClaims(ctx), actorUserID(ctx), userID, label, scopes)
 	return key, ownerError(err)
 }
 

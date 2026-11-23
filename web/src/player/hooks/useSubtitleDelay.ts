@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { clampSubtitleSyncMs, useSubtitleSyncSetting } from "@/hooks/queries/subtitleSync";
+import { reportOfflineSettingFailure } from "@/hooks/queries/settingWriteOffline";
 
 /** How long the Delay control waits after the last nudge before saving. */
 const SAVE_AFTER_MS = 600;
@@ -44,7 +45,9 @@ export function useSubtitleDelay(): [number, (ms: number) => void] {
         flushRef.current = null;
         queueRef.current = queueRef.current
           .then(() => save(next))
-          .catch(() => undefined)
+          // Refused offline, it won't be saved later either: say so. The draft
+          // still applies for this playback.
+          .catch((error: unknown) => void reportOfflineSettingFailure(error))
           .finally(() => setUnsettled((count) => count - 1));
       };
       flushRef.current = flush;

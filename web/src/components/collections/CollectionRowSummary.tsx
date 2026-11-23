@@ -22,11 +22,11 @@ export function CollectionRowSummary({
         <Icon aria-hidden className="size-4" />
       </span>
       <span className="grid min-w-0 flex-1">
-        <span className="truncate text-[13.5px] font-medium">{row.title}</span>
-        <span className="text-muted-foreground truncate text-[12.5px]">
+        <span className="truncate text-[0.84375rem] font-medium">{row.title}</span>
+        <span className="text-muted-foreground truncate text-[0.78125rem]">
           {rowMeta(row, libraryNames)}
         </span>
-        {note ? <span className="text-[12.5px] text-pretty">{note}</span> : null}
+        {note ? <span className="text-[0.78125rem] text-pretty">{note}</span> : null}
       </span>
     </>
   );

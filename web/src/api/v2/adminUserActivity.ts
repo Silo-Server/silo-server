@@ -73,7 +73,8 @@ export interface AdminUserPlay {
   play_method: string;
   started_at: string;
   ended_at: string;
-  watched_seconds: number;
+  /** Where the play ended, not how long it was watched. */
+  end_position_seconds: number;
   duration_seconds: number | null;
   completed: boolean;
 }
@@ -265,7 +266,7 @@ function playOf(value: unknown): AdminUserPlay {
     play_method: optionalText(row, "play_method", what),
     started_at: text(row, "started_at", what),
     ended_at: text(row, "ended_at", what),
-    watched_seconds: count(row, "watched_seconds", what),
+    end_position_seconds: count(row, "end_position_seconds", what),
     duration_seconds: nullableCount(row, "duration_seconds", what),
     completed: flag(row, "completed", what),
   };

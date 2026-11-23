@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
+	"slices"
 	"strings"
 	"time"
 
@@ -288,6 +290,20 @@ func buildMatchCandidateQuery(source MatchItem, limit int, after *matchCandidate
 			len(args),
 		))
 	}
+	// Every edition of a book may claim its work, so these branches ride
+	// idx_media_item_work_ids_provider_id instead of a unique key.
+	for _, provider := range slices.Sorted(maps.Keys(source.WorkIDs)) {
+		workID := source.WorkIDs[provider].ID
+		if provider == "" || workID == "" {
+			continue
+		}
+		args = append(args, provider, workID)
+		matchFilters = append(matchFilters, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM media_item_work_ids w WHERE w.content_id = mi.content_id AND w.provider = $%d AND w.provider_id = $%d)",
+			len(args)-1,
+			len(args),
+		))
+	}
 	if strings.TrimSpace(source.SeriesName) != "" && source.SeriesIndex != nil {
 		args = append(args, source.SeriesName, *source.SeriesIndex)
 		matchFilters = append(matchFilters, fmt.Sprintf(
@@ -385,6 +401,7 @@ func (r *Repository) listMatchItems(ctx context.Context, suffix string, args ...
 		       COALESCE(book_series.series_name, '') AS series_name,
 		       book_series.series_index,
 		       COALESCE(provider_ids.external_ids, '{}'::jsonb) AS external_ids,
+		       COALESCE(work_ids.work_ids, '{}'::jsonb) AS work_ids,
 		       COALESCE(lwi.work_id, '') AS work_id
 		FROM media_items mi
 		LEFT JOIN literary_work_items lwi ON lwi.content_id = mi.content_id
@@ -411,6 +428,11 @@ func (r *Repository) listMatchItems(ctx context.Context, suffix string, args ...
 			FROM media_item_provider_ids mip
 			WHERE mip.content_id = mi.content_id
 		) provider_ids ON TRUE
+		LEFT JOIN LATERAL (
+			SELECT jsonb_object_agg(w.provider, jsonb_build_object('id', w.provider_id, 'evidence', w.evidence)) AS work_ids
+			FROM media_item_work_ids w
+			WHERE w.content_id = mi.content_id
+		) work_ids ON TRUE
 		`+suffix, args...)
 	if err != nil {
 		return nil, err
@@ -877,7 +899,7 @@ func scanWork(row pgx.Row) (*Work, error) {
 
 func scanMatchItem(row pgx.Row) (MatchItemWithWork, error) {
 	var item MatchItemWithWork
-	var providerIDs []byte
+	var providerIDs, workIDs []byte
 	if err := row.Scan(
 		&item.ContentID,
 		&item.Type,
@@ -889,6 +911,7 @@ func scanMatchItem(row pgx.Row) (MatchItemWithWork, error) {
 		&item.SeriesName,
 		&item.SeriesIndex,
 		&providerIDs,
+		&workIDs,
 		&item.WorkID,
 	); err != nil {
 		return MatchItemWithWork{}, err
@@ -896,6 +919,12 @@ func scanMatchItem(row pgx.Row) (MatchItemWithWork, error) {
 	item.ExternalIDs = map[string]string{}
 	if len(providerIDs) > 0 {
 		if err := json.Unmarshal(providerIDs, &item.ExternalIDs); err != nil {
+			return MatchItemWithWork{}, err
+		}
+	}
+	item.WorkIDs = map[string]WorkID{}
+	if len(workIDs) > 0 {
+		if err := json.Unmarshal(workIDs, &item.WorkIDs); err != nil {
 			return MatchItemWithWork{}, err
 		}
 	}

@@ -24,14 +24,6 @@ const PROVIDER_KEY = "catalog.search.provider";
 const MEILI_URL_KEY = "catalog.search.meilisearch.url";
 const MEILI_API_KEY = "catalog.search.meilisearch.api_key";
 
-// The environment variable that sets each key on every server start; while it
-// is set the server refuses saves of that key.
-const ENV_VARS: Record<string, string> = {
-  [PROVIDER_KEY]: "SILO_SEARCH_PROVIDER",
-  [MEILI_URL_KEY]: "SILO_MEILISEARCH_URL",
-  [MEILI_API_KEY]: "SILO_MEILISEARCH_API_KEY",
-};
-
 // Reaching Meilisearch and the two choices that change what a search returns
 // are shown once it is selected; the index name, timing and ranking mix are
 // tuning behind Advanced.
@@ -69,11 +61,6 @@ export default function SearchSettings() {
 
   const provider = form.getValue(PROVIDER_KEY) || "postgres";
   const meiliEnabled = provider === "meilisearch";
-  const envVar = (key: string) =>
-    form.sensitiveManagedByEnv.includes(key) ? ENV_VARS[key] : undefined;
-  const providerEnv = envVar(PROVIDER_KEY);
-  const urlEnv = envVar(MEILI_URL_KEY);
-  const apiKeyEnv = envVar(MEILI_API_KEY);
   // Without the protected-credential status the page cannot tell which of
   // these fields the environment sets, so they wait for a reload.
   const connectionUnknown = form.sensitiveStatusError;
@@ -136,11 +123,7 @@ export default function SearchSettings() {
           <SettingField
             label={t("web.admin.settings.search.provider.label")}
             type="select"
-            description={
-              providerEnv
-                ? t("web.admin.settings.search.managedByEnv", { env: providerEnv })
-                : t("web.admin.settings.search.provider.description")
-            }
+            description={t("web.admin.settings.search.provider.description")}
             value={provider}
             onChange={(value) => form.setValue(PROVIDER_KEY, value)}
             options={[
@@ -148,7 +131,8 @@ export default function SearchSettings() {
               { value: "meilisearch", label: MEILISEARCH },
             ]}
             status={meiliEnabled && !searchStatus?.degraded ? <SearchStatusSummary /> : undefined}
-            disabled={providerEnv != null || connectionUnknown}
+            disabled={connectionUnknown}
+            managedByEnv={form.envVar(PROVIDER_KEY)}
             restartRequired={restartKeys.has(PROVIDER_KEY)}
           />
           {connectionUnknown && (
@@ -187,11 +171,12 @@ export default function SearchSettings() {
             <>
               <SettingField
                 label={t("web.admin.settings.search.meili.url.label")}
-                description={urlEnv && t("web.admin.settings.search.managedByEnv", { env: urlEnv })}
                 value={form.getValue(MEILI_URL_KEY)}
                 onChange={(value) => form.setValue(MEILI_URL_KEY, value)}
                 hint={MEILI_URL_EXAMPLE}
-                disabled={!meiliEnabled || urlEnv != null || connectionUnknown}
+                dir="ltr"
+                disabled={!meiliEnabled || connectionUnknown}
+                managedByEnv={form.envVar(MEILI_URL_KEY)}
                 restartRequired={restartKeys.has(MEILI_URL_KEY)}
               />
               <SecretField
@@ -204,12 +189,11 @@ export default function SearchSettings() {
                 // Meilisearch instance without a master key needs it empty.
                 onClear={() => form.setValue(MEILI_API_KEY, "")}
                 cleared={form.isClearStaged(MEILI_API_KEY)}
-                hint={
-                  apiKeyEnv
-                    ? t("web.admin.settings.search.managedByEnv", { env: apiKeyEnv })
-                    : t("web.admin.settings.search.meili.apiKey.hint")
-                }
-                disabled={!meiliEnabled || apiKeyEnv != null || connectionUnknown}
+                hint={t("web.admin.settings.search.meili.apiKey.hint")}
+                // Emptying the field takes its draft back, so it holds still
+                // while a save is in flight, like the Email password.
+                disabled={!meiliEnabled || connectionUnknown || form.isSaving}
+                managedByEnv={form.envVar(MEILI_API_KEY)}
                 restartRequired={restartKeys.has(MEILI_API_KEY)}
               />
               <ConnectionCheckAction
@@ -264,17 +248,18 @@ export default function SearchSettings() {
               <>
                 <SettingField
                   label={t("web.admin.settings.search.meili.index.label")}
-                  value={form.getValue("catalog.search.meilisearch.index") || "silo_media_items"}
+                  value={form.getValue("catalog.search.meilisearch.index")}
                   onChange={(value) => form.setValue("catalog.search.meilisearch.index", value)}
                   description={t("web.admin.settings.search.meili.index.description")}
-                  disabled={!meiliEnabled}
+                  disabled={!meiliEnabled || connectionUnknown}
                   restartRequired={restartKeys.has("catalog.search.meilisearch.index")}
+                  managedByEnv={form.envVar("catalog.search.meilisearch.index")}
                 />
                 <SettingField
                   label={t("web.admin.settings.search.meili.timeout.label")}
                   type="number"
                   unit={t("web.admin.common.units.milliseconds")}
-                  value={form.getValue("catalog.search.meilisearch.timeout_ms") || "800"}
+                  value={form.getValue("catalog.search.meilisearch.timeout_ms")}
                   onChange={(value) =>
                     form.setValue("catalog.search.meilisearch.timeout_ms", value)
                   }
@@ -285,7 +270,7 @@ export default function SearchSettings() {
                 <SettingField
                   label={t("web.admin.settings.search.meili.batch.label")}
                   type="number"
-                  value={form.getValue("catalog.search.meilisearch.sync_batch_size") || "500"}
+                  value={form.getValue("catalog.search.meilisearch.sync_batch_size")}
                   onChange={(value) =>
                     form.setValue("catalog.search.meilisearch.sync_batch_size", value)
                   }
@@ -296,7 +281,7 @@ export default function SearchSettings() {
                 <SettingField
                   label={t("web.admin.settings.search.meili.ratio.label")}
                   type="number"
-                  value={form.getValue("catalog.search.meilisearch.semantic_ratio") || "0.50"}
+                  value={form.getValue("catalog.search.meilisearch.semantic_ratio")}
                   onChange={(value) =>
                     form.setValue("catalog.search.meilisearch.semantic_ratio", value)
                   }

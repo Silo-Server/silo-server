@@ -348,6 +348,7 @@ func DeleteProfile(ctx context.Context, db *sql.DB, id string) ([]string, error)
 		"not_interested",
 		"watch_progress",
 		"watch_history",
+		"playback_stop_commits",
 		"hidden_history_items",
 		"home_item_dismissals",
 		"collection_sort_preferences",

@@ -63,7 +63,7 @@ function KeyBox({
         <Lock aria-hidden="true" className="size-4 shrink-0" />
         {t("web.admin.backups.key.heading")}
       </h3>
-      <p className="text-muted-foreground text-[13px] leading-relaxed">
+      <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
         {t("web.admin.backups.key.explanation")}
       </p>
       <div className="space-y-1">
@@ -77,7 +77,7 @@ function KeyBox({
           {keyCheck}
         </p>
       </div>
-      <p className="text-muted-foreground text-[13px] leading-relaxed">
+      <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
         {t("web.admin.backups.key.checkHelp", {
           code: (chunks) => <code className="font-mono text-xs">{chunks}</code>,
         })}
@@ -90,7 +90,7 @@ function KeyBox({
           aria-required="true"
           className="mt-0.5"
         />
-        <Label htmlFor={boxId} className="text-[13px] leading-relaxed font-normal">
+        <Label htmlFor={boxId} className="text-[0.8125rem] leading-relaxed font-normal">
           {t("web.admin.backups.key.kept")}
         </Label>
       </div>
@@ -105,6 +105,7 @@ function TextField({
   placeholder,
   type = "text",
   mono = false,
+  dir,
 }: {
   label: string;
   value: string;
@@ -112,6 +113,8 @@ function TextField({
   placeholder?: string;
   type?: "text" | "password";
   mono?: boolean;
+  /** Pass `"ltr"` for a URL, which reads left to right in every language. */
+  dir?: "ltr";
 }) {
   const id = useId();
   return (
@@ -120,6 +123,7 @@ function TextField({
       <Input
         id={id}
         type={type}
+        dir={dir}
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
@@ -217,6 +221,7 @@ function S3SetupForm({
               onChange={set("endpoint")}
               placeholder={ENDPOINT_EXAMPLE}
               mono
+              dir="ltr"
             />
           </div>
           <TextField

@@ -84,8 +84,8 @@ func (b Brand) withDefaults() Brand {
 }
 
 // actionColors returns the primary button's background and label colors:
-// the accent with whichever label color reads better on it, else the
-// default white-on-dark action.
+// the accent with a label color that reads on it (readableLabelColor), else
+// the default white-on-dark action.
 func (b Brand) actionColors() (background, label string) {
 	accent := normalizeHexColor(b.AccentColor)
 	if accent == "" {
@@ -206,15 +206,23 @@ func normalizeHexColor(color string) string {
 }
 
 // readableLabelColor picks the dark or white label color, whichever has the
-// higher WCAG contrast against the "#rrggbb" background.
+// higher WCAG contrast against the "#rrggbb" background, or black when neither
+// reaches 4.5:1. That happens only on mid-tone accents (relative luminance
+// about 0.18 to 0.21, such as the violet preset), where black reads at 4.66:1
+// or more, so the button keeps the admin's accent as stored. The web client
+// makes the same choice (web/src/lib/accentColor.ts).
 func readableLabelColor(background string) string {
 	bg := relativeLuminance(background)
-	dark := relativeLuminance(EmailColorOnAct)
-	white := 1.0
-	if (white+0.05)/(bg+0.05) > (bg+0.05)/(dark+0.05) {
+	white := 1.05 / (bg + 0.05)
+	dark := (bg + 0.05) / (relativeLuminance(EmailColorOnAct) + 0.05)
+	switch {
+	case max(white, dark) < 4.5:
+		return "#000000"
+	case white > dark:
 		return "#ffffff"
+	default:
+		return EmailColorOnAct
 	}
-	return EmailColorOnAct
 }
 
 func relativeLuminance(hex string) float64 {

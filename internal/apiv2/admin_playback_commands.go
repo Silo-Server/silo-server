@@ -24,7 +24,7 @@ type AdminPlaybackCommandService interface {
 type AdminPlaybackCommandIdentity struct {
 	CommandID  string `json:"command_id" format:"uuid" minLength:"36" maxLength:"36" doc:"Client-allocated canonical UUID naming this one command; a retry preserves it" example:"3fa85f64-5717-4562-b3fc-2c963f66afa6"`
 	Sequence   int64  `json:"sequence" minimum:"1" maximum:"9007199254740991" doc:"Client-allocated positive order within this session, at most 2^53-1 so every client can represent the latest applied sequence exactly; a command below the latest applied sequence is refused as stale" example:"7"`
-	Reason     string `json:"reason,omitempty" maxLength:"1024" doc:"Free-form administrator reason shown to the player when supported"`
+	Reason     string `json:"reason,omitempty" maxLength:"1024" doc:"Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate"`
 	DeadlineMS int    `json:"deadline_ms,omitempty" minimum:"0" maximum:"10000" doc:"Delivery acknowledgement deadline in milliseconds; bounded to 10000, default 3000. Ignored by message"`
 }
 
@@ -49,7 +49,7 @@ type AdminPlaybackCommandReceipt struct {
 	CommandID string `json:"command_id" doc:"The command identity this receipt belongs to"`
 	Sequence  int64  `json:"sequence" doc:"The applied sequence"`
 	Outcome   string `json:"outcome" enum:"applied,replayed" doc:"applied: this request dispatched the command once (202). replayed: the identity was already applied and this is its recorded receipt (200)"`
-	Delivery  string `json:"delivery" enum:"dispatched,fallback_scheduled" doc:"dispatched: sent on the session's realtime lane. fallback_scheduled: no lane; the server ends the session after the deadline (stop only)"`
+	Delivery  string `json:"delivery" enum:"dispatched,fallback_scheduled,acknowledged" doc:"dispatched: written to the session's realtime lane; the receipt does not say whether the player confirmed it, and a lane whose player went away without closing it still takes the write. fallback_scheduled: no lane; the server ends the session after the deadline (stop only). acknowledged: the player answered that it received the message within the server's short wait (message only); a player may answer before showing it"`
 }
 
 // AdminPlaybackCommandOutput carries 202 for a newly applied command and 200

@@ -196,9 +196,12 @@ export const DESIGN_PRINCIPLES = [
 // ├─────────────────────────────────────────────────────────────┤
 // │  --primary           │ Primary action color (buttons, CTAs)│
 // │  --primary-foreground│ Text on primary elements            │
+// │  --primary-hover     │ Hovered primary fill                │
 // │  --secondary         │ Secondary element backgrounds       │
 // │  --accent            │ Active/highlighted backgrounds      │
-// │  --destructive       │ Danger/delete actions               │
+// │  --destructive       │ Danger text, icons, borders, dots   │
+// │  --destructive-fill  │ Danger fill under white text        │
+// │  --<status>-label    │ Status text on its tint or a surface│
 // │  --ring              │ Focus ring color                    │
 // ├─────────────────────────────────────────────────────────────┤
 // │  BORDERS                                                   │

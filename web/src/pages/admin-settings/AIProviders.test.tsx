@@ -2,6 +2,8 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import type { AIProvider } from "@/hooks/queries/admin/aiProviders";
+
 import { AIProvidersList } from "./AIProviders";
 
 const mocks = vi.hoisted(() => ({ update: vi.fn() }));
@@ -15,7 +17,7 @@ vi.mock("@/hooks/queries/admin/aiProviders", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
-const provider = {
+const provider: AIProvider = {
   id: "openai-1",
   type: "openai" as const,
   name: "OpenAI",
@@ -34,8 +36,8 @@ const types = [
   },
 ];
 
-async function openProvider(user: ReturnType<typeof userEvent.setup>) {
-  render(<AIProvidersList providers={[provider]} types={types} />);
+async function openProvider(user: ReturnType<typeof userEvent.setup>, shown = provider) {
+  render(<AIProvidersList providers={[shown]} types={types} />);
   await user.click(screen.getByRole("button", { name: "Manage" }));
   return screen.getByRole("group", { name: "OpenAI" });
 }
@@ -58,5 +60,22 @@ describe("AIProvidersList", () => {
     expect(id).toBe("openai-1");
     expect(draft.name).toBe("OpenAI work");
     expect(draft.api_key).toBe(wantKey);
+  });
+
+  // The server refuses to edit or delete a provider the deployment declares.
+  it("locks a provider the deployment declares", async () => {
+    const user = userEvent.setup();
+    const panel = await openProvider(user, {
+      ...provider,
+      used_by: [],
+      managed_by_env_var: "SILO_CONFIG_FILE",
+    });
+    expect(
+      within(panel).getByText("Set by SILO_CONFIG_FILE in the server’s environment."),
+    ).toBeInTheDocument();
+    expect(within(panel).getByLabelText("Name")).toBeDisabled();
+    expect(within(panel).queryByRole("button", { name: "Remove" })).not.toBeInTheDocument();
+    expect(within(panel).queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(within(panel).getByRole("button", { name: "Test" })).toBeEnabled();
   });
 });

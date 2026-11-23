@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { Loader2 } from "lucide-react";
+import { Direction } from "radix-ui";
 
 import type { PluginAdminForm, PluginAdminFormField, PluginAdminFormSection } from "@/api/types";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,10 @@ import { useT } from "@/i18n";
 import {
   effectiveValue,
   evaluateShowWhen,
+  isSecretField,
+  ownValue,
+  rendersMultiline,
+  textDirection,
   validateSchemaValues,
   type SchemaOption,
 } from "./schemaFormUtils";
@@ -53,17 +58,23 @@ type Props = {
    * shown under the control (e.g. why a server's type cannot change).
    */
   lockedKeys?: Readonly<Record<string, string>>;
+  /**
+   * Fields that hold server paths. On a right-to-left page their values stay
+   * left to right, even when a path starts with a right-to-left folder name.
+   */
+  pathKeys?: readonly string[];
 };
 
 const NO_HIDDEN_KEYS: readonly string[] = [];
 const NO_LOCKED_KEYS: Readonly<Record<string, string>> = {};
+const NO_PATH_KEYS: readonly string[] = [];
 
 function optionsFor(
   field: PluginAdminFormField,
   dynamicOptions: Record<string, SchemaOption[]> | undefined,
 ): SchemaOption[] {
   if (field.dynamic_options) {
-    return dynamicOptions?.[field.key] ?? field.options ?? [];
+    return ownValue(dynamicOptions, field.key) ?? field.options ?? [];
   }
   return field.options ?? [];
 }
@@ -172,8 +183,10 @@ export function SchemaForm({
   hiddenKeys = NO_HIDDEN_KEYS,
   expandSections = false,
   lockedKeys = NO_LOCKED_KEYS,
+  pathKeys = NO_PATH_KEYS,
 }: Props) {
   const t = useT();
+  const pageDir = Direction.useDirection();
   const hidden = useMemo(() => new Set(hiddenKeys), [hiddenKeys]);
   const byKey = useMemo(() => {
     const map = new Map<string, PluginAdminFormField>();
@@ -221,7 +234,7 @@ export function SchemaForm({
 
   // The reason a locked field cannot change, tied to its control.
   function renderLockNote(field: PluginAdminFormField): React.ReactNode {
-    const reason = lockedKeys[field.key];
+    const reason = ownValue(lockedKeys, field.key);
     return reason ? (
       <p id={lockNoteId(field)} className="text-muted-foreground text-xs">
         {reason}
@@ -231,7 +244,7 @@ export function SchemaForm({
 
   function renderControl(field: PluginAdminFormField): React.ReactNode {
     const id = `${idPrefix}-${field.key}`;
-    const locked = lockedKeys[field.key] !== undefined;
+    const locked = ownValue(lockedKeys, field.key) !== undefined;
     const describedBy = locked ? lockNoteId(field) : undefined;
 
     if (field.control === "SELECT") {
@@ -310,13 +323,19 @@ export function SchemaForm({
       );
     }
 
-    if (field.control === "TEXTAREA" || field.multiline) {
+    const text = String(effectiveValue(field, values) ?? "");
+    const masked = isSecretField(field);
+    const alwaysLeftToRight = masked || pathKeys.includes(field.key);
+    const textDir = textDirection(pageDir, text, field.placeholder, alwaysLeftToRight);
+
+    if (rendersMultiline(field)) {
       return (
         <textarea
           id={id}
+          dir={textDir}
           className="border-input bg-background min-h-24 w-full rounded-md border px-3 py-2 text-sm"
           rows={field.rows && field.rows > 0 ? field.rows : 4}
-          value={String(effectiveValue(field, values) ?? "")}
+          value={text}
           placeholder={field.placeholder}
           onChange={(event) => setField(field.key, event.target.value)}
           disabled={locked}
@@ -330,14 +349,9 @@ export function SchemaForm({
         id={id}
         disabled={locked}
         aria-describedby={describedBy}
-        type={
-          field.control === "PASSWORD" || field.secret
-            ? "password"
-            : field.control === "NUMBER"
-              ? "number"
-              : "text"
-        }
-        value={String(effectiveValue(field, values) ?? "")}
+        type={masked ? "password" : field.control === "NUMBER" ? "number" : "text"}
+        dir={textDir}
+        value={text}
         placeholder={field.placeholder}
         onChange={(event) => setField(field.key, event.target.value)}
       />
@@ -346,7 +360,7 @@ export function SchemaForm({
 
   // A non-switch field: label + optional description stacked above the control.
   function renderField(field: PluginAdminFormField): React.ReactNode {
-    const err = mergedErrors[field.key];
+    const err = ownValue(mergedErrors, field.key);
     // A field that only appears because its show_when passed reads as nested
     // under whatever toggle gates it (e.g. the anime overrides under anime_enabled).
     const nested = Boolean(field.show_when);
@@ -371,7 +385,7 @@ export function SchemaForm({
   // the toggle at the end. No outer border — the group container owns it.
   function renderSwitchRow(field: PluginAdminFormField): React.ReactNode {
     const id = `${idPrefix}-${field.key}`;
-    const err = mergedErrors[field.key];
+    const err = ownValue(mergedErrors, field.key);
     return (
       <div key={field.key} className="px-3.5 py-3 transition-colors">
         <div className="flex items-start gap-3">
@@ -380,8 +394,10 @@ export function SchemaForm({
             className="mt-0.5 shrink-0"
             checked={Boolean(effectiveValue(field, values))}
             onCheckedChange={(checked) => setField(field.key, checked)}
-            disabled={lockedKeys[field.key] !== undefined}
-            aria-describedby={lockedKeys[field.key] !== undefined ? lockNoteId(field) : undefined}
+            disabled={ownValue(lockedKeys, field.key) !== undefined}
+            aria-describedby={
+              ownValue(lockedKeys, field.key) !== undefined ? lockNoteId(field) : undefined
+            }
           />
           <div className="min-w-0 space-y-0.5">
             <Label htmlFor={id} className="cursor-pointer font-medium">
@@ -465,7 +481,7 @@ export function SchemaForm({
             section={section}
             values={values}
             fields={descriptor.fields}
-            forceOpen={section.field_keys.some((key) => mergedErrors[key] != null)}
+            forceOpen={section.field_keys.some((key) => ownValue(mergedErrors, key) != null)}
             expanded={expandSections}
             renderFields={(keys) => renderFieldList(resolveKeys(keys))}
           />

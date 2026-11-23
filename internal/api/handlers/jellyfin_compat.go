@@ -176,7 +176,7 @@ func (h *AdminHandler) StartAdminJellyfinCompatWebInstall(ctx context.Context, r
 		}
 		version = resolvedVersion
 	}
-	return jellycompat.StartWebComponentInstall(jellycompat.WebComponentInstallOptions{
+	return jellycompat.StartWebComponentInstall(h.BaseContext, jellycompat.WebComponentInstallOptions{
 		InstallRoot: root,
 		SourceURL:   sourceURL,
 		Version:     version,

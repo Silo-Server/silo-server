@@ -24,11 +24,7 @@ func publishEventMetadataUpdate(ctx context.Context, hub *evt.Hub, libraryID int
 	if hub == nil {
 		return
 	}
-	if err := hub.PublishJSON(ctx, evt.ChannelCatalog, "catalog.item.changed", map[string]any{
-		"library_id": libraryID,
-		"content_id": contentID,
-		"change":     "metadata_updated",
-	}, evt.PublishOptions{}); err != nil {
+	if err := hub.PublishJSON(ctx, evt.ChannelCatalog, "catalog.item.changed", notifications.NewCatalogItemChange(libraryID, contentID, "metadata_updated"), evt.PublishOptions{}); err != nil {
 		slog.WarnContext(ctx, "events: failed to publish metadata update", "component", "api", "library_id", libraryID, "content_id", contentID, "error", err)
 	}
 }

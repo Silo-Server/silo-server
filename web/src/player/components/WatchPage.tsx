@@ -12,6 +12,7 @@ import type { PlaybackRealtimeEventEnvelope } from "../realtime-protocol";
 import { usePlaybackSession } from "../hooks/usePlaybackSession";
 import { useMarkerChangeGuard } from "../hooks/useMarkerChangeGuard";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
+import { resumeVersionForPlan } from "../utils/mediaTimeline";
 import { resolvePlayableSubtitles } from "../utils/playableSubtitles";
 import { patchVersionMarkers, resolveActiveVersionMarkers } from "../utils/watchPageMarkers";
 import { VideoPlayer } from "./VideoPlayer";
@@ -34,15 +35,11 @@ function patchChapterThumbnail(
 ): PlayerFileVersion[] {
   let changed = false;
   const nextVersions = versions.map((version) => {
-    if (version.file_id !== fileId || !version.chapters?.length) {
-      return version;
-    }
+    if (version.file_id !== fileId || !version.chapters?.length) return version;
 
     let versionChanged = false;
     const nextChapters = version.chapters.map((chapter) => {
-      if (chapter.index !== chapterIndex) {
-        return chapter;
-      }
+      if (chapter.index !== chapterIndex) return chapter;
       if (
         chapter.thumbnail_url === thumbnailUrl &&
         chapter.thumbnail_thumbhash === thumbnailThumbhash
@@ -184,6 +181,7 @@ function WatchPagePlayer({
   forceInitialPosition,
   qualityPreference,
   maxBitrateKbps,
+  networkTier,
   explicitAudioTrackIndex,
   initialSubtitleTrackIndexByFileId,
   initialBitmapSubtitleTrackIndexByFileId,
@@ -196,8 +194,6 @@ function WatchPagePlayer({
   showMarkerSource = false,
   bufferingMode = "always",
   autoSkipRecap,
-  autoPlayNextPreview,
-  autoPlayNext,
   canEditMarkers,
   seriesContext,
   onNavigateEpisode,
@@ -251,6 +247,7 @@ function WatchPagePlayer({
     !watchTogetherRoomId,
     bufferingMode,
     versionPicked,
+    networkTier,
   );
 
   const fallbackHandledRef = useRef<string | null>(null);
@@ -343,6 +340,12 @@ function WatchPagePlayer({
     () => playbackVersions.find((version) => version.file_id === session.mediaFileId),
     [playbackVersions, session.mediaFileId],
   );
+  const resumeVersion = resumeVersionForPlan(
+    playbackVersions,
+    session.plan?.requested_media_file_id,
+    activePlaybackVersion,
+    session.versionPinned(),
+  );
   const trickplayAvailable = activePlaybackVersion?.trickplay_available === true;
   const trickplayQuery = useWatchTrickplay(
     contentId,
@@ -393,17 +396,25 @@ function WatchPagePlayer({
 
   const versionPinned = session.versionPinned;
   const handleEnded = useCallback(() => {
+    const version = resumeVersion ?? activePlaybackVersion;
     onEnded?.({
       positionSeconds: session.durationSeconds ?? 0,
       durationSeconds: session.durationSeconds ?? undefined,
-      lastFileId: session.mediaFileId,
-      lastResolution: activePlaybackVersion?.resolution,
-      lastHDR: activePlaybackVersion?.hdr,
-      lastCodecVideo: activePlaybackVersion?.codec_video,
-      lastEditionKey: activePlaybackVersion?.edition_key,
+      lastFileId: resumeVersion?.file_id ?? session.mediaFileId,
+      lastResolution: version?.resolution,
+      lastHDR: version?.hdr,
+      lastCodecVideo: version?.codec_video,
+      lastEditionKey: version?.edition_key,
       versionPinned: versionPinned(),
     });
-  }, [activePlaybackVersion, onEnded, session.durationSeconds, session.mediaFileId, versionPinned]);
+  }, [
+    activePlaybackVersion,
+    onEnded,
+    resumeVersion,
+    session.durationSeconds,
+    session.mediaFileId,
+    versionPinned,
+  ]);
 
   const { saveAudioChoice, saveSubtitleChoice } = useTrackChoicePersistence({
     seriesId: seriesContext?.seriesId ?? contentId,
@@ -695,6 +706,7 @@ function WatchPagePlayer({
       replanErrorTitle={session.errorTitle}
       sessionId={session.sessionId}
       selectedVersion={selectedVersion}
+      resumeVersion={resumeVersion}
       versions={playbackVersions}
       activeFileId={session.mediaFileId}
       chapters={activeChapters}
@@ -711,6 +723,7 @@ function WatchPagePlayer({
       onRetryConnection={session.retryConnection}
       connectionStatus={session.connectionStatus}
       connectionErrorTitle={session.connectionErrorTitle}
+      connectionEndReason={session.connectionEndReason}
       connectionError={session.connectionError}
       onPlanInvalidated={session.invalidatePlan}
       onReanchorSeek={session.reanchorSeek}
@@ -726,6 +739,7 @@ function WatchPagePlayer({
       showMarkerSource={showMarkerSource}
       bufferingMode={bufferingMode}
       bandwidthCapKbps={maxBitrateKbps}
+      networkTierRevision={session.networkTierRevision}
       bufferingTitleId={contentId}
       playbackAttemptId={session.playbackAttemptId}
       onKeptEstimate={session.setKeptEstimate}
@@ -741,8 +755,6 @@ function WatchPagePlayer({
       autoSkipRecap={autoSkipRecap}
       preview={activeMarkers.preview}
       markerSegments={selectedVersion?.marker_segments}
-      autoPlayNextPreview={autoPlayNextPreview}
-      autoPlayNext={autoPlayNext}
       canEditMarkers={canEditMarkers}
       onMarkersEdited={(editedFileId, markers) =>
         applyMarkerChange((current) =>

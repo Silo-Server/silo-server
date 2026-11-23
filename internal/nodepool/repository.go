@@ -138,6 +138,17 @@ type Node struct {
 	// can serialize it. Off the v1 wire, which is frozen; v2 maps it
 	// explicitly.
 	KeyIssued bool `json:"-"`
+	// EnvManaged names the configuration fields this node declared from its
+	// own environment at its last start (FieldGroup, FieldMaxJobs, ...). An
+	// administrator update that changes one of them is refused. Empty for a
+	// node that declares nothing. Off the v1 wire, which is frozen; v2 maps it
+	// explicitly.
+	EnvManaged []string `json:"-"`
+	// DeploymentManaged reports a transcode node the API servers' deployment
+	// configuration (SILO_TRANSCODE_NODES) lists and owns: its key is not
+	// issued and its row is not deleted from the admin API. Off the v1 wire,
+	// which is frozen; v2 maps it explicitly.
+	DeploymentManaged bool `json:"-"`
 	// PhysicalGPUKeys identifies the actual GPUs behind this node, derived from
 	// Capabilities rather than stored: it is a pure function of that payload, so
 	// a column would only be a second copy that can disagree with it. Two nodes
@@ -437,17 +448,18 @@ func (i UpdateNodeInput) ValidateFor(node *Node) error {
 // internal/config/admin_settings.go and the CHECK constraint on
 // stream_nodes.hw_accel_override: a per-node override may only name a backend
 // the cluster-wide setting could also name.
-var hwAccelOverrideValues = []string{hwAccelAuto, hwAccelQSV, hwAccelVAAPI, hwAccelNVENC, hwAccelNone}
+var hwAccelOverrideValues = []string{hwAccelAuto, hwAccelQSV, hwAccelVAAPI, hwAccelNVENC, hwAccelVideoToolbox, hwAccelNone}
 
 const (
 	// hwAccelAuto asks the node to resolve its own backend against live
 	// hardware at session start; dispatch passes it through untouched for
 	// exactly that reason.
-	hwAccelAuto  = "auto"
-	hwAccelQSV   = "qsv"
-	hwAccelVAAPI = "vaapi"
-	hwAccelNVENC = "nvenc"
-	hwAccelNone  = "none"
+	hwAccelAuto         = "auto"
+	hwAccelQSV          = "qsv"
+	hwAccelVAAPI        = "vaapi"
+	hwAccelNVENC        = "nvenc"
+	hwAccelVideoToolbox = "videotoolbox"
+	hwAccelNone         = "none"
 )
 
 // sameURL is true when an update leaves the row addressing the same worker.
@@ -514,7 +526,7 @@ func NewRepository(pool *pgxpool.Pool) *Repository {
 	return &Repository{pool: pool}
 }
 
-const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access, download_artifact_dir_override, download_artifact_max_bytes_override, drain_requested, drain_state, node_key_ciphertext IS NOT NULL, source_access`
+const nodeColumns = `id, name, type, url, public_url, enabled, healthy, active_jobs, node_group, max_jobs, max_bandwidth_kbps, egress_kbps, last_health_check, created_at, capabilities, capabilities_hash, capabilities_refreshed_at, last_stats, hw_accel_override, hw_device_override, capability_drift, capability_drift_baseline, network_access, download_artifact_dir_override, download_artifact_max_bytes_override, drain_requested, drain_state, node_key_ciphertext IS NOT NULL, source_access, env_managed, deployment_managed`
 
 func scanNode(row pgx.Row) (*Node, error) {
 	var n Node
@@ -536,6 +548,8 @@ func scanNode(row pgx.Row) (*Node, error) {
 		&n.DrainRequested, &n.DrainState,
 		&n.KeyIssued,
 		&n.SourceAccess,
+		&n.EnvManaged,
+		&n.DeploymentManaged,
 	)
 	if err != nil {
 		return nil, err

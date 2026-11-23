@@ -1,9 +1,15 @@
 import type { ReactNode } from "react";
 import type { EpisodeListItem } from "@/api/types";
+import { useClampCut } from "@/hooks/useClampCut";
 import { useAppLanguage } from "@/i18n";
+import { cn } from "@/lib/utils";
 import MachineTranslatedLabel from "./MachineTranslatedLabel";
 import { hasMachineTranslation } from "./machineTranslation";
-import { episodeCardMetadata, episodeCardSpokenTitle, episodeCardTitle } from "./episodeCardText";
+import {
+  episodeCardMetadata,
+  episodeCardSpokenTitle,
+  episodeCardTitleParts,
+} from "./episodeCardText";
 
 interface EpisodeCardCaptionProps {
   episode: EpisodeListItem;
@@ -29,19 +35,37 @@ export default function EpisodeCardCaption({
   notice,
 }: EpisodeCardCaptionProps) {
   useAppLanguage();
+  const { prefix, title } = episodeCardTitleParts(episode);
   const metadata = episodeCardMetadata(episode);
   const overview = hideOverview ? "" : (episode.overview?.trim() ?? "");
   const showsTranslationLabel =
     overview !== "" && hasMachineTranslation(episode.machine_translated_fields);
+  const overviewRef = useClampCut<HTMLParagraphElement>(overview);
 
   return (
     <div className="mt-2 space-y-1">
       <div className="flex items-center gap-2">
         <p
-          className="text-foreground min-w-0 flex-1 truncate text-sm font-semibold"
-          style={isCurrent ? { color: "var(--primary)" } : undefined}
+          className={cn(
+            "min-w-0 flex-1 text-sm font-semibold",
+            isCurrent ? "text-primary" : "text-foreground",
+          )}
         >
-          <span aria-hidden="true">{episodeCardTitle(episode)}</span>
+          {/* The title is cut in its own box, in its own direction, so an
+              English title after an Arabic code keeps its start. The code
+              keeps its width; the title takes what's left and moves to a
+              second line when not even its first letter and "…" fit. pre
+              keeps the space before the title. */}
+          <span aria-hidden="true" className="flex flex-wrap overflow-hidden">
+            <span className="max-w-full shrink-0 overflow-hidden text-ellipsis whitespace-pre">
+              {prefix}
+            </span>
+            {title && (
+              <span dir="auto" className="bidi-text max-w-max grow basis-[2.5em] truncate">
+                {title}
+              </span>
+            )}
+          </span>
           <span className="sr-only">{episodeCardSpokenTitle(episode)}</span>
         </p>
         {badges && <span className="flex shrink-0 items-center gap-2">{badges}</span>}
@@ -56,7 +80,11 @@ export default function EpisodeCardCaption({
       {overview && (
         // Three lines are reserved, as on the Apple card, so short descriptions
         // keep the row's cards the same height.
-        <p className="bidi-text text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed">
+        <p
+          ref={overviewRef}
+          dir="auto"
+          className="bidi-text text-muted-foreground line-clamp-3 min-h-[3lh] text-xs leading-relaxed"
+        >
           {overview}
         </p>
       )}

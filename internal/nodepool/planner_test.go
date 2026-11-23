@@ -497,3 +497,34 @@ func TestPlannerSkipsTranscodeNodesWithoutAKey(t *testing.T) {
 		t.Fatal("a pool without a key check placed work on a node with no issued key")
 	}
 }
+
+// A node that refused new work at its own job cap takes none from this
+// process until a health check newer than the refusal, or the hold's end,
+// even while the row's cap says it has room.
+func TestNodeAtCapacityIsHeldUntilItsNextHealthCheck(t *testing.T) {
+	transcodes := newKeyedTranscodePool()
+	transcodes.SetNodes([]*Node{{ID: 1, URL: "http://transcode-a", Enabled: true, Healthy: true}})
+	planner := NewPlanner(NewProxyPool(), transcodes)
+	now := time.Unix(1_000, 0)
+	planner.now = func() time.Time { return now }
+
+	ReportAtCapacity(planner, "http://transcode-a/")
+	if planner.TranscodeWorkAvailableWith(nil) {
+		t.Fatal("a node that refused at its cap still takes work")
+	}
+	transcodes.ApplyHealth(1, "http://transcode-a", true, 1, 0, "", nil, nil, now.Add(time.Second))
+	if !planner.TranscodeWorkAvailableWith(nil) {
+		t.Fatal("a health check after the refusal did not lift the hold")
+	}
+	// A refusal newer than the last health check holds the node again, and
+	// then only time lifts it.
+	now = now.Add(2 * time.Second)
+	ReportAtCapacity(planner, "http://transcode-a")
+	if planner.TranscodeWorkAvailableWith(nil) {
+		t.Fatal("a refusal after the last health check did not hold the node")
+	}
+	now = now.Add(atCapacityHold)
+	if !planner.TranscodeWorkAvailableWith(nil) {
+		t.Fatal("the hold outlasted atCapacityHold")
+	}
+}

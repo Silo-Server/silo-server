@@ -74,7 +74,7 @@ export function ResetProfileDialog({
           )}
         </ul>
         <DialogFooter className="items-center sm:justify-between">
-          <p className="text-muted-foreground text-[13px]">{t("web.home.rows.cantUndo")}</p>
+          <p className="text-muted-foreground text-[0.8125rem]">{t("web.home.rows.cantUndo")}</p>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)}>
               {t("common.cancel")}

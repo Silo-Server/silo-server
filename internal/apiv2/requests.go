@@ -195,14 +195,14 @@ type RequestTarget struct {
 	RequestID       ID      `json:"request_id" example:"1834729"`
 	IntegrationID   string  `json:"integration_id,omitempty" doc:"Admins only: the download server holding this target"`
 	IntegrationKind string  `json:"integration_kind,omitempty" doc:"Admins only: the download server's kind" example:"radarr"`
-	InstanceName    string  `json:"instance_name,omitempty" doc:"Admins only: the download server's name"`
+	InstanceName    string  `json:"instance_name,omitempty" doc:"Admins only, and left out of the admin request list for API keys with scopes: the download server's name"`
 	Quality         string  `json:"quality" example:"1080p"`
 	IsAnime         bool    `json:"is_anime"`
 	ExternalID      string  `json:"external_id,omitempty" doc:"Admins only: the integration's own identifier"`
 	ExternalStatus  string  `json:"external_status,omitempty" doc:"Admins only: the status as the download server reports it"`
 	Status          string  `json:"status" example:"queued"`
-	LastError       string  `json:"last_error,omitempty" doc:"Admins only: why the download server failed this target"`
-	RouteName       string  `json:"route_name,omitempty" doc:"Admins only: the routing rule that sent this target to its server, as named when it was sent"`
+	LastError       string  `json:"last_error,omitempty" doc:"Admins only, and left out of the admin request list for API keys with scopes: why the download server failed this target"`
+	RouteName       string  `json:"route_name,omitempty" doc:"Admins only, and left out of the admin request list for API keys with scopes: the routing rule that sent this target to its server, as named when it was sent"`
 	CreatedAt       Instant `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
 	UpdatedAt       Instant `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
 	// Download is set while the target's router plugin reports progress.
@@ -222,6 +222,7 @@ type MediaRequest struct {
 	Overview             string                  `json:"overview,omitempty"`
 	PosterPath           string                  `json:"poster_path,omitempty" doc:"TMDB image path"`
 	BackdropPath         string                  `json:"backdrop_path,omitempty" doc:"TMDB image path"`
+	PosterURL            string                  `json:"poster_url,omitempty" format:"uri-reference" doc:"Admin request reads only (listAdminRequests and the admin request actions): the poster as a root-relative path on this server, getAdminRequestPoster, which serves the TMDB poster through the server. Fetch it with the credentials that read the row. It does not expire. Absent when the request has no TMDB poster, and on a server that cannot fetch posters (the admin request capabilities then report request_posters false)" example:"/api/v2/admin/requests/1834729/poster"`
 	Status               string                  `json:"status" doc:"pending, approved, queued, downloading, completed" example:"pending"`
 	Outcome              string                  `json:"outcome" doc:"active, declined, cancelled, failed" example:"active"`                                                                                                                                                    //nolint:misspell // the store's spelling
 	State                string                  `json:"state" doc:"The one state to show a user: pending, approved, processing, partially_available (some requested seasons are in the library), available (in the library), declined, cancelled or failed" example:"pending"` //nolint:misspell // the store's spelling
@@ -237,7 +238,7 @@ type MediaRequest struct {
 	ExternalID           string                  `json:"external_id,omitempty" doc:"Admins only: the integration's own identifier"`
 	ExternalStatus       string                  `json:"external_status,omitempty" doc:"Admins only: the status as the download server reports it"`
 	LibraryContentID     string                  `json:"library_content_id,omitempty" doc:"The catalog item once the media is in the library"`
-	LastError            string                  `json:"last_error,omitempty" doc:"Admins only: why the last submission to a download server failed. It can name servers and routing rules"`
+	LastError            string                  `json:"last_error,omitempty" doc:"Admins only, and left out of the admin request list for API keys with scopes: why the last submission to a download server failed. It can name servers and routing rules"`
 	CreatedAt            Instant                 `json:"created_at" example:"2026-01-02T03:04:05.000Z"`
 	UpdatedAt            Instant                 `json:"updated_at" example:"2026-01-02T03:04:05.000Z"`
 	ApprovedAt           *Instant                `json:"approved_at,omitempty"`
@@ -880,20 +881,36 @@ func mediaRequestOf(r *mediarequests.Request, viewer mediarequests.Viewer) Media
 	return out
 }
 
+// withholdRequestDeployment drops what names the admin's download setup from
+// a request and its targets for a scoped key: the free-text failures, which
+// can name download servers, their addresses and routing rules, and each
+// target's server name and routing-rule name. The monitoring scope never
+// reads that configuration; integration_kind still says what kind of server
+// took the target.
+func withholdRequestDeployment(r *MediaRequest) {
+	r.LastError = ""
+	for i := range r.Targets {
+		r.Targets[i].LastError, r.Targets[i].InstanceName, r.Targets[i].RouteName = "", "", ""
+	}
+}
+
 // requestDownloadOf maps download progress. The byte counts and percent are
 // left out while the size is unknown (a total of 0). Progress with no report
 // time, which only an out-of-band database edit can leave behind, is left out
 // whole: a zero Instant cannot be marshaled and would fail the entire response.
-// It stays on the domain value so the download refresh pass can still clear it.
+// A zero estimate is left out for the same reason. Both stay on the domain value
+// so the download refresh pass can still clear them.
 func requestDownloadOf(d *mediarequests.DownloadProgress) *RequestDownload {
 	if d == nil || d.UpdatedAt.IsZero() {
 		return nil
 	}
 	out := &RequestDownload{
-		Phase:                 string(d.Phase),
-		EstimatedCompletionAt: instantPtr(d.EstimatedCompletion),
-		Downloads:             max(d.Downloads, 0),
-		UpdatedAt:             NewInstant(d.UpdatedAt),
+		Phase:     string(d.Phase),
+		Downloads: max(d.Downloads, 0),
+		UpdatedAt: NewInstant(d.UpdatedAt),
+	}
+	if d.EstimatedCompletion != nil && !d.EstimatedCompletion.IsZero() {
+		out.EstimatedCompletionAt = instantPtr(d.EstimatedCompletion)
 	}
 	if d.BytesTotal > 0 {
 		total, left := d.BytesTotal, min(max(d.BytesLeft, 0), d.BytesTotal)

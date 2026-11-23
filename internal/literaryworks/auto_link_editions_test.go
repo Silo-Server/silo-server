@@ -128,3 +128,42 @@ func TestAutoLinkEditionsPreservesIgnoresAndExistingWorks(t *testing.T) {
 		})
 	}
 }
+
+// An opposite-format edition sharing only a work id claim, under another
+// title, is a candidate and carries its claim; one claiming another work is
+// not. AutoLinkContent then links the two.
+func TestCandidatesIncludeEditionsSharingOnlyAWorkIDDB(t *testing.T) {
+	f := newEditionLinkFixture(t)
+	source := f.add("source", FormatEbook, "")
+	sharing := f.add("sharing", FormatAudiobook, f.prefix+"subtitled title")
+	other := f.add("other", FormatAudiobook, f.prefix+"another title")
+	work := f.prefix + "W"
+	for id, value := range map[string]string{source: work, sharing: work, other: work + "X"} {
+		if _, err := f.pool.Exec(t.Context(), `
+			INSERT INTO media_item_work_ids (content_id, provider, provider_id, evidence, source) VALUES ($1, 'openlibrary_work', $2, 'isbn', 'books-metadata')`,
+			id, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	item, err := f.repo.GetMatchItem(t.Context(), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidates, _, err := f.repo.listMatchCandidatesPage(t.Context(), item.MatchItem, 20, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(candidates) != 1 || candidates[0].ContentID != sharing ||
+		candidates[0].WorkIDs["openlibrary_work"] != (WorkID{ID: work, Evidence: "isbn"}) {
+		t.Fatalf("candidates = %+v, want only %s with its work id", candidates, sharing)
+	}
+	if _, linked, err := f.service.AutoLinkContent(t.Context(), source); err != nil || !linked {
+		t.Fatalf("AutoLinkContent = %v, %v; want linked", linked, err)
+	}
+	linked, err := f.repo.GetFirstWorkIDForContentIDs(t.Context(), []string{source})
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.assertWork(sharing, linked)
+	f.assertWork(other, "")
+}

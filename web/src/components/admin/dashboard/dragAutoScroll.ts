@@ -1,5 +1,5 @@
 import type { RefObject } from "react";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 
 /**
  * Drag auto-scroll for the dashboard grid.
@@ -67,10 +67,26 @@ function findScrollContainer(start: HTMLElement | null): Element | null {
 }
 
 /**
+ * Where pinned page headers (`data-sticky-header`, such as the admin phone
+ * header or the impersonation banner) end at the top of the viewport right
+ * now. The drag events over them go to the header, not the grid, so the top
+ * edge zone has to start below them. ItemGrid's `stickyHeaderInset` reads the
+ * same opt-in for where a header will sit once stuck.
+ */
+function pinnedHeaderBottom(): number {
+  let bottom = 0;
+  for (const header of document.querySelectorAll<HTMLElement>("[data-sticky-header]")) {
+    const rect = header.getBoundingClientRect();
+    if (rect.height > 0) bottom = Math.max(bottom, rect.bottom);
+  }
+  return bottom;
+}
+
+/**
  * The container's visible span in viewport coordinates — the edges the pointer
  * is measured against. For the document's scrolling element that is the
- * viewport itself; for an inner container it is its rect clipped to the
- * viewport.
+ * viewport below any pinned header; for an inner container it is its rect
+ * clipped to the viewport.
  */
 function scrollViewportBounds(container: Element): { top: number; bottom: number } {
   if (
@@ -78,7 +94,7 @@ function scrollViewportBounds(container: Element): { top: number; bottom: number
     container === document.documentElement ||
     container === document.body
   ) {
-    return { top: 0, bottom: window.innerHeight };
+    return { top: pinnedHeaderBottom(), bottom: window.innerHeight };
   }
   const rect = container.getBoundingClientRect();
   return { top: Math.max(rect.top, 0), bottom: Math.min(rect.bottom, window.innerHeight) };
@@ -86,39 +102,48 @@ function scrollViewportBounds(container: Element): { top: number; bottom: number
 
 interface AutoScrollState {
   raf: number | null;
-  clientY: number;
-  container: Element | null;
+  /** The pointer's latest position, or null while it is outside the window. */
+  clientY: number | null;
   onScrolled: ((dy: number) => void) | null;
 }
 
+/** Cancels the next frame; the next position inside an edge zone restarts the loop. */
+function pause(state: AutoScrollState) {
+  if (state.raf !== null) {
+    cancelAnimationFrame(state.raf);
+    state.raf = null;
+  }
+}
+
+/** What the auto-scroll follows: a native HTML5 drag, or a pointer-captured gesture. */
+export type AutoScrollGesture = "drag" | "pointer";
+
 /**
- * The stateful half: `update(clientY)` on every dragover (or pointermove), and
- * `stop()` on every way a drag can end. The first update inside an edge zone
- * starts the RAF loop; the loop stops itself the moment the pointer leaves the
- * zones, and `stop` (also run on unmount) kills it from the outside.
+ * The stateful half. While `gesture` is set (a widget is being dragged or
+ * resized), the RAF loop runs whenever the pointer sits in an edge zone and
+ * pauses when it leaves them; when `gesture` clears, by whatever path the
+ * gesture ended, the loop stops.
+ *
+ * A drag reports the pointer from the window: drag events over anything
+ * outside the grid (the pinned phone header, the gutters, the sidebar, the
+ * Add widget sheet the drag started from) never reach the grid's handlers. A
+ * pointer gesture (resize), which fires no drag events, calls
+ * `update(clientY)` on every pointermove instead.
  *
  * Scrolling happens in the loop, not in the event handler — dragover fires
  * continuously and only the latest `clientY` matters. `onScrolled` reports
  * each frame's actual scroll delta so a pointer-anchored session (resize) can
  * compensate for the content moving under a stationary pointer.
  */
-export function useDragAutoScroll(anchorRef: RefObject<HTMLElement | null>) {
+export function useDragAutoScroll(
+  anchorRef: RefObject<HTMLElement | null>,
+  gesture: AutoScrollGesture | null,
+) {
   const stateRef = useRef<AutoScrollState>({
     raf: null,
-    clientY: 0,
-    container: null,
+    clientY: null,
     onScrolled: null,
   });
-
-  const stop = useCallback(() => {
-    const state = stateRef.current;
-    if (state.raf !== null) {
-      cancelAnimationFrame(state.raf);
-      state.raf = null;
-    }
-    state.container = null;
-    state.onScrolled = null;
-  }, []);
 
   const update = useCallback(
     (clientY: number, onScrolled?: (dy: number) => void) => {
@@ -126,41 +151,58 @@ export function useDragAutoScroll(anchorRef: RefObject<HTMLElement | null>) {
       state.clientY = clientY;
       state.onScrolled = onScrolled ?? null;
       if (state.raf !== null) return;
-
       const container = findScrollContainer(anchorRef.current);
       if (!container) return;
       const { top, bottom } = scrollViewportBounds(container);
       if (edgeScrollSpeed(clientY, top, bottom) === 0) return;
-      state.container = container;
 
       const step = () => {
-        const current = stateRef.current;
-        const target = current.container;
-        if (!target) {
-          current.raf = null;
-          return;
-        }
-        const bounds = scrollViewportBounds(target);
-        const speed = edgeScrollSpeed(current.clientY, bounds.top, bounds.bottom);
+        const bounds = scrollViewportBounds(container);
+        const speed =
+          state.clientY === null ? 0 : edgeScrollSpeed(state.clientY, bounds.top, bounds.bottom);
         if (speed === 0) {
-          // Left the edge zones; the next qualifying dragover restarts the loop.
-          current.raf = null;
-          current.container = null;
+          pause(state);
           return;
         }
-        const before = target.scrollTop;
-        target.scrollTop = before + speed;
-        const dy = target.scrollTop - before;
-        if (dy !== 0) current.onScrolled?.(dy);
-        current.raf = requestAnimationFrame(step);
+        const before = container.scrollTop;
+        container.scrollTop = before + speed;
+        const dy = container.scrollTop - before;
+        if (dy !== 0) state.onScrolled?.(dy);
+        state.raf = requestAnimationFrame(step);
       };
       state.raf = requestAnimationFrame(step);
     },
     [anchorRef],
   );
 
-  // A drag interrupted by unmount must not leave the loop running.
-  useEffect(() => stop, [stop]);
+  // A layout effect, so the loop stops in the commit that ends the gesture. A
+  // gesture that ends outside an event handler (the grid's source check)
+  // commits at default priority, and React can run its passive cleanup only
+  // after another frame has scrolled.
+  useLayoutEffect(() => {
+    if (gesture === null) return;
+    const state = stateRef.current;
+    if (gesture === "pointer") return () => pause(state);
+    const follow = (event: DragEvent) => update(event.clientY);
+    // A drag that leaves the window fires a last dragleave and then no more
+    // dragover, which would leave the loop scrolling on the last position.
+    // Moving between elements fires dragleave too, so only one that enters no
+    // element at a point outside the window counts. Chromium on Windows and
+    // Linux reports that point as (0, 0).
+    const leave = (event: DragEvent) => {
+      const { clientX: x, clientY: y } = event;
+      const outside =
+        x < 0 || y < 0 || x >= window.innerWidth || y >= window.innerHeight || (x === 0 && y === 0);
+      if (event.relatedTarget === null && outside) state.clientY = null;
+    };
+    window.addEventListener("dragover", follow, true);
+    window.addEventListener("dragleave", leave, true);
+    return () => {
+      window.removeEventListener("dragover", follow, true);
+      window.removeEventListener("dragleave", leave, true);
+      pause(state);
+    };
+  }, [gesture, update]);
 
-  return { update, stop };
+  return { update };
 }

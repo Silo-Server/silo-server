@@ -288,12 +288,46 @@ type Service struct {
 	memoryMu                sync.Mutex
 	memoryObjects           map[string]objectCheckpoint
 	memoryCursors           map[string]prefixCursor
+	// envManaged names the environment variable that sets each storage key
+	// this process locks; see SetEnvironmentManaged.
+	envManaged map[string]string
 }
 
 // SetNodeAdmission connects the transition to the API process's storage
 // admission lock. Production API processes install it before opening storage.
 func (s *Service) SetNodeAdmission(admission *pglock.NodeAdmission) {
 	s.nodeAdmission = admission
+}
+
+// SetEnvironmentManaged records the settings the environment sets on this
+// API server, keyed by setting with the variable as value. A transition
+// commits new storage settings, which the environment would replace on the
+// next start, so Start refuses while any storage setting is among them.
+func (s *Service) SetEnvironmentManaged(vars map[string]string) {
+	s.envManaged = vars
+}
+
+// environmentManagedStorageVars returns the sorted variables that set a
+// storage setting here.
+func (s *Service) environmentManagedStorageVars() []string {
+	var out []string
+	for _, key := range storageKeys() {
+		if name := s.envManaged[key]; name != "" {
+			out = append(out, name)
+		}
+	}
+	slices.Sort(out)
+	return out
+}
+
+// refuseEnvironmentManagedStorage is the refusal of a transition on a server
+// whose environment sets a storage setting.
+func (s *Service) refuseEnvironmentManagedStorage() error {
+	vars := s.environmentManagedStorageVars()
+	if len(vars) == 0 {
+		return nil
+	}
+	return validationErrorf("storage is set by the environment (%s); unset those variables and restart before a managed storage transition", strings.Join(vars, ", "))
 }
 
 func New(pool *pgxpool.Pool, settings Settings, jobs JobRepository, source, private blobstore.Store) *Service {
@@ -441,6 +475,9 @@ func (s *Service) Start(ctx context.Context, userID int, req StartRequest) (*mod
 	}
 	if !validPolicy(req.Policy) {
 		return nil, Preflight{}, validationErrorf("unknown migration policy %q", req.Policy)
+	}
+	if err := s.refuseEnvironmentManagedStorage(); err != nil {
+		return nil, Preflight{}, err
 	}
 	// Stage selection and job admission must have one owner. The job index
 	// alone cannot prevent a losing request from changing the winner's stage.
@@ -789,6 +826,12 @@ func (s *Service) ExecuteStorageTransition(ctx context.Context, req adminjob.Sto
 	if staged.Phase == transitionPhaseRestartPending {
 		// The runner settles the receipt instead of recording a failure.
 		return nil, fmt.Errorf("%w; awaiting restart or recovery", adminjob.ErrStorageTransitionAlreadyCommitted)
+	}
+	// A transition staged before a restart that added a storage variable
+	// would commit a location the environment replaces on the next start.
+	// One that already committed is past this point and settles above.
+	if err := s.refuseEnvironmentManagedStorage(); err != nil {
+		return nil, err
 	}
 	if err := s.updateStage(ctx, staged.ID, func(state *stagedTarget) {
 		state.Phase = transitionPhaseCopying

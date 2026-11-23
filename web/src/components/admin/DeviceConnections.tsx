@@ -76,7 +76,7 @@ export function DeviceConnections({ device }: { device: AdminDeviceDetail }) {
       {device.connections.map((connection) => (
         <div
           key={connection.id}
-          className="border-border/60 space-y-1 rounded-md border px-3 py-2.5 text-[13px]"
+          className="border-border/60 space-y-1 rounded-md border px-3 py-2.5 text-[0.8125rem]"
         >
           <div className="text-foreground font-medium">
             {connectionLabel(t, connection.connection)}

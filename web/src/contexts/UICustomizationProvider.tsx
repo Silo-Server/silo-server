@@ -29,9 +29,13 @@ export function UICustomizationProvider({ children }: { children: ReactNode }) {
     capabilitiesQuery.data,
   );
   const query = useEffectiveSettings({ keys: UI_CUSTOMIZATION_KEYS, enabled: isSupported });
+  // A failed background refetch keeps the last good capabilities answer as
+  // `data` under an error status. That answer still says what the server
+  // supports, so only a missing answer makes the editors unavailable. A failed
+  // settings read still closes them: the editors save whole documents built
+  // from those values.
   const isUnavailable =
-    (!capabilitiesQuery.isLoading &&
-      (capabilitiesQuery.isError || capabilitiesQuery.data === undefined)) ||
+    (!capabilitiesQuery.isLoading && capabilitiesQuery.data === undefined) ||
     (isSupported && !query.isLoading && (query.isError || query.data === undefined));
   // A disabled query may still expose data cached before a server downgrade or
   // reconnect. Ignore it until the connected server proves support.

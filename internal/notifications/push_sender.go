@@ -61,12 +61,11 @@ func pushRetryDelay(completedAttempt int) (time.Duration, bool) {
 
 func pushRetryDelayWithHint(completedAttempt int, retryAfter time.Duration) (time.Duration, bool) {
 	delay, more := pushRetryDelay(completedAttempt)
-	if retryAfter > 0 {
-		// The relay retains idempotency state for 24 hours. Stay safely inside
-		// that window even if APNs returns an unusually large Retry-After value.
-		delay = min(retryAfter, pushRelayMaxRetryAfter)
-	}
-	return delay, more
+	// Retry-After can lengthen the wait but never shorten the schedule: a 429
+	// asking for a few seconds would otherwise use up every attempt within a
+	// few sweeps. The relay retains idempotency state for 24 hours, so stay
+	// safely inside that window even when APNs asks for longer.
+	return max(delay, min(retryAfter, pushRelayMaxRetryAfter)), more
 }
 
 func terminalAPNsDeviceRejection(status int, code, message string) bool {

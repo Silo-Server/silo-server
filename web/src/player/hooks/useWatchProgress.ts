@@ -5,11 +5,13 @@ import {
   observeSessionProgress,
   captureSessionProgress,
 } from "../session-mutations";
-import { isPlaybackSessionEndedError } from "../player-fetch";
+import { playbackSessionEndReason, type PlaybackSessionEndReason } from "../player-fetch";
 import { toMediaTime } from "../utils/mediaTimeline";
 
 /**
- * Reports watch progress to the server every 10 seconds.
+ * Reports watch progress to the server every 10 seconds, and at once when
+ * the video pauses or resumes, so the server's paused timeout never judges a
+ * resume it has not heard of yet.
  * Reads currentTime and paused state from the video element.
  * An optional streamOriginRef maps player-local time back onto the original
  * media timeline for restarted HLS sessions.
@@ -18,14 +20,15 @@ import { toMediaTime } from "../utils/mediaTimeline";
  * keepalive so the backend records the last known position even when
  * the user seeks and closes quickly.
  *
- * `onSessionEnded` runs when a report learns the server ended the session for
- * good (an administrator stopped it while the player was unreachable).
+ * `onSessionEnded` runs, with the reason, when a report learns the server
+ * ended the session for good: an administrator stopped it while the player
+ * was unreachable, or it stayed paused too long.
  */
 export function useWatchProgress(
   sessionId: string | null,
   videoRef: React.RefObject<HTMLVideoElement | null>,
   streamOriginRef?: React.RefObject<number>,
-  onSessionEnded?: () => void,
+  onSessionEnded?: (reason: PlaybackSessionEndReason) => void,
 ) {
   const onSessionEndedRef = useRef(onSessionEnded);
   useEffect(() => {
@@ -101,16 +104,22 @@ export function useWatchProgress(
     // replacement session.
     let active = true;
 
-    intervalRef.current = setInterval(() => {
+    const report = () => {
       reportProgress().catch((error: unknown) => {
         // Best effort — don't disrupt playback on progress report failure,
         // unless the server says the session is over.
-        if (active && isPlaybackSessionEndedError(error)) onSessionEndedRef.current?.();
+        const reason = playbackSessionEndReason(error);
+        if (active && reason) onSessionEndedRef.current?.(reason);
       });
-    }, 10_000);
+    };
+    intervalRef.current = setInterval(report, 10_000);
+    const video = videoRef.current;
+    const pauseEvents = ["play", "pause"];
+    pauseEvents.forEach((event) => video?.addEventListener(event, report));
 
     return () => {
       active = false;
+      pauseEvents.forEach((event) => video?.removeEventListener(event, report));
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = null;
 
@@ -120,7 +129,7 @@ export function useWatchProgress(
       // position before the session is deleted (e.g. after a seek).
       reportProgress({ keepalive: true, isPaused: true }).catch(() => {});
     };
-  }, [reportProgress, sessionId]);
+  }, [reportProgress, sessionId, videoRef]);
 
   return flushProgress;
 }

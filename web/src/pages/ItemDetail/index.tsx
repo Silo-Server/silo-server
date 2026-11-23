@@ -8,6 +8,7 @@ import { isNotFoundProblem } from "@/api/v2/request";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Button } from "@/components/ui/button";
 import { loadErrorDescription } from "@/components/loadErrorDescription";
+import PageBack from "@/components/PageBack";
 import PageUnavailable from "@/components/PageUnavailable";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { toast } from "sonner";
@@ -29,6 +30,7 @@ import { parseOptionalLibraryId } from "@/components/sidebarItemNavigation";
 import { useShowAdvisoryAge } from "@/hooks/useShowAdvisoryAge";
 import { markItemDetailShown } from "@/lib/itemNavigationTiming";
 import { useShowTitleArt } from "@/hooks/useTitleArt";
+import { isAudiobookLibraryType, isEbookLibraryType } from "@/pages/libraryPageSearchParams";
 import { useT } from "@/i18n";
 
 interface HomeItemTransitionShape {
@@ -181,10 +183,20 @@ export default function ItemDetail() {
   // whether the page will be a book, so the placeholder can take its layout.
   // The sidebar has already read the library list; this only looks at that copy.
   const { data: availableLibraries } = useAvailableUserLibraries({ enabled: false });
-  const loadingAudiobook =
-    item?.type === "audiobook" ||
-    (libraryId !== undefined &&
-      availableLibraries?.find((library) => library.id === libraryId)?.type === "audiobooks");
+  const linkedLibraryType =
+    libraryId !== undefined
+      ? availableLibraries?.find((library) => library.id === libraryId)?.type
+      : undefined;
+  const loadingBookKind: "audiobook" | "ebook" | undefined =
+    item?.type === "audiobook"
+      ? "audiobook"
+      : item?.type === "ebook"
+        ? "ebook"
+        : linkedLibraryType && isAudiobookLibraryType(linkedLibraryType)
+          ? "audiobook"
+          : linkedLibraryType && isEbookLibraryType(linkedLibraryType)
+            ? "ebook"
+            : undefined;
 
   useDocumentTitle(
     itemNotFound
@@ -211,15 +223,16 @@ export default function ItemDetail() {
   }, [detailShown, id]);
 
   if (loading || !itemDetailsReady) {
-    if (loadingAudiobook) {
+    if (loadingBookKind) {
       return (
         <div
           data-testid={enteredItemFromHome ? "home-item-transition-shell" : undefined}
-          className={enteredItemFromHome ? "bg-background min-h-screen" : undefined}
+          className={enteredItemFromHome ? "bg-background relative min-h-screen" : "relative"}
           aria-busy="true"
         >
           <span className="sr-only">{t("web.detail.page.loadingDetails")}</span>
-          <AudiobookDetailSkeleton solid={enteredItemFromHome} />
+          <PageBack />
+          <AudiobookDetailSkeleton solid={enteredItemFromHome} kind={loadingBookKind} />
         </div>
       );
     }

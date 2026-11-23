@@ -34,7 +34,7 @@ export function RecentErrorsWidget() {
         </CardTitle>
         <Link
           to="/admin/logs"
-          className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
+          className="text-muted-foreground hover:text-primary text-[0.6875rem] transition-colors"
         >
           {t("web.admin.dashboard.widgets.recentErrors.allLogs")}
         </Link>
@@ -70,7 +70,7 @@ function LogRow({ entry }: { entry: OperationalLogEntry }) {
           cannot tell the tints apart, and by a screenshot in grayscale. */}
       <span
         className={cn(
-          "mt-0.5 flex flex-shrink-0 items-center gap-1 text-[10px] font-bold uppercase",
+          "mt-0.5 flex flex-shrink-0 items-center gap-1 text-[0.625rem] font-bold uppercase",
           tone.className,
         )}
       >
@@ -81,7 +81,7 @@ function LogRow({ entry }: { entry: OperationalLogEntry }) {
         <div className="truncate text-xs" title={entry.message}>
           {entry.message}
         </div>
-        <div className="text-muted-foreground mt-0.5 text-[10px]">
+        <div className="text-muted-foreground mt-0.5 text-[0.625rem]">
           {entry.component || t("web.admin.dashboard.widgets.recentErrors.componentFallback")}
           {SEPARATOR}
           {formatRelativeTime(entry.timestamp, {

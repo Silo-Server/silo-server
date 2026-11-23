@@ -84,6 +84,12 @@ import { useOptionalAuth } from "@/hooks/useAuth";
 import { useCurrentProfile } from "@/hooks/useCurrentProfile";
 import { formatRelativeTime } from "@/lib/date";
 import { useT, type MessageKey, type Translate } from "@/i18n";
+import { PluginDestinationsSection } from "./PluginDestinationsSection";
+import {
+  DESTINATION_NOTIFY_FIELDS as WEBHOOK_NOTIFY_FIELDS,
+  REASON_FIELDS,
+  type DestinationNotifyKey,
+} from "./notificationReasonFields";
 import {
   currentWebPushSubscription,
   disableWebPush,
@@ -91,22 +97,10 @@ import {
   webPushSupport,
 } from "@/lib/webPush";
 
-const REASON_FIELDS = [
-  { key: "notify_next_up", labelKey: "web.settings.notifications.reason.nextUp" },
-] as const satisfies readonly { key: string; labelKey: MessageKey }[];
-
-// Webhooks additionally carry the request toggle, which also covers
-// watchlist.available; it is not an episode reason, so the profile
-// preferences section keeps REASON_FIELDS.
-const WEBHOOK_NOTIFY_FIELDS = [
-  ...REASON_FIELDS,
-  { key: "notify_requests", labelKey: "web.settings.notifications.reason.requests" },
-] as const satisfies readonly { key: string; labelKey: MessageKey }[];
-
 /** Example URL in the create dialog's URL field; a URL, so not translated. */
 const DISCORD_WEBHOOK_URL_EXAMPLE = "https://discord.com/api/webhooks/…";
 
-type WebhookNotifyKey = (typeof WEBHOOK_NOTIFY_FIELDS)[number]["key"];
+type WebhookNotifyKey = DestinationNotifyKey;
 
 function PreferencesSection() {
   const t = useT();
@@ -907,6 +901,9 @@ function WebhookFormDialog({
             </Label>
             <Input
               id="webhook-url"
+              // The URL and the example URL read left to right; the translated placeholder shown
+              // while editing keeps the page's direction.
+              dir={url || !editing ? "ltr" : undefined}
               value={url}
               placeholder={
                 editing
@@ -1257,6 +1254,8 @@ export default function NotificationsSettings() {
       <DiscordSection key={notificationScope()} />
 
       <WebhooksSection />
+
+      <PluginDestinationsSection />
     </div>
   );
 }

@@ -2,11 +2,10 @@
 
 An administrator's pause, resume, stop, message or terminate through the
 `/api/v2` admin session routes has to run on the API replica that holds the
-session's realtime control lane. The frozen `/api/v1` bridge routes are not
-relayed. The receiving
-replica runs it itself only when the relay cannot hand it to another replica
-(see "When the request runs locally") or, for a terminate, when the owner did
-not answer (see "When the owner does not answer"). The lane holder holds
+session's realtime control lane. The receiving replica runs it itself only
+when the relay cannot hand it to another replica (see "When the request runs
+locally") or, for a terminate, when the owner did not answer (see "When the
+owner does not answer"). The lane holder holds
 the lane itself, the command tracker that sees the player's result and runs the
 deadline fallback, and the ledger that applies each sequenced command once. A
 load balancer can send the administrator's request to any replica.
@@ -77,11 +76,13 @@ reply timeout.
 
 ## When the owner does not answer
 
-A request that was published and got no reply within 8 seconds may still have
+A request that was published and got no reply within 8 seconds (11 for a
+message) may still have
 run on the owner, and so may one whose publish failed, because Redis can
 deliver a `PUBLISH` whose answer the client never read. The receiving replica
 therefore does not simply repeat it. The wait covers one lane write, which has
 a 5 second socket write deadline, and the session stop that a terminate runs.
+A message adds the up to 3 seconds it waits for the player's result.
 The owner finishes a request even after the caller stops waiting, so a slow
 terminate still writes its watch history and stop receipt.
 

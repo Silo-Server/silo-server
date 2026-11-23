@@ -4,6 +4,7 @@ import { imageIdentity, useImageLoaded } from "@/hooks/useImageLoaded";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
 import { useShowTitleArt } from "@/hooks/useTitleArt";
 import { HeroBackdropArtwork } from "@/components/HeroBackdropArtwork";
+import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { useT } from "@/i18n";
 
 import "./detailLayout.css";
@@ -31,7 +32,7 @@ interface DetailHeroProps {
    */
   genreHref?: (genre: string) => string;
   overview?: string;
-  /** Pulses the overview while an on-view AI translation is in flight. */
+  /** Shows the translating status while an on-view AI translation is in flight. */
   overviewTranslating?: boolean;
   /** When set, renders a small "Translate" chip under the overview. */
   onTranslateOverview?: () => void;
@@ -45,6 +46,8 @@ interface DetailHeroProps {
   actions?: ReactNode;
   aside?: ReactNode;
   studioLabel?: string;
+  /** Where the studio or network label leads; without it the label is plain text. */
+  studioHref?: string;
   tagline?: string;
   scoreRow?: ReactNode;
   crewLine?: ReactNode;
@@ -81,6 +84,7 @@ export default function DetailHero({
   actions,
   aside,
   studioLabel,
+  studioHref,
   tagline,
   scoreRow,
   crewLine,
@@ -245,7 +249,17 @@ export default function DetailHero({
                     {eyebrowType && studioLabel && (
                       <span aria-hidden="true" className="size-[3px] rounded-full bg-current" />
                     )}
-                    {studioLabel && <span className="text-foreground/85">{studioLabel}</span>}
+                    {studioLabel &&
+                      (studioHref ? (
+                        <ViewTransitionLink
+                          to={studioHref}
+                          className="text-foreground/85 hover:text-foreground transition-colors"
+                        >
+                          {studioLabel}
+                        </ViewTransitionLink>
+                      ) : (
+                        <span className="text-foreground/85">{studioLabel}</span>
+                      ))}
                   </p>
                 )}
 
@@ -272,7 +286,7 @@ export default function DetailHero({
                   <DetailTitle
                     title={title}
                     bounded={isViewportBounded}
-                    className={`bidi-text text-foreground mb-3 font-extrabold tracking-tight ${
+                    className={`text-foreground mb-3 font-extrabold tracking-tight ${
                       isCompact
                         ? "font-display text-3xl leading-[1.1] sm:text-4xl"
                         : "font-display text-4xl leading-[0.98] tracking-[-0.05em] sm:text-5xl lg:text-7xl"

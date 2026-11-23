@@ -96,6 +96,8 @@ import {
   hwDeviceSyntaxChanges,
   nodeUsesCUDADevices,
   parseHWDeviceOverride,
+  restoreEnvManagedFields,
+  nodeUsesVideoToolbox,
 } from "./adminNodesPresentation";
 import { NodeRoutingSettings } from "@/pages/admin-settings/NodeRoutingSettings";
 
@@ -140,13 +142,13 @@ const METRIC_GRID = "grid grid-cols-[auto_minmax(2rem,1fr)_auto] items-center ga
 function NodeMetricRow({ metric }: { metric: ResourceMetric }) {
   return (
     <>
-      <span className="text-muted-foreground text-[11px]" title={metric.title}>
+      <span className="text-muted-foreground text-[0.6875rem]" title={metric.title}>
         {metric.label}
       </span>
       <LoadMeter fill={metric.fill} warning={metric.warning} />
       <span
         className={cn(
-          "text-end font-mono text-[11px] tabular-nums",
+          "text-end font-mono text-[0.6875rem] tabular-nums",
           metric.muted && "text-muted-foreground",
           metric.warning && "text-warning font-medium",
         )}
@@ -197,12 +199,12 @@ function NodeCapacityBlock({ node, showEgress }: { node: StreamNode; showEgress:
           reader do that subtraction on every unit. The stamp stays in the title
           for when the exact moment matters.
         */}
-        <span className="text-muted-foreground text-[11px]">
+        <span className="text-muted-foreground text-[0.6875rem]">
           {t("web.admin.nodes.unit.checked")}
         </span>
         <span />
         <span
-          className="text-end font-mono text-[11px] tabular-nums"
+          className="text-end font-mono text-[0.6875rem] tabular-nums"
           title={node.last_health_check ? formatDateTime(node.last_health_check) : undefined}
         >
           {formatRelativeTime(node.last_health_check) ?? t("web.admin.nodes.unit.never")}
@@ -259,7 +261,7 @@ function NodeDriftBadge({ node }: { node: StreamNode }) {
   return (
     <Badge
       variant="outline"
-      className="bg-warning/10 text-warning border-warning/15"
+      className="bg-warning/10 text-warning-label border-warning/15"
       title={drift.title}
     >
       {drift.label}
@@ -303,7 +305,7 @@ function NodeEngineRow({ device }: { device: NodeGPULiveDevice }) {
   return (
     <>
       <span
-        className="text-muted-foreground max-w-[7rem] truncate font-mono text-[11px]"
+        className="text-muted-foreground max-w-[7rem] truncate font-mono text-[0.6875rem]"
         title={device.title}
       >
         {device.label}
@@ -311,14 +313,14 @@ function NodeEngineRow({ device }: { device: NodeGPULiveDevice }) {
       <LoadMeter fill={device.busyFill} />
       <span
         className={cn(
-          "text-end font-mono text-[11px] tabular-nums",
+          "text-end font-mono text-[0.6875rem] tabular-nums",
           device.busyMuted ? "text-muted-foreground" : "text-foreground",
         )}
         title={device.title}
       >
         {device.busy}
       </span>
-      <span className="text-muted-foreground text-end text-[10px] whitespace-nowrap">
+      <span className="text-muted-foreground text-end text-[0.625rem] whitespace-nowrap">
         {device.sessions}
       </span>
     </>
@@ -453,10 +455,7 @@ function GroupChip({
       )}
       <span className={cn(active && "font-medium")}>{label}</span>
       <span
-        className={cn(
-          "font-mono text-[10px] tabular-nums",
-          active ? "opacity-70" : "text-muted-foreground",
-        )}
+        className={cn("font-mono text-[0.625rem] tabular-nums", !active && "text-muted-foreground")}
       >
         {count}
       </span>
@@ -516,12 +515,16 @@ function NodeGroupFilter({
  *
  * The missing-key status is worded as its consequence: the node is listed and
  * health-checked, but receives no work until it has a key. The button needs a
- * server that can issue keys (`onKey` is undefined otherwise).
+ * server that can issue keys (`onKey` is undefined otherwise), and a node whose
+ * key comes from the server's deployment configuration has none: the server
+ * refuses to issue it one.
  */
 function NodeKeyLine({ node, onKey }: { node: StreamNode; onKey?: (node: StreamNode) => void }) {
   const t = useT();
   if (node.key_issued === undefined) return null;
   const issued = node.key_issued;
+  let status = issued ? t("web.admin.nodes.key.issued") : t("web.admin.nodes.key.missing");
+  if (node.deployment_managed) status = t("web.admin.nodes.key.deploymentManaged");
   return (
     <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
       <KeyRound
@@ -529,9 +532,9 @@ function NodeKeyLine({ node, onKey }: { node: StreamNode; onKey?: (node: StreamN
         aria-hidden="true"
       />
       <span className={issued ? "text-muted-foreground" : "text-warning font-medium"}>
-        {issued ? t("web.admin.nodes.key.issued") : t("web.admin.nodes.key.missing")}
+        {status}
       </span>
-      {onKey && (
+      {onKey && !node.deployment_managed && (
         <Button
           variant="link"
           size="sm"
@@ -627,7 +630,9 @@ function NodeUnit({
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-            <h3 className="text-[15px] leading-tight font-semibold tracking-tight">{node.name}</h3>
+            <h3 className="text-[0.9375rem] leading-tight font-semibold tracking-tight">
+              {node.name}
+            </h3>
             <span className="inline-flex items-center gap-1.5">
               <span
                 aria-hidden="true"
@@ -636,7 +641,7 @@ function NodeUnit({
               <span className="text-muted-foreground text-xs">{t(NODE_STATE_LABEL[state])}</span>
             </span>
             {node.group && (
-              <Badge variant="outline" className="font-mono text-[10px] font-normal">
+              <Badge variant="outline" className="font-mono text-[0.625rem] font-normal">
                 {node.group}
               </Badge>
             )}
@@ -729,15 +734,35 @@ function NodeUnit({
           >
             <Pencil className="h-3 w-3" aria-hidden="true" />
           </Button>
+          {/* A node the deployment configuration owns cannot be deleted here.
+              The button stays focusable (aria-disabled, not disabled) so
+              keyboard and touch users can reach the reason, which a press
+              shows. */}
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7"
+            className={cn("h-7 w-7", node.deployment_managed && "cursor-not-allowed opacity-50")}
             aria-label={t("web.admin.nodes.unit.delete", { name: node.name })}
-            onClick={() => onDelete(node)}
+            aria-disabled={node.deployment_managed || undefined}
+            aria-describedby={node.deployment_managed ? `node-${node.id}-deployment` : undefined}
+            title={
+              node.deployment_managed
+                ? t("web.admin.nodes.unit.deleteDeploymentManaged")
+                : undefined
+            }
+            onClick={() => {
+              if (node.deployment_managed)
+                toast.info(t("web.admin.nodes.unit.deleteDeploymentManaged"));
+              else onDelete(node);
+            }}
           >
             <Trash2 className="h-3 w-3" aria-hidden="true" />
           </Button>
+          {node.deployment_managed && (
+            <span id={`node-${node.id}-deployment`} className="sr-only">
+              {t("web.admin.nodes.unit.deleteDeploymentManaged")}
+            </span>
+          )}
         </div>
       </div>
 
@@ -918,10 +943,12 @@ function NodeDevicePicker({
   rows,
   onToggle,
   onInherit,
+  disabled = false,
 }: {
   rows: NodeHWDeviceRow[];
   onToggle: (path: string) => void;
   onInherit: () => void;
+  disabled?: boolean;
 }) {
   const t = useT();
   const selectedCount = rows.filter((row) => row.selected).length;
@@ -935,10 +962,13 @@ function NodeDevicePicker({
               <p className={cn("truncate text-sm", !row.reported && "text-muted-foreground")}>
                 {row.description}
               </p>
-              <p className="text-muted-foreground truncate font-mono text-xs">{row.path}</p>
+              <p className="text-muted-foreground truncate font-mono text-xs">
+                <span dir="ltr">{row.path}</span>
+              </p>
             </div>
             <Switch
               checked={row.selected}
+              disabled={disabled}
               aria-label={t("web.admin.nodes.devicePicker.toggle", { path: row.path })}
               onCheckedChange={() => onToggle(row.path)}
             />
@@ -958,7 +988,7 @@ function NodeDevicePicker({
               ? t("web.admin.nodes.devicePicker.singleDevice")
               : t("web.admin.nodes.devicePicker.balanced")}
         </p>
-        {selectedCount > 0 && (
+        {selectedCount > 0 && !disabled && (
           <Button type="button" variant="ghost" size="sm" className="h-7 px-2" onClick={onInherit}>
             {t("web.admin.nodes.devicePicker.useClusterDefault")}
           </Button>
@@ -992,6 +1022,14 @@ function NodeForm({
   onCreated?: (created: { id: string; name: string }) => void;
 }) {
   const t = useT();
+  // Fields the node declares from its own environment: shown read-only, and
+  // sent back with their stored values (restoreEnvManagedFields).
+  const envManaged = new Set(node?.env_managed ?? []);
+  const isLocked = (field: string) => envManaged.has(field);
+  const lockedNote = (field: string) =>
+    isLocked(field) ? (
+      <p className="text-muted-foreground text-sm">{t("web.admin.nodes.form.envManaged")}</p>
+    ) : null;
   const [name, setName] = useState(node?.name ?? "");
   const [url, setUrl] = useState(node?.url ?? "");
   const [publicUrl, setPublicUrl] = useState(node?.public_url ?? "");
@@ -1020,6 +1058,9 @@ function NodeForm({
   const { data: serverSettings } = useAdminServerSettings();
   const clusterHWAccel = serverSettings?.["playback.hw_accel"];
   const usesCUDADevices = nodeUsesCUDADevices(node, hwAccelOverride, clusterHWAccel);
+  // VideoToolbox takes no device, so its control is hidden. The value stays in
+  // state and is saved as it was: hiding it clears nothing.
+  const showDeviceOverride = !nodeUsesVideoToolbox(node, hwAccelOverride, clusterHWAccel);
   // A device override written for one syntax means nothing in the other: a
   // render path is not a CUDA identity and neither is settable as the other, so
   // moving the selection between them drops the stored value rather than
@@ -1030,7 +1071,11 @@ function NodeForm({
   // the first render, and an effect would read that as a change and erase a
   // valid override on a dialog nobody had touched yet.
   function selectHWAccelOverride(next: string) {
-    if (hwDeviceSyntaxChanges(node, hwAccelOverride, next, clusterHWAccel)) {
+    // A device the node declares is saved as stored, so it stays on screen.
+    if (
+      !isLocked("hw_device_override") &&
+      hwDeviceSyntaxChanges(node, hwAccelOverride, next, clusterHWAccel)
+    ) {
       setHwDeviceOverride("");
     }
     setHwAccelOverride(next);
@@ -1082,7 +1127,10 @@ function NodeForm({
       if (showSourceAccess) {
         body.source_access = sourceAccess;
       }
-      updateMutation.mutate({ node, body }, { onSuccess: onClose });
+      updateMutation.mutate(
+        { node, body: restoreEnvManagedFields(body, node) },
+        { onSuccess: onClose },
+      );
     } else {
       const body: CreateNodeRequest = { type: nodeType, ...fields };
       if (nodeType === "proxy" && publicUrl.trim() !== "") {
@@ -1107,6 +1155,7 @@ function NodeForm({
           <Label>{t("web.admin.nodes.form.name")}</Label>
           <Input
             value={name}
+            disabled={isLocked("name")}
             onChange={(e) => setName(e.target.value)}
             placeholder={
               nodeType === "proxy"
@@ -1115,6 +1164,7 @@ function NodeForm({
             }
             required
           />
+          {lockedNote("name")}
         </div>
 
         <div className="space-y-2">
@@ -1129,11 +1179,14 @@ function NodeForm({
         <div className="space-y-2">
           <Label>{t("web.admin.nodes.form.url")}</Label>
           <Input
+            dir="ltr"
             value={url}
+            disabled={isLocked("url")}
             onChange={(e) => setUrl(e.target.value)}
             placeholder={urlPlaceholder}
             required
           />
+          {lockedNote("url")}
           {nodeType === "transcode" ? (
             <p className="text-muted-foreground text-sm">
               {t("web.admin.nodes.form.urlHelpTranscode")}
@@ -1149,10 +1202,14 @@ function NodeForm({
           <div className="space-y-2">
             <Label>{t("web.admin.nodes.form.publicUrl")}</Label>
             <Input
+              // The URL reads left to right; the translated placeholder keeps the page's direction.
+              dir={publicUrl ? "ltr" : undefined}
               value={publicUrl}
+              disabled={isLocked("public_url")}
               onChange={(e) => setPublicUrl(e.target.value)}
               placeholder={t("web.admin.nodes.form.publicUrlPlaceholder")}
             />
+            {lockedNote("public_url")}
             <p className="text-muted-foreground text-sm">
               {t("web.admin.nodes.form.publicUrlHelp")}
             </p>
@@ -1163,9 +1220,11 @@ function NodeForm({
           <Label>{t("web.admin.nodes.form.group")}</Label>
           <Input
             value={group}
+            disabled={isLocked("group")}
             onChange={(e) => setGroup(e.target.value)}
             placeholder={t("web.admin.nodes.form.groupPlaceholder")}
           />
+          {lockedNote("group")}
           <p className="text-muted-foreground text-sm">{t("web.admin.nodes.form.groupHelp")}</p>
         </div>
 
@@ -1179,9 +1238,11 @@ function NodeForm({
             type="number"
             min={0}
             value={maxJobs}
+            disabled={isLocked("max_jobs")}
             onChange={(e) => setMaxJobs(e.target.value)}
             placeholder={t("web.admin.nodes.form.unlimited")}
           />
+          {lockedNote("max_jobs")}
           <p className="text-muted-foreground text-sm">{t("web.admin.nodes.form.maxJobsHelp")}</p>
         </div>
 
@@ -1193,9 +1254,11 @@ function NodeForm({
               min={0}
               step="any"
               value={maxBandwidthMbps}
+              disabled={isLocked("max_bandwidth_kbps")}
               onChange={(e) => setMaxBandwidthMbps(e.target.value)}
               placeholder={t("web.admin.nodes.form.unlimited")}
             />
+            {lockedNote("max_bandwidth_kbps")}
             <p className="text-muted-foreground text-sm">
               {t("web.admin.nodes.form.maxEgressHelp")}
             </p>
@@ -1207,6 +1270,7 @@ function NodeForm({
             <Label htmlFor="node-source-access">{t("web.admin.nodes.form.sourceAccess")}</Label>
             <Select
               value={sourceAccess}
+              disabled={isLocked("source_access")}
               onValueChange={(value) => setSourceAccess(value as NodeSourceAccess)}
             >
               <SelectTrigger id="node-source-access" className="w-full">
@@ -1220,6 +1284,7 @@ function NodeForm({
             <p className="text-muted-foreground text-sm">
               {t("web.admin.nodes.form.sourceAccessHelp")}
             </p>
+            {lockedNote("source_access")}
           </div>
         )}
 
@@ -1235,7 +1300,11 @@ function NodeForm({
               <Label htmlFor="node-hw-accel-override">
                 {t("web.admin.nodes.form.hardwareAcceleration")}
               </Label>
-              <Select value={hwAccelOverride} onValueChange={selectHWAccelOverride}>
+              <Select
+                value={hwAccelOverride}
+                disabled={isLocked("hw_accel_override")}
+                onValueChange={selectHWAccelOverride}
+              >
                 <SelectTrigger id="node-hw-accel-override" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
@@ -1253,58 +1322,66 @@ function NodeForm({
               {effectiveAcceleration && (
                 <p className="text-muted-foreground text-sm">{effectiveAcceleration}</p>
               )}
+              {lockedNote("hw_accel_override")}
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor={hasDeviceInventory ? undefined : "node-hw-device-override"}>
-                {t("web.admin.nodes.form.gpuDevices")}
-              </Label>
-              {hasDeviceInventory ? (
-                <NodeDevicePicker
-                  rows={deviceRows}
-                  onToggle={(path) =>
-                    setHwDeviceOverride(toggleHWDevice(hwDeviceOverride, path, devicePaths))
-                  }
-                  onInherit={() => setHwDeviceOverride("")}
-                />
-              ) : (
-                <>
-                  <Input
-                    id="node-hw-device-override"
-                    value={hwDeviceOverride}
-                    onChange={(e) => setHwDeviceOverride(e.target.value)}
-                    placeholder={t("web.admin.nodes.form.gpuDevicesPlaceholder")}
+            {showDeviceOverride && (
+              <div className="space-y-2">
+                <Label htmlFor={hasDeviceInventory ? undefined : "node-hw-device-override"}>
+                  {t("web.admin.nodes.form.gpuDevices")}
+                </Label>
+                {hasDeviceInventory ? (
+                  <NodeDevicePicker
+                    rows={deviceRows}
+                    onToggle={(path) =>
+                      setHwDeviceOverride(toggleHWDevice(hwDeviceOverride, path, devicePaths))
+                    }
+                    onInherit={() => setHwDeviceOverride("")}
+                    disabled={isLocked("hw_device_override")}
                   />
-                  {/*
-                  Each branch is a whole sentence rather than a shared tail: an
-                  NVENC node reaches the free-text field *with* a reported
-                  inventory (its render devices are real, they are just not what
-                  NVENC addresses), so "no inventory yet" is only true of the
-                  other branch — and splitting one sentence across the
-                  conditional also lets JSX drop the space before "empty".
+                ) : (
+                  <>
+                    <Input
+                      id="node-hw-device-override"
+                      // Device paths read left to right; the translated placeholder keeps the page's direction.
+                      dir={hwDeviceOverride ? "ltr" : undefined}
+                      value={hwDeviceOverride}
+                      disabled={isLocked("hw_device_override")}
+                      onChange={(e) => setHwDeviceOverride(e.target.value)}
+                      placeholder={t("web.admin.nodes.form.gpuDevicesPlaceholder")}
+                    />
+                    {/*
+                    Each branch is a whole sentence rather than a shared tail: an
+                    NVENC node reaches the free-text field *with* a reported
+                    inventory (its render devices are real, they are just not what
+                    NVENC addresses), so "no inventory yet" is only true of the
+                    other branch — and splitting one sentence across the
+                    conditional also lets JSX drop the space before "empty".
 
-                  Neither branch says what leaving this empty resolves to. Empty
-                  inherits the cluster-wide playback.hw_device verbatim, and this
-                  form does not know that value — naming a default here would be
-                  a guess, and on the NVENC branch a dangerous one, since an
-                  inherited /dev/dri path reaches NVENC as a CUDA identity.
-                */}
-                  <p className="text-muted-foreground text-sm">
-                    {usesCUDADevices
-                      ? t("web.admin.nodes.form.cudaDeviceHelp", {
-                          index: "0",
-                          uuid: "GPU-a1b2c3d4",
-                          path: "/dev/dri",
-                          mono,
-                        })
-                      : t("web.admin.nodes.form.renderDeviceHelp", {
-                          example: "/dev/dri/renderD128,/dev/dri/renderD129",
-                          mono,
-                        })}
-                  </p>
-                </>
-              )}
-            </div>
+                    Neither branch says what leaving this empty resolves to. Empty
+                    inherits the cluster-wide playback.hw_device verbatim, and this
+                    form does not know that value — naming a default here would be
+                    a guess, and on the NVENC branch a dangerous one, since an
+                    inherited /dev/dri path reaches NVENC as a CUDA identity.
+                  */}
+                    <p className="text-muted-foreground text-sm">
+                      {usesCUDADevices
+                        ? t("web.admin.nodes.form.cudaDeviceHelp", {
+                            index: "0",
+                            uuid: "GPU-a1b2c3d4",
+                            path: "/dev/dri",
+                            mono,
+                          })
+                        : t("web.admin.nodes.form.renderDeviceHelp", {
+                            example: "/dev/dri/renderD128,/dev/dri/renderD129",
+                            mono,
+                          })}
+                    </p>
+                  </>
+                )}
+                {lockedNote("hw_device_override")}
+              </div>
+            )}
           </>
         )}
 
@@ -1318,7 +1395,7 @@ function NodeForm({
 
 /** Rich-text tag for the device examples in the form help. */
 function mono(chunks: ReactNode[]) {
-  return <span className="font-mono">{chunks}</span>;
+  return <code className="font-mono">{chunks}</code>;
 }
 
 /** The node the key dialog acts on, and whether it has a key to replace. */

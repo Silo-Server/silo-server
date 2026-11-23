@@ -7,9 +7,9 @@ import { episodeCode, formatPlayMethod } from "../format";
 import { DetailCard, ListRow, ProgressBar } from "../ui";
 
 function sessionTitle(t: Translate, session: AdminSession): string {
-  if (session.series_name) {
+  if (session.series_title) {
     const code = episodeCode(session.season_number, session.episode_number);
-    return code ? `${session.series_name} · ${code}` : session.series_name;
+    return code ? `${session.series_title} · ${code}` : session.series_title;
   }
   return session.media_title || t("web.admin.users.detail.common.unknownTitle");
 }

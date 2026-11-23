@@ -151,6 +151,9 @@ type pendingRun struct {
 	id   string
 	kind Kind
 	held Held
+	// slot is the nightly slot lockScheduled admitted the run for; zero for
+	// a manual run.
+	slot time.Time
 }
 
 // New builds a Service.
@@ -301,7 +304,7 @@ func (s *Service) RunTask(ctx context.Context, progress func(float64, string)) (
 	defer held.Release(context.WithoutCancel(ctx))
 	ctx, cancel := withLost(ctx, held)
 	defer cancel()
-	return s.Backup(ctx, held, kind, id, progress)
+	return s.backupWith(ctx, held, kind, id, run.slot, progress, nil, nil)
 }
 
 // lockScheduled takes the lock for a run the task manager started: a
@@ -320,10 +323,14 @@ func (s *Service) lockScheduled(ctx context.Context) (*pendingRun, RunResult, er
 	if err != nil {
 		return nil, RunResult{}, err
 	}
+	var slot time.Time
 	if kind == KindNightly {
 		// Every API server fires the trigger; under the lock, the first to
-		// finish the slot's backup leaves the others nothing to do.
-		done, err := s.slotBackedUp(ctx, nightlySlot(s.opts.Now(), s.backupTime(ctx), s.opts.Location))
+		// finish the slot's backup leaves the others nothing to do. The run
+		// records this slot, so moving backup.time while it runs cannot leave
+		// tonight open for a second copy.
+		slot = nightlySlot(s.opts.Now(), s.backupTime(ctx), s.opts.Location)
+		done, err := s.slotBackedUp(ctx, slot)
 		if err != nil || done {
 			held.Release(context.WithoutCancel(ctx))
 			if err != nil {
@@ -332,21 +339,24 @@ func (s *Service) lockScheduled(ctx context.Context) (*pendingRun, RunResult, er
 			return nil, RunResult{Skipped: SkippedAlreadyDone}, nil
 		}
 	}
-	return &pendingRun{held: held, kind: kind}, RunResult{}, nil
+	return &pendingRun{held: held, kind: kind, slot: slot}, RunResult{}, nil
 }
 
 // Backup takes one backup under held, the subsystem lock the caller holds; a
 // restore calls this directly for its before-restore copy. id may be empty.
 // On success rotation and the sweep run; a failed backup deletes nothing. The
-// run is published as the active operation and then as the latest run.
+// run is published as the active operation and then as the latest run. It
+// records no nightly slot: only a scheduled run (RunTask) has one.
 func (s *Service) Backup(ctx context.Context, held Held, kind Kind, id string, progress func(float64, string)) (RunResult, error) {
-	return s.backupWith(ctx, held, kind, id, progress, nil, nil)
+	return s.backupWith(ctx, held, kind, id, time.Time{}, progress, nil, nil)
 }
 
-// backupWith is Backup with ids its rotation must keep (a restore pins its
-// source, so the before-restore backup it takes cannot rotate it away) and,
-// for a before-upgrade backup, the upgrade its manifest records.
-func (s *Service) backupWith(ctx context.Context, held Held, kind Kind, id string, progress func(float64, string), pinned map[string]bool, upgrade *UpgradeRecord) (RunResult, error) {
+// backupWith is Backup with the nightly slot a scheduled run records (the one
+// lockScheduled admitted it for; zero for any other run), ids its rotation
+// must keep (a restore pins its source, so the before-restore backup it takes
+// cannot rotate it away) and, for a before-upgrade backup, the upgrade its
+// manifest records.
+func (s *Service) backupWith(ctx context.Context, held Held, kind Kind, id string, slot time.Time, progress func(float64, string), pinned map[string]bool, upgrade *UpgradeRecord) (RunResult, error) {
 	if progress == nil {
 		progress = func(float64, string) {}
 	}
@@ -366,10 +376,7 @@ func (s *Service) backupWith(ctx context.Context, held Held, kind Kind, id strin
 	if err == nil {
 		result, err = s.backup(ctx, prep, kind, started, report, pinned)
 	}
-	last := &LastRun{ID: id, Kind: kind, StartedAt: started, FinishedAt: s.opts.Now(), Status: string(result.Status)}
-	if kind == KindNightly {
-		last.NightlySlot = nightlySlot(started, s.backupTime(ctx), s.opts.Location)
-	}
+	last := &LastRun{ID: id, Kind: kind, StartedAt: started, FinishedAt: s.opts.Now(), Status: string(result.Status), NightlySlot: slot}
 	if err != nil {
 		last.Status, last.Error = RunFailed, err.Error()
 	}
