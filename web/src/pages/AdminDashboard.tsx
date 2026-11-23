@@ -16,7 +16,7 @@ import { useAdminLibraries, useScanAllLibraries } from "@/hooks/queries/admin/li
 import { PageHeader } from "@/components/page/PageHeader";
 import { Button } from "@/components/ui/button";
 import { LayoutDashboard, Plus, RefreshCw, ScanLine, TriangleAlert } from "lucide-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { type QueryClient, useQueryClient } from "@tanstack/react-query";
 import { adminKeys } from "@/hooks/queries/keys";
 import { usePageActivity } from "@/hooks/usePageActivity";
 import { buildAdminCommandNavSections } from "@/lib/adminNavigation";
@@ -42,6 +42,23 @@ const DASHBOARD_WIDGET_QUERY_PREFIXES = [
   adminKeys.operationalLogsRoot(),
 ];
 
+// Refreshes can overlap (a slow automatic one, then a resume or a Refresh
+// click, possibly from a dashboard opened again after leaving it), and their
+// stats can answer out of order. Each refresh takes a number when it starts,
+// and its stats apply only if no later-started refresh has applied its own.
+// The numbers live with the query client because that is the cache every
+// dashboard mount writes to.
+const dashboardRefreshOrders = new WeakMap<QueryClient, { started: number; applied: number }>();
+
+function dashboardRefreshOrder(queryClient: QueryClient) {
+  let order = dashboardRefreshOrders.get(queryClient);
+  if (!order) {
+    order = { started: 0, applied: 0 };
+    dashboardRefreshOrders.set(queryClient, order);
+  }
+  return order;
+}
+
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
 const DASHBOARD_AUTO_REFRESH_MS = 60_000;
 const RELATIVE_UPDATED_LABEL_TICK_MS = 30_000;
@@ -59,12 +76,6 @@ export default function AdminDashboard() {
   const pageActivity = usePageActivity();
   const layout = useDashboardLayout();
   const manualRefreshStartedAtRef = useRef<number | null>(null);
-  // Refreshes can overlap (a slow automatic one, then a resume or a Refresh
-  // click), and their stats can answer out of order. Each refresh takes a
-  // number when it starts, and its stats apply only if no later-started
-  // refresh has applied its own yet.
-  const refreshSequenceRef = useRef(0);
-  const appliedRefreshSequenceRef = useRef(0);
   const wasDashboardPollingPausedRef = useRef(!pageActivity.canPollDashboard);
   const [isManualRefreshPending, setIsManualRefreshPending] = useState(false);
   const [lastDashboardUpdatedAt, setLastDashboardUpdatedAt] = useState<number | null>(null);
@@ -124,7 +135,8 @@ export default function AdminDashboard() {
     async ({ manual }: { manual: boolean }) => {
       const profileContext = captureProfileRequestContext();
       if (!profileContext) return;
-      const sequence = ++refreshSequenceRef.current;
+      const order = dashboardRefreshOrder(queryClient);
+      const sequence = ++order.started;
       if (manual) {
         manualRefreshStartedAtRef.current = Date.now();
         setIsManualRefreshPending(true);
@@ -145,8 +157,8 @@ export default function AdminDashboard() {
         ]);
         const nextStats = await fetchAdminStats({ refresh: true, profileContext });
         if (!isCapturedProfileAuthorityActive(profileContext)) return;
-        if (sequence < appliedRefreshSequenceRef.current) return;
-        appliedRefreshSequenceRef.current = sequence;
+        if (sequence < order.applied) return;
+        order.applied = sequence;
         queryClient.setQueryData(adminStatsKey(profileContext), nextStats);
         await Promise.all([refetchSessions(), refetchLibraries(), refetchUsers()]);
         const refreshedAt = Date.now();

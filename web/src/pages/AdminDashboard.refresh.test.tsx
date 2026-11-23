@@ -78,40 +78,55 @@ describe("AdminDashboard refresh ordering", () => {
     mocks.request.mockReset();
   });
 
-  it("keeps the newest stats when an older refresh answers last", async () => {
-    const refreshes: Deferred[] = [];
-    mocks.request.mockImplementation(
-      (operation: string, args: { query?: { refresh?: boolean } }) => {
-        if (operation !== "GET /api/v2/admin/stats") throw new Error(`unexpected ${operation}`);
-        if (!args.query?.refresh) return Promise.resolve({ total_movies: 1 });
-        const response = deferred<{ total_movies: number }>();
-        refreshes.push(response);
-        return response.promise;
-      },
-    );
-    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter>
-          <AdminDashboard />
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
-    const tile = await screen.findByLabelText("Total movies");
-    await screen.findByText("1");
+  // Leaving the dashboard and coming back mounts a new page while the first
+  // page's refresh is still waiting, and both write the same stats cache.
+  it.each([
+    { name: "on the same page", leaveAndReturn: false },
+    { name: "after leaving the page and coming back", leaveAndReturn: true },
+  ])(
+    "keeps the newest stats when an older refresh answers last $name",
+    async ({ leaveAndReturn }) => {
+      const refreshes: Deferred[] = [];
+      mocks.request.mockImplementation(
+        (operation: string, args: { query?: { refresh?: boolean } }) => {
+          if (operation !== "GET /api/v2/admin/stats") throw new Error(`unexpected ${operation}`);
+          if (!args.query?.refresh) return Promise.resolve({ total_movies: 1 });
+          const response = deferred<{ total_movies: number }>();
+          refreshes.push(response);
+          return response.promise;
+        },
+      );
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const page = (
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>
+            <AdminDashboard />
+          </MemoryRouter>
+        </QueryClientProvider>
+      );
+      const { unmount } = render(page);
+      await screen.findByText("1");
 
-    // The automatic refresh starts, then the admin presses Refresh before it answers.
-    await act(async () => {
-      vi.advanceTimersByTime(60_000);
-    });
-    expect(refreshes).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: /refresh/i }));
-    await vi.waitFor(() => expect(refreshes).toHaveLength(2));
-    const [older, newer] = refreshes as [Deferred, Deferred];
+      // The automatic refresh starts, then the admin presses Refresh before it answers.
+      await act(async () => {
+        vi.advanceTimersByTime(60_000);
+      });
+      expect(refreshes).toHaveLength(1);
+      if (leaveAndReturn) {
+        unmount();
+        render(page);
+      }
+      fireEvent.click(await screen.findByRole("button", { name: /^refresh$/i }));
+      await vi.waitFor(() => expect(refreshes).toHaveLength(2));
+      const [older, newer] = refreshes as [Deferred, Deferred];
+      const tile = screen.getByLabelText("Total movies");
 
-    await act(async () => newer.resolve({ total_movies: 222 }));
-    expect(tile.textContent).toBe("222");
-    await act(async () => older.resolve({ total_movies: 111 }));
-    expect(tile.textContent).toBe("222");
-  });
+      await act(async () => newer.resolve({ total_movies: 222 }));
+      await vi.waitFor(() => expect(tile.textContent).toBe("222"));
+      await act(async () => older.resolve({ total_movies: 111 }));
+      // Let the query cache deliver whatever the older answer wrote.
+      await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
+      expect(tile.textContent).toBe("222");
+    },
+  );
 });
