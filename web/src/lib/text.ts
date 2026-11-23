@@ -27,6 +27,26 @@ export function leadingGraphemes(text: string, count: number): string {
 }
 
 /**
+ * Where each character of `text` starts, as a reader sees them, in UTF-16 code
+ * units: a cut at one of these offsets never splits an emoji, a flag, or a
+ * letter from its accents. Without Intl.Segmenter it gives every code point's
+ * start, which still never splits a surrogate pair.
+ */
+export function graphemeStarts(text: string): Set<number> {
+  const starts = new Set<number>();
+  if (graphemes) {
+    for (const { index } of graphemes.segment(text)) starts.add(index);
+  } else {
+    let at = 0;
+    for (const char of text) {
+      starts.add(at);
+      at += char.length;
+    }
+  }
+  return starts;
+}
+
+/**
  * The first `count` characters of `text`, upper-cased by the interface
  * language's rules: Turkish makes "i" into "İ", as CSS `uppercase` does under
  * the page's `lang`. Call it while rendering: it reads the current language.
