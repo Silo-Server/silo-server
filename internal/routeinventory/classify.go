@@ -841,6 +841,9 @@ var traitOnlyRules = []authRule{
 var infrastructureMiddleware = []string{
 	"apimw.RequestID", mwRequestID, "middleware.Recoverer", "apimw.RequestLogger", "apimw.Metrics",
 	"httpstream.CompressExcept", "httpstream.CompressWithExclusions", "clientip.Middleware", "activitylog.NewMiddleware",
+	// apimw.Recoverer answers a handler's panic with a 500 inside the
+	// request recorders; it admits and refuses nothing.
+	"apimw.Recoverer",
 	// netaccess.Middleware validates and strips the network access ingress
 	// token on every listener; it records the access path and never grants
 	// or changes authorization.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -197,6 +198,9 @@ type selectiveFixture struct {
 	failFollowUps bool
 	// beforeSettings runs ahead of each settings write, before its lock.
 	beforeSettings func()
+	// env is what this server's environment sets; the settings write
+	// refuses a batch naming any of it, as the admin write path does.
+	env map[string]string
 }
 
 func newSelectiveFixture(t *testing.T) *selectiveFixture {
@@ -242,6 +246,11 @@ func newSelectiveFixtureOn(t *testing.T, pool *pgxpool.Pool, dsn string) *select
 			if f.beforeSettings != nil {
 				f.beforeSettings()
 			}
+			for key := range values {
+				if _, set := f.env[key]; set {
+					return nil, nil, fmt.Errorf("managed_by_environment: %s is managed by an environment variable", key)
+				}
+			}
 			err := f.settings.UpdateAtomicWithTx(ctx, tx, func(stored map[string]string, _ pgx.Tx) (map[string]string, error) {
 				if check != nil {
 					if err := check(stored); err != nil {
@@ -251,6 +260,10 @@ func newSelectiveFixtureOn(t *testing.T, pool *pgxpool.Pool, dsn string) *select
 				return values, nil
 			})
 			return nil, func(context.Context) {}, err
+		},
+		EnvironmentValue: func(key string) (string, bool) {
+			value, ok := f.env[key]
+			return value, ok
 		},
 		LibrarySectionsCreated: func(context.Context, int) error { return nil },
 		LibraryCreated: func(_ context.Context, id int) error {
@@ -617,6 +630,74 @@ func TestRestoreNeverSendsLiveSecretsToARestoredAddressDB(t *testing.T) {
 	}
 	if page := previewItem(t, unverified, SectionSettings, pageEmail); page.Selectable || page.Reason != ReasonUnverifiedBackup {
 		t.Fatalf("email page of an unverified backup = %+v, want unselectable, unverified_backup", page)
+	}
+}
+
+// TestRestoreLeavesOutSettingsTheEnvironmentSetsDB: a setting this server's
+// environment sets keeps the environment's value, and the rest of its page
+// restores, where the write path's refusal of that key used to fail the
+// whole page. The mail connection the environment sets the password of
+// stays whole, and a page with nothing else left is not offered.
+func TestRestoreLeavesOutSettingsTheEnvironmentSetsDB(t *testing.T) {
+	f := newSelectiveFixture(t)
+	ctx := t.Context()
+	const name, subtitle = "branding.server_name", "branding.login_subtitle"
+	setSetting(t, f.pool, f.settings, name, "Backup Name")
+	setSetting(t, f.pool, f.settings, subtitle, "Subtitle from backup")
+	setSetting(t, f.pool, f.settings, settingSMTPHost, "smtp.backup.example")
+	setSetting(t, f.pool, f.settings, settingSMTPPassword, "the backup's password")
+	source, err := backupUnderLock(t, f.svc, KindManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The server starts again with SILO_SERVER_NAME and SILO_SMTP_PASSWORD,
+	// which store their values.
+	f.env = map[string]string{name: "Env Name", settingSMTPPassword: "the environment's password"}
+	for key, value := range map[string]string{name: "Env Name", subtitle: "Live subtitle", settingSMTPHost: "mail.example.com",
+		settingSMTPPassword: "the environment's password"} {
+		setSetting(t, f.pool, f.settings, key, value)
+	}
+	preview, err := f.svc.Preview(ctx, source.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := previewItem(t, preview, SectionSettings, "general")
+	statuses := map[string]string{}
+	for _, s := range append(page.Settings, previewItem(t, preview, SectionSettings, pageEmail).Settings...) {
+		statuses[s.Key] = s.Status
+	}
+	if !page.Selectable || statuses[name] != SettingManagedByEnvironment || statuses[subtitle] != ItemDiffers {
+		t.Fatalf("general page = %+v, want selectable with %s managed_by_environment", page, name)
+	}
+	if email := previewItem(t, preview, SectionSettings, pageEmail); email.Selectable || email.Reason != ReasonManagedByEnvironment ||
+		statuses[settingSMTPHost] != SettingManagedByEnvironment {
+		t.Fatalf("email page = %+v, want the connection kept whole", email)
+	}
+	selection := map[string][]string{SectionSettings: {"general"}}
+	report, err := f.restore(t, source.ID, preview.Digest, selection, &testFence{pool: f.pool})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item := reportItem(t, report, SectionSettings, "general"); item.Outcome != OutcomeRestored {
+		t.Fatalf("general page = %+v, want restored", item)
+	}
+	for key, want := range map[string]string{name: "Env Name", subtitle: "Subtitle from backup", settingSMTPHost: "mail.example.com"} {
+		if got, _ := f.settings.Get(ctx, key); got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+	// Only the environment's setting differs now.
+	if preview, err = f.svc.Preview(ctx, source.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if page := previewItem(t, preview, SectionSettings, "general"); page.Selectable || page.Reason != ReasonManagedByEnvironment {
+		t.Fatalf("general page = %+v, want unselectable, managed_by_environment", page)
+	}
+	if report, err = f.restore(t, source.ID, preview.Digest, selection, &testFence{pool: f.pool}); err != nil {
+		t.Fatal(err)
+	}
+	if item := reportItem(t, report, SectionSettings, "general"); item.Outcome != OutcomeLeftOut || item.Reason != ReasonManagedByEnvironment {
+		t.Fatalf("general page = %+v, want left out, managed_by_environment", item)
 	}
 }
 

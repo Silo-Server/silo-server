@@ -29,6 +29,7 @@ import { SaveBar } from "@/components/SaveBar";
 import { useT } from "@/i18n";
 import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
+import { PausedPlaybackGroup } from "./PausedPlaybackGroup";
 import { TrickplayNodeCapacityField } from "./TrickplayNodeCapacityField";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
@@ -262,6 +263,7 @@ export default function PlaybackSettings() {
             label={t("web.admin.settings.playback.watch.markWatched")}
             type="number"
             unit={t("web.admin.common.units.percent")}
+            description={t("web.admin.settings.playback.watch.markWatchedDescription")}
             value={form.getValue("playback.watched_threshold")}
             onChange={(v) => form.setValue("playback.watched_threshold", v)}
             restartRequired={restartKeys.has("playback.watched_threshold")}
@@ -276,6 +278,8 @@ export default function PlaybackSettings() {
             restartRequired={restartKeys.has("playback.min_resume_threshold")}
           />
         </FieldGroup>
+
+        <PausedPlaybackGroup form={form} />
 
         <FieldGroup
           label={t("web.admin.settings.playback.transcoding.group")}

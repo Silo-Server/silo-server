@@ -10,6 +10,7 @@ import { catalogKeys, itemKeys } from "@/hooks/queries/keys";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useT, type Translate } from "@/i18n";
 import { titleCount } from "@/lib/homeRows/describe";
+import { itemTypeLabel } from "@/lib/itemTypeLabels";
 
 const SEARCH_LIMIT = 10;
 const SEARCH_DEBOUNCE_MS = 250;
@@ -121,7 +122,7 @@ export function CuratedTitlesEditor({
           />
         </div>
         {searchStatus ? (
-          <p role="status" className="text-muted-foreground text-[13px]">
+          <p role="status" className="text-muted-foreground text-[0.8125rem]">
             {searchStatus}
           </p>
         ) : debounced.length > 0 ? (
@@ -131,6 +132,7 @@ export function CuratedTitlesEditor({
           >
             {found.map((item) => {
               const already = picked.has(item.content_id);
+              const type = itemTypeLabel(t, item.type);
               return (
                 <li key={item.content_id} className="flex items-center gap-2 px-3 py-2 text-sm">
                   {/* The year and type sit under the title so the title has the
@@ -143,9 +145,9 @@ export function CuratedTitlesEditor({
                       {item.year
                         ? t("web.home.addRow.curated.resultMeta", {
                             year: item.year,
-                            type: item.type,
+                            type,
                           })
-                        : item.type}
+                        : type}
                     </span>
                   </span>
                   <Button
@@ -174,11 +176,11 @@ export function CuratedTitlesEditor({
       {/* grid-cols-1 holds the column to the editor's width. An implicit auto
           column grows to fit the longest title instead of cutting it. */}
       <div className="grid grid-cols-1 gap-2">
-        <span id={listId} className="text-muted-foreground text-[13px]">
+        <span id={listId} className="text-muted-foreground text-[0.8125rem]">
           {t("web.home.addRow.curated.inOrder", { titles: titleCount(itemIds.length) })}
         </span>
         {itemIds.length === 0 ? (
-          <p className="border-border text-muted-foreground rounded-xl border border-dashed px-3 py-3 text-[13px]">
+          <p className="border-border text-muted-foreground rounded-xl border border-dashed px-3 py-3 text-[0.8125rem]">
             {t("web.home.addRow.curated.empty")}
           </p>
         ) : (

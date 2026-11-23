@@ -51,9 +51,9 @@ Within item detail this covers cast and crew headshots too: they follow the
 same 500px image. Without the parameter they are that 500px image as well.
 
 Without the parameter, an episode still standing in for a backdrop in a section
-hero or Continue Watching uses the widest still rung that fits, 1280px. On
-`/api/v2` a Continue Watching or Next Up episode card shows a still only when
-its season and series have no backdrop (see below).
+hero or Continue Watching uses the widest still rung that fits, 1280px. A
+Continue Watching or Next Up episode card shows a still only when its season
+and series have no backdrop (see below).
 
 The `/api/v2/catalog/people` operations do **not** take the parameter — their headshots are
 always the 500px variant. Browsing a person's filmography does honor it, because
@@ -118,7 +118,9 @@ The last four rows are the [extended item artwork](#extended-item-artwork); only
 `medium` is the width the server chose before this parameter existed, which is
 why it is not always the middle rung. `original` is the cached original at the
 source's full resolution, re-encoded as WebP and capped on ingest at 3840px on
-its longest edge — it is not the provider's untouched file.
+its longest edge — it is not the provider's untouched file. An SVG source, such
+as a TMDB logo, has no resolution of its own and is drawn at 3840px on its
+longest edge.
 
 Artwork hosted by a metadata plugin rather than cached in the bucket has no
 fixed width. For those the size is forwarded to the plugin as a semantic variant
@@ -360,9 +362,9 @@ and season's artwork next to their own: `series_poster_url`,
 `*_thumbhash`. A client can draw an episode's hero from `series_backdrop_url`
 without fetching the episode's detail, since an episode card's `backdrop_url`
 is usually the episode still. In Continue Watching and Next Up rows,
-`/api/v2` episode cards instead carry the season backdrop as `backdrop_url`, or
+episode cards instead carry the season backdrop as `backdrop_url`, or
 the series backdrop when the season has none, and keep the still only when
-neither exists. Frozen `/api/v1` cards keep the still. The poster fields follow
+neither exists. The poster fields follow
 `poster_width` and the backdrop field follows `backdrop_width`, like
 `poster_url` and `backdrop_url` on the same card.
 
@@ -377,7 +379,6 @@ and Next Up included), catalog browse and search, Watch Tonight, and on episode
 detail (`getCatalogItem`). Each field is absent when the series or season has
 no such image. There is no season backdrop field; Continue Watching and Next Up
 rows show it as `backdrop_url`.
-The frozen `/api/v1` responses do not carry them.
 
 ## Jellyfin compatibility
 

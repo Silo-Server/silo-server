@@ -131,7 +131,8 @@ type ArtworkDelivery struct {
 }
 
 type Dependencies struct {
-	Config *config.Config
+	DirectConnections apiv2.DirectConnectionsService
+	Config            *config.Config
 	// SubtitlePlaySync receives subtitles a player is served, so one never
 	// synced is aligned the first time it is played. The routes here connect
 	// it to the subtitle sync service; the Jellyfin routes share it. May be nil.
@@ -1650,34 +1651,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 		} else {
 			playbackHandler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(deps.SessionMgr, realtimeHub)
 		}
-		// Optimistic remux: a play is never blocked on the H.264 copy-safety
-		// scan, so the scan runs behind the issued plan and the notifier moves
-		// any session that is already stream-copying an unsafe source off that
-		// route (or stops it, for a client that cannot be told). Both halves
-		// need the same probe ensurer the playback and detail surfaces use.
+		// A play is never blocked on the H.264 copy-safety scan: the scan runs
+		// behind the issued plan and persists its verdict for later replans.
+		// It needs the same probe ensurer the playback and detail surfaces use.
 		if copySafetyScanner, ok := deps.ProbeEnsurer.(playback.CopySafetyScanner); ok && deps.FileRepo != nil {
-			copySafetyRace := playback.NewCopySafetyRace(
-				copySafetyScanner,
-				deps.FileRepo,
-				playback.NewCopySafetyNotifier(
-					deps.SessionMgr,
-					playbackHandler.PlanStoreV3,
-					playbackHandler.CommandDispatcher,
-					handlers.NewCopySafetyPlaybackControl(playbackHandler),
-				),
-			)
-			if copySafetyRace != nil {
+			if copySafetyRace := playback.NewCopySafetyRace(copySafetyScanner, deps.FileRepo); copySafetyRace != nil {
 				playbackHandler.CopySafetyRacer = copySafetyRace
 				if detailSvc != nil {
 					detailSvc.SetCopySafetyRacer(copySafetyRace)
-				}
-				if streamHandler != nil {
-					// The progressive remux serve path revives stream-copy
-					// transports of its own, and its single long response is
-					// the one thing no later request can gate. It needs the
-					// same racer to refuse a condemned revival and to cover an
-					// undecided one.
-					streamHandler.CopySafetyRacer = copySafetyRace
 				}
 			}
 		}
@@ -1824,6 +1805,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var adminJobsHandler *handlers.AdminJobsHandler
 	if userRepo != nil {
 		adminHandler = handlers.NewAdminHandler(userRepo, deps.DB, deps.UserStoreProvider)
+		adminHandler.BaseContext = deps.AppContext //nolint:fatcontext // set once on a new handler to the app context
 		adminHandler.SessionsLoader = playbackSessionsLoader
 		adminHandler.DetailSvc = detailSvc
 		adminHandler.EventBus = deps.EventBus
@@ -3298,6 +3280,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if deps.PluginService != nil {
 		v2deps.NetworkAccess = deps.PluginService
 	}
+	if deps.DirectConnections != nil {
+		v2deps.DirectConnections = deps.DirectConnections
+	}
 	if deps.TaskManager != nil && deps.DB != nil {
 		v2deps.AdminTasks = deps.TaskManager
 		v2deps.AdminTaskMetrics = metadata.NewRefreshDebtRepository(deps.DB)
@@ -3624,6 +3609,8 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	}
 
 	r.Use(apimw.RequestLogger(deps.NodeID))
+	// This Recoverer answers a panic in the recording middleware below. A
+	// handler's panic is answered by the one after the activity log.
 	r.Use(middleware.Recoverer)
 	r.Use(apimw.Metrics)
 
@@ -3637,6 +3624,11 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	if deps.ActivityLogWriter != nil {
 		r.Use(activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub))
 	}
+
+	// A handler's panic becomes its 500 here, inside the request metrics and
+	// the activity log, so both record it like any other server error
+	// (#3735), an upgrade request included.
+	r.Use(apimw.Recoverer)
 }
 
 // nodeConfigSettings reads the server settings a transcode node's

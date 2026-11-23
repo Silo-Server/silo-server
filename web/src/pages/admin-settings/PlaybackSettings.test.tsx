@@ -14,14 +14,15 @@ const A = "/dev/dri/renderD128";
 const B = "/dev/dri/renderD129";
 const C = "/dev/dri/renderD130";
 
-const { settings } = vi.hoisted(() => ({
+const { settings, save } = vi.hoisted(() => ({
   settings: { current: {} as Record<string, string> },
+  save: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/admin/settings", () => ({
   useAdminServerSettings: () => ({ data: settings.current, isLoading: false }),
   useAdminSensitiveStatus: () => ({ data: { configured: [], managed_by_env: [] }, isError: false }),
-  useUpdateServerSettings: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateServerSettings: () => ({ mutateAsync: save, isPending: false }),
 }));
 vi.mock("@/hooks/queries/admin/system", () => ({
   useHWAccelDetection: () => ({
@@ -103,5 +104,29 @@ describe("hardware device picker kept for an unsaved change", () => {
 
     expect(screen.queryByRole("switch", { name: "GPU A" })).not.toBeInTheDocument();
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+  });
+});
+
+describe("paused playback timeout", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    save.mockReset();
+    settings.current = { "playback.paused_session_timeout_minutes": "20" };
+  });
+
+  // Zero is the documented way to turn the timeout off, so it must save.
+  it("shows the stored minutes and saves zero", async () => {
+    render(page);
+    const group = within(screen.getByRole("group", { name: "Paused playback" }));
+    const field = group.getByRole("spinbutton", { name: "End paused playback after" });
+    expect(field).toHaveValue(20);
+
+    await userEvent.clear(field);
+    await userEvent.type(field, "0");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ "playback.paused_session_timeout_minutes": "0" }),
+    );
   });
 });

@@ -4,7 +4,7 @@ import { toast } from "sonner";
 
 import type { AdminBackup, AdminBackupOmitted } from "@/api/v2/adminBackups";
 import { Button } from "@/components/ui/button";
-import { useT } from "@/i18n";
+import { exactAmount, useT } from "@/i18n";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { cn } from "@/lib/utils";
 
@@ -22,18 +22,6 @@ import {
   type OmissionGroup,
 } from "./warningDetails";
 import { OVERFLOW_CLIP, useOverflowsInline } from "@/hooks/useOverflowsInline";
-
-/**
- * Picks a toggle label's wording for the number of items it reveals. The label
- * prints no number, so its catalog `select` matches exact counts: CLDR's `one`
- * also covers 21, 31, and 101 in Russian or Latvian, and `exactlyTwo` keeps
- * the dual that Arabic and Slovenian use for two.
- */
-function amount(count: number): "exactlyOne" | "exactlyTwo" | "other" {
-  if (count === 1) return "exactlyOne";
-  if (count === 2) return "exactlyTwo";
-  return "other";
-}
 
 /** A list long enough to need its own scroll: names or keys, selectable to copy. */
 const LONG_LIST =
@@ -61,7 +49,7 @@ function OmittedName({ label }: { label: string }) {
 /** One section's headline: the only amber line, with the warning icon. */
 function Headline({ children }: { children: ReactNode }) {
   return (
-    <p className="flex items-start gap-1.5 text-[13px] text-amber-600 dark:text-amber-400">
+    <p className="flex items-start gap-1.5 text-[0.8125rem] text-amber-600 dark:text-amber-400">
       <TriangleAlert aria-hidden="true" className="mt-0.5 size-3.5 shrink-0" />
       <span className="min-w-0">{children}</span>
     </p>
@@ -80,7 +68,7 @@ function OmissionGroupRow({ group }: { group: OmissionGroup }) {
   const [sampleRef, sampleOverflows] = useOverflowsInline<HTMLParagraphElement>(sample);
   return (
     <li className="min-w-0 space-y-1">
-      <p className="text-[13px]">{omissionGroupTitle(group)}</p>
+      <p className="text-[0.8125rem]">{omissionGroupTitle(group)}</p>
       <p
         title={group.detail}
         className={cn(
@@ -150,9 +138,12 @@ export function OmittedAccounts({
     <div className="min-w-0 space-y-1.5">
       <Headline>{headline}</Headline>
       <Disclosure open={open} onOpenChange={setOpen} controls={bodyId}>
-        {open
-          ? t("web.admin.backups.warnings.hideAccounts", { amount: amount(omitted.length) })
-          : t("web.admin.backups.warnings.showAccounts", { amount: amount(omitted.length) })}
+        {t(
+          open
+            ? "web.admin.backups.warnings.hideAccounts"
+            : "web.admin.backups.warnings.showAccounts",
+          { amount: exactAmount(omitted.length) },
+        )}
       </Disclosure>
       {open ? (
         <ul id={bodyId} className="space-y-3 pt-1">
@@ -175,11 +166,14 @@ function MissingGroupRow({ group }: { group: MissingFileGroup }) {
   return (
     <li className="min-w-0 space-y-1">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-[13px]">{missingGroupTitle(group)}</span>
+        <span className="text-[0.8125rem]">{missingGroupTitle(group)}</span>
         <Disclosure open={open} onOpenChange={setOpen} controls={listId}>
-          {open
-            ? t("web.admin.backups.warnings.hideGroupFiles", { amount: amount(group.keys.length) })
-            : t("web.admin.backups.warnings.showGroupFiles", { amount: amount(group.keys.length) })}
+          {t(
+            open
+              ? "web.admin.backups.warnings.hideGroupFiles"
+              : "web.admin.backups.warnings.showGroupFiles",
+            { amount: exactAmount(group.keys.length) },
+          )}
         </Disclosure>
       </div>
       {open ? (
@@ -205,9 +199,9 @@ function MissingFiles({ blobs, total }: { blobs: AdminBackup["missing_blobs"]; t
     <div className="min-w-0 space-y-1.5">
       <Headline>{missingHeadline(blobs.length, total)}</Headline>
       <Disclosure open={open} onOpenChange={setOpen} controls={bodyId}>
-        {open
-          ? t("web.admin.backups.warnings.hideFiles", { amount: amount(blobs.length) })
-          : t("web.admin.backups.warnings.showFiles", { amount: amount(blobs.length) })}
+        {t(open ? "web.admin.backups.warnings.hideFiles" : "web.admin.backups.warnings.showFiles", {
+          amount: exactAmount(blobs.length),
+        })}
       </Disclosure>
       {open ? (
         <div id={bodyId} className="space-y-2 pt-1">

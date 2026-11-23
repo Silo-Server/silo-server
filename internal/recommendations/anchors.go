@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
@@ -173,27 +174,28 @@ func interleaveAnchors(lists [][]ScoredItem, slots []int, limit int) []ScoredIte
 // anchoredRow composes a main row of up to limit items from anchors. Each
 // anchor fetches anchorPoolFactor candidates per slot with no genre filter,
 // MMR ranks them, and interleaveAnchors merges the anchors' rankings. It
-// returns the row and every candidate fetched. An anchor whose candidates or
-// embeddings cannot be read fails the row: the others would take its slots,
-// and a row missing an interest would be cached as if it were whole.
+// returns the row and every candidate fetched, with their details. An anchor
+// whose candidates cannot be read fails the row: the others would take its
+// slots, and a row missing an interest would be cached as if it were whole.
 //
 // When the profile's turned-away titles take anchors out of the row (see
 // shrinkAvertedAnchors), the anchors left fetch again for the slots they
 // gained, so the row keeps its length. allAverted reports that every anchor
 // left: the profile turned away each of its interests, and the row is empty.
-func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, limit int, excludeIDs []string, filter catalog.AccessFilter) (row, pool []ScoredItem, allAverted bool, err error) {
+func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, limit int, excludeIDs []string, filter catalog.AccessFilter) (row, pool []ScoredItem, details map[string]CandidateDetails, allAverted bool, err error) {
 	weights := make([]float64, len(anchors))
 	for i, a := range anchors {
 		weights[i] = a.weight
 	}
 	slots := allocateAnchorSlots(weights, limit)
 	lists := make([][]ScoredItem, len(anchors))
+	listDetails := make([]map[string]CandidateDetails, len(anchors))
 	shares := make([]float64, len(anchors))
 	fetched := make([]int, len(anchors))
 	for i := range anchors {
 		fetched[i] = anchorPoolFactor * slots[i]
-		if lists[i], shares[i], err = b.anchorList(ctx, anchors[i], i, fetched[i], excludeIDs, filter); err != nil {
-			return nil, nil, false, err
+		if lists[i], listDetails[i], shares[i], err = b.anchorList(ctx, anchors[i], i, fetched[i], excludeIDs, filter); err != nil {
+			return nil, nil, nil, false, err
 		}
 	}
 	// A refill widens an anchor's pool, which moves the median its share is
@@ -203,14 +205,14 @@ func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, li
 	for {
 		kept, keptSlots := shrinkAvertedAnchors(weights, shares, slots, limit)
 		if len(kept) == 0 {
-			return nil, nil, true, nil
+			return nil, nil, nil, true, nil
 		}
 		refilled := false
 		for k, i := range kept {
 			if n := anchorPoolFactor * keptSlots[k]; n > fetched[i] {
 				fetched[i] = n
-				if lists[i], shares[i], err = b.anchorList(ctx, anchors[i], i, n, excludeIDs, filter); err != nil {
-					return nil, nil, false, err
+				if lists[i], listDetails[i], shares[i], err = b.anchorList(ctx, anchors[i], i, n, excludeIDs, filter); err != nil {
+					return nil, nil, nil, false, err
 				}
 				refilled = true
 			}
@@ -219,36 +221,36 @@ func (b rowBuilder) anchoredRow(ctx context.Context, anchors []mainRowAnchor, li
 			continue
 		}
 		keptLists := make([][]ScoredItem, len(kept))
+		details = make(map[string]CandidateDetails)
 		for k, i := range kept {
 			keptLists[k] = lists[i]
 			// An anchor that leaves the row leaves the pool too, so type
 			// supplements cannot bring its titles back.
 			pool = mergeScoredCandidates(pool, lists[i])
+			maps.Copy(details, listDetails[i])
 		}
-		return interleaveAnchors(keptLists, keptSlots, limit), pool, false, nil
+		return interleaveAnchors(keptLists, keptSlots, limit), pool, details, false, nil
 	}
 }
 
 // anchorList fetches n candidates around anchor a (the i-th), ranks them
 // against the profile's turned-away titles and by MMR, and returns the
-// ranking with the share of the anchor's interest the turned-away titles
-// leave. MMR's ranking is greedy, so its first items are the anchor's picks;
-// the rest stand in when another anchor runs out.
-func (b rowBuilder) anchorList(ctx context.Context, a mainRowAnchor, i, n int, excludeIDs []string, filter catalog.AccessFilter) ([]ScoredItem, float64, error) {
-	candidates, _, err := b.store.FindTasteProfileCandidates(ctx, a.embedding, excludeIDs, nil, n, filter)
+// ranking and the candidates' details with the share of the anchor's
+// interest the turned-away titles leave. MMR's ranking is greedy, so its
+// first items are the anchor's picks; the rest stand in when another anchor
+// runs out.
+func (b rowBuilder) anchorList(ctx context.Context, a mainRowAnchor, i, n int, excludeIDs []string, filter catalog.AccessFilter) ([]ScoredItem, map[string]CandidateDetails, float64, error) {
+	candidates, details, err := b.store.FindTasteProfileCandidatesWithDetails(ctx, a.embedding, excludeIDs, nil, n, filter, "")
 	if err != nil {
-		return nil, 0, fmt.Errorf("main row anchor %d candidates: %w", i, err)
+		return nil, nil, 0, fmt.Errorf("main row anchor %d candidates: %w", i, err)
 	}
 	if len(candidates) == 0 {
-		return nil, 1, nil
+		return nil, details, 1, nil
 	}
-	candidates = b.withRecencyBoost(ctx, b.withQualityPrior(ctx, candidates, 0))
-	embMap, err := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(candidates))
-	if err != nil {
-		return nil, 0, fmt.Errorf("main row anchor %d embeddings: %w", i, err)
-	}
+	candidates = b.withRecencyBoost(withQualityPrior(candidates, details, 0), details)
+	embMap := candidateEmbeddings(details)
 	candidates, averse := b.withAversion(candidates, embMap, a.embedding)
-	return applyMMR(candidates, embMap, b.lambda, len(candidates)), averse.interestShare(a.weight), nil
+	return applyMMR(candidates, embMap, b.lambda, len(candidates)), details, averse.interestShare(a.weight), nil
 }
 
 // shrinkAvertedAnchors re-splits the row's slots after the profile's

@@ -5,9 +5,13 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/procgroup"
+	"github.com/Silo-Server/silo-server/internal/procgroup/procgrouptest"
 )
 
 const startupTestManifest = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n#EXTINF:2,\nseg_00000.ts\n#EXT-X-ENDLIST\n"
@@ -458,5 +462,224 @@ func TestStartReconstructTranscodeKeepsOutputForNextAttempt(t *testing.T) {
 	}
 	if got := session.Opts(); got.HWAccel != HWAccelNone || !got.SoftwareVideoDecode {
 		t.Fatalf("final attempt = %+v, want software path", got)
+	}
+}
+
+// gpuDecodeRejectingFFmpeg writes a fake FFmpeg that records each
+// invocation's arguments under logDir. Asked to decode on the GPU, it prints
+// stderr and then exits with 218, or, when keepRunning is set, keeps running
+// in a child process the way FFmpeg reads on through an input its decoder
+// rejects packet by packet. Without -hwaccel it writes a playable manifest and its segments,
+// and runs until killed.
+func gpuDecodeRejectingFFmpeg(t *testing.T, logDir, stderr string, keepRunning bool) string {
+	t.Helper()
+	dir := t.TempDir()
+	stderrPath := filepath.Join(dir, "stderr.txt")
+	manifestPath := filepath.Join(dir, "stream.m3u8")
+	if err := os.WriteFile(stderrPath, []byte(stderr), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A fresh start waits for minManifestSegments listed, non-empty segments.
+	const manifest = "#EXTM3U\n#EXT-X-TARGETDURATION:2\n" +
+		"#EXTINF:2,\nseg_00000.ts\n#EXTINF:2,\nseg_00001.ts\n#EXTINF:2,\nseg_00002.ts\n"
+	if err := os.WriteFile(manifestPath, []byte(manifest), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	onGPUDecode := `cat "` + stderrPath + `" >&2; exit 218`
+	if keepRunning {
+		// The work runs in a child started first, as the real FFmpeg does
+		// under a wrapper script, so stopping only the script would leave it
+		// running.
+		onGPUDecode = `sleep 30 & echo $! > "` + logDir + `/gpu-child.pid"; cat "` + stderrPath + `" >&2; wait; exit 218`
+	}
+	path := filepath.Join(dir, "ffmpeg")
+	script := `#!/bin/sh
+n=1
+while [ -e "` + logDir + `/args-$n" ]; do n=$((n+1)); done
+printf '%s\n' "$@" > "` + logDir + `/args-$n.tmp"
+mv "` + logDir + `/args-$n.tmp" "` + logDir + `/args-$n"
+for arg in "$@"; do
+  if [ "$arg" = "-hwaccel" ]; then
+    ` + onGPUDecode + `
+  fi
+done
+for n in 0 1 2; do echo segment > "seg_0000$n.ts"; done
+cp "` + manifestPath + `" stream.m3u8
+while :; do sleep 0.1; done
+`
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+// An explicit QSV or VAAPI start whose GPU cannot decode the source failed on
+// every executor: the start-path retry only matched NVDEC's rejection, so
+// a transcode node gave up and the local retry ran the same command again. The
+// stderr below is FFmpeg's, from the two reports.
+//   - #4319: a codec with no GPU decoder is decoded on the CPU, and the
+//     VAAPI graph cannot take the frames. FFmpeg exits at once.
+//   - #4279: FFmpeg's AV1 decoder has no software path, so on a GPU without
+//     AV1 decode it rejects every packet and reads on. It must be stopped
+//     for the retry to run before the startup wait ends.
+//
+// Both now move to CPU decode with the same GPU encoder.
+func TestStartReadyTranscodeDecodesOnCPUWhenQSVOrVAAPICannotDecode(t *testing.T) {
+	const filterRejectsCPUFrames = "Impossible to convert between the formats supported by the filter 'graph -1 input from stream 0:0' and the filter 'auto_scale_0'\n" +
+		"Link 'graph -1 input from stream 0:0.default' -> 'auto_scale_0.default':\n" +
+		"  Pixel formats:\n    src: yuv420p\n    dst: yuv420p\n" +
+		"[vf#0:0 @ 0x1] Error reinitializing filters!\n" +
+		"[vf#0:0 @ 0x1] Task finished with error code: -38 (Function not implemented)\n" +
+		"[vost#0:0/hevc_vaapi @ 0x2] [enc:hevc_vaapi @ 0x3] Could not open encoder before EOF\n"
+	const av1DecoderHasNoGPU = "[av1 @ 0x1] Your platform doesn't support hardware accelerated AV1 decoding.\n" +
+		"[av1 @ 0x1] Failed to get pixel format.\n" +
+		"[av1 @ 0x1] Get current frame error\n" +
+		"[vist#0:0/av1 @ 0x2] [dec:av1 @ 0x3] Error submitting packet to decoder: Function not implemented\n" +
+		"[av1 @ 0x1] No support for codec av1 profile 0.\n" +
+		"[av1 @ 0x1] Failed setup for format vaapi: hwaccel initialisation returned error.\n"
+	tests := []struct {
+		name        string
+		hwAccel     string
+		codec       string
+		bitDepth    int
+		policy      TranscodeStartupRetry
+		stderr      string
+		keepRunning bool
+	}{
+		{name: "VAAPI node, codec without a GPU decoder", hwAccel: transcodeHWVAAPI, codec: "theora", bitDepth: 8,
+			policy: TranscodeStartupRetryAccelChange, stderr: filterRejectsCPUFrames},
+		{name: "VAAPI local, AV1 without a GPU decoder", hwAccel: transcodeHWVAAPI, codec: "av1", bitDepth: 10,
+			policy: TranscodeStartupRetryOtherDevice, stderr: av1DecoderHasNoGPU, keepRunning: true},
+		{name: "QSV node, AV1 without a GPU decoder", hwAccel: transcodeHWQSV, codec: "av1", bitDepth: 10,
+			policy: TranscodeStartupRetryAccelChange, stderr: av1DecoderHasNoGPU, keepRunning: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resetDeviceLoad(t)
+			fakeDeviceStat(t, qsvPairDevA)
+			logDir := t.TempDir()
+			opts := TranscodeOpts{
+				InputPath: "/nonexistent/input.mkv", OutputDir: t.TempDir(), SessionID: "decode-reject",
+				SourceVideoCodec: tt.codec, SourceVideoProfile: "Main", SourceVideoBitDepth: tt.bitDepth,
+				TargetCodecVideo: "h264", TargetCodecAudio: "aac", SegmentDuration: 2, TargetResolution: "1080p",
+				FFmpegPath: gpuDecodeRejectingFFmpeg(t, logDir, tt.stderr, tt.keepRunning),
+				HWAccel:    tt.hwAccel, HWDevice: qsvPairDevA,
+			}
+			pipeline := newAutoTranscodePipeline(context.Background(), opts, newAutoTranscodePipelineCache())
+			if pipeline.Enabled() {
+				t.Fatalf("explicit %s must not enable the auto pipeline", tt.hwAccel)
+			}
+
+			const startupWait = 10 * time.Second
+			began := time.Now()
+			session, err := StartReadyTranscode(context.Background(), pipeline, TranscodeStartup{Timeout: startupWait, LegacyRetry: tt.policy})
+			if err != nil {
+				t.Fatalf("StartReadyTranscode: %v", err)
+			}
+			t.Cleanup(func() { _ = session.Close() })
+			if elapsed := time.Since(began); elapsed >= startupWait/2 {
+				t.Fatalf("startup took %s; the rejected GPU decode was not stopped early", elapsed)
+			}
+			if tt.keepRunning {
+				assertProcessGone(t, filepath.Join(logDir, "gpu-child.pid"))
+			}
+
+			first := readFFmpegInvocation(t, logDir, 1)
+			second := readFFmpegInvocation(t, logDir, 2)
+			if !strings.Contains(first, "\n-hwaccel\n") {
+				t.Fatalf("first attempt did not decode on the GPU:\n%s", first)
+			}
+			if strings.Contains(second, "\n-hwaccel\n") {
+				t.Fatalf("retry decoded on the GPU again:\n%s", second)
+			}
+			if got := session.Opts(); got.HWAccel != tt.hwAccel || !got.SoftwareVideoDecode {
+				t.Fatalf("running attempt = %s with CPU decode %v, want %s with CPU decode", got.HWAccel, got.SoftwareVideoDecode, tt.hwAccel)
+			}
+			if _, err := os.Stat(filepath.Join(logDir, "args-3")); err == nil {
+				t.Fatal("startup ran a third attempt after the CPU-decode retry produced a manifest")
+			}
+		})
+	}
+}
+
+// assertProcessGone fails unless the process whose pid pidFile holds has
+// exited. Where nothing reaps orphans, a killed child stays a zombie, which
+// procgrouptest.RequireExited counts as exited.
+func assertProcessGone(t *testing.T, pidFile string) {
+	t.Helper()
+	data, err := os.ReadFile(pidFile)
+	if err != nil {
+		t.Fatalf("read %s: %v", filepath.Base(pidFile), err)
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		t.Fatalf("parse pid %q: %v", data, err)
+	}
+	procgrouptest.RequireExited(t, pid)
+}
+
+// Windows Media Video 7 and 8 and the Microsoft MPEG-4 variants have no GPU
+// decoder in FFmpeg, so they are planned on CPU decode. WMV3 is VC-1, which
+// NVIDIA and most Intel GPUs decode, and keeps GPU decode.
+func TestRequiresSoftwareVideoDecodeForCodecsWithoutGPUDecoder(t *testing.T) {
+	for codec, want := range map[string]bool{
+		"wmv1": true, "wmv2": true, " WMV2 ": true, "msmpeg4v1": true, "msmpeg4v2": true, "msmpeg4v3": true, "msmpeg4": true,
+		"wmv3": false, "vc1": false, "h264": false, "hevc": false, "av1": false, "": false,
+	} {
+		if got := RequiresSoftwareVideoDecode(codec, "", 8); got != want {
+			t.Errorf("RequiresSoftwareVideoDecode(%q) = %v, want %v", codec, got, want)
+		}
+	}
+}
+
+// Only the AV1 decoder's own line on a GPU-decode command stops FFmpeg.
+// FFmpeg echoes input paths in other lines, and a file named after the
+// message must not stop a transcode that is working.
+func TestStderrWriterStopsOnlyOnAV1DecoderRejection(t *testing.T) {
+	const decoderLine = "[av1 @ 0x5581c2a0] Your platform doesn't support hardware accelerated AV1 decoding.\n"
+	tests := []struct {
+		name     string
+		hwaccel  bool
+		line     string
+		wantStop bool
+	}{
+		{name: "decoder line on GPU decode", hwaccel: true, line: decoderLine, wantStop: true},
+		{name: "decoder line on CPU decode", line: decoderLine},
+		{name: "input path naming the message", hwaccel: true,
+			line: "/media/doesn't support hardware accelerated AV1 decoding.mkv: Invalid data found when processing input\n"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := []string{"-c", "sleep 30", "sh"}
+			if tt.hwaccel {
+				args = append(args, "-hwaccel", "vaapi")
+			}
+			cmd := procgroup.CommandContext(context.Background(), "/bin/sh", args...)
+			if err := cmd.Start(); err != nil {
+				t.Fatal(err)
+			}
+			exited := make(chan struct{})
+			go func() { _ = cmd.Wait(); close(exited) }()
+			t.Cleanup(func() { _ = procgroup.Kill(cmd); <-exited })
+
+			writer := &ffmpegStderrWriter{session: &TranscodeSession{}, ctx: context.Background(), cmd: cmd}
+			if _, err := writer.Write([]byte(tt.line)); err != nil {
+				t.Fatal(err)
+			}
+			wait := 5 * time.Second
+			if !tt.wantStop {
+				wait = 200 * time.Millisecond
+			}
+			select {
+			case <-exited:
+				if !tt.wantStop {
+					t.Fatal("FFmpeg was stopped by a line that is not the AV1 decoder's rejection on a GPU-decode command")
+				}
+			case <-time.After(wait):
+				if tt.wantStop {
+					t.Fatal("FFmpeg kept running after its AV1 decoder rejected the GPU")
+				}
+			}
+		})
 	}
 }

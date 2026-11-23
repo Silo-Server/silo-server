@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 
 import type { MDBListListSummary } from "@/api/types";
+import { LineName, MetaLine } from "@/components/MetaLine";
 import { Input } from "@/components/ui/input";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useMDBListSearch } from "@/hooks/queries/userCollectionImports";
@@ -48,23 +49,28 @@ function listMeta(t: Translate, list: MDBListListSummary) {
     list.mediatype === "movie" || list.mediatype === "show"
       ? t("web.collections.templateGallery.listKind", { kind: list.mediatype })
       : null;
-  return [
-    t("web.collections.templateGallery.byUser", { user: list.user_name }),
-    kind,
-    t("web.collections.metaLine.titleCount", {
-      count: list.items,
-      shown: list.items.toLocaleString(formatLocale()),
-    }),
-    list.likes > 0 ? `♥ ${list.likes.toLocaleString(formatLocale())}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const user = list.user_name.trim();
+  return (
+    <MetaLine
+      parts={[
+        user
+          ? t("web.collections.templateGallery.byUser", { user: <LineName name={user} /> })
+          : null,
+        kind,
+        t("web.collections.metaLine.titleCount", {
+          count: list.items,
+          shown: list.items.toLocaleString(formatLocale()),
+        }),
+        list.likes > 0 ? `♥ ${list.likes.toLocaleString(formatLocale())}` : null,
+      ]}
+    />
+  );
 }
 
 function GroupHeading({ title, help }: { title: string; help: string }) {
   const t = useT();
   return (
-    <p className="px-3.5 pt-3 pb-1 text-[13px]">
+    <p className="px-3.5 pt-3 pb-1 text-[0.8125rem]">
       {t("web.collections.templateGallery.groupHeading", {
         title,
         help,
@@ -164,7 +170,7 @@ export function MDBListBrowser({
       {searchEnabled ? null : (
         <p
           id={`${id}-off`}
-          className="bg-muted/60 flex items-start gap-2.5 rounded-xl px-3 py-2.5 text-[13px]"
+          className="bg-muted/60 flex items-start gap-2.5 rounded-xl px-3 py-2.5 text-[0.8125rem]"
         >
           <Info aria-hidden className="text-muted-foreground mt-0.5 size-4 shrink-0" />
           {scopeKind === "server" ? (
@@ -199,7 +205,7 @@ export function MDBListBrowser({
                 aria-pressed={theme === group.category}
                 onClick={() => setTheme(group.category)}
                 className={cn(
-                  "border-border hover:bg-accent h-8 rounded-full border px-3 text-[13px] font-medium",
+                  "border-border hover:bg-accent h-8 rounded-full border px-3 text-[0.8125rem] font-medium",
                   theme === group.category && "bg-foreground text-background hover:bg-foreground",
                 )}
               >
@@ -236,31 +242,31 @@ export function MDBListBrowser({
               />
             ))}
             {search.isError ? (
-              <p role="alert" className="text-destructive px-3.5 py-2.5 text-[13px]">
+              <p role="alert" className="text-destructive px-3.5 py-2.5 text-[0.8125rem]">
                 {t("web.collections.templateGallery.searchFailed", {
                   detail: search.error instanceof Error ? search.error.message : "",
                 }).trim()}
               </p>
             ) : search.isFetching && found.length === 0 ? (
-              <p className="text-muted-foreground px-3.5 py-2.5 text-[13px]">
+              <p className="text-muted-foreground px-3.5 py-2.5 text-[0.8125rem]">
                 {t("web.collections.templateGallery.searching")}
               </p>
             ) : search.data && found.length === 0 ? (
-              <p className="text-muted-foreground px-3.5 py-2.5 text-[13px]">
+              <p className="text-muted-foreground px-3.5 py-2.5 text-[0.8125rem]">
                 {t("web.collections.templateGallery.noMatches", { query: settled })}
               </p>
             ) : null}
           </div>
         ) : null}
         {shown.length === 0 && !settled ? (
-          <p className="text-muted-foreground px-3.5 py-3 text-[13px]">
+          <p className="text-muted-foreground px-3.5 py-3 text-[0.8125rem]">
             {t("web.collections.templateGallery.noPicks")}
           </p>
         ) : null}
       </RadioGroupPrimitive.Root>
 
       <div className="grid gap-2">
-        <label htmlFor={`${id}-link`} className="text-[14px] font-semibold">
+        <label htmlFor={`${id}-link`} className="text-[0.875rem] font-semibold">
           {pasteMdblistLink()}
         </label>
         {/* Set on the wrapper so the start-side icon and the input's start padding stay
@@ -283,7 +289,7 @@ export function MDBListBrowser({
           />
         </div>
         {linkInvalid ? (
-          <p id={`${id}-link-error`} className="text-destructive text-[12.5px]">
+          <p id={`${id}-link-error`} className="text-destructive text-[0.78125rem]">
             {mdblistLinkInvalid()}
           </p>
         ) : null}

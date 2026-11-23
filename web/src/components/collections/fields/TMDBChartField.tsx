@@ -44,7 +44,7 @@ export function TMDBChartField({
   return (
     <div className="grid gap-4">
       <div className="grid gap-2">
-        <span id={`${id}-chart`} className="text-[14px] font-semibold">
+        <span id={`${id}-chart`} className="text-[0.875rem] font-semibold">
           {t("web.collections.fields.chart")}
         </span>
         <RadioGroup
@@ -92,14 +92,14 @@ export function TMDBChartField({
             ) : null}
           </div>
           {lock ? (
-            <p className="text-muted-foreground flex items-center gap-1.5 text-[13px]">
+            <p className="text-muted-foreground flex items-center gap-1.5 text-[0.8125rem]">
               <Lock aria-hidden className="size-3.5" />
               {lock}
             </p>
           ) : null}
         </div>
       ) : null}
-      <p className="text-muted-foreground text-[13px]">
+      <p className="text-muted-foreground text-[0.8125rem]">
         {chartRulesNote()}
         {note ? <> {note}</> : null}
       </p>

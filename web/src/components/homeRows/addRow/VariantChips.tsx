@@ -27,14 +27,14 @@ export function VariantChips({
             variant: t(option.chip),
           })}
           onClick={() => onPick(option.presetKey)}
-          className="border-border bg-background/60 text-foreground/80 hover:bg-secondary hover:text-foreground focus-visible:ring-ring/50 inline-flex h-[26px] items-center rounded-full border px-2.5 text-[13px] font-medium whitespace-nowrap outline-none focus-visible:ring-[3px]"
+          className="border-border bg-background/60 text-foreground/80 hover:bg-secondary hover:text-foreground focus-visible:ring-ring/50 inline-flex h-6.5 items-center rounded-full border px-2.5 text-[0.8125rem] font-medium whitespace-nowrap outline-none focus-visible:ring-[3px]"
         >
           {t(option.chip)}
         </button>
       ))}
       {hidden > 0 ? (
         // Not text-muted-foreground: high contrast pins that brighter than the /80 chips.
-        <span className="border-border text-foreground/65 inline-flex h-[26px] items-center rounded-full border border-dashed px-2.5 text-[13px] font-medium">
+        <span className="border-border text-foreground/65 inline-flex h-6.5 items-center rounded-full border border-dashed px-2.5 text-[0.8125rem] font-medium">
           {t("web.home.addRow.chips.more", { count: hidden })}
         </span>
       ) : null}

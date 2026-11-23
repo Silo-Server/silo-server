@@ -46,7 +46,7 @@ func TestLoadTranscodeNodeEnvReadsKeyFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte(key+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	env := map[string]string{envCoreURL: "http://core:8080", envNodeKey + "_FILE": path}
+	env := map[string]string{transcodenode.EnvCoreURL: "http://core:8080", transcodenode.EnvNodeKey + "_FILE": path}
 	got, err := loadTranscodeNodeEnv(func(name string) string { return env[name] })
 	if err != nil || got.nodeKey != key {
 		t.Fatalf("node key = %q, %v; want the file's key", got.nodeKey, err)
@@ -59,18 +59,18 @@ func TestLoadTranscodeNodeEnv(t *testing.T) {
 		return func(name string) string { return values[name] }
 	}
 	for name, values := range map[string]map[string]string{
-		"no core URL":       {envNodeKey: key},
-		"relative core URL": {envCoreURL: "core:8080", envNodeKey: key},
-		"no key":            {envCoreURL: "http://core:8080"},
-		"malformed key":     {envCoreURL: "http://core:8080", envNodeKey: "snk1_6_not-a-key"},
-		"not a node key":    {envCoreURL: "http://core:8080", envNodeKey: "a-shared-secret"},
+		"no core URL":       {transcodenode.EnvNodeKey: key},
+		"relative core URL": {transcodenode.EnvCoreURL: "core:8080", transcodenode.EnvNodeKey: key},
+		"no key":            {transcodenode.EnvCoreURL: "http://core:8080"},
+		"malformed key":     {transcodenode.EnvCoreURL: "http://core:8080", transcodenode.EnvNodeKey: "snk1_6_not-a-key"},
+		"not a node key":    {transcodenode.EnvCoreURL: "http://core:8080", transcodenode.EnvNodeKey: "a-shared-secret"},
 	} {
 		if _, err := loadTranscodeNodeEnv(env(values)); err == nil {
 			t.Fatalf("%s: accepted", name)
 		}
 	}
 	got, err := loadTranscodeNodeEnv(env(map[string]string{
-		envCoreURL: " http://core:8080 ", envNodeKey: key + "\n", "PORT": "9100",
+		transcodenode.EnvCoreURL: " http://core:8080 ", transcodenode.EnvNodeKey: key + "\n", "PORT": "9100",
 		envSecretKey: "shared-env-file", envNodeName: "gpu-6", envDatabaseURL: "postgres://interim", envRedisURL: "redis://shared",
 	}))
 	if err != nil {
@@ -86,7 +86,7 @@ func TestLoadTranscodeNodeEnv(t *testing.T) {
 		"https://core.example": false, "http://127.0.0.1:8080": false, "http://localhost:8080": false, "http://[::1]:8080": false,
 		"http://192.168.1.10:8080": true,
 	} {
-		loaded, err := loadTranscodeNodeEnv(env(map[string]string{envCoreURL: coreURL, envNodeKey: key}))
+		loaded, err := loadTranscodeNodeEnv(env(map[string]string{transcodenode.EnvCoreURL: coreURL, transcodenode.EnvNodeKey: key}))
 		if err != nil || loaded.insecureCoreURL != insecure || loaded.listen != ":8080" {
 			t.Fatalf("%s: insecure = %v, listen %q (%v); want insecure %v on :8080", coreURL, loaded.insecureCoreURL, loaded.listen, err, insecure)
 		}
@@ -161,22 +161,22 @@ func TestTranscodeNodeStartsFromTheCoreAlone(t *testing.T) {
 		var env []string
 		for _, kv := range os.Environ() {
 			name, _, _ := strings.Cut(kv, "=")
-			if !slices.Contains(append(slices.Clone(transcodeNodeIgnoredEnv), envCoreURL, envNodeKey, envNodeKey+"_FILE", "PORT"), name) {
+			if !slices.Contains(append(slices.Clone(transcodeNodeIgnoredEnv), transcodenode.EnvCoreURL, transcodenode.EnvNodeKey, transcodenode.EnvNodeKey+"_FILE", "PORT"), name) {
 				env = append(env, kv)
 			}
 		}
-		return append(append(env, "SILO_TEST_TRANSCODE_NODE=1", "MODE=transcode", nodeDrainTimeoutEnv+"=0"), extra...)
+		return append(append(env, "SILO_TEST_TRANSCODE_NODE=1", "MODE=transcode", transcodenode.EnvDrainTimeout+"=0"), extra...)
 	}
 
 	for name, key := range map[string]string{"missing key": "", "malformed key": "snk1_6_not-a-key"} {
 		cmd := exec.Command(os.Args[0], "-test.run=^TestTranscodeNodeStartsFromTheCoreAlone$")
-		cmd.Env = nodeEnv(envCoreURL+"=http://127.0.0.1:1", envNodeKey+"="+key)
+		cmd.Env = nodeEnv(transcodenode.EnvCoreURL+"=http://127.0.0.1:1", transcodenode.EnvNodeKey+"="+key)
 		output, err := cmd.CombinedOutput()
 		if exit, ok := errors.AsType[*exec.ExitError](err); !ok || exit.ExitCode() == 0 {
 			t.Fatalf("%s: process ended with %v, want a failed exit\n%s", name, err, output)
 		}
-		if !strings.Contains(string(output), envNodeKey) {
-			t.Fatalf("%s: output does not name %s:\n%s", name, envNodeKey, output)
+		if !strings.Contains(string(output), transcodenode.EnvNodeKey) {
+			t.Fatalf("%s: output does not name %s:\n%s", name, transcodenode.EnvNodeKey, output)
 		}
 	}
 
@@ -184,7 +184,7 @@ func TestTranscodeNodeStartsFromTheCoreAlone(t *testing.T) {
 	core := newFakeNodeCore(t, key)
 	port := freePort(t)
 	cmd := exec.Command(os.Args[0], "-test.run=^TestTranscodeNodeStartsFromTheCoreAlone$")
-	cmd.Env = nodeEnv(envCoreURL+"="+core.URL, envNodeKey+"="+key, "PORT="+port)
+	cmd.Env = nodeEnv(transcodenode.EnvCoreURL+"="+core.URL, transcodenode.EnvNodeKey+"="+key, "PORT="+port)
 	var output syncBuffer
 	cmd.Stdout, cmd.Stderr = &output, &output
 	if err := cmd.Start(); err != nil {

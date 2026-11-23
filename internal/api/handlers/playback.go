@@ -138,15 +138,6 @@ type PlaybackProbeEnsurer interface {
 // *playback.CopySafetyRace implements it.
 type PlaybackCopySafetyRacer interface {
 	RaceScanForPlan(fileID int, plan *playback.PlanV3)
-	// RaceScan re-engages the race for a file whose verdict is still open. The
-	// serve paths use it when they revive a stream-copy transport: the replica
-	// that planned it may be gone, and only a race running *here* can withdraw
-	// the route from the session this replica just rebuilt.
-	RaceScan(fileID int)
-	// VideoCopyUnsafeKnown answers, without ffmpeg and without waiting, whether
-	// this replica can already condemn a video stream-copy of the file —
-	// including from a verdict whose write to the row failed.
-	VideoCopyUnsafeKnown(ctx context.Context, file *models.MediaFile) bool
 }
 
 type PlaybackChapterThumbnailQueuer interface {
@@ -260,7 +251,8 @@ type PlaybackHandler struct {
 	ProbeEnsurer       PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
 	// CopySafetyRacer resolves an unknown H.264 copy-safety verdict behind an
 	// already-issued stream-copy plan. Optional: without it an unknown verdict
-	// simply stays unknown and the copy route is never withdrawn.
+	// stays unknown, and strict web decoders and downloads treat the file as
+	// copy-safe.
 	CopySafetyRacer        PlaybackCopySafetyRacer
 	ChapterThumbnailQueuer PlaybackChapterThumbnailQueuer
 	IntroAnalyzer          PlaybackEpisodeAnalyzer
@@ -291,6 +283,10 @@ type PlaybackHandler struct {
 	beforeIdentityLifecycleLockV3 func()
 	realtimeCommandMu             sync.Mutex
 	realtimeCommands              map[string]playbackCommandRecord
+	// realtimeResultWaiters holds the commands an administrator request is
+	// waiting on a player's result for, keyed by session and command
+	// (playback_realtime.go). Guarded by realtimeCommandMu.
+	realtimeResultWaiters map[realtimeResultKey]chan playback.RealtimeResultStatus
 	// tm owns the transcode-session lifecycle (live map, recipe cards, and
 	// restart reconstruct) shared with the jellycompat handler. The handler
 	// delegates all transcode-session and recipe operations to it.
@@ -335,6 +331,14 @@ type PlaybackHandler struct {
 	v3ReplanSlots           chan struct{}
 	v3EventRateMu           sync.Mutex
 	v3EventRates            map[string]v3EventRate
+	// pausedTimeoutSetting caches the paused-session timeout the lifecycle
+	// sweep enforces; built on first use from SettingsRepo.
+	pausedTimeoutOnce    sync.Once
+	pausedTimeoutSetting *config.CachedSetting[time.Duration]
+	// pausedTimeoutCursor is where the paused timeout's next candidate page
+	// starts; nil starts from the oldest pause.
+	pausedTimeoutCursorMu sync.Mutex
+	pausedTimeoutCursor   *pausedTimeoutCursor
 }
 
 type PlaybackWatchScrobbler interface {
@@ -493,6 +497,27 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 	return t
 }
 
+// playbackThresholdsForFile is playbackThresholds with file's end credits,
+// for session's position measured on a timeline of duration seconds. The
+// credits count only when file is the one session streams and the timeline is
+// that file's own. A session that streams another file than the one it loaded,
+// such as a lower-bitrate version or the next part of a multipart title, one
+// whose streamed file is unknown (a detached Jellyfin stop that only guessed
+// its version), or a longer timeline such as a whole audiobook, keeps the
+// percentage rule.
+func (h *PlaybackHandler) playbackThresholdsForFile(ctx context.Context, session *playback.Session, file *models.MediaFile, duration float64) userstore.ProgressThresholds {
+	t := h.playbackThresholds(ctx)
+	if file == nil || duration != float64(file.Duration) {
+		return t
+	}
+	if session != nil && (session.MediaFileID != file.ID && (session.MediaFileID > 0 || session.RequestedMediaFileID > 0) ||
+		session.TimelineDuration > 0 && session.TimelineDuration != duration) {
+		return t
+	}
+	t.CreditsStartSeconds = markers.CreditsLimitsForFile(file).EndCreditsStart(models.EffectiveMarkerSegments(file), duration)
+	return t
+}
+
 // --- Request/Response types ---
 
 func semanticPlayMethod(s *playback.Session) playback.PlayMethod {
@@ -503,6 +528,20 @@ func semanticPlayMethod(s *playback.Session) playback.PlayMethod {
 		return s.BasePlayMethod
 	}
 	return s.PlayMethod
+}
+
+// reconstructTransportForServe rebuilds a lost local transport from the token
+// recipe for the manifest and segment serve routes. A nil card yields a nil
+// result, which is the caller's not-found: to a client, a recipe it cannot
+// present and a recipe that no longer rebuilds are the same thing.
+// The returned error carries a tone-map execution failure so the serve handler
+// can render it as a 422 instead of a generic not-found; it is nil for every
+// other rebuild outcome, including a plain miss.
+func (h *PlaybackHandler) reconstructTransportForServe(ctx context.Context, sessionID string, requestedSegment int, card *playback.RecipeCard) (*playback.TranscodeSession, error) {
+	if card == nil {
+		return nil, nil
+	}
+	return h.tm.ReconstructTranscodeWithError(ctx, sessionID, requestedSegment, *card)
 }
 
 // ensurePlaybackProbe repairs probe metadata and stamps the H.264 copy-safety
@@ -628,9 +667,6 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 				return session, playback.SessionLoaded, nil, nil, nil
 			}
 			if card != nil {
-				if videoCopyReconstructRefused(r.Context(), h.fileResolver, h.CopySafetyRacer, card) {
-					return nil, playback.SessionMissing, nil, nil, nil
-				}
 				session, _, status, reconstructErr := h.tm.LoadOrReconstructTranscodeWithError(r.Context(), h.sessionMgr.GetSession, sessionID, requestUserID, requestedSegment, card)
 				return session, status, card, claims, reconstructErr
 			}
@@ -655,18 +691,6 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 		if routeStatus := nativeAPIEgressStatusV3(card.RoutingWorkload, card.RoutingExecution, card.RoutingEgress); routeStatus != 0 {
 			return nil, playback.SessionUnavailable, card, claims, &nativeRouteBindingErrorV3{status: routeStatus}
 		}
-	}
-	// The copy-safety verdict gates the revival before it happens, not after.
-	// Reconstruction registers the playback session against the user's stream
-	// caps, so a refusal that ran later would leave a session nobody serves
-	// holding an admission slot the client's fresh attempt needs — and a
-	// remote-node recipe never reaches the local transport reconstruct at all
-	// (the serve handlers proxy to the node instead), so a gate down there would
-	// miss it entirely. A revival the verdict does not condemn re-engages the
-	// race here, so the session about to be rebuilt is covered by a race this
-	// replica owns. See playback_copy_safety.go.
-	if videoCopyReconstructRefused(r.Context(), h.fileResolver, h.CopySafetyRacer, card) {
-		return nil, playback.SessionMissing, nil, nil, nil
 	}
 	// A tone-mapped or keyframe-planned rebuild can fail for a reason the
 	// player has to hear (a terminal tone-map verdict, a playlist that can no
@@ -1053,7 +1077,7 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 	}
 
 	duration := float64(file.Duration)
-	thresholds := h.playbackThresholds(ctx)
+	thresholds := h.playbackThresholdsForFile(ctx, session, file, duration)
 	hints := userstore.VersionHints{
 		FileID:     file.ID,
 		Resolution: file.Resolution,
@@ -1109,7 +1133,7 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	}
 
 	duration := float64(file.Duration)
-	thresholds := h.playbackThresholds(ctx)
+	thresholds := h.playbackThresholdsForFile(ctx, session, file, duration)
 	watchSvc := watchstate.NewService(h.StoreProvider).
 		WithStableIdentityResolver(h.StableIdentityResolver).
 		WithCompletionObserver(h.CompletionObserver)
@@ -1150,8 +1174,8 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	// an earlier stop failed to mark is not lost; the mark skips episodes
 	// already completed.
 	var spanWritten bool
-	if (historyID == "" || session.IsJellyfinCompat) && (result.Completed || (result.AlreadyRecorded && duration > 0 &&
-		session.Position/duration > userstore.WatchedFraction(thresholds.WatchedPct))) {
+	if (historyID == "" || session.IsJellyfinCompat) && (result.Completed || (result.AlreadyRecorded &&
+		thresholds.Watched(session.Position, duration))) {
 		targets, spanErr := h.spannedEpisodeTargets(ctx, file)
 		if spanErr == nil {
 			spanWritten, spanErr = watchSvc.RecordSpannedEpisodesWatched(ctx, session.UserID, session.ProfileID, targets, stoppedAt)
@@ -1277,9 +1301,7 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 			duration = session.TimelineDuration
 		}
 		durationPtr = &duration
-		if duration > 0 && session.Position/duration > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct) {
-			completed = true
-		}
+		completed = h.playbackThresholdsForFile(ctx, session, file, duration).Watched(session.Position, duration)
 	}
 
 	entry := &AdminPlaybackHistoryEntry{
@@ -1351,7 +1373,7 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
 	h.cleanupStoppedSessionTransport(ctx, session)
 	if reason.userInitiated() || session.TranscodeNodeURL != "" {
-		// A system teardown (an FFmpeg exit, a copy-safety stop) leaves the
+		// A system teardown (an FFmpeg exit) leaves the
 		// attempt live for the client's next request to rebuild, as a stream
 		// token would; only a real stop retires the recovery card. A remote
 		// transport is the exception: the teardown above stopped its node job
@@ -1433,9 +1455,36 @@ func (h *PlaybackHandler) recordStopHistory(ctx context.Context, session *playba
 	return result
 }
 
-// recordAdminStopHistory logs a failed write itself and also returns it, so
-// the lifecycle sweep can hold back its next attempt.
+// recordCommittedSubtitle gives a native play's entry the subtitle its
+// attempt's last replan committed. History keeps the subtitle recorded
+// latest, and a copy that missed a replan on another server, or whose own
+// replan failed, still holds an older one.
+func (h *PlaybackHandler) recordCommittedSubtitle(ctx context.Context, session *playback.Session, entry *AdminPlaybackHistoryEntry) {
+	// Only a native play's session ID, a UUID, can name an attempt.
+	if h.PlanStoreV3 == nil || session.IsJellyfinCompat || lifecycleIDParam(session.ID) == nil {
+		return
+	}
+	record, err := h.PlanStoreV3.GetAttempt(ctx, session.ID)
+	if err != nil && !errors.Is(err, playback.ErrSessionNotFound) {
+		slog.WarnContext(ctx, "failed to read the attempt for a session's admin history subtitle", "component", "api", "session", session.ID, "error", err)
+	}
+	if err != nil || record == nil || record.UserID != session.UserID || record.ProfileID != session.ProfileID || record.CurrentPlanID == "" {
+		return
+	}
+	entry.Subtitle = playback.SessionSubtitleFromPlanV3(&record.CurrentPlan)
+}
+
+// recordAdminStopHistory records a session's end in the admin log; see
+// recordAdminEnd.
 func (h *PlaybackHandler) recordAdminStopHistory(ctx context.Context, session *playback.Session, reason PlaybackEndReason) error {
+	return h.recordAdminEnd(ctx, session, reason, time.Time{})
+}
+
+// recordAdminEnd logs a failed write itself and also returns it, so the
+// lifecycle sweep can hold back its next attempt. subtitleAt is when the
+// session's subtitle was last known, when that is before its end
+// (AdminPlaybackHistoryEntry.SubtitleAt).
+func (h *PlaybackHandler) recordAdminEnd(ctx context.Context, session *playback.Session, reason PlaybackEndReason, subtitleAt time.Time) error {
 	entry, err := h.buildAdminHistoryEntry(ctx, session)
 	if err != nil {
 		slog.ErrorContext(ctx, "failed to build admin history", "component", "api", "session", session.ID, "error", err)
@@ -1445,6 +1494,10 @@ func (h *PlaybackHandler) recordAdminStopHistory(ctx context.Context, session *p
 		return nil
 	}
 	entry.EndReason = reason
+	entry.SubtitleAt = subtitleAt
+	if subtitleAt.IsZero() {
+		h.recordCommittedSubtitle(ctx, session, entry)
+	}
 	// An end goes through the session's lifecycle, which announces it;
 	// a teardown the client can recover from records its stretch only.
 	if reason != "" {
@@ -2359,129 +2412,14 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 		transcodeSession.ServeSubtitleSegment(w, r, segmentName)
 		return
 	}
-	segmentLease, err := transcodeSession.OpenSegment(segmentName)
-	if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
-		segNum, parseErr := playback.ParseSegmentNumber(segmentName)
-		if parseErr == nil {
-			now := time.Now()
-			decision := transcodeSession.SegmentRecoveryDecision(segNum, now)
-			lastProducedAgeMS := int64(-1)
-			if !decision.Progress.LastProducedAt.IsZero() {
-				lastProducedAgeMS = now.Sub(decision.Progress.LastProducedAt).Milliseconds()
-			}
-			slog.InfoContext(r.Context(), "transcode segment missing", "component", "api",
-				"segment", segmentName,
-				"requested_segment", segNum,
-				"produced_head", decision.Progress.ProducedHead,
-				"last_requested_segment", decision.Progress.LastRequestedSegment,
-				"start_segment_number", decision.Progress.StartSegmentNumber,
-				"last_produced_age_ms", lastProducedAgeMS,
-				"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-				"restart_on_timeout", decision.RestartOnTimeout,
-				"reason", decision.Reason,
-				"session", sessionID,
-				"playback_session_id", sessionID,
-			)
-			if decision.Wait {
-				slog.InfoContext(r.Context(), "transcode segment wait", "component", "api",
-					"segment", segmentName,
-					"requested_segment", segNum,
-					"produced_head", decision.Progress.ProducedHead,
-					"last_requested_segment", decision.Progress.LastRequestedSegment,
-					"start_segment_number", decision.Progress.StartSegmentNumber,
-					"last_produced_age_ms", lastProducedAgeMS,
-					"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-					"restart_on_timeout", decision.RestartOnTimeout,
-					"reason", decision.Reason,
-					"session", sessionID,
-					"playback_session_id", sessionID,
-				)
-				segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, decision.WaitTimeout)
-				if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
-					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "api",
-						"segment", segmentName,
-						"requested_segment", segNum,
-						"produced_head", decision.Progress.ProducedHead,
-						"last_requested_segment", decision.Progress.LastRequestedSegment,
-						"start_segment_number", decision.Progress.StartSegmentNumber,
-						"last_produced_age_ms", lastProducedAgeMS,
-						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-						"restart_on_timeout", decision.RestartOnTimeout,
-						"reason", decision.Reason,
-						"session", sessionID,
-						"playback_session_id", sessionID,
-					)
-				}
-			}
-
-			// If the segment is still missing (timed out, or outside the
-			// active encode range), either restart at the exact manifest-derived
-			// timeline position or return 404 for copy-mode segments outside the
-			// current manifest window.
-			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
-				target, ok, restartErr := h.tm.RestartSegmentLocked(
-					r.Context(),
-					sessionID,
-					transcodeSession,
-					segNum,
-					decision.Progress.GenerationStartedAt,
-				)
-				// A restart skipped because the request ended is not a failure.
-				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
-					slog.ErrorContext(r.Context(), "restart transcode at missing segment", "component", "api", "error", restartErr, "segment", segmentName, "session", sessionID, "playback_session_id", sessionID)
-				}
-
-				// Copy-mode with an unresolved seek target (ok=false, no error)
-				// means the manifest can't place this segment yet. Don't restart
-				// at a fabricated position; surface ErrSegmentNotFound so the
-				// client retries while the session keeps producing manifest.
-				// Mirrors the transcode-node guard in
-				// internal/transcodenode/server.go.
-				if !ok && restartErr == nil && transcodeSession.IsCopyVideo() {
-					err = playback.ErrSegmentNotFound
-				}
-
-				if restartErr != nil {
-					err = restartErr
-				} else if ok {
-					slog.InfoContext(r.Context(), "transcode seek restart", "component", "api",
-						"segment", segmentName,
-						"requested_segment", segNum,
-						"produced_head", decision.Progress.ProducedHead,
-						"last_requested_segment", decision.Progress.LastRequestedSegment,
-						"start_segment_number", decision.Progress.StartSegmentNumber,
-						"last_produced_age_ms", lastProducedAgeMS,
-						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-						"restart_on_timeout", decision.RestartOnTimeout,
-						"reason", decision.Reason,
-						"seek_seconds", target.SeekSeconds,
-						"stream_origin_seconds", target.StreamOriginSeconds,
-						"resolved_start_segment", target.StartSegmentNumber,
-						"session", sessionID,
-						"playback_session_id", sessionID,
-					)
-					// Throttler + exit monitor re-arm via the session's
-					// restart hook.
-					segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 30*time.Second)
-					if err == nil && strings.EqualFold(transcodeSession.Opts().TargetCodecVideo, "copy") {
-						// Copy-mode seeks can resume as soon as the target segment
-						// exists, but that sometimes leaves the player one segment
-						// away from stalling while FFmpeg catches up. Briefly wait
-						// for a single lookahead fragment when available so the
-						// first resumed playback window is less brittle.
-						nextSegmentName := fmt.Sprintf("seg_%05d%s", segNum+1, filepath.Ext(segmentName))
-						if nextSegment, nextErr := transcodeSession.WaitForOpenSegmentContext(r.Context(), nextSegmentName, 1200*time.Millisecond); nextErr == nil {
-							_ = nextSegment.Close()
-						}
-					}
-				}
-			}
-		} else if transcodeSession.IsRunning() {
-			// Non-numbered segment (e.g., init.mp4 for fMP4 HLS).
-			// Wait briefly — the init segment is written almost immediately.
-			segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 10*time.Second)
-		}
-	}
+	segmentLease, err := playback.OpenSegmentWithRecovery(r.Context(), transcodeSession, segmentName, playback.SegmentRecoveryOptions{
+		SessionID: sessionID,
+		Component: "api",
+		Restart: func(ctx context.Context, segNum int, seenGeneration time.Time) (playback.SegmentRecoveryTarget, bool, error) {
+			return h.tm.RestartSegmentLocked(ctx, sessionID, transcodeSession, segNum, seenGeneration)
+		},
+		CopyLookaheadTimeout: 1200 * time.Millisecond,
+	})
 	if err != nil {
 		if r.Context().Err() != nil {
 			// net/http also ends the context of a client that only

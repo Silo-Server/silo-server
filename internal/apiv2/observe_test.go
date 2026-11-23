@@ -299,3 +299,61 @@ func TestObservedAbortIsRecordedAndRepanics(t *testing.T) {
 		})
 	}
 }
+
+// A panic that reaches no Huma operation (a raw registration, or a v2 chi
+// middleware) is answered with the internal_error problem and recorded as that
+// 500. Once the handler has committed its response, the panic breaks the
+// connection instead and the request is recorded as aborted. A status the
+// writer refused commits nothing.
+func TestObservedRawPanicIsAnsweredAndRecorded(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		status    int
+		write     bool
+		wantClass string
+		wantCode  string
+	}{
+		{"nothing written", 0, false, "5xx", TypeInternalError.ID},
+		{"status rejected", 1000, false, "5xx", TypeInternalError.ID},
+		{"response committed", 0, true, "aborted", labelNone},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			buf := captureLogs(t)
+			labels := prometheus.Labels{labelAPIMajor: "2", labelOperationID: labelNone, labelMethod: http.MethodGet, labelStatusClass: tc.wantClass, labelErrorCode: tc.wantCode, labelAuthClass: authClassAnonymous, labelClient: labelNone}
+			before := counterValue(t, requestsTotal, labels)
+			h := observe(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.Header().Set("Content-Length", "99")
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+				}
+				if tc.write {
+					_, _ = w.Write([]byte("partial"))
+				}
+				panic("boom token=hunter2")
+			}))
+			rr := httptest.NewRecorder()
+			var rec any
+			func() {
+				defer func() { rec = recover() }()
+				h.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/api/v2/events", nil))
+			}()
+			var wantRec any
+			if tc.write {
+				wantRec = http.ErrAbortHandler
+			}
+			if rec != wantRec {
+				t.Fatalf("recovered %v, want %v", rec, wantRec)
+			}
+			if !tc.write && (rr.Code != http.StatusInternalServerError || rr.Header().Get("Content-Type") != problemContentType || rr.Header().Get("Content-Length") != "" || rr.Header().Get("Access-Control-Allow-Origin") != "*" || !strings.Contains(rr.Body.String(), TypeInternalError.ID)) {
+				t.Fatalf("response = %d %v %s, want the internal_error problem", rr.Code, rr.Header(), rr.Body.String())
+			}
+			if got := counterValue(t, requestsTotal, labels) - before; got != 1 {
+				t.Fatalf("%s request counted %v times, want 1", tc.wantClass, got)
+			}
+			if strings.Contains(buf.String(), "hunter2") || !strings.Contains(buf.String(), `"msg":"apiv2 handler panic"`) {
+				t.Fatalf("panic log missing or unmasked: %s", buf.String())
+			}
+		})
+	}
+}

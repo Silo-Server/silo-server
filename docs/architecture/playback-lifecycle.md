@@ -12,7 +12,7 @@ A logical session is one native session id: the key of the in-memory
 (`playback_session_lifecycle`) and the admin history row (`admin_playback_history`).
 It starts once and ends once; an id never starts again.
 
-- Native (v2 and the v1 bridge): starts when `startPlannedPlaybackV3` commits the
+- Native: starts when `startPlannedPlaybackV3` commits the
   transport; ends when its attempt row is stopped. A stopped attempt never
   reconstructs, and reconstruction after a restart announces nothing. A
   reconstruction from a stream token, whose recipe card carries no client, takes
@@ -54,7 +54,7 @@ transition.
   announced state is therefore always the latest accepted sample's, and a lost update
   is repaired by the next sample. The control socket's confirmed pause does not touch
   it; the player's next sample carries the pause.
-- Jellyfin, Audiobookshelf and v1 bridge reports carry no sequence. Their pause state
+- Jellyfin and Audiobookshelf reports carry no sequence. Their pause state
   follows database arrival order and writes only when it changes.
 - `stopped` is final.
 
@@ -66,8 +66,8 @@ stops the attempt row and claims its finalization lease, so only one caller runs
 non-idempotent writers (watch history, provider events). The admin history row and the
 lifecycle's stop commit in one transaction (`RecordEnd`): the first end sets the reason
 and `lifecycle_seq`, later ends record that reason, and only the first is announced,
-with the history entry as stored. A teardown the client recovers from (encoder exit,
-copy-safety) is not an end: it records its stretch and announces nothing.
+with the history entry as stored. A teardown the client recovers from (an encoder
+exit) is not an end: it records its stretch and announces nothing.
 
 ## Sessions no server holds
 
@@ -113,6 +113,81 @@ idleness is tried again after another grace instead of every 15 seconds, and ses
 that keep failing move behind the others, so they never fill a batch. The row is
 recorded once the cause is fixed.
 Lifecycle events themselves are at most once.
+
+## Paused timeout
+
+A native session left paused longer than
+`playback.paused_session_timeout_minutes` (default 15, `0` off, read live
+through a per-server cache that keeps a value for a minute) is ended, so an
+abandoned pause stops holding a stream slot and its transcode. A server that
+has not read the setting successfully yet ends nothing, rather than apply the
+default an administrator may have turned off. The same sweep
+runs it on every API server (`playback_paused_timeout.go`). The attempt's
+24-hour lifetime bounds it: a value near the 1440-minute maximum may not fire
+before the attempt expires, and the existing expiry then ends the session.
+
+- **Eligible.** A native lifecycle row in `paused` since at least the timeout
+  ago, by the database's clock. Its live attempt last accepted a paused sample
+  and accepted one within `PausedStreamSlotGrace` (2 minutes): the client
+  still reports, so the idle expiry above is not the one to end it. Exempt:
+  an attempt whose `output.current_sink` is `cast_receiver` (the sender keeps
+  a Cast play going without the viewer), a session that is a member of an open
+  Watch Together room (`runtime->'members'`, phase `lobby` or `playing`; a runtime
+  whose `members` is not an object lists nobody), and an audio-only effective
+  file (`MediaFile.IsAudioOnly`, resolved in Go because it depends on the
+  probe). The pause starts when a sample turns the lifecycle
+  row paused; later paused samples, and seeks while paused, do not restart it.
+- **Ownership.** A session this server holds, or one no server has synced for
+  45 seconds, is this server's to end. One another server synced recently is
+  left to that server's sweep, which ends it from its own copy; the candidate
+  query leaves it out by passing the ids this server holds.
+- **Paging.** Candidates come oldest pause first in pages of 100, at most
+  three pages a sweep, continuing on the next sweep from where the last one
+  stopped (keyset on the lifecycle row's `updated_at` and session id) and
+  starting over once a page comes back short. Rows the sweep reads and leaves,
+  an audio-only file or one it cannot read, therefore never keep eligible
+  sessions behind them.
+- **Claim.** `ExpirePausedAttempt` locks the attempt row (the lock
+  `ApplyProgress` takes), requiring a paused last sample, then reads the
+  lifecycle row in a second statement, whose snapshot is taken after the lock
+  is held, and requires it to have said paused for the whole timeout. Both
+  statements check the selection again: the first that the client accepted a
+  sample within `PausedStreamSlotGrace` and that the attempt's sink is not
+  `cast_receiver`, the second that no open Watch Together room lists the
+  session. Only then does it stop the attempt under `pausedTimeoutStopID`.
+  A resume that commits first, or while the claim waits on the lock, keeps
+  the session live. A single `UPDATE` that joined the lifecycle row would read that row as
+  of the statement's start under `READ COMMITTED`, and could end a session
+  that resumed and paused again while it waited.
+- **End.** The claim's winner denies the session's stream tokens and finishes
+  the end like any stopped attempt (`finishInterruptedNativeEnd`): it tears
+  down the copy it holds, or records history from the attempt row. The end
+  reason is `expired`. The provider event is a pause marked `SessionEnded`, or
+  a stop when the play had already completed. When finishing leaves the copy
+  held here (another caller holds the finalization lease, or the writers
+  failed), the copy and its live row are dropped at once without history, so
+  its transcode and slot go now; the sweep's stopped-attempt recovery above
+  then finishes the end from the row under the same lease, once.
+- **Stale copies.** Another server claims a session only once no server has
+  synced it for 45 seconds, so a holder whose sync stalled can still hold a
+  paused copy. Each sweep, a server reads the attempts of the native sessions
+  it holds in one query and, for each one stopped under `pausedTimeoutStopID`,
+  first finishes the end from its copy when nobody has
+  (`finishInterruptedNativeEnd`, so the writers run only under the
+  finalization lease), then drops the copy and its live row. This runs even
+  while the timeout reads zero, since another server may have claimed before
+  the setting changed. Copies stopped by other ends keep their own paths.
+- **Resume race.** A resume reaches the server with the client's next report.
+  The web player reports on its video element's `play` and `pause` events;
+  the native clients report every 10 seconds, so a viewer who resumes within
+  one report interval of the timeout can still be ended and sees the
+  paused-timeout notice, with the position kept.
+- **Answers.** Progress, replan and the control-ticket mint answer `410`:
+  `playback_session_paused_timeout` when the attempt's durable client features
+  list `paused_timeout_v1` (attempt-sticky), `playback_session_ended`
+  otherwise, so every client leaves. Media keeps the deny marker's
+  `410 playback_session_ended`. No socket frame announces the end.
+  [Protocol v3 §6.3](playback-protocol-v3.md) is the client contract.
 
 ## Listing
 

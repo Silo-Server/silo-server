@@ -4387,7 +4387,8 @@
               "kept_stricter",
               "unverified_backup",
               "over_restore_budget",
-              "needs_primary_profile"
+              "needs_primary_profile",
+              "managed_by_environment"
             ],
             "type": "string"
           },
@@ -4907,7 +4908,8 @@
               "kept_stricter",
               "unverified_backup",
               "over_restore_budget",
-              "needs_primary_profile"
+              "needs_primary_profile",
+              "managed_by_environment"
             ],
             "type": "string"
           },
@@ -5237,14 +5239,15 @@
             "type": "boolean"
           },
           "status": {
-            "description": "on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores",
+            "description": "on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores; managed_by_environment: this server's environment sets it, or sets another setting of the outside-service connection it belongs to (mail's SMTP settings, for example), so a restore never writes it and this server keeps its value",
             "enum": [
               "on_this_server",
               "differs",
               "needs_another_key",
               "kept_stricter",
               "cleared",
-              "unverified_backup"
+              "unverified_backup",
+              "managed_by_environment"
             ],
             "type": "string"
           }
@@ -15499,10 +15502,11 @@
             "type": "string"
           },
           "delivery": {
-            "description": "dispatched: sent on the session's realtime lane. fallback_scheduled: no lane; the server ends the session after the deadline (stop only)",
+            "description": "dispatched: written to the session's realtime lane; the receipt does not say whether the player confirmed it, and a lane whose player went away without closing it still takes the write. fallback_scheduled: no lane; the server ends the session after the deadline (stop only). acknowledged: the player answered that it received the message within the server's short wait (message only); a player may answer before showing it",
             "enum": [
               "dispatched",
-              "fallback_scheduled"
+              "fallback_scheduled",
+              "acknowledged"
             ],
             "type": "string"
           },
@@ -15697,7 +15701,7 @@
             "type": "number"
           },
           "end_reason": {
-            "description": "Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from",
+            "description": "Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method or version). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from",
             "enum": [
               "stopped",
               "terminated",
@@ -17567,7 +17571,7 @@
             "type": "array"
           },
           "connection_check_supported": {
-            "description": "True when POST config/test contacts the provider for this plugin: a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics can still answer that checks are not supported.",
+            "description": "True when POST config/test contacts the provider for this plugin: a plugin declaring configuration_check, a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics, or a plugin declaring configuration_check without serving it, can still answer that checks are not supported.",
             "type": "boolean"
           },
           "created_at": {
@@ -19260,7 +19264,7 @@
             "description": "The newest sweep on any server that rebuilt or failed at least one profile. Absent until one does."
           },
           "pending": {
-            "description": "Profiles whose recommendations wait for a rebuild. The sweep rebuilds up to 50 every 5 minutes; a profile whose rebuild fails stays pending.",
+            "description": "Profiles whose recommendations wait for a rebuild. Each server tries a sweep 2 minutes after its last try ended, one server at a time; a sweep starts rebuilds, oldest first, for up to a minute, and a rebuild it started finishes even past that minute. A profile whose rebuild fails stays pending.",
             "format": "int64",
             "type": "integer"
           }
@@ -33370,6 +33374,279 @@
         "required": [
           "manifest",
           "bundle"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsCapabilities": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "description": "Whether the current principal may use the capability",
+            "type": "boolean"
+          },
+          "refresh": {
+            "type": "boolean"
+          },
+          "revision": {
+            "description": "Opaque revision of this document",
+            "type": "string"
+          },
+          "state": {
+            "description": "Support and configuration state, not health",
+            "enum": [
+              "available",
+              "disabled",
+              "not_configured",
+              "unsupported"
+            ],
+            "type": "string"
+          },
+          "status": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "status",
+          "refresh",
+          "revision",
+          "state",
+          "allowed"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsFeature": {
+        "additionalProperties": false,
+        "properties": {
+          "detail": {
+            "type": "string"
+          },
+          "feature": {
+            "enum": [
+              "direct",
+              "nat_mapping",
+              "nat_hairpin",
+              "ipv4",
+              "ipv6",
+              "port_mapping",
+              "reachability",
+              "socket_receive_buffer",
+              "socket_send_buffer",
+              "gso",
+              "gro",
+              "pmtu_fallback",
+              "cap_net_admin"
+            ],
+            "type": "string"
+          },
+          "granted": {
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "local",
+              "network"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "enum": [
+              "disabled",
+              "admin_off",
+              "kernel_unsupported",
+              "limit",
+              "force_failed",
+              "no_cap_net_admin",
+              "net_admin_dropped",
+              "unsupported_platform",
+              "probe_failed",
+              "not_available",
+              "no_gateway",
+              "gateway_unsupported",
+              "mapping_varies",
+              "not_measured"
+            ],
+            "type": "string"
+          },
+          "requested": {
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "on",
+              "off",
+              "capped",
+              "fallback",
+              "degraded",
+              "unknown"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature",
+          "kind",
+          "state"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsHostStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "checked_at": {
+            "description": "RFC 3339 instant in UTC with millisecond precision",
+            "format": "date-time",
+            "pattern": "^(?:[1-9][0-9]{3}|0[1-9][0-9]{2}|00[1-9][0-9]|000[2-9])-",
+            "patternDescription": "a non-zero RFC 3339 instant",
+            "type": "string"
+          },
+          "features": {
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionsFeature"
+            },
+            "type": "array"
+          },
+          "host": {
+            "$ref": "#/components/schemas/NetworkAccessHostRef"
+          },
+          "knobs": {
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionsKnob"
+            },
+            "type": "array"
+          },
+          "listeners": {
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionsListener"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "host",
+          "checked_at",
+          "features",
+          "knobs"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsKnob": {
+        "additionalProperties": false,
+        "properties": {
+          "allowed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "default": {
+            "type": "string"
+          },
+          "effective": {
+            "type": "string"
+          },
+          "env": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requested": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "env",
+          "default",
+          "effective"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsListener": {
+        "additionalProperties": false,
+        "properties": {
+          "errno": {
+            "type": "string"
+          },
+          "granted": {
+            "type": "string"
+          },
+          "listener": {
+            "enum": [
+              "api",
+              "jellyfin",
+              "abs",
+              "proxy"
+            ],
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requested": {
+            "type": "string"
+          },
+          "send_buffer": {
+            "$ref": "#/components/schemas/DirectConnectionsSendBuffer"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "listener",
+          "requested",
+          "granted",
+          "state",
+          "reason",
+          "send_buffer"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsSendBuffer": {
+        "additionalProperties": false,
+        "properties": {
+          "errno": {
+            "type": "string"
+          },
+          "granted": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requested": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "requested",
+          "granted",
+          "state",
+          "reason"
+        ],
+        "type": "object"
+      },
+      "DirectConnectionsStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "hosts": {
+            "items": {
+              "$ref": "#/components/schemas/DirectConnectionsHostStatus"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "hosts"
         ],
         "type": "object"
       },
@@ -84086,6 +84363,359 @@
         "x-silo-class": "acting_admin",
         "x-silo-raw-protocol": "diagnostic-bundle",
         "x-silo-raw-reason": "The existing administrator consumer downloads a gzip archive; bytes must not pass through JSON encoding or response buffering.",
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/direct-connections/capabilities": {
+      "get": {
+        "operationId": "getAdminDirectConnectionsCapabilities",
+        "parameters": [
+          {
+            "description": "Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed.",
+            "in": "header",
+            "name": "If-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectConnectionsCapabilities"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "The representation named by If-None-Match is current; no body.",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "412": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Precondition Failed",
+            "headers": {
+              "ETag": {
+                "description": "The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read.",
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Discover direct-connection readiness operations and service configuration, independently of probe health and the hidden setting.",
+        "tags": [
+          "direct-connections"
+        ],
+        "x-silo-class": "acting_admin",
+        "x-silo-conditional": true,
+        "x-silo-service-backed": true
+      }
+    },
+    "/api/v2/admin/direct-connections/status": {
+      "get": {
+        "operationId": "getAdminDirectConnectionsStatus",
+        "parameters": [
+          {
+            "description": "Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted.",
+            "in": "header",
+            "name": "X-Profile-Id",
+            "schema": {
+              "examples": [
+                "1"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked",
+            "in": "header",
+            "name": "X-Profile-Token",
+            "schema": {
+              "examples": [
+                "pvt_5f3a9c1e7b2d4e8fa0c6"
+              ],
+              "type": "string"
+            }
+          },
+          {
+            "description": "Run a new check, or wait for the in-flight check. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds",
+            "explode": false,
+            "in": "query",
+            "name": "refresh",
+            "schema": {
+              "default": false,
+              "description": "Run a new check, or wait for the in-flight check. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DirectConnectionsStatus"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "406": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Not Acceptable"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the API host's direct-connection readiness. Network probes run only when the hidden setting is enabled. Refresh joins an in-flight check or starts a new one. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds.",
+        "tags": [
+          "direct-connections"
+        ],
+        "x-silo-class": "acting_admin",
         "x-silo-service-backed": true
       }
     },
@@ -190663,7 +191293,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "The library's Collections tab: curated collections, their groups, and the viewer's opted-in personal collections.",
+        "summary": "The library's Collections tab: curated collections, their groups, and opted-in personal collections (the viewer's own, plus shared ones from other profiles on the same login).",
         "tags": [
           "libraries"
         ],
@@ -191751,7 +192381,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "The viewer's own personal collections opted into this library's tab.",
+        "summary": "Personal collections opted into this library's tab: the viewer's own, plus shared ones from other profiles on the same login.",
         "tags": [
           "libraries"
         ],
@@ -195466,7 +196096,7 @@
         "operationId": "unsubscribeNotificationEmail",
         "parameters": [
           {
-            "description": "Email capability token. Missing, expired or consumed proof returns an HTML error page.",
+            "description": "Email capability token. Missing proof returns an HTML error page; validity is checked only when the confirmation is submitted with POST.",
             "in": "query",
             "name": "token",
             "schema": {
@@ -195570,7 +196200,7 @@
             "description": "Service Unavailable"
           }
         },
-        "summary": "Process a tokenized notification email link and render its standalone result.",
+        "summary": "Render an unsubscribe confirmation page without changing email preferences.",
         "tags": [
           "notifications"
         ],
@@ -195583,7 +196213,7 @@
         "operationId": "unsubscribeNotificationEmailOneClick",
         "parameters": [
           {
-            "description": "Email capability token. Missing, expired or consumed proof returns an HTML error page.",
+            "description": "Email capability token. Missing or unknown proof returns an HTML error page. The token stays valid after use.",
             "in": "query",
             "name": "token",
             "schema": {
@@ -244173,6 +244803,57 @@
         }
       },
       {
+        "parameters": [
+          {
+            "description": "Transport identifier.",
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "description": "Say whether the client of a transport this node runs is waiting on the encoder: output_bound is true while a restart replaces FFmpeg, or while FFmpeg runs (or has failed) and the client has fetched every produced segment but at most the newest. A progressive remux answers false. A transport the node does not run is 404; the read reconstructs nothing and does not count as client activity. The core calls it before it learns a bandwidth limit from a reported stall.",
+        "listener": "transcode_node",
+        "method": "GET",
+        "path": "/transcode/{session_id}/output-bound",
+        "handler": "(*internal/transcodenode.Server).handleOutputBound",
+        "auth_class": "node_bearer",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/x-silo-worker-protocols/schemas/transcodenode_OutputBoundResponse"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        }
+      },
+      {
         "description": "Reload configuration; active remux work is not torn down.",
         "retry_safety": "non_retryable",
         "listener": "proxy",
@@ -253958,6 +254639,18 @@
           "file_size",
           "video_stream_index",
           "stream_signature"
+        ],
+        "type": "object"
+      },
+      "transcodenode_OutputBoundResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "output_bound": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "output_bound"
         ],
         "type": "object"
       },

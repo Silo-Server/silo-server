@@ -281,6 +281,18 @@
       "value": "รหัสลงชื่อเข้าใช้นี้หมดอายุแล้ว โปรดเริ่มใหม่"
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "บัญชีนี้มีอุปกรณ์สำหรับการเชื่อมต่อโดยตรงครบจำนวนที่กำหนดแล้ว"
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "มีอุปกรณ์อื่นใช้คีย์การเชื่อมต่อนี้อยู่แล้ว โปรดลองอีกครั้ง"
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -339,6 +351,12 @@
     {
       "type": 0,
       "value": "ค่านี้กำหนดโดยสภาพแวดล้อม โปรดเปลี่ยนค่าในสภาพแวดล้อมนั้นแล้วรีสตาร์ทบริการที่เกี่ยวข้อง"
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "ไม่มีค่านี้"
     }
   ],
   "error.field.out_of_range": [
@@ -501,6 +519,18 @@
     {
       "type": 0,
       "value": "เซสชันการเล่นนี้สิ้นสุดแล้ว โปรดเริ่มเล่นอีกครั้ง"
+    }
+  ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "การเล่นหยุดลงเนื่องจากหยุดชั่วคราวนานเกินไป โปรดเริ่มเล่นอีกครั้ง"
+    }
+  ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "มีการแทนที่สตรีมนี้แล้ว การเล่นยังคงดำเนินต่อในสตรีมปัจจุบัน"
     }
   ],
   "error.precondition_failed": [
@@ -13954,9 +13984,25 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อน"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ซ่อน"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -13965,9 +14011,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14088,9 +14132,25 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดง"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "แสดง"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14099,9 +14159,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -14698,9 +14756,41 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "เลือก "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " ด้วย เนื่องจากสิ่งที่คุณเลือกต้องใช้รายการนี้"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "เลือก "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " ด้วย เนื่องจากสิ่งที่คุณเลือกต้องใช้รายการเหล่านี้"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14713,20 +14803,50 @@
             },
             {
               "type": 0,
-              "value": " ด้วย เนื่องจากสิ่งที่คุณเลือกต้องใช้"
+              "value": " ด้วย เนื่องจากสิ่งที่คุณเลือกต้องใช้รายการเหล่านี้"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ยกเลิกการเลือก "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " ด้วย เนื่องจากรายการนี้ต้องใช้สิ่งที่คุณยกเลิกการเลือก"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ยกเลิกการเลือก "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " ด้วย เนื่องจากรายการเหล่านี้ต้องใช้สิ่งที่คุณยกเลิกการเลือก"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14739,13 +14859,11 @@
             },
             {
               "type": 0,
-              "value": " ด้วย เนื่องจากต้องใช้สิ่งที่คุณยกเลิกการเลือก"
+              "value": " ด้วย เนื่องจากรายการเหล่านี้ต้องใช้สิ่งที่คุณยกเลิกการเลือก"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -18846,20 +18964,34 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "อ่านข้อมูลของบัญชีนี้ไม่ได้"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "อ่านข้อมูลของบัญชีเหล่านี้ไม่ได้"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
               "type": 0,
-              "value": "อ่านข้อมูลของบัญชีไม่ได้"
+              "value": "อ่านข้อมูลของบัญชีเหล่านี้ไม่ได้"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -19032,6 +19164,266 @@
     {
       "type": 0,
       "value": "ฐานข้อมูลอ้างอิงไฟล์เหล่านี้ แต่ไม่พบในพื้นที่จัดเก็บ การกู้คืนจะไม่รวมไฟล์เหล่านี้"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ไฟล์แบรนดิ้ง "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ภาพพื้นหลังคอลเลกชัน "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "โปสเตอร์คอลเลกชัน "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "คำบรรยายที่ดาวน์โหลด "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "โปสเตอร์คลัง "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "รูปภาพโอเวอร์เลย์ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "โปสเตอร์คอลเลกชันส่วนตัว "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "อวาตาร์โปรไฟล์ "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ไฟล์อาร์ตเวิร์กที่อัปโหลด "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ไฟล์"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "คำบรรยายที่อัปโหลด "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -19222,9 +19614,41 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "อ่าน "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " ของบัญชีนี้ไม่ได้"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "อ่าน "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " ของบัญชีเหล่านี้ไม่ได้"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -19237,13 +19661,11 @@
             },
             {
               "type": 0,
-              "value": " ของบัญชีไม่ได้"
+              "value": " ของบัญชีเหล่านี้ไม่ได้"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -19380,20 +19802,34 @@
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ข้อมูลของบัญชีนี้มีขนาดใหญ่เกินกว่าที่ชุดกู้คืนรองรับ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ข้อมูลของบัญชีเหล่านี้มีขนาดใหญ่เกินกว่าที่ชุดกู้คืนรองรับ"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
               "type": 0,
-              "value": "ข้อมูลของบัญชีมีขนาดใหญ่เกินกว่าที่ชุดกู้คืนรองรับ"
+              "value": "ข้อมูลของบัญชีเหล่านี้มีขนาดใหญ่เกินกว่าที่ชุดกู้คืนรองรับ"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -21840,6 +22276,12 @@
       "value": "ผู้ให้บริการแปลงเสียงพูดเป็นข้อความไม่พร้อมใช้งานชั่วคราว โปรดลองอีกครั้งในภายหลัง"
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความไม่มีเครดิตเหลือ หรือถึงขีดจำกัดการใช้งานหรือวงเงินการใช้จ่ายแล้ว ตรวจสอบยอดคงเหลือและขีดจำกัดกับผู้ให้บริการ หรือการตั้งค่าการใช้งาน ChatGPT"
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -21850,6 +22292,80 @@
     {
       "type": 0,
       "value": "เชื่อมต่อ AI ข้อความไม่ได้ ตรวจสอบโมเดล ระดับการให้เหตุผล ระดับบริการ การเชื่อมต่อบัญชี และขีดจำกัดการใช้งานของผู้ให้บริการ"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการปฏิเสธการเข้าถึง AI ข้อความ ตรวจสอบว่าคีย์ API หรือบัญชี ChatGPT ใช้โมเดลนี้ได้"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "ปลายทางหรือโมเดล AI ข้อความไม่พร้อมใช้งาน ตรวจสอบ URL หลักของผู้ให้บริการและโมเดล"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "บัญชี ChatGPT ที่เชื่อมต่อแชร์การใช้งานตามแพ็กเกจไม่ได้ ตรวจสอบการตั้งค่าการใช้งาน ChatGPT หรือเชื่อมต่อบัญชีอื่น"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความกำลังจำกัดอัตราคำขอ โปรดลองอีกครั้งในภายหลัง"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความปฏิเสธคำขอตรวจสอบ ตรวจสอบโมเดล ระดับการให้เหตุผล และการตั้งค่าการใช้งานของบัญชี ดูข้อผิดพลาดจากผู้ให้บริการได้ในล็อกของเซิร์ฟเวอร์"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความปฏิเสธคำขอตรวจสอบ (สถานะ "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ") ตรวจสอบโมเดล ระดับการให้เหตุผล และระดับบริการ ดูข้อผิดพลาดจากผู้ให้บริการได้ในล็อกของเซิร์ฟเวอร์"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "การตรวจสอบการเชื่อมต่อ AI ข้อความหมดเวลา ตรวจสอบความพร้อมใช้งานของผู้ให้บริการแล้วลองอีกครั้ง"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความปฏิเสธข้อมูลรับรอง เปลี่ยนคีย์ API ของผู้ให้บริการ หรือลงชื่อเข้าใช้ด้วย ChatGPT อีกครั้ง"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "ผู้ให้บริการ AI ข้อความไม่พร้อมใช้งานชั่วคราว โปรดลองอีกครั้งในภายหลัง"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo เข้าถึงผู้ให้บริการ AI ข้อความไม่ได้ ตรวจสอบ URL หลักของผู้ให้บริการ และตรวจสอบว่าเซิร์ฟเวอร์นี้เชื่อมต่อกับผู้ให้บริการได้"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "โมเดลข้อความส่งคืนการตอบกลับที่ Silo ใช้ไม่ได้ เลือกโมเดลอื่น"
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -21930,6 +22446,12 @@
     {
       "type": 0,
       "value": "ล้างขีดจำกัด"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "โดยตรง"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -41138,6 +41660,99 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "การสแกนและการรีเฟรชข้อมูลเมตาจะแสดงที่นี่ขณะกำลังทำงาน"
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "ไม่มีการสแกนหรือการรีเฟรชที่กำลังทำงาน"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "ทั้งหมด ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "ซ่อนคิว"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ อีก "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " คลัง"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "การรีเฟรชข้อมูลเมตา"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "กำลังรีเฟรชข้อมูลเมตา…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "ดูคิว"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "สูง"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "ต่ำ"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "ปานกลาง"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -41520,6 +42135,30 @@
       "value": "ยืนยันการล้างรูทที่ว่าง"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบ"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "ไม่มีรายการที่รออยู่ในคิวของตัวจับคู่ข้อมูลเมตา"
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "ไม่มีบันทึกรูทที่ข้าม"
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "ไม่มีบันทึก ID ภายนอกที่ล้าสมัย"
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -41556,6 +42195,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "แก้ไข"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "ยังไม่ได้ตั้งค่าคลัง"
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -41597,6 +42248,12 @@
       "value": "ซ่อนพาธ"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "ว่าง"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -41631,6 +42288,12 @@
       "value": "สแกนบางส่วน"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "เติมข้อมูลเมตาที่ขาดหายหรือแทนที่ข้อมูลเมตาทั้งหมด"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -41643,6 +42306,12 @@
       "value": "เข้าถึงรูทไม่ได้"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "สแกน"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -41653,6 +42322,12 @@
     {
       "type": 0,
       "value": "แสดงพาธ"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "หยุด"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -41671,6 +42346,22 @@
     {
       "type": 0,
       "value": "ตรวจสอบการเมานต์"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบว่าเข้าถึงโฟลเดอร์ทั้งหมดของคลังได้"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "ดูการสแกนที่กำลังทำงานของคลัง "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -41774,7 +42465,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "จัดการรูทของคลังและการสแกน การนำเข้า/ส่งออกแค็ตตาล็อกย้ายไปอยู่ในการบำรุงรักษาแล้ว"
+      "value": "จัดการโฟลเดอร์สื่อ ติดตามการสแกน และแก้ไขปัญหาการจับคู่"
     }
   ],
   "web.admin.libraries.page.title": [
@@ -42183,6 +42874,49 @@
     {
       "type": 0,
       "value": "ID ภายนอกที่ล้าสมัย"
+    }
+  ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "กำลังทำงาน "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " รายการ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "กิจกรรมการสแกน"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "สถานะของแค็ตตาล็อก"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "คลัง"
     }
   ],
   "web.admin.libraries.toast.cancelJobFailed": [
@@ -42611,6 +43345,24 @@
     {
       "type": 0,
       "value": "ค้นหารายการที่ละเว้นตามชื่อเรื่อง คลัง หรือประเภท…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "กำกวม"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "รอดำเนินการ"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "ไม่พบที่ตรงกัน"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -57668,6 +58420,612 @@
       "value": "ซิงค์มาร์กเกอร์ออนไลน์"
     }
   ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "อัลกอริทึม: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "ที่ขอ "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": " ที่ใช้อยู่ "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "ค่าที่อนุญาต: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "การควบคุมความแออัด: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "บัญชี"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "ใช้เส้นทางนี้ตั้งแต่"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "ไม่มีอุปกรณ์ที่เชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "ปลายทางของเพียร์"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "อุปกรณ์ที่เชื่อมต่อ"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "ไปยังพอร์ต "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "ค่าเริ่มต้น: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบความพร้อมของเซิร์ฟเวอร์นี้สำหรับการเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "ค่าที่มีผล: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "เปิดใช้การเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "ความสามารถ NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "เอนจินการเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT hairpin"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "การแมป NAT"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "การใช้ PMTU สำรอง"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "การเข้าถึงได้"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "บัฟเฟอร์รับของซ็อกเก็ต"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "บัฟเฟอร์ส่งของซ็อกเก็ต"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "การปรับแต่งโฮสต์"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "การลดจำนวน ACK"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "นโยบายจัดการแพ็กเก็ตสูญหายของ BBR"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "การออฟโหลดการแบ่งเซกเมนต์ UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "หน้าต่างการรับของไคลเอ็นต์"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "พอร์ต UDP ของการเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "การควบคุมความแออัด TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "บัฟเฟอร์ส่ง TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบล่าสุด "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "พร็อกซี"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "ลิสเทนเนอร์"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "ที่อยู่สาธารณะที่ตรวจพบ: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบการรองรับ UPnP NAT-PMP หรือ PCP ของเราเตอร์"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "การแมปพอร์ต"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "การตรวจสอบความพร้อมจะไม่เริ่มการเล่นโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "ผู้ดูแลระบบปิดใช้งานแล้ว"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "ปิดใช้งาน"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "เริ่มเอนจินการเชื่อมต่อโดยตรงไม่ได้"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "เพิ่มขนาดบัฟเฟอร์ไม่ได้"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "เราเตอร์ไม่รองรับการแมปพอร์ต"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "บัฟเฟอร์เล็กกว่าที่ขอ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "ตัวช่วยปรับแต่งเครือข่ายไม่พร้อมใช้งาน"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "ค่าไม่ถูกต้อง จึงใช้ “ปิด”"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "ระบบใช้หรืออ่านการตั้งค่านี้ไม่ได้"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "เคอร์เนลนี้ไม่รองรับ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "บัฟเฟอร์ถึงขีดจำกัดของโฮสต์แล้ว"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "อ่านขีดจำกัดบัฟเฟอร์ของโฮสต์ไม่ได้"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "ที่อยู่สาธารณะเปลี่ยนไปตามปลายทาง"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR ไม่พร้อมใช้งาน"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR ไม่ได้โหลดหรือไม่ได้รับอนุญาต"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "มีเซิร์ฟเวอร์ API ทำงานอยู่มากกว่าหนึ่งเครื่อง"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "สละความสามารถ NET_ADMIN แล้ว"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "ไม่มีความสามารถ NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "ไม่พบเราเตอร์"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "ไม่มีความสามารถ NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "ไม่ได้รับอนุญาต"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "ไม่พร้อมใช้งาน"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "ยังไม่ได้วัด"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "ไม่ต้องเพิ่มขนาด"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "นโยบายของโฮสต์เลือกอัลกอริทึมอื่น"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "การตรวจสอบล้มเหลว"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "ตรวจสอบเซิร์ฟเวอร์ API อื่นไม่ได้"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "เซิร์ฟเวอร์ API อื่นเป็นโฮสต์การเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "กำลังรอเป็นโฮสต์การเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "สถานะการเชื่อมต่อโดยตรงไม่พร้อมใช้งาน"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "เปิดพอร์ต UDP ไม่ได้"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "พอร์ต UDP ไม่ถูกต้อง"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "แพลตฟอร์มนี้ไม่รองรับ"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "ค่าที่ขอ: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "ขนาดที่ขอ: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": " ขนาดที่ได้รับ: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "เรียกใช้การตรวจสอบ"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "บัฟเฟอร์ส่ง: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "จำกัดอยู่"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "ประสิทธิภาพลดลง"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "ใช้วิธีสำรอง"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "ไม่จำเป็น"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "ปิด"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "เปิด"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "ไม่ทราบ"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "รายการ host:port สูงสุดแปดรายการที่คั่นด้วยจุลภาค เว้นว่างไว้เพื่อใช้ค่าเริ่มต้น"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "เซิร์ฟเวอร์ STUN"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "การเชื่อมต่อโดยตรง"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "ให้อุปกรณ์เข้าถึงเซิร์ฟเวอร์นี้ผ่านเส้นทาง UDP โดยตรง พอร์ต UDP มาจาก "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " และอ่านได้อย่างเดียวที่นี่"
+    }
+  ],
   "web.admin.settings.network.host.apiServer": [
     {
       "type": 0,
@@ -60154,6 +61512,24 @@
       "value": "บันทึกลงในคลัง"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "การเล่นที่หยุดชั่วคราว"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "สิ้นสุดการเล่นที่หยุดชั่วคราวหลังจาก"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 ถึง 1440 สิ้นสุดการเล่นวิดีโอที่หยุดชั่วคราวในแอป Silo นานเท่านี้ เพื่อคืนสตรีมและการแปลงรหัสที่ใช้อยู่ เมื่อเล่นอีกครั้งจะเล่นต่อจากตำแหน่งเดิม ไม่มีผลกับฟีเจอร์ดูด้วยกัน การแคสต์ และหนังสือเสียง 0 คือปิดตัวเลือกนี้"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -60590,6 +61966,12 @@
       "value": "วัน"
     }
   ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "นาที"
+    }
+  ],
   "web.admin.settings.playback.unitSeconds": [
     {
       "type": 0,
@@ -60606,6 +61988,12 @@
     {
       "type": 0,
       "value": "ทำเครื่องหมายว่าดูแล้วที่"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "รายการที่มีเครื่องหมายช่วงเครดิตจะนับว่าดูแล้วเช่นกันเมื่อเล่นถึงช่วงเครดิต"
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -66417,6 +67805,12 @@
       "value": "เปิดใช้การแมปโทน HDR ด้วยซอฟต์แวร์"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "สิ้นสุดการเล่นที่หยุดชั่วคราวหลังจาก (นาที)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -66475,6 +67869,12 @@
     {
       "type": 0,
       "value": "แหล่งที่มาของเครื่องหมาย"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "การเล่นที่หยุดชั่วคราว"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -68413,6 +69813,36 @@
     {
       "type": 0,
       "value": "เปิดผู้ให้บริการลงชื่อเข้าใช้ก่อน หากปิดการลงชื่อเข้าใช้ด้วยรหัสผ่านและไม่ได้เปิดผู้ให้บริการใด จะมีเพียงผู้ดูแลระบบฉุกเฉินเท่านั้นที่ลงชื่อเข้าใช้ได้"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "ตั้งแต่ 8 ถึง 72 อักขระ กฎจะมีผลเมื่อมีผู้ตั้งหรือเปลี่ยนรหัสผ่าน รหัสผ่านที่ตั้งไว้แล้วยังใช้งานได้ตามเดิม"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "ความยาวรหัสผ่านขั้นต่ำ"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "เครื่องหมายวรรคตอนหรือสัญลักษณ์ใดก็ได้ เช่น ! หรือ # ตัวอักษร ตัวเลข และการเว้นวรรคไม่นับรวม"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "ต้องมีอักขระพิเศษ"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "ต้องมีตัวพิมพ์ใหญ่"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -79615,6 +81045,20 @@
       "value": "กำลังตั้งรหัสผ่าน…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "แจ้งรหัสผ่านนี้ให้ผู้ใช้ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ทราบด้วยตนเอง"
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -81968,10 +83412,48 @@
       "value": " ไม่อนุญาตให้อุปกรณ์นี้ลงชื่อเข้าใช้เซิร์ฟเวอร์นี้"
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "อย่างน้อย "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " อักขระ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "รหัสผ่านไม่ตรงกัน"
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "ใส่อักขระพิเศษอย่างน้อยหนึ่งตัว เช่น ! หรือ #"
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "ใส่ตัวพิมพ์ใหญ่อย่างน้อยหนึ่งตัว"
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -81984,6 +83466,32 @@
     {
       "type": 0,
       "value": "ใช้อย่างน้อย 8 อักขระ"
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ใช้อย่างน้อย "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " อักขระ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -93255,6 +94763,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [
@@ -113477,6 +114999,12 @@
       "value": "ผู้ดูแลระบบสิ้นสุดเซสชันการเล่นนี้แล้ว"
     }
   ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "การเล่นหยุดลงเนื่องจากหยุดชั่วคราวนานเกินไป"
+    }
+  ],
   "web.player.shuffle.scopeWithParent": [
     {
       "type": 1,
@@ -117579,6 +119107,16 @@
       "value": "กลับไปหน้า 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "ไปที่หน้า "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -117669,6 +119207,20 @@
     {
       "type": 0,
       "value": "หน้าผลลัพธ์ขอเพื่อเพิ่ม"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "หน้า "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " เกินหน้าสุดท้ายของผลลัพธ์นี้"
     }
   ],
   "web.requests.toAdd.series": [
@@ -119146,6 +120698,12 @@
     {
       "type": 0,
       "value": "อ่านการแจ้งเตือนของโปรไฟล์เมื่อได้รับและทำเครื่องหมายว่าอ่านแล้ว"
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "ดูสิ่งที่กำลังเล่นอยู่ขณะนี้ในโปรไฟล์ หรือในทุกโปรไฟล์ของบัญชีเมื่อคีย์ไม่ได้ระบุโปรไฟล์ใด: เรื่อง ตำแหน่งการเล่น สถานะหยุดชั่วคราว อุปกรณ์ และวิธีการเล่น ไม่รวมการควบคุมการเล่นหรือรายละเอียดเครือข่าย"
     }
   ],
   "web.settings.apiKeys.scope.requests": [

@@ -67,7 +67,7 @@ Existing probe configuration keeps working.
 ## Beta Books functionality
 
 Silo 1.0 supports Movies and Series. Audiobooks, ebooks, and Audiobookshelf
-compatibility remain available on 1.0 builds exactly as they work today, labeled
+compatibility remain available and unchanged on 1.0 builds, labeled
 **beta** and outside the 1.0 support promise. A consolidated Books effort will
 replace them later, with no assigned release date. See the
 [scope decision](architecture/v1-scope.md#library-scope-books-deferred).
@@ -284,7 +284,7 @@ administration-UI location for each row before the release candidate is promoted
 | Webhook sync | `/api/v1/webhook-sync/webhooks/{secret}` | `POST /api/v2/webhook-sync/webhooks/{secret}` | Replace the external receiver URL, rotating the secret with `rotateWebhookConnection` (`POST /api/v2/webhook-sync/connections/{id}/webhook/rotate`) | Confirm delivery and profile mapping |
 | OAuth/auth plugin | `/api/v1/auth/oauth/{install_id}/callback` | `GET /api/v2/auth/oauth/{install_id}/callback` | Register the 1.0 callback with the identity provider and reconnect | Complete a new authorization and sign-in flow |
 | Discord link | `/api/v1/notifications/discord/link/callback` | `GET /api/v2/notifications/discord/link/callback` | Start a new link operation from 1.0 | Complete the callback and send a test notification |
-| Tokenized email | `/api/v1/notifications/email/verify`, `/api/v1/notifications/email/unsubscribe` | `GET /api/v2/notifications/email/verify`, `GET` and `POST /api/v2/notifications/email/unsubscribe` | Resend the action from 1.0; pre-upgrade links stop working | Open the newly sent link successfully |
+| Tokenized email | `/api/v1/notifications/email/verify`, `/api/v1/notifications/email/unsubscribe` | `GET /api/v2/notifications/email/verify`, `GET` and `POST /api/v2/notifications/email/unsubscribe` | Resend the action from 1.0; pre-upgrade links stop working | Open the newly sent link successfully. An unsubscribe link only shows a confirmation page: submit it, then check that the profile's email setting is off |
 | Downloads | `/api/v1/downloads/...` control plus `/downloads/file/{token}` and node artifact paths | `/api/v2/downloads/...` control; the node listener keeps `/downloads/file/{token}` at its version-neutral path | Restart unfinished downloads and use only URLs issued by 1.0 | Verify `HEAD`, ranged transfer, manifest, artwork, and subtitles |
 | Playback | `/api/v1/playback/...` control plus `/api/v1/stream/...` media delivery | `/api/v2/playback/...` control plus `/api/v2/stream/...` media delivery | Start a new playback session and use only URLs issued by 1.0 | Verify start, seek/resume, subtitles, and stop reporting |
 | Plugins | `/api/v1/plugins/{installation_id}/...` and `/api/v1/plugin-assets/{installation_id}/...` | `/api/v2/plugin-content/plugins/{installation_id}/...` and `/api/v2/plugin-content/plugin-assets/{installation_id}/...` | Reopen through the 1.0 UI and update the plugin if required. A plugin that emits absolute links or redirects needs its own compatibility check; Silo does not rewrite them | Verify plugin page, assets, authorization, and one core action |
@@ -314,30 +314,34 @@ individually, and a retired one does not answer `410`.
   receive only the upgrade tombstone; separately retired version-neutral paths never execute old
   business behavior.
 
-## Pending Apple and Android contract follow-up
+## Apple and Android contract follow-up
 
-Native implementation is deferred. Every item below remains pending for both
-`silo-apple` (iOS, tvOS and macOS) and `silo-android` (phone and TV); this checklist
-records required work, not completed changes or filed issues. Complete and validate
-these changes against the same server contract before native migration ratification.
+Both native clients call only `/api/v2` (apart from the retained health probe) and decode
+it with handwritten models. The table lists each contract change the clients must handle and
+where `silo-apple` (iOS, tvOS and macOS) and `silo-android` (phone and TV) stand on their main
+branches. Validate both against the same server contract before release.
 
-| Contract change | Required native adaptation |
-| --- | --- |
-| Optional-domain capability documents, including `getRequestStatus`, `getSubtitleProviderStatus` and `getSubtitleAIStatus` | Decode `revision` as an opaque string, `state` as an extensible value and scoped `allowed` as a boolean. Treat unknown states as unavailable. Revisions reflect the runtime document and caller scope; do not parse them as numbers or use route presence as feature detection. |
-| Conditional capability reads | Store the document with its `ETag`, send `If-None-Match`, and reuse the matching body on bodyless `304`. Respect private cache directives. Partition caches by server, account, profile and relevant device/security context; revalidate after authority or configuration changes. |
-| `getCatalogSearchCapabilities` | Allow `provider` to be absent when search is not configured. Use `state` before interpreting provider-specific limits or starting a search. |
-| `getSettingsContractCapabilities` | Move the previous numeric `revision` consumer to `manifest_revision`; reserve string `revision` for the capability document. Other settings contract and row revisions retain their documented numeric meaning. |
-| `getPlaybackSubtitleFonts` | Decode `CollectionPlaybackSubtitleFont`, an object with `items: [{name, data}]`, instead of a bare array. Each item uses `PlaybackSubtitleFont`; `data` remains base64 font bytes. Empty results are `{"items":[]}`. |
-| Native download operations | Handle validly encoded but invalid domain input as `422 validation_failed`. Malformed JSON and invalid cursors remain `400`. Keep conflict and retry handling separate from validation failures. |
-| Diagnostics upload and chunk operations | Handle `409 capability_disabled` and `409 capability_not_configured` as availability failures. Re-read `getDiagnosticsCapabilities`; do not automatically replay an uncertain upload or completion. |
-| Positive decimal string identifiers | Preserve string IDs on the wire. Send canonical values such as `"7"`; `"007"`, `"+7"`, zero and negative values are rejected where a positive decimal ID is required. UUID and other opaque identifier formats retain their own contracts. |
-| `effective_policy.library_ids` | Preserve `null` for unrestricted access and `[]` for deny-all. Never normalize both to an empty list or interpret an empty list as unrestricted. |
-| Stored timestamps and dates | Handle a `500` Problem when persisted data cannot be represented by the declared date/time contract. Do not depend on malformed stored values becoming empty, omitted or fabricated dates. |
-| Mutation receipts | Do not require an `ETag` on a historical receipt. Read the canonical resource before an edit that requires a current validator; a receipt is not proof of its current version. |
+| Contract change | Required native adaptation | Apple | Android |
+| --- | --- | --- | --- |
+| Optional-domain capability documents, including `getRequestStatus`, `getSubtitleProviderStatus` and `getSubtitleAIStatus` | Decode `revision` as an opaque string, `state` as an extensible value and scoped `allowed` as a boolean. Treat unknown states as unavailable. Revisions reflect the runtime document and caller scope; do not parse them as numbers or use route presence as feature detection. | Done | Done for request and subtitle-provider status; pending for `getSubtitleAIStatus`, which decodes none of the three fields |
+| Conditional capability reads | Store the document with its `ETag`, send `If-None-Match`, and reuse the matching body on bodyless `304`. Respect private cache directives. Partition caches by server, account, profile and relevant device/security context; revalidate after authority or configuration changes. | Pending | Pending |
+| `getCatalogSearchCapabilities` | Allow `provider` to be absent when search is not configured. Use `state` before interpreting provider-specific limits or starting a search. | Done | Pending: `provider` is required and `state` is not checked |
+| `getSettingsContractCapabilities` | Move the previous numeric `revision` consumer to `manifest_revision`; reserve string `revision` for the capability document. Other settings contract and row revisions retain their documented numeric meaning. | Done | Done |
+| `getPlaybackSubtitleFonts` | Decode `CollectionPlaybackSubtitleFont`, an object with `items: [{name, data}]`, instead of a bare array. Each item uses `PlaybackSubtitleFont`; `data` remains base64 font bytes. Empty results are `{"items":[]}`. | Done | Not used: the client reads fonts embedded in the file |
+| Native download operations | Handle schema validation failures (a missing or out-of-range member, a value outside an enum, a missing or malformed device or profile header) as `422 validation_failed`. Malformed JSON, invalid cursors, a malformed subtitle ref, and the creation handler's own checks (non-canonical `media_file_id`, invalid `caps.video_decode`, malformed or oversized `expected_entries`, inconsistent revision guards) are `400 malformed_request`. A bitrate preset the server cannot prepare is `501 capability_unsupported`, transcoding the account or server does not allow is `403 permission_denied`, and missing preparation capacity is a retryable `503`. Keep conflict and retry handling separate from validation failures; see [the downloads error reference](downloads-api.md#12-error-reference). | Done: conflicts are separate, and `400` and `422` are both definite refusals | Pending: status reports retry `400` and `422` like transient failures |
+| Diagnostics upload and chunk operations | Handle `409 capability_disabled` and `409 capability_not_configured` as availability failures. Re-read `getDiagnosticsCapabilities`; do not automatically replay an uncertain upload or completion. | Done | Pending: a `409` marks the report permanently failed |
+| Positive decimal string identifiers | Preserve string IDs on the wire. Send canonical values such as `"7"`; `"007"`, `"+7"`, zero and negative values are rejected where a positive decimal ID is required. UUID and other opaque identifier formats retain their own contracts. | Done | Done, except that reads accept leading zeros |
+| `effective_policy.library_ids` | Preserve `null` for unrestricted access and `[]` for deny-all. Never normalize both to an empty list or interpret an empty list as unrestricted. | Pending: not read | Pending: not read |
+| Stored timestamps and dates | Handle a `500` Problem when persisted data cannot be represented by the declared date/time contract. Do not depend on malformed stored values becoming empty, omitted or fabricated dates. | Pending: no specific handling found | Pending: no specific handling found |
+| Mutation receipts | Do not require an `ETag` on a historical receipt. Read the canonical resource before an edit that requires a current validator; a receipt is not proof of its current version. | Done | Done for playback receipts; the onboarding update still requires an `ETag` on its response |
 
-Regenerate native clients from the final OpenAPI document, then update handwritten
-adapters and decoding fixtures. The schema names below replace ambiguous domain
-names; operation IDs remain unchanged.
+Regenerate OpenAPI-generated clients (such as the web app's
+`web/src/api/v2/schema.ts` and third-party generated clients) from the final
+OpenAPI document. For the handwritten Apple and Android clients
+([api-contract.md](architecture/api-contract.md#apple-and-android)), sync their
+decoding fixtures and update any affected handwritten models or adapters. The
+schema names below replace ambiguous domain names; operation IDs remain
+unchanged.
 
 | Previous schema | Native schema | Affected operation or representation |
 | --- | --- | --- |
@@ -367,7 +371,7 @@ separate generated copies of plugin implementation types. The schema ownership
 allowlist and explicit names live in `internal/apiv2/schema_ownership_test.go` and
 `internal/apiv2/schema_names.go`.
 
-For each native repository, the pending validation is:
+For each native repository, validate:
 
 - [ ] Regenerate and build all supported platform targets; check the complete schema diff
   and every affected operation adapter.
@@ -381,8 +385,8 @@ For each native repository, the pending validation is:
 - [ ] Render shared plugin/watch-provider forms, including empty option and condition
   arrays, and confirm uncertain mutations are not replayed for missing receipt ETags.
 
-These are native v2 changes. Jellyfin compatibility retains its separate protocol;
-this checklist does not require Jellyfin clients to adopt the native schemas.
+Jellyfin compatibility keeps its separate protocol; Jellyfin clients do not adopt
+the native schemas.
 
 ## Recovery preparation
 

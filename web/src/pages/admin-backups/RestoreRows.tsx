@@ -56,7 +56,7 @@ export function StateTag({ state }: { state: ItemState }) {
   return (
     <span
       className={cn(
-        "inline-flex h-5 shrink-0 items-center rounded-md border px-1.5 text-[11px] font-medium whitespace-nowrap",
+        "inline-flex h-5 shrink-0 items-center rounded-md border px-1.5 text-[0.6875rem] font-medium whitespace-nowrap",
         tag.className,
       )}
     >
@@ -94,6 +94,14 @@ function settingValues(t: Translate, setting: RestoreSetting): { now: string; ba
     return {
       now: t("web.admin.backups.restore.setting.keptStricter", { value: current }),
       backup,
+    };
+  }
+  if (setting.status === "managed_by_environment") {
+    return {
+      now: t("web.admin.backups.restore.setting.managedByEnvironment", {
+        value: setting.masked ? set : current,
+      }),
+      backup: setting.masked ? t("web.admin.backups.restore.setting.differentEncrypted") : backup,
     };
   }
   if (setting.masked) {
@@ -223,7 +231,10 @@ function SettingsDiff({ item }: { item: RestoreItem }) {
                     <span className="font-mono text-xs break-words">
                       <BreakableKey value={setting.key} />
                     </span>
-                    {setting.restart_required ? <RestartBadge /> : null}
+                    {setting.restart_required &&
+                    (setting.status === "differs" || setting.status === "cleared") ? (
+                      <RestartBadge />
+                    ) : null}
                   </div>
                   {setting.class === "external_service" ? (
                     <p className="text-muted-foreground mt-0.5 text-xs">
@@ -475,7 +486,7 @@ export const ItemRow = memo(function ItemRow({
           ) : null}
         </div>
         {item.kind === "template_collection" ? (
-          <span className="text-muted-foreground hidden shrink-0 text-[11px] sm:inline">
+          <span className="text-muted-foreground hidden shrink-0 text-[0.6875rem] sm:inline">
             {t("web.admin.backups.restore.rows.starterPack")}
           </span>
         ) : null}
@@ -524,7 +535,7 @@ export const SameRow = memo(function SameRow({
   const label = displayLabel(item);
   const [nameRef, nameOverflows] = useOverflowsInline<HTMLSpanElement>(label);
   return (
-    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-[13px]">
+    <li className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-0.5 py-1 text-[0.8125rem]">
       {/* The name reads in its own direction, so a part that can't wrap is clipped
           at the name's end rather than its start; its lines line up with the page's. */}
       <span

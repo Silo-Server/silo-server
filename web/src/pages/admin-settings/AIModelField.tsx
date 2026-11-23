@@ -92,7 +92,7 @@ export function ModelField({
           autoComplete="off"
           spellCheck={false}
           disabled={managedByEnv != null}
-          className="font-mono text-[13px]"
+          className="font-mono text-[0.8125rem]"
         />
         {suggestions.length > 0 && (
           <Select

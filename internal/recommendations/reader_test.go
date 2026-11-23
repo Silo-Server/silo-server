@@ -276,7 +276,8 @@ func TestDisabledRecommendationsServeNoPersonalRows(t *testing.T) {
 			RecTypeSimilarUsersLiked + "|":         {{MediaItemID: "peer-pick"}},
 		},
 		global: map[string][]ScoredItem{
-			RecTypePopular:                      {{MediaItemID: "popular"}},
+			// Popular scores an account count, at least one.
+			RecTypePopular:                      {{MediaItemID: "popular", Score: 1}},
 			RecTypeRecentlyAdded:                {{MediaItemID: "recent"}},
 			RecTypeGenreSamplerPrefix + "Drama": {{MediaItemID: "top-drama"}},
 		},
@@ -330,6 +331,56 @@ func TestWatchTonightFallsBackToTheLiveRecentlyAddedRow(t *testing.T) {
 	}
 	if len(repo.defaultCalls) != 1 || repo.defaultCalls[0].kind != RecTypeRecentlyAdded || !slices.Equal(repo.defaultCalls[0].exclude, []string{"watched"}) {
 		t.Fatalf("default row reads = %+v, want one Recently Added read leaving out the watched title", repo.defaultCalls)
+	}
+}
+
+// Watch Tonight's cold-start list is the same on every read: equal scores
+// keep the order their row holds them in, so trimming keeps the same titles,
+// and Recently Added is scored by its rank, not its Unix-seconds score, so it
+// interleaves with Popular across its band rather than all landing near 0.35.
+func TestWatchTonightColdStartOrder(t *testing.T) {
+	const day = 86400.0
+	added := func(daysAgo float64) float64 { return 1.8e9 - daysAgo*day }
+	for _, tc := range []struct {
+		name            string
+		popular, recent []ScoredItem
+		limit           int
+		want            []string
+	}{
+		{
+			name: "Popular ties keep the cached order",
+			// The Popular row is cached most accounts first, then most
+			// recently watched, then by content ID.
+			popular: []ScoredItem{{MediaItemID: "pa", Score: 2}, {MediaItemID: "pb", Score: 2}, {MediaItemID: "pc", Score: 2}, {MediaItemID: "pd", Score: 2}, {MediaItemID: "pe", Score: 2}},
+			limit:   3,
+			want:    []string{"pa", "pb", "pc"},
+		},
+		{
+			name:    "Recently Added interleaves with Popular by rank",
+			popular: []ScoredItem{{MediaItemID: "p5", Score: 5}, {MediaItemID: "p3", Score: 3}, {MediaItemID: "p1", Score: 1}},
+			recent:  []ScoredItem{{MediaItemID: "r1", Score: added(0)}, {MediaItemID: "r2", Score: added(1)}, {MediaItemID: "r3", Score: added(2)}, {MediaItemID: "r4", Score: added(3)}},
+			limit:   8,
+			// Popular 0.40, 0.32, 0.24; Recently Added 0.35, 0.30, 0.25, 0.20.
+			want: []string{"p5", "r1", "p3", "r2", "r3", "p1", "r4"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repo := &fakeReaderRepo{
+				global:   map[string][]ScoredItem{RecTypePopular: tc.popular},
+				defaults: map[string][]ScoredItem{RecTypeRecentlyAdded: tc.recent},
+			}
+			r := (&Reader{repo: repo, signals: NewSignalReader(&fakeSignalRepo{}, nil)}).WithPersonalRows(false)
+			// The candidates pass through a map, whose order changes per run.
+			for range 20 {
+				tonight, err := r.GetWatchTonight(t.Context(), 7, "p1", tc.limit, catalog.AccessFilter{})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got := scoredIDs(tonight.Items); !slices.Equal(got, tc.want) {
+					t.Fatalf("watch tonight = %v, want %v", got, tc.want)
+				}
+			}
+		})
 	}
 }
 

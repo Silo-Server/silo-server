@@ -80,7 +80,7 @@ bytes, and text that re-encodes to itself.
   streams fail at their next signed call until it restarts with the new key, so
   drain a node before rotating. A node still running with the replaced key
   shuts down at once on SIGTERM (see [Drain and health](#drain-and-health)). The admin API is in
-  [admin API: node keys](../admin-api.md#node-keys-v2).
+  [admin API: node keys](../admin-api.md#node-keys).
 - **Rejected key.** When the core answers the node's configuration read with
   `401`, `nodeconfig.Remote` sets `key_rejected`, which the node's
   `/api/v1/health` carries (still `200`, so a liveness probe does not restart a
@@ -278,7 +278,7 @@ cipher or event bus.
 Before its first configuration read the node sends its declaration
 ([Registration](#registration)), so the configuration it loads already
 reflects it. The node then reads its configuration, retrying with backoff from one second to 30
-seconds until a read succeeds or it is signalled, and only then opens its
+seconds until a read succeeds or it is signaled, and only then opens its
 listener. A configuration that names another node id than the key is refused
 (`Client.FetchConfig`). Each call to the core has a 10-second timeout
 (`nodecontrol.Client`).
@@ -513,6 +513,112 @@ with reason `key_rejected`, whose logged detail names a replaced key or deleted
 node and a clock more than 30 seconds off as the causes; it still records the node's resources, build and
 drain state. A binary from before this design has no version, so it is never
 placed.
+
+## macOS node build
+
+Docker on a Mac runs Linux in a VM with no VideoToolbox, so a Mac transcodes
+with a native node beside a server in Docker. The base image (and the omnibus
+image built on it) carries that node at
+`/usr/share/silo/nodes/silo-darwin-arm64`, from the `node_darwin` stage of the
+root `Dockerfile`: `CGO_ENABLED=0 GOOS=darwin GOARCH=arm64` with
+`-tags silo_node`, cross-compiled on the build host and signed ad hoc by the Go
+linker. The binary is the image's own revision, so a node copied from an image
+matches the server that runs it. `make build-node-darwin` runs the same build;
+the Go vet CI job runs it and vets the node build for darwin, which no Linux
+build compiles.
+
+- **The `silo_node` tag** leaves libvips and the web app out.
+  `internal/imageutil` keeps the declarations both builds share in
+  `shared.go`, and the node build replaces the functions with
+  `imageutil_node.go`, the same exported API with every function failing.
+  `web/embed_node.go` replaces `web/embed.go` with an empty `DistFS`. A node
+  processes no images: its one image job, `chapterthumbs.ExtractFrame`, is
+  FFmpeg's. The binary links only system frameworks, so no Homebrew library
+  can stop it from loading. A new exported `imageutil` function needs a stub,
+  and a new cgo import the node links fails the build.
+- **Node builds run only as a node.** `main` refuses every subcommand but
+  `silo node`, and, after the transcode branch, any run without
+  `MODE=transcode` (`nodebuild.Node`, `internal/nodebuild/node.go`).
+- **Version.** `silo node version` and the installer name the build as Admin
+  shows the server's and each node's: the build number and the display
+  revision.
+- **Installer.** `silo node install` and `silo node uninstall`
+  (`internal/nodeinstall/node_command.go`; the install, swap and file work
+  in `node_install_darwin.go`, launchctl in `launchd_darwin.go`) manage one
+  per-user LaunchAgent,
+  `org.siloserver.node`, and nothing system-wide. The cgo darwin build refuses
+  to install itself, since it loads Homebrew libraries, and other platforms
+  refuse both commands.
+
+| File | |
+|---|---|
+| `~/Library/Application Support/Silo/node/silo` | The binary. |
+| `~/Library/Application Support/Silo/node/node.env` | Mode 0600. The installer manages `MODE=transcode`, `SILO_CORE_URL`, `SILO_NODE_KEY_FILE` naming `node-key`, and `PORT` (default 8100, since Docker Desktop often publishes 8080). Any other variable in the file, such as one from [Startup and environment](#startup-and-environment), is kept across reruns, except `SILO_NODE_KEY`, which would clash with the key file. |
+| `~/Library/Application Support/Silo/node/node-key` | Mode 0600: the node key. |
+| `~/Library/LaunchAgents/org.siloserver.node.plist` | Runs the binary with `-env` and `node.env`, `RunAtLoad`, `KeepAlive` with `SuccessfulExit` false (launchd restarts the node after a crash or a non-zero exit, not after the clean exit that ends a drain), and an `ExitTimeOut` of the drain timeout `node.env` sets plus a minute (660 seconds with the default). Current macOS caps `ExitTimeOut` at 60 seconds, so a logout or shutdown stops the node's streams a minute after SIGTERM; the installer's own stop does not depend on it. |
+| `~/Library/Application Support/Silo/node-install.lock` | Mode 0600, in a 0700 folder: the lock every install and uninstall holds. It sits outside the node's folder, which uninstall removes while it holds the lock, and is never removed, so two runs always lock the same file. |
+| `~/Library/Logs/Silo/node.log` | The node's output. Uninstall keeps it. |
+
+An install is also the upgrade: a rerun takes every value its flags leave out
+from the existing install, and replaces the binary unless it runs from the
+installed one. The key is never a command-line argument, which other users of
+the Mac could read: a first install, and a rerun with `--new-key`, ask for it at
+a hidden prompt, or read it from standard input when that isn't a terminal. It checks everything it can before it writes anything: the
+flags and key (`--server` must be a plain `http` or `https` URL: no userinfo,
+which would go out as Basic auth, and no query or fragment, which would swallow
+the paths joined onto it), a `SILO_NODE_DRAIN_TIMEOUT` the node would ignore
+(`transcodenode.ParseDrainTimeout`, which the node parses it with), FFmpeg (Homebrew's `ffmpeg-full`, as `playback`'s discovery
+finds it), the server's `GET /api/v1/ready` (joined onto the URL's path, so a
+server behind a path prefix works; a `200` within five seconds, no redirects,
+so a server that is restarting or migrating stops the run), and the
+port (nothing else may answer on it). It then takes the lock, reads the
+install again under it, stages the new files beside the old ones, stops the
+old job, swaps the files in, bootstraps the job, and waits up to 60 seconds
+for the node's `GET /api/v1/health`.
+
+The stop drains before it boots the job out. `launchctl bootout` returns at
+once and launchd kills the job a minute after it, whatever `ExitTimeOut` asks,
+so the installer sends SIGTERM itself (`launchctl kill SIGTERM`), polls
+`launchctl print` until the signaled pid is gone, and only then boots the job
+out and waits for launchd to let it go. A `launchctl print` error while it
+waits is retried, not taken for the exit. A job an older plist keeps alive
+unconditionally restarts under a new pid; the signaled pid's exit still ends
+the drain. Each wait is bounded by the running node's drain timeout plus two
+minutes: the longer of the one `node.env` sets and the one the installed
+plist's `ExitTimeOut` recorded, since the node read `node.env` when it started
+and the file may have changed since. A node still running at that deadline is booted out anyway, and
+the installer says it is stopping a node that is still finishing streams, so a
+stop never leaves the job stopped without the install's restart or rollback
+running. Uninstall stops the job the same way.
+
+The swap moves each file to `<file>.old` and keeps it until the new node is
+ready; a `<file>.old` already there is the last working file of a run that
+stopped mid-swap, so it stays the backup and the unverified file in its place
+is dropped. For the same reason, an install reads its stored settings from
+`node.env.old` and `node-key.old` when `node.env` or `node-key` is missing, so a
+rerun after such a run keeps the previous server, port, key and other
+variables instead of starting over as a first install.
+
+The node is ready when that answers `200` with a `node_control_version`, which
+neither the API server's health nor a proxy's carries, and without
+`key_rejected`. A drained node is ready: an administrator's drain outlasts the
+restart, and the installer says so. The node opens its port only once the core
+accepted its key, so a ready node also shows that the key and core URL work.
+
+When the new job does not start or become ready, or the run is interrupted
+after the files were swapped, the previous files come back, with a context of
+their own, and the previous job is bootstrapped only if launchd had it before
+the install, so a node that was stopped stays stopped. A rollback first stops
+the new job, and restores nothing until launchd confirms it is gone: when the
+stop fails, every file and backup stays where it is and the installer reports
+the recovery as incomplete, naming the backups. The installer exits
+non-zero with the end of the log. A stop interrupted, or failed in launchctl, after its signal went out
+waits until launchd lets the old job go and bootstraps its plist again, so the
+old node is not left stopped. Only `launchctl print`'s "not found" status
+(113) counts as a job launchd does not have. A bootout that answers
+`EINPROGRESS` (36), a job still shutting down, went out, and the installer
+waits for the job to go as it does after a bootout that timed out. Each
+launchctl call has its own timeout.
 
 ## Rate limit
 

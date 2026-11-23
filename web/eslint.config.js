@@ -7,6 +7,7 @@ import eslintComments from "@eslint-community/eslint-plugin-eslint-comments";
 import formatjs from "eslint-plugin-formatjs";
 import noAdminMessage from "./eslint-rules/no-admin-message-outside-admin.js";
 import noPhysicalDirection from "./eslint-rules/no-physical-direction.js";
+import textSizeInRem from "./eslint-rules/text-size-in-rem.js";
 
 // Requests infer their shape through the generated v2 contract.
 const CONTRACT_SYNTAX = [
@@ -48,6 +49,12 @@ const I18N_TEXT_PROPS =
 // formatting layer itself; tests render literal text on purpose.
 const I18N_CONVERTED = ["src/**/*.{ts,tsx}"];
 const I18N_UNCHECKED = ["src/i18n/**", "src/locales/**", "src/test/**", "src/test-setup.ts"];
+
+// Repository rules. One object, so every config block that enables a rule
+// registers the same plugin.
+const silo = {
+  rules: { "no-physical-direction": noPhysicalDirection, "text-size-in-rem": textSizeInRem },
+};
 
 // Files that draw physical geometry, where left means left in every language:
 // media timelines measured with clientX, chart plots, badges placed on poster
@@ -197,8 +204,14 @@ export default tseslint.config(
     files: ["src/**/*.{ts,tsx}"],
     // Tests assert whatever classes the source uses.
     ignores: [...PHYSICAL_DIRECTION, "**/*.test.*", "**/*.test-support.*"],
-    plugins: { silo: { rules: { "no-physical-direction": noPhysicalDirection } } },
+    plugins: { silo },
     rules: { "silo/no-physical-direction": "error" },
+  },
+  {
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["**/*.test.*", "**/*.test-support.*"],
+    plugins: { silo },
+    rules: { "silo/text-size-in-rem": "error" },
   },
   {
     files: ["src/**/*.{ts,tsx}"],

@@ -112,7 +112,7 @@ export default function AdminSidebar({
   const pendingRequests = useAdminRequestCounts().data?.needs_approval ?? 0;
   const requestsBadge =
     pendingRequests > 0 ? (
-      <span className="bg-primary text-primary-foreground rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums">
+      <span className="bg-primary text-primary-foreground rounded-full px-1.5 py-px text-[0.625rem] font-semibold tabular-nums">
         <span aria-hidden="true">{numberText(pendingRequests)}</span>
         <span className="sr-only">
           {t("web.admin.shell.sidebar.pendingRequests", {
@@ -215,11 +215,11 @@ export default function AdminSidebar({
             onClick={onSearch}
             aria-label={t("web.admin.shell.search.label")}
             title={t("web.admin.shell.search.title", { shortcut: SEARCH_SHORTCUT_LABEL })}
-            className="border-border/70 bg-surface/70 text-muted-foreground hover:text-foreground hover:bg-accent/60 focus-visible:ring-ring/60 flex h-10 w-full items-center gap-2.5 rounded-xl border px-3 text-[13px] transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
+            className="border-border/70 bg-surface/70 text-muted-foreground hover:text-foreground hover:bg-accent/60 focus-visible:ring-ring/60 flex h-10 w-full items-center gap-2.5 rounded-xl border px-3 text-[0.8125rem] transition-colors focus-visible:ring-[3px] focus-visible:outline-none"
           >
             <Search className="h-4 w-4 shrink-0" aria-hidden="true" />
             <span>{t("web.admin.shell.sidebar.search")}</span>
-            <kbd className="border-border/70 pointer-events-none ms-auto rounded border px-1.5 py-0.5 font-mono text-[10px] whitespace-nowrap select-none">
+            <kbd className="border-border/70 pointer-events-none ms-auto rounded border px-1.5 py-0.5 font-mono text-[0.625rem] whitespace-nowrap select-none">
               {SEARCH_SHORTCUT_LABEL}
             </kbd>
           </button>
@@ -293,11 +293,11 @@ export default function AdminSidebar({
       {/* Footer */}
       <div className="space-y-3 px-3 pb-4">
         <div className="border-sidebar-border/70 bg-sidebar-accent/40 rounded-xl border px-3 py-2">
-          <div className="text-muted-foreground text-[10px] font-semibold tracking-[0.18em] uppercase">
+          <div className="text-muted-foreground text-[0.625rem] font-semibold tracking-[0.18em] uppercase">
             {t("web.admin.shell.sidebar.build.heading")}
           </div>
           <div
-            className="text-sidebar-foreground mt-1 font-mono text-[12px] leading-5"
+            className="text-sidebar-foreground mt-1 font-mono text-[0.75rem] leading-5"
             title={
               buildInfo.data?.built_at
                 ? t("web.admin.shell.sidebar.build.builtAt", { built_at: buildInfo.data.built_at })
@@ -313,7 +313,7 @@ export default function AdminSidebar({
           to="/"
           up
           onClick={onNavigate}
-          className="text-muted-foreground hover:text-foreground hover:bg-accent/70 flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[13px] font-medium transition-colors duration-150"
+          className="text-muted-foreground hover:text-foreground hover:bg-accent/70 flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-[0.8125rem] font-medium transition-colors duration-150"
         >
           <ArrowLeft className="h-[18px] w-[18px]" />
           <span>{t("web.admin.shell.sidebar.backToApp")}</span>
