@@ -110,37 +110,33 @@ func listOverlaySummaries(ctx context.Context, pool *pgxpool.Pool, contentIDs []
 	// Each branch reads a requested card's files through the content or
 	// episode index and ranks them in the same pass, so a file's row is read
 	// once and the scan can run in parallel. A multi-episode file also badges
-	// each later episode of its range. The winner is the smallest row of
-	// (resolution DESC, range DESC, tie columns): min() keeps it in one pass
-	// per card instead of sorting every candidate, and its last field is the
-	// file ID. media_files.content_id and episode_id use the C collation, and
-	// a record sorts NULL fields last, as ORDER BY ... ASC does.
+	// each later episode of its range. Each card keeps its first file by
+	// resolution, then range, then the caller's tie columns.
 	query := fmt.Sprintf(`
 		WITH winners AS (
-			SELECT group_key,
-				(to_jsonb(min(ROW(-resolution_rank, -range_rank, %[1]s)))->>'f%[2]d')::bigint AS id
+			SELECT DISTINCT ON (group_key) group_key, id
 			FROM (
-				SELECT mf.content_id AS group_key, %[3]s
+				SELECT mf.content_id AS group_key, %[2]s
 				FROM media_files mf
-				WHERE mf.content_id = ANY($1) AND %[4]s
+				WHERE mf.content_id = ANY($1) AND %[3]s
 				UNION ALL
-				SELECT mf.episode_id AS group_key, %[3]s
+				SELECT mf.episode_id AS group_key, %[2]s
 				FROM media_files mf
-				WHERE mf.episode_id = ANY($1) AND %[4]s
+				WHERE mf.episode_id = ANY($1) AND %[3]s
 				UNION ALL
-				SELECT covered.content_id AS group_key, %[3]s
+				SELECT covered.content_id AS group_key, %[2]s
 				FROM episodes covered`+spannedEpisodeJoinSQL+`
-				WHERE covered.content_id = ANY($1) AND %[4]s
+				WHERE covered.content_id = ANY($1) AND %[3]s
 			) candidates
-			GROUP BY group_key
+			ORDER BY group_key, resolution_rank DESC, range_rank DESC, %[1]s
 		)
 		SELECT winners.group_key, mf.file_path, coalesce(mf.resolution, ''), coalesce(mf.hdr, false),
 			coalesce(mf.codec_video, ''), coalesce(mf.codec_audio, ''), coalesce(mf.audio_channels, 0),
 			coalesce(mf.container, ''), coalesce(mf.edition_key, ''), mf.video_tracks, mf.audio_tracks,
-			%[5]s
+			%[4]s
 		FROM winners
 		JOIN media_files mf ON mf.id = winners.id
-	`, strings.Join(tieColumns, ", "), 2+len(tieColumns), ranked, where, overlaySummaryHasSubtitlesSQL)
+	`, strings.Join(tieColumns, ", "), ranked, where, overlaySummaryHasSubtitlesSQL)
 
 	rows, err := pool.Query(ctx, query, args...)
 	if err != nil {
