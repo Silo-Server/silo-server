@@ -158,6 +158,40 @@ describe("fontFamilyNames", () => {
     expect(names).not.toContain("late name");
   });
 
+  it("stops reading a collection once its records have used the parsing budget", () => {
+    // Four fonts share one name table of 65,535 records no style can name, so
+    // they decode nothing; the fifth font's own name comes after the budget.
+    const records = 65_535;
+    const shared = 6 + records * 12;
+    const header = 12 + 5 * 4;
+    const faceAt = (i: number) => header + i * 28;
+    const sharedAt = faceAt(4);
+    const late = sfntWithNames([{ platform: 3, encoding: 1, nameId: 1, value: "Late Name" }]);
+    const lateAt = sharedAt + shared;
+    const collection = new Uint8Array(lateAt + late.length);
+    const view = new DataView(collection.buffer);
+    collection.set([..."ttcf"].map((c) => c.charCodeAt(0)));
+    view.setUint32(4, 0x00010000);
+    view.setUint32(8, 5);
+    for (let i = 0; i < 4; i += 1) {
+      view.setUint32(12 + i * 4, faceAt(i));
+      view.setUint32(faceAt(i), 0x00010000);
+      view.setUint16(faceAt(i) + 4, 1);
+      collection.set(
+        [..."name"].map((c) => c.charCodeAt(0)),
+        faceAt(i) + 12,
+      );
+      view.setUint32(faceAt(i) + 20, sharedAt);
+    }
+    view.setUint32(12 + 4 * 4, lateAt);
+    view.setUint16(sharedAt + 2, records);
+    view.setUint16(sharedAt + 4, shared);
+    for (let j = 0; j < records; j += 1) view.setUint16(sharedAt + 6 + j * 12 + 6, 2);
+    collection.set(relocate(late, lateAt), lateAt);
+
+    expect(fontFamilyNames(collection)).toEqual([]);
+  });
+
   it("returns no names for data that is not an sfnt font", () => {
     expect(fontFamilyNames(new Uint8Array([1, 2, 3]))).toEqual([]);
     expect(fontFamilyNames(new TextEncoder().encode("wOF2 not parsed here"))).toEqual([]);

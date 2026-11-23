@@ -225,6 +225,7 @@ export function fontFamilyNames(data: Uint8Array): string[] {
     const seen = new Set<number>();
     for (let i = 0; i < count; i += 1) {
       const fontOffset = view.getUint32(12 + i * 4);
+      if (budget.units <= 0) break;
       if (seen.has(fontOffset)) continue;
       seen.add(fontOffset);
       read(fontOffset);
@@ -235,10 +236,10 @@ export function fontFamilyNames(data: Uint8Array): string[] {
   return [...names];
 }
 
-// Parsing work per font file: one unit per font and name record visited, plus
-// each name byte decoded. Real fonts use a few thousand; the cap stops a
-// crafted file (65,535 records pointing at one long string, or many fonts
-// sharing one name table) from stalling the player.
+// Parsing work per font file: one unit per font, table record and name record
+// visited, plus each name byte decoded. Real fonts use a few thousand; the cap
+// stops a crafted file (65,535 records pointing at one long string, or many
+// fonts sharing one name table) from stalling the player.
 const NAME_PARSE_BUDGET = 256 * 1024;
 
 function readSfntNames(
@@ -252,6 +253,8 @@ function readSfntNames(
   if (version !== 0x00010000 && version !== 0x74727565 && version !== 0x4f54544f) return;
   const numTables = view.getUint16(fontOffset + 4);
   for (let i = 0; i < numTables; i += 1) {
+    budget.units -= 1;
+    if (budget.units < 0) return;
     const record = fontOffset + 12 + i * 16;
     if (view.getUint32(record) !== 0x6e616d65 /* name */) continue;
     const table = view.getUint32(record + 8);
