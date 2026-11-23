@@ -64,7 +64,7 @@ export function PickRow({
       </span>
       <span className="grid min-w-0 gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
-          <span id={`${id}-title`} className="truncate text-[0.90625rem] font-semibold">
+          <span id={`${id}-title`} dir="auto" className="truncate text-[0.90625rem] font-semibold">
             {title}
           </span>
           {tag ? (
