@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef } from "react";
 
 import type { useSettingsForm } from "@/hooks/useSettingsForm";
 
@@ -11,63 +11,104 @@ type MarkerForm = Pick<
   "getValue" | "getPersistedValue" | "setValue" | "resetValue" | "isDirty"
 >;
 
-/** What `markers.lazy_playback` held before a source change staged it. */
+/** What `markers.lazy_playback` held before source edits staged it. */
 interface LazyPlaybackBefore {
   dirty: boolean;
   value: string;
 }
 
-/**
- * Edits to the marker source and online storage, which can stage
- * `markers.lazy_playback` along with them (on-demand online markers turn it
- * on). A value staged that way belongs to those edits: once neither the source
- * nor the storage holds an edit, it is taken back to what it was before, so
- * Save never writes it on its own. Setting it directly makes it the admin's
- * own edit, which source changes no longer take back.
- */
-export function useMarkerSourceDraft(form: MarkerForm) {
-  const [lazyBefore, setLazyBefore] = useState<LazyPlaybackBefore | null>(null);
-  // Only a draft still staged counts; a save or discard settles it.
-  const lazyPlaybackLinked = lazyBefore !== null && form.isDirty(MARKER_LAZY_PLAYBACK_KEY);
+function sources(mode: string) {
+  return {
+    online: mode === "online" || mode === "both",
+    local: mode === "local" || mode === "both",
+  };
+}
 
-  function change(key: string, value: string, lazyPlayback?: string) {
-    form.setValue(key, value);
-    const other = key === MARKER_MODE_KEY ? MARKER_ONLINE_STORAGE_KEY : MARKER_MODE_KEY;
-    const edited = value !== form.getPersistedValue(key);
-    if (!edited && !form.isDirty(other)) {
-      if (lazyPlaybackLinked) {
-        if (lazyBefore.dirty) form.setValue(MARKER_LAZY_PLAYBACK_KEY, lazyBefore.value);
-        else form.resetValue(MARKER_LAZY_PLAYBACK_KEY);
-      }
-      setLazyBefore(null);
-      return;
+/**
+ * The lazy playback value a marker source change from `saved` to `next`
+ * implies: a source turned on looks markers up at playback, and turning every
+ * source off stops that. Dropping one of two sources leaves it alone.
+ */
+function lazyPlaybackForMode(saved: string, next: string): string | undefined {
+  const before = sources(saved);
+  const after = sources(next);
+  if ((after.online && !before.online) || (after.local && !before.local)) return "true";
+  if (!after.online && !after.local) return "false";
+  return undefined;
+}
+
+/**
+ * Edits to the marker source and online storage, which stage
+ * `markers.lazy_playback` along with them: on-demand online storage turns it
+ * on, and where `modeStagesLazyPlayback` is set (the setup wizard, which has no
+ * lazy playback row), so does the source change itself. The staged value is
+ * worked out from the source and storage edits still standing, not from the
+ * order they were made in, and once none of them implies one, lazy playback
+ * goes back to what it held before. Save therefore never writes it without
+ * the visible edit that caused it. Setting it directly makes it the admin's
+ * own edit.
+ */
+export function useMarkerSourceDraft(
+  form: MarkerForm,
+  { modeStagesLazyPlayback = false }: { modeStagesLazyPlayback?: boolean } = {},
+) {
+  const lazyBefore = useRef<LazyPlaybackBefore | null>(null);
+
+  function change(key: string, value: string) {
+    // With nothing staged, a remembered value is from before a save or
+    // discard and no longer what to go back to.
+    if (
+      !form.isDirty(MARKER_MODE_KEY) &&
+      !form.isDirty(MARKER_ONLINE_STORAGE_KEY) &&
+      !form.isDirty(MARKER_LAZY_PLAYBACK_KEY)
+    ) {
+      lazyBefore.current = null;
     }
-    // A change back to the saved value stages nothing of its own.
-    if (lazyPlayback === undefined || !edited) return;
-    if (!lazyPlaybackLinked) {
-      setLazyBefore({
+    form.setValue(key, value);
+
+    const draft = (k: string) => (k === key ? value : form.getValue(k));
+    const mode = draft(MARKER_MODE_KEY);
+    const savedMode = form.getPersistedValue(MARKER_MODE_KEY);
+    const storage = draft(MARKER_ONLINE_STORAGE_KEY);
+    let lazyPlayback: string | undefined;
+    if (storage === "on_demand" && storage !== form.getPersistedValue(MARKER_ONLINE_STORAGE_KEY)) {
+      lazyPlayback = "true";
+    } else if (modeStagesLazyPlayback && mode !== savedMode) {
+      lazyPlayback = lazyPlaybackForMode(savedMode, mode);
+    }
+
+    if (lazyPlayback !== undefined) {
+      lazyBefore.current ??= {
         dirty: form.isDirty(MARKER_LAZY_PLAYBACK_KEY),
         value: form.getValue(MARKER_LAZY_PLAYBACK_KEY),
-      });
+      };
+      form.setValue(MARKER_LAZY_PLAYBACK_KEY, lazyPlayback);
+      return;
     }
-    form.setValue(MARKER_LAZY_PLAYBACK_KEY, lazyPlayback);
+    const before = lazyBefore.current;
+    if (!before) return;
+    lazyBefore.current = null;
+    if (before.dirty) form.setValue(MARKER_LAZY_PLAYBACK_KEY, before.value);
+    else form.resetValue(MARKER_LAZY_PLAYBACK_KEY);
   }
 
   return {
-    /** Stages a marker source, and `lazyPlayback` with it when given. */
-    setMarkerMode: (value: string, lazyPlayback?: string) =>
-      change(MARKER_MODE_KEY, value, lazyPlayback),
-    /** Stages the online storage; on demand also turns lazy playback on. */
-    setOnlineStorage: (value: string) =>
-      change(MARKER_ONLINE_STORAGE_KEY, value, value === "on_demand" ? "true" : undefined),
+    setMarkerMode: (value: string) => change(MARKER_MODE_KEY, value),
+    setOnlineStorage: (value: string) => change(MARKER_ONLINE_STORAGE_KEY, value),
     setLazyPlayback: (value: string) => {
-      setLazyBefore(null);
+      lazyBefore.current = null;
       form.setValue(MARKER_LAZY_PLAYBACK_KEY, value);
     },
-    /**
-     * The staged lazy playback value came with a source or storage edit, which
-     * shows it; it needs no row of its own.
-     */
-    lazyPlaybackLinked,
   };
+}
+
+/**
+ * On-demand online storage staged in the draft: it carries the lazy playback
+ * value it turned on, so that value needs no row of its own.
+ */
+export function onDemandStorageStaged(form: MarkerForm) {
+  return (
+    form.isDirty(MARKER_ONLINE_STORAGE_KEY) &&
+    form.getValue(MARKER_ONLINE_STORAGE_KEY) === "on_demand"
+  );
 }

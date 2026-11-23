@@ -112,24 +112,18 @@ export function FeaturesStep() {
 
   // This step has no lazy playback row: the value only ever comes with a
   // marker switch or the storage choice, and is taken back with them.
-  const markerDraft = useMarkerSourceDraft(form);
+  const markerDraft = useMarkerSourceDraft(form, { modeStagesLazyPlayback: true });
 
   function setOnlineMarkers(enabled: boolean) {
     let nextMode = enabled ? "online" : "off";
     if (localMarkersEnabled) nextMode = enabled ? "both" : "local";
-    markerDraft.setMarkerMode(
-      nextMode,
-      enabled || !localMarkersEnabled ? String(enabled) : undefined,
-    );
+    markerDraft.setMarkerMode(nextMode);
   }
 
   function setLocalMarkers(enabled: boolean) {
     let nextMode = enabled ? "local" : "off";
     if (onlineMarkersEnabled) nextMode = enabled ? "both" : "online";
-    markerDraft.setMarkerMode(
-      nextMode,
-      enabled || !onlineMarkersEnabled ? String(enabled) : undefined,
-    );
+    markerDraft.setMarkerMode(nextMode);
   }
 
   if (form.isPending) return <StepSkeleton rows={4} />;

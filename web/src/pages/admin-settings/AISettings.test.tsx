@@ -3,19 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { stubRadixDom } from "@/pages/adminPage.test-support";
+
 import AISettings from "./AISettings";
 
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
-
-window.HTMLElement.prototype.hasPointerCapture ??= () => false;
-window.HTMLElement.prototype.setPointerCapture ??= () => {};
-window.HTMLElement.prototype.releasePointerCapture ??= () => {};
-window.HTMLElement.prototype.scrollIntoView ??= () => {};
+stubRadixDom();
 
 const { settings } = vi.hoisted(() => ({
   settings: { current: {} as Record<string, string> },

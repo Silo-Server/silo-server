@@ -10,7 +10,7 @@ import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
 import { SettingField } from "./SettingField";
 import { MARKER_KEYS } from "./playbackSettings.keys";
-import { useMarkerSourceDraft } from "./useMarkerSourceDraft";
+import { onDemandStorageStaged, useMarkerSourceDraft } from "./useMarkerSourceDraft";
 
 /** The Skip markers group on Playback settings. */
 export function MarkerSettingsGroup({
@@ -41,7 +41,7 @@ export function MarkerSettingsGroup({
   const detectionWorkersKept = !localMarkersEnabled && form.isDirty("markers.detection_workers");
   const onlineStorageKept = !onlineMarkersEnabled && form.isDirty("markers.online_storage");
   const lazyPlaybackKept =
-    !showLazyPlayback && form.isDirty("markers.lazy_playback") && !markerDraft.lazyPlaybackLinked;
+    !showLazyPlayback && form.isDirty("markers.lazy_playback") && !onDemandStorageStaged(form);
 
   // Detection behavior lives here; which online providers answer a lookup,
   // and on what terms, is provider configuration and lives with the other

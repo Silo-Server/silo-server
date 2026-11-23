@@ -2,19 +2,11 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { stubRadixDom } from "@/pages/adminPage.test-support";
+
 import { FeaturesStep } from "./FeaturesStep";
 
-class ResizeObserverStub {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
-}
-globalThis.ResizeObserver ??= ResizeObserverStub as unknown as typeof ResizeObserver;
-
-window.HTMLElement.prototype.hasPointerCapture ??= () => false;
-window.HTMLElement.prototype.setPointerCapture ??= () => {};
-window.HTMLElement.prototype.releasePointerCapture ??= () => {};
-window.HTMLElement.prototype.scrollIntoView ??= () => {};
+stubRadixDom();
 
 const { settings, saved } = vi.hoisted(() => ({
   settings: { current: {} as Record<string, string> },
@@ -123,6 +115,22 @@ describe("FeaturesStep keeps unsaved edits in view", () => {
       "Fetch when needed",
     );
     await continueStep();
+    expect(saved.current).toEqual({ "markers.online_storage": "on_demand" });
+  });
+
+  it("stages lazy playback from the standing edits, not from the order they were made", async () => {
+    settings.current["markers.mode"] = "local";
+    render(<FeaturesStep />);
+    const online = screen.getByRole("switch", { name: "Skip markers from TheIntroDB and Silo" });
+    const local = screen.getByRole("switch", { name: "Detect markers on this server" });
+    await userEvent.click(online);
+    await userEvent.click(screen.getByRole("combobox", { name: "Save online markers" }));
+    await userEvent.click(screen.getByRole("option", { name: "Fetch when needed" }));
+    await userEvent.click(local);
+    await userEvent.click(online);
+    await userEvent.click(local);
+    await continueStep();
+
     expect(saved.current).toEqual({ "markers.online_storage": "on_demand" });
   });
 

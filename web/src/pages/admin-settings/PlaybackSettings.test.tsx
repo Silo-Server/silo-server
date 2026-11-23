@@ -137,6 +137,31 @@ describe("marker settings kept for an unsaved change", () => {
     expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
   });
 
+  it("takes lazy playback back with the storage edit while the source stays edited", async () => {
+    settings.current["markers.mode"] = "both";
+    render(page);
+    await pick("Save online markers", "Fetch when needed");
+    await pick("Marker source", "Off");
+    await pick("Save online markers", "Save to library");
+
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+  });
+
+  it("restores the admin's own lazy playback edit when on-demand storage is taken back", async () => {
+    settings.current = {
+      ...settings.current,
+      "markers.mode": "both",
+      "markers.lazy_playback": "true",
+    };
+    render(page);
+    await userEvent.click(screen.getByRole("switch", { name: "Find markers on playback" }));
+    await pick("Save online markers", "Fetch when needed");
+    await pick("Save online markers", "Save to library");
+
+    expect(screen.getByRole("switch", { name: "Find markers on playback" })).not.toBeChecked();
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+  });
+
   it("keeps an edited detection worker count in view under online-only markers", async () => {
     render(page);
     const workers = screen.getByRole("spinbutton", { name: "Detection workers" });
