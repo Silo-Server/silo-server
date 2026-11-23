@@ -44,19 +44,16 @@ function lazyPlaybackForMode(saved: string, next: string): string | undefined {
  * on while online markers are, and where `modeStagesLazyPlayback` is set (the
  * setup wizard, which has no lazy playback row), so does the source change
  * itself. The value is worked out from the source and storage edits still
- * standing, not from the order they were made in. It is staged only when that
- * worked-out value changes, so a later source change never overrides the
- * admin's own lazy playback edit, and once no standing edit implies one, lazy
- * playback goes back to what it held before. Save therefore never writes it
- * without the visible edit that caused it.
+ * standing, not from the order they were made in, and once none of them
+ * implies one, lazy playback goes back to what it held before, the admin's
+ * own edit included. Save therefore never writes it without the visible edit
+ * that caused it.
  */
 export function useMarkerSourceDraft(
   form: MarkerForm,
   { modeStagesLazyPlayback = false }: { modeStagesLazyPlayback?: boolean } = {},
 ) {
   const lazyBefore = useRef<LazyPlaybackBefore | null>(null);
-  // The value the standing edits last implied.
-  const implied = useRef<string | undefined>(undefined);
 
   function change(key: string, value: string) {
     // With nothing staged, a remembered value is from before a save or
@@ -67,7 +64,6 @@ export function useMarkerSourceDraft(
       !form.isDirty(MARKER_LAZY_PLAYBACK_KEY)
     ) {
       lazyBefore.current = null;
-      implied.current = undefined;
     }
     form.setValue(key, value);
 
@@ -86,8 +82,6 @@ export function useMarkerSourceDraft(
       lazyPlayback = lazyPlaybackForMode(savedMode, mode);
     }
 
-    if (lazyPlayback === implied.current) return;
-    implied.current = lazyPlayback;
     if (lazyPlayback !== undefined) {
       lazyBefore.current ??= {
         dirty: form.isDirty(MARKER_LAZY_PLAYBACK_KEY),
@@ -106,8 +100,7 @@ export function useMarkerSourceDraft(
   return {
     setMarkerMode: (value: string) => change(MARKER_MODE_KEY, value),
     setOnlineStorage: (value: string) => change(MARKER_ONLINE_STORAGE_KEY, value),
-    // The admin's own edit: nothing to go back to, and it stands until the
-    // standing source edits imply a different value.
+    // The admin's own edit: nothing to go back to.
     setLazyPlayback: (value: string) => {
       lazyBefore.current = null;
       form.setValue(MARKER_LAZY_PLAYBACK_KEY, value);

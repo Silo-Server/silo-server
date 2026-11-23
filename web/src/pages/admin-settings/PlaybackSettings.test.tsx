@@ -143,9 +143,10 @@ describe("marker settings kept for an unsaved change", () => {
     settings.current["markers.mode"] = "both";
     render(page);
     await pick("Save online markers", "Fetch when needed");
-    await pick("Marker source", "Off");
+    await pick("Marker source", "Online providers only");
     await pick("Save online markers", "Save to library");
 
+    // Only the source change is left.
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
   });
 
