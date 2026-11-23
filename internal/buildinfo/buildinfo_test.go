@@ -221,7 +221,7 @@ func TestWithVersion(t *testing.T) {
 
 	clean := Info{Display: "b4c5aae1", Revision: "b4c5aae18aa653725ac697b29a05eac797576008", BuildNumber: 411, Available: true}
 	got := withVersion(clean, "0.24.0")
-	if got.Display != "0.24.0" || got.Version != "0.24.0" || got.Revision != clean.Revision || got.BuildNumber != 411 {
+	if got.Display != "0.24.0" || got.Revision != clean.Revision || got.BuildNumber != 411 {
 		t.Fatalf("withVersion(release) = %+v", got)
 	}
 
@@ -234,7 +234,7 @@ func TestWithVersion(t *testing.T) {
 	if got := withVersion(clean, ""); got != clean {
 		t.Fatalf("withVersion(no version) = %+v, want unchanged", got)
 	}
-	if got := withVersion(unavailableInfo(), "0.24.0"); got.Version != "" || got.Display != unavailableDisplay {
+	if got := withVersion(unavailableInfo(), "0.24.0"); got.Display != unavailableDisplay {
 		t.Fatalf("withVersion(unavailable) = %+v, want unchanged", got)
 	}
 }

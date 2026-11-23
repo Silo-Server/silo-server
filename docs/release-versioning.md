@@ -67,8 +67,10 @@ PostgreSQL, Redis, and Meilisearch; see [Omnibus image](architecture/omnibus-ima
 | `X` | each release in that major version, from 1 on | The newest `X.Y.Z` release, for example `1`. There is no `0` tag. |
 
 A release image is the image CI built and tested for that commit, plus one file,
-`/usr/share/silo/version`, from which the server reads its version. Release
-candidates after `v1.0.0`, such as `v1.1.0-rc.1`, get only their own tag.
+`/usr/share/silo/version`, from which the server reads its version. The file
+stays in the image, so a macOS transcode node binary copied out of a release
+image reports its revision, not the version. Release candidates other than
+`v1.0.0`'s, such as `v0.25.0-rc.1` or `v1.1.0-rc.1`, get only their own tag.
 
 Build numbers are not release versions and do not carry compatibility or
 support guarantees. Pin a release tag, `build-N`, commit-SHA tag, or image
@@ -98,11 +100,15 @@ announcing a release.
    release.
 
 Release refuses an invalid version, a version that already exists or is older
-than the newest release, a run from a branch other than `main`, and a commit
-that CI hasn't passed or whose image hasn't been published. Generated notes start at the previous
+than the newest release, a run from a branch other than `main`, a run while
+another draft release exists, a commit with no new commits since the previous
+release, and a commit that CI hasn't passed or whose image hasn't been
+published. Generated notes start at the previous
 release for a release candidate, and at the previous non-candidate release
 otherwise, so `v1.0.0` covers everything since the last `0.x` release. If
 tagging the image fails, run **Release published** again with the release's tag.
+A re-run never rebuilds a version that is already published: it points the
+tags at the existing version image.
 
 GitHub's manual-workflow permission is the release access boundary: only users
 with repository write access can dispatch it. If Silo later requires a second

@@ -34,7 +34,6 @@ var releaseVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[
 // the short revision otherwise.
 type Info struct {
 	Display     string `json:"display"`
-	Version     string `json:"version,omitempty"`
 	Revision    string `json:"revision"`
 	Dirty       bool   `json:"dirty"`
 	VCSTime     string `json:"vcs_time"`
@@ -86,7 +85,6 @@ func withVersion(info Info, version string) Info {
 	if version == "" || !info.Available {
 		return info
 	}
-	info.Version = version
 	info.Display = version
 	if info.Dirty {
 		info.Display += "+dirty"
