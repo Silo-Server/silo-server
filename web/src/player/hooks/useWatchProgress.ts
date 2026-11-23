@@ -9,7 +9,9 @@ import { playbackSessionEndReason, type PlaybackSessionEndReason } from "../play
 import { toMediaTime } from "../utils/mediaTimeline";
 
 /**
- * Reports watch progress to the server every 10 seconds.
+ * Reports watch progress to the server every 10 seconds, and at once when
+ * the video pauses or resumes, so the server's paused timeout never judges a
+ * resume it has not heard of yet.
  * Reads currentTime and paused state from the video element.
  * An optional streamOriginRef maps player-local time back onto the original
  * media timeline for restarted HLS sessions.
@@ -102,17 +104,22 @@ export function useWatchProgress(
     // replacement session.
     let active = true;
 
-    intervalRef.current = setInterval(() => {
+    const report = () => {
       reportProgress().catch((error: unknown) => {
         // Best effort — don't disrupt playback on progress report failure,
         // unless the server says the session is over.
         const reason = playbackSessionEndReason(error);
         if (active && reason) onSessionEndedRef.current?.(reason);
       });
-    }, 10_000);
+    };
+    intervalRef.current = setInterval(report, 10_000);
+    const video = videoRef.current;
+    const pauseEvents = ["play", "pause"];
+    pauseEvents.forEach((event) => video?.addEventListener(event, report));
 
     return () => {
       active = false;
+      pauseEvents.forEach((event) => video?.removeEventListener(event, report));
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = null;
 
@@ -122,7 +129,7 @@ export function useWatchProgress(
       // position before the session is deleted (e.g. after a seek).
       reportProgress({ keepalive: true, isPaused: true }).catch(() => {});
     };
-  }, [reportProgress, sessionId]);
+  }, [reportProgress, sessionId, videoRef]);
 
   return flushProgress;
 }
