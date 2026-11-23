@@ -521,6 +521,12 @@
       "value": "Esta sesión de reproducción terminó. Vuelve a reproducir."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Se reemplazó esta transmisión. La reproducción continúa en la actual."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -74551,6 +74557,12 @@
       "value": "Marcar como visto al"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Los títulos con un marcador de créditos también cuentan como vistos cuando la reproducción llega a los créditos."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -112197,6 +112209,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

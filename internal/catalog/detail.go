@@ -64,8 +64,7 @@ type PlaybackProbeEnsurer interface {
 
 // CopySafetyRacer resolves an unknown H.264 copy-safety verdict out of band.
 // The watch page asks for it and never waits: the verdict is not part of the
-// response, and any session that later ends up on a stream-copy route for the
-// file is switched off it by the playback-side notifier when the scan lands.
+// response; the persisted verdict reaches the plans made after it lands.
 //
 // It is a narrow injected interface so the catalog keeps no dependency on the
 // playback session machinery that implements it.
@@ -5082,9 +5081,9 @@ func fileIDOrZero(version *FileVersion) int {
 //
 // It deliberately does not wait for an unknown verdict: the bitstream scan is
 // started in the background instead, so opening the watch page costs nothing
-// even for a file nobody has played yet. No session exists at this point — if
-// one appears and lands on a stream-copy route before the scan finishes, the
-// playback-side notifier switches it off that route when the verdict lands.
+// even for a file nobody has played yet. The verdict is persisted for the
+// download policy and for the strict web decoders that get a copy-unsafe
+// source encoded on the first plan.
 func (s *DetailService) preparePlaybackFiles(ctx context.Context, files []*models.MediaFile) []*models.MediaFile {
 	return s.prepareFiles(ctx, files, true)
 }

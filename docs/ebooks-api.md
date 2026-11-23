@@ -5,7 +5,7 @@
 > replaces it (no assigned release date). See the
 > [scope decision](architecture/v1-scope.md#library-scope-books-deferred).
 
-The v2 reader progress operations use the reader stores and the shared media
+The reader progress operations use the reader stores and the shared media
 authorization. They require account authentication and
 a verified `X-Profile-Id`. Current item access is checked on reads; writes also
 check that the accessible ebook file belongs to the requested item.
@@ -35,8 +35,7 @@ newer than the submitted event.
 
 The existing finished-book rule remains: after a book reaches the finished
 threshold, ordinary autosaves can change its location but cannot mark it unread.
-Explicit unread deletes the saved progress. V1 continues assigning server times
-and does not gain v2 retry guarantees.
+Explicit unread deletes the saved progress.
 
 The progress request body is capped at 16 KiB; locations are limited to 8192
 characters. Invalid input returns a validation problem. Inaccessible files and
@@ -83,13 +82,13 @@ conversion stays off. Cache reads, writes, and evictions go only through the
 directory Silo checked at startup, and the reader serves the file the cache
 opened rather than reopening it by name.
 
-The web reader loads these bytes through the v2 session boundary using its
+The web reader loads these bytes through the session boundary using its
 captured profile authority. The existing 512 MiB Content-Length check remains;
 files beyond that size require downloading instead of an in-tab blob.
 
 ## Annotations
 
-The capability's `guarded_annotations` field advertises the v2 annotation flow.
+The capability's `guarded_annotations` field advertises the guarded annotation flow.
 `GET /api/v2/ebooks/{content_id}/annotations` returns an `items` array and
 `page` continuation. The default page contains at most 20 annotations; `limit`
 accepts 1–50. Continue with `page.next_cursor` until `page.has_more` is false.

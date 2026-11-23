@@ -521,6 +521,12 @@
       "value": "Phiên phát này đã kết thúc. Bắt đầu phát lại."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Luồng này đã được thay thế. Nội dung vẫn tiếp tục phát trên luồng hiện tại."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -67937,6 +67943,12 @@
       "value": "Đánh dấu đã xem ở mức"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Các tựa phim có điểm đánh dấu phần danh đề cuối cũng được tính là đã xem khi phát đến phần danh đề cuối."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -103178,6 +103190,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

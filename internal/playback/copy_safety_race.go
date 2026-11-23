@@ -26,12 +26,6 @@ const copySafetyScanTimeout = time.Minute
 // defer and must still happen, goroutines are cheap, ffmpeg is not.
 const copySafetyScanConcurrency = 4
 
-// copySafetyRecheckTimeout bounds the verdict re-read that follows a failed
-// scan. It cannot inherit the scan's context: a scan that failed because its
-// deadline expired leaves that context already dead, which is exactly the case
-// the re-read exists for.
-const copySafetyRecheckTimeout = 15 * time.Second
-
 // CopySafetyScanner is the scanner-side half of the race: it decides whether a
 // file still needs the H.264 multi-PPS scan, runs it, and reports what this
 // process already knows without scanning. *scanner.PlaybackProbeEnsurer
@@ -44,13 +38,9 @@ type CopySafetyScanner interface {
 	// caller may act on.
 	ScanCopySafety(ctx context.Context, file *models.MediaFile) (multi bool, stale bool, err error)
 	// KnownCopySafetyVerdict answers from the process memo or the persisted
-	// row, never from ffmpeg, and retries a write that never landed.
-	//
-	// It is required rather than probed for: an unsafe verdict whose write
-	// failed lives only in the scanning process's memo, and the row — the only
-	// other place to look — cannot distinguish that from "never scanned". A
-	// racer that could not ask this question would leave the sessions on the
-	// condemned route with nothing left to withdraw them.
+	// row, never from ffmpeg, and retries a write that never landed. The race
+	// calls it for that retry: replans on every replica read the verdict from
+	// the row, so a verdict only this process's memo holds helps nobody.
 	KnownCopySafetyVerdict(ctx context.Context, file *models.MediaFile) (multi bool, known bool)
 }
 
@@ -63,15 +53,16 @@ type CopySafetyFileLoader interface {
 // stream-copies video has already been handed to a client (or a watch page has
 // been rendered for a file no session exists for yet).
 //
-// This is the asynchronous half of optimistic remuxing: an unknown verdict no
-// longer blocks a play, so it has to be resolved behind the play instead. A
-// multi-PPS verdict is both persisted — every later plan for the file excludes
-// the copy route deterministically — and pushed at whatever sessions are live
-// on a copy route by the time it lands.
+// A play never waits on the scan. Its verdict is persisted for the download
+// policy, which never remuxes a copy-unsafe source because a download cannot
+// recover, and for web clients treated as strict decoders, which get the
+// encode on the first plan. For every other client the planner treats such a
+// source like any other, and the verdict never withdraws a copy that is
+// playing: decoders that apply in-band parameter sets play it fine, and the
+// ones that do not report the failure that starts the replan.
 type CopySafetyRace struct {
-	scanner  CopySafetyScanner
-	files    CopySafetyFileLoader
-	notifier *CopySafetyNotifier
+	scanner CopySafetyScanner
+	files   CopySafetyFileLoader
 	// inFlight keeps one goroutine per file. The scanner's own singleflight
 	// already collapses concurrent scans, but every start, replan and watch-page
 	// load for a popular file would otherwise stack a goroutine that does
@@ -86,29 +77,25 @@ type CopySafetyRace struct {
 
 // NewCopySafetyRace returns a racer, or nil when it has nothing to scan with. A
 // nil racer is safe to call.
-func NewCopySafetyRace(scanner CopySafetyScanner, files CopySafetyFileLoader, notifier *CopySafetyNotifier) *CopySafetyRace {
+func NewCopySafetyRace(scanner CopySafetyScanner, files CopySafetyFileLoader) *CopySafetyRace {
 	if scanner == nil || files == nil {
 		return nil
 	}
 	return &CopySafetyRace{
-		scanner:  scanner,
-		files:    files,
-		notifier: notifier,
-		slots:    make(chan struct{}, copySafetyScanConcurrency),
-		timeout:  copySafetyScanTimeout,
+		scanner: scanner,
+		files:   files,
+		slots:   make(chan struct{}, copySafetyScanConcurrency),
+		timeout: copySafetyScanTimeout,
 	}
 }
 
 // copySafetyRaceState is the per-file entry in inFlight. It exists so a request
 // that arrives while a scan is running is remembered rather than dropped.
 //
-// Dropping it was wrong in one specific, reachable way: the sessions a pass
-// notifies are the ones that exist when it runs, and the notifier excludes the
-// sessions it disposed of from its own late sweep. A replan that commits a
-// replacement stream-copy while the scan is in flight therefore produces a
-// session no pass will ever look at — its race request was swallowed by the
-// dedupe, and the plan it is running was never considered by the pass that
-// preceded it.
+// Dropping it loses a verdict when the file is rewritten in place mid-scan: the
+// running scan reads the old generation and comes back stale without persisting
+// anything, and the request for the replacement was swallowed by the dedupe, so
+// the replacement stays unscanned until some later play asks again.
 type copySafetyRaceState struct {
 	mu sync.Mutex
 	// recheck records that somebody asked for this file while the owner was
@@ -124,11 +111,11 @@ type copySafetyRaceState struct {
 // the file is not H.264.
 //
 // A request that lands while a scan for the same file is running does not start
-// a second scan — and is not dropped either: it is folded into one follow-up
+// a second scan, and is not dropped either: it is folded into one follow-up
 // pass the running goroutine makes before it retires. That pass normally costs
-// no ffmpeg at all (the verdict it would scan for is by then memoized or
-// persisted, so it takes the known-verdict path) and exists to re-examine the
-// sessions that appeared while the scan ran.
+// no ffmpeg at all, because the verdict is by then persisted and the pass takes
+// the known-verdict path; it scans again only when the first scan left the
+// verdict unknown (failed, or read a superseded generation of the file).
 //
 // The caller's request context is deliberately not used: the scan outlives the
 // request that noticed the verdict was missing, and the whole point is that no
@@ -217,112 +204,30 @@ func (r *CopySafetyRace) scan(fileID int) {
 		return
 	}
 	if !r.scanner.NeedsCopySafetyScan(file) {
-		// Nothing left to scan, but that is not the same as nothing to do. The
-		// verdict may have been reached by another replica between this race
-		// being requested and the file being loaded: that replica notified its
-		// own sessions and has no way to reach ours, so an unsafe verdict has to
-		// be applied locally even though no scan runs here. It may equally have
-		// been reached by *this* process and failed to persist, which is why the
-		// question goes to the scanner (memo first, then row) rather than to the
-		// row alone — the row cannot tell an unpersisted verdict from an unknown
-		// one. A known-safe verdict is silent, as always.
-		//
-		// This closes the window for sessions this replica raced against another
-		// replica's write. It is not distributed invalidation: a verdict that
-		// lands after every replica has stopped racing still reaches only the
-		// replica that reached it. Pushing invalidations across replicas —
-		// Redis-backed, like the other cross-replica playback signals — is
-		// follow-up work.
-		r.notifyKnownUnsafe(ctx, file)
+		// Nothing left to scan. A verdict this process reached but failed to
+		// write is retried here, so the row the replans read catches up.
+		r.scanner.KnownCopySafetyVerdict(ctx, file)
 		return
 	}
 
 	multi, stale, err := r.scanner.ScanCopySafety(ctx, file)
-	if err != nil {
-		// An inconclusive scan is not evidence of anything. Nothing is persisted
-		// (the scanner only records a verdict it reached), live sessions keep
-		// playing the route they were given, and a later request retries. The
-		// old behavior — treating a failed scan as copy-unsafe — belonged to a
-		// world where the scan ran before playback started.
+	switch {
+	case err != nil:
+		// An inconclusive scan is not evidence of anything. Nothing is
+		// persisted, and a later request retries.
 		slog.WarnContext(ctx, "video copy-safety scan failed",
 			"component", "playback", "file_id", fileID, "error", err)
-		// Inconclusive here does not mean inconclusive everywhere. Another
-		// replica may have persisted an unsafe verdict while this scan was
-		// failing, and that verdict now suppresses every later local scan of the
-		// file (NeedsCopySafetyScan reads the row) — so the sessions this replica
-		// owns would wait for an unrelated future race to withdraw their route.
-		// Re-reading the row is the one thing that can still resolve them.
-		r.recheckPersistedVerdict(ctx, fileID)
-		return
-	}
-	if stale {
-		// The scan read a generation of the file the row has since moved past —
-		// it was rewritten in place while ffmpeg was working. The verdict is
-		// about bytes nobody is serving, so it neither persists nor withdraws
-		// anything: notifying on it would tear down sessions playing the
-		// replacement over evidence from the file it replaced. The replacement's
-		// own verdict is unknown again, and the next start, replan or revival
-		// for it asks for a fresh race.
+	case stale:
+		// The scan read a generation of the file the row has since moved past.
+		// The replacement's verdict is unknown again. A request for it that
+		// arrived during this scan gets the follow-up pass; otherwise the next
+		// start, replan or watch-page load asks for a fresh race.
 		slog.InfoContext(ctx, "discarding a video copy-safety verdict for a superseded generation of the file",
 			"component", "playback", "file_id", fileID)
-		return
+	case multi:
+		slog.InfoContext(ctx, "video copy-safety scan found conflicting parameter sets; downloads of this source are not remuxed",
+			"component", "playback", "file_id", fileID)
 	}
-	if !multi {
-		return
-	}
-
-	slog.InfoContext(ctx, "video copy-safety scan disqualified the stream-copy route",
-		"component", "playback", "file_id", fileID)
-	r.notifier.VideoCopyUnsafe(ctx, fileID)
-}
-
-// recheckPersistedVerdict re-reads the row after a local scan failed and applies
-// an unsafe verdict another replica reached in the meantime. A read that fails,
-// or a row with no valid verdict on it, changes nothing: inconclusive stays
-// inconclusive.
-func (r *CopySafetyRace) recheckPersistedVerdict(ctx context.Context, fileID int) {
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), copySafetyRecheckTimeout)
-	defer cancel()
-
-	file, err := r.files.GetByID(ctx, fileID)
-	if err != nil || file == nil {
-		if err != nil {
-			slog.WarnContext(ctx, "video copy-safety verdict re-read after a failed scan could not load the file",
-				"component", "playback", "file_id", fileID, "error", err)
-		}
-		return
-	}
-	r.notifyKnownUnsafe(ctx, file)
-}
-
-// notifyKnownUnsafe pushes the withdrawal for a file this replica can already
-// call copy-unsafe without scanning — from the persisted row, or from a verdict
-// this process reached whose write never landed. A known-safe or unresolved
-// file is silent, as always.
-func (r *CopySafetyRace) notifyKnownUnsafe(ctx context.Context, file *models.MediaFile) {
-	if r == nil || file == nil {
-		return
-	}
-	multi, known := r.scanner.KnownCopySafetyVerdict(ctx, file)
-	if !known || !multi {
-		return
-	}
-	slog.InfoContext(ctx, "applying a copy-unsafe verdict that needed no scan",
-		"component", "playback", "file_id", file.ID)
-	r.notifier.VideoCopyUnsafe(ctx, file.ID)
-}
-
-// VideoCopyUnsafeKnown reports whether this replica can already say the file
-// cannot be video stream-copied, without running ffmpeg and without waiting on
-// anything. It is what the serve paths gate a revived stream-copy on: the
-// persisted row alone would miss a verdict this process reached but failed to
-// write, which is exactly the case where nothing else is left to catch it.
-func (r *CopySafetyRace) VideoCopyUnsafeKnown(ctx context.Context, file *models.MediaFile) bool {
-	if r == nil || file == nil {
-		return false
-	}
-	multi, known := r.scanner.KnownCopySafetyVerdict(ctx, file)
-	return known && multi
 }
 
 // RaceScanForPlan starts a race only when the plan actually stream-copies video

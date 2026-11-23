@@ -1,20 +1,23 @@
 # Diagnostics upload API
 
-The native v2 diagnostics ingress uses the existing diagnostics validator and
+The native diagnostics ingress uses the existing diagnostics validator and
 storage service.
 
 `GET /api/v2/diagnostics/capabilities` requires a signed-in account access token;
 API keys are refused. The capability document returns the account-specific status,
 server instance identity, accepted manifest schema versions, bundle and manifest
 limits, retention days and consent notice version. Capability state is `available`,
-`disabled`, or `not_configured` according to diagnostics availability. A missing
-service returns a dependency-unavailable problem. Treat `revision` as an opaque
+`disabled`, or `not_configured` according to diagnostics availability. A server
+with no diagnostics ingress service still answers `200`, with state
+`not_configured`, `status` `storage_unavailable` and empty accepted schema-version
+and crash-source lists; `POST /api/v2/diagnostics/reports` then returns
+`409 capability_not_configured`. Treat `revision` as an opaque
 string; cache the document privately with its ETag and revalidate with
 `If-None-Match`. A bodyless `304` reuses the matching account-scoped document.
 
-`upload_chunk_bytes` advertises the fixed chunk size when the v2 chunk service
-is configured; zero means unsupported. Clients must use the capability from the
-same API namespace as their upload transport.
+`upload_chunk_bytes` advertises the fixed chunk size when the chunk service is
+configured; zero means unsupported, and the chunk routes then answer
+`503 dependency_unavailable`.
 
 `accepted_crash_sources` lists the `crash.source` values the manifest validator
 accepts. Servers that predate the field accept only `ueh`, `exit_info`,
@@ -86,6 +89,4 @@ completion. That absence does not prove that an earlier uncertain completion
 failed to create a report. Clients must not automatically repeat an uncertain
 completion or start a replacement report based on that `404`.
 
-Apple and Android upload transports and the web diagnostics-status consumer must
-adopt the v2 discovery and ingress together before migration ratification. The
-Jellyfin compatibility surface has no corresponding diagnostics upload contract.
+The Jellyfin compatibility surface has no corresponding diagnostics upload contract.

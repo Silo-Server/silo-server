@@ -521,6 +521,12 @@
       "value": "Сеанс воспроизведения завершён. Запустите воспроизведение снова."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Этот поток был заменён. Воспроизведение продолжается в текущем потоке."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -82578,6 +82584,12 @@
       "value": "Отмечать просмотренным при"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Если у видео есть метка титров, оно также считается просмотренным, когда воспроизведение доходит до титров."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -123152,6 +123164,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

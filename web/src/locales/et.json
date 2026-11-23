@@ -521,6 +521,12 @@
       "value": "See esitusseanss lõppes. Alustage esitamist uuesti."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "See voog asendati. Esitus jätkub praeguses voos."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -68293,6 +68299,12 @@
       "value": "Märgi vaadatuks alates"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Lõputiitrite märgisega pealkirjad loetakse vaadatuks ka siis, kui esitus jõuab lõputiitriteni."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -103480,6 +103492,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

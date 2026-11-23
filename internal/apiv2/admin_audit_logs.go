@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/netip"
 	"strconv"
 	"strings"
 	"time"
@@ -81,14 +80,11 @@ func registerAdminAuditLogs(reg *Registry) {
 			opts.StatusCode = new(code)
 		}
 		if opts.ClientIP != "" {
-			if addr, err := netip.ParseAddr(opts.ClientIP); err == nil && addr.Zone() == "" {
-				opts.ClientIP = addr.String()
-			} else if prefix, err := netip.ParsePrefix(opts.ClientIP); err == nil {
-				// Keep host bits: PostgreSQL inet equality includes the address and mask.
-				opts.ClientIP = prefix.String()
-			} else {
+			normalized, ok := activitylog.NormalizeClientIPFilter(opts.ClientIP)
+			if !ok {
 				return nil, NewProblem(TypeValidationFailed, "Invalid client_ip.")
 			}
+			opts.ClientIP = normalized
 		}
 		if in.ActorUserID != "" {
 			id, err := intOfID(ID(in.ActorUserID))

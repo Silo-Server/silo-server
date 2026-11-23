@@ -136,7 +136,7 @@ func (s *Service) RecordPlaybackStop(
 		FinalPositionSeconds: position,
 	}
 	// Below minimum resume threshold — skip both progress and history.
-	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(thresholds.MinResumePct) {
+	if _, _, skip := userstore.ResolveProgressState(position, duration, thresholds); skip {
 		result.SkippedBelowMinResume = true
 		return result, nil
 	}
@@ -163,7 +163,7 @@ func (s *Service) RecordPlaybackStop(
 		MediaItemID:     targetID,
 		WatchedAt:       formatWatchedAt(watchedAt),
 		DurationSeconds: duration,
-		Completed:       duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct),
+		Completed:       thresholds.Watched(position, duration),
 		Source:          userstore.WatchHistorySourcePlayback,
 	}
 	s.applyStableIdentity(ctx, &entry)
@@ -260,7 +260,7 @@ func (s *Service) RecordPlaybackStopOnce(
 		DurationSeconds:      duration,
 		FinalPositionSeconds: position,
 	}
-	if duration > 0 && position > 0 && position/duration < userstore.MinResumeFraction(thresholds.MinResumePct) {
+	if _, _, skip := userstore.ResolveProgressState(position, duration, thresholds); skip {
 		result.SkippedBelowMinResume = true
 		return result, nil
 	}
@@ -277,7 +277,7 @@ func (s *Service) RecordPlaybackStopOnce(
 		MediaItemID:     targetID,
 		WatchedAt:       formatWatchedAt(watchedAt),
 		DurationSeconds: duration,
-		Completed:       duration > 0 && position/duration > userstore.WatchedFraction(thresholds.WatchedPct),
+		Completed:       thresholds.Watched(position, duration),
 		Source:          userstore.WatchHistorySourcePlayback,
 	}
 	s.applyStableIdentity(ctx, &entry)

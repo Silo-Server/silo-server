@@ -562,10 +562,22 @@ Non-retryable 4xx responses (everything except 408, 425, and 429) are
 deterministic destination-side rejections: the attempt fails immediately
 without walking the schedule. Auto-disable on that path requires three
 *consecutive* deliveries to fail with a non-retryable 4xx, because
-destination-side WAF/CDN blips intermittently 4xx valid webhooks. 429 honors
-`Retry-After` when present. Auto-disable posts a `webhook.auto_disabled`
-notice to the profile's inbox — a type that is itself excluded from webhook
-dispatch so a broken webhook cannot loop.
+destination-side WAF/CDN blips intermittently 4xx valid webhooks. The webhook
+row counts that streak (`consecutive_rejections`); a success, re-enabling, or
+a new URL resets it. On a 429, a `Retry-After` header can lengthen the wait
+before the next attempt but never shortens the schedule; other statuses ignore
+it. Auto-disable posts a
+`webhook.auto_disabled` notice to the profile's inbox — a type that is itself
+excluded from webhook dispatch so a broken webhook cannot loop. The disable
+and its notice commit with the attempt's outcome and the streaks, and only
+the worker that turns the webhook off writes the notice.
+
+A claimed attempt carries a 90-second lease. Only the worker that still
+holds the claim records the send's outcome, so a send that outlived its lease
+and was reclaimed counts once. A worker starts a send only with at least 25
+seconds of lease left (up to 10 seconds of artwork resolution, the 10-second
+request, and slack), and retry sweeps claim no more attempts than fit in one
+lease.
 
 Inbox retention keeps a delivery while one of its webhook or plugin
 destination attempts is still pending or retrying: deleting the delivery
@@ -574,6 +586,34 @@ keeps it always while the attempt is claimed or scheduled (`retrying` with
 `next_retry_at` ahead), and otherwise only while the delivery is younger than
 the plugin attempt age cap (36 hours, `pluginAttemptMaxAge`), so a stranded
 attempt (webhooks turned off server-wide, for example) releases its row.
+
+### Revisions and guarded deletion
+
+`notification_webhooks.revision` is a server-owned bigint allocated from a
+non-cycling PostgreSQL sequence (migration
+`20260906145619_webhook_conditional_revision`). The insert/update trigger
+assigns it for every write, including configuration updates, signing-secret
+rotation, delivery success/failure bookkeeping, and disabling a destination. It
+does not depend on transaction timestamps. Gaps are expected, and a recreated
+row receives a new revision even if its ID or supplied revision repeats.
+Sequence exhaustion fails writes rather than reusing a validator. Every writer
+goes through the trigger; trigger bypass, a manual sequence reset and
+independently restored divergent databases are outside this guarantee.
+
+The repository's guarded deletion seam locks the profile-owned row, invokes the
+caller's precondition check on its current revision, and deletes within the
+same transaction. A mismatch returns without deleting the row or cascading its
+attempts. Missing and foreign-profile rows report not found. Concurrent writers
+serialize through the same row lock; an editor that wins first makes the
+original deletion revision stale. A writer that loses to a committed deletion
+cannot update that deleted row.
+
+The revision covers operational metadata as well as configuration, so a
+provider outcome may invalidate an editor's validator. This is conservative
+lost-update protection, not a configuration-only version. A database deletion
+cannot recall an external request already sent. The `/api/v2` transport owns
+validator rendering and conditional-header evaluation; the storage package does
+not interpret HTTP headers.
 
 ## Plugin destinations
 
@@ -665,8 +705,9 @@ to the plugin service, so neither package imports the other.
   one included. The insert key-share locks only the account row, the row an
   account deletion locks before its cascade reaches the profile and its
   destinations, so the two wait on each other instead of deadlocking. A
-  profile purge locks the profile's destinations, and its webhooks, in id
-  order before deleting them, the order an enqueue locks them.
+  profile purge locks the profile's destinations, and its webhooks, web push
+  subscriptions and push registrations, in id order before deleting them, the
+  order an enqueue locks them.
 - **Enqueue.** Like webhooks, attempts are enqueued in the fanout
   transaction, filtered by the destination's switch for the delivery
   (`notify_next_up` for an episode, `notify_requests` for a watchlist
@@ -679,8 +720,15 @@ to the plugin service, so neither package imports the other.
   exist and key-share locks them, in id order, until the delivery commits, so a
   destination deleted after it was listed drops its attempt instead of
   aborting the delivery, inbox row and other channels included, on the
-  foreign key; webhooks enqueue the same way. All of a transaction's attempts
-  go in one `INSERT ... SELECT FROM unnest(...)` with four parameters, so a
+  foreign key; webhooks, web push and mobile push enqueue the same way. The
+  retention sweeps of web push subscriptions and push registrations skip a
+  row a delivery holds instead of waiting on it, which could deadlock with an
+  enqueue, and take it on a later run. The sweep of push registrations with no
+  recorded login then deletes each row it skipped on its own, waiting for the
+  delivery, since its Apple evidence, an ended login, can be gone by the next
+  run; a statement that locks one row can't deadlock with an enqueue. All of a
+  transaction's attempts go in one `INSERT ... SELECT FROM unnest(...)` with
+  four parameters, so a
   fanout of any size stays under the protocol's parameter limit. A delivery
   the insert's `RETURNING` names is marked (`InsertedDelivery.pluginAttempts`),
   and only those reach the plugin destination dispatcher, so other deliveries

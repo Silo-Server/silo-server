@@ -521,6 +521,12 @@
       "value": "Această sesiune de redare s-a încheiat. Porniți din nou redarea."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Acest stream a fost înlocuit. Redarea continuă pe streamul curent."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -74671,6 +74677,12 @@
       "value": "Marcare ca vizionat la"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titlurile cu un marcaj pentru generic sunt considerate vizionate și atunci când redarea ajunge la generic."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -112487,6 +112499,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [
