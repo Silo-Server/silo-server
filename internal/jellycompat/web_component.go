@@ -1567,17 +1567,25 @@ func webInstallCommandRunner(cacheDir, preloadPath string) func(context.Context,
 			return errors.New("empty command")
 		}
 		cmd := procgroup.CommandContext(ctx, argv[0], argv[1:]...)
-		// Wait for the output pipes until every writer has exited. When ctx
-		// ends the group kill closes them at once, and an npm that exits
-		// before its children must not end the install while they still run.
-		cmd.WaitDelay = 0
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "npm_config_cache="+cacheDir, "NODE_OPTIONS="+nodeOptions)
 		if stdin != "" {
 			cmd.Stdin = strings.NewReader(stdin)
 		}
-		out, err := cmd.CombinedOutput()
+		pipe, err := cmd.StdoutPipe()
 		if err != nil {
+			return fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
+		}
+		cmd.Stderr = cmd.Stdout
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
+		}
+		// Read the output to the end before Wait. npm can exit while webpack
+		// still writes to it, and os/exec stops killing the group on ctx once
+		// Wait has reaped npm. Until then npm stays at least a zombie, so its
+		// group id can't be reused, and the group kill on ctx closes the pipe.
+		out, _ := io.ReadAll(pipe)
+		if err := cmd.Wait(); err != nil {
 			if cause := context.Cause(ctx); cause != nil && !errors.Is(err, cause) {
 				err = fmt.Errorf("%w: %w", cause, err)
 			}
