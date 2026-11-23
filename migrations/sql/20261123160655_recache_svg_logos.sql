@@ -30,7 +30,9 @@ SET status = 'queued',
     updated_at = NOW()
 WHERE j.image_type = 'logo'
   AND j.status IN ('succeeded', 'failed')
-  AND lower(j.source_path) LIKE '%.svg'
+  -- A library file's source ends in its "?v=<size>-<mtime>" fingerprint
+  -- (localImageFingerprint in internal/metadata).
+  AND lower(j.source_path) ~ '\.svg(\?v=\d+--?\d+)?$'
   AND (
       (j.target_type = 'item' AND EXISTS (
           SELECT 1 FROM media_items mi

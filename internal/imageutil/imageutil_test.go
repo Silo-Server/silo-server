@@ -80,20 +80,46 @@ func withPNGDimensions(t *testing.T, data []byte, width, height uint32) []byte {
 }
 
 // TMDB serves logos as SVGs whose canvas is a few dozen units wide. Drawn at
-// that canvas, every rung of a logo was a 54px image.
-func TestRasterizeDrawsSVGAtTheCachedOriginalSize(t *testing.T) {
-	svg := []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 53.921 24"><rect width="53.921" height="24" fill="#f64312"/></svg>`)
-	rasterized, err := Rasterize(svg)
-	if err != nil {
-		t.Fatalf("Rasterize: %v", err)
+// that canvas, every rung of a logo was a 54px image. The size asked for is
+// small enough for any node's decode budget, so the result does not depend on
+// the test machine's memory.
+func TestRasterizeWithinDrawsSVGAtTheRequestedSize(t *testing.T) {
+	const maxDim = 1000
+	cases := map[string]struct {
+		svg                 string
+		wantWidth, wantHigh int
+	}{
+		"viewBox only": {
+			svg:       `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 53.921 24"><rect width="53.921" height="24" fill="#f64312"/></svg>`,
+			wantWidth: maxDim, wantHigh: 445,
+		},
+		// The declared size rounds to 1x1; the raster must still be maxDim.
+		"fractional canvas": {
+			svg:       `<svg xmlns="http://www.w3.org/2000/svg" width="1.49" height="1.49"><rect width="1.49" height="1.49"/></svg>`,
+			wantWidth: maxDim, wantHigh: maxDim,
+		},
 	}
-	size, err := bimg.NewImage(rasterized).Size()
-	if err != nil {
-		t.Fatalf("Size: %v", err)
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			rasterized, err := RasterizeWithin([]byte(tc.svg), maxDim)
+			if err != nil {
+				t.Fatalf("RasterizeWithin: %v", err)
+			}
+			size, err := bimg.NewImage(rasterized).Size()
+			if err != nil {
+				t.Fatalf("Size: %v", err)
+			}
+			// libvips rounds each edge, so allow a pixel either way.
+			if abs(size.Width-tc.wantWidth) > 1 || abs(size.Height-tc.wantHigh) > 1 {
+				t.Fatalf("rasterized to %dx%d, want %dx%d", size.Width, size.Height, tc.wantWidth, tc.wantHigh)
+			}
+		})
 	}
-	// The declared size bimg reports is whole pixels (54x24), so the longest
-	// edge lands just short of the cap.
-	if size.Width < 3800 || size.Width > MaxCachedOriginalDimension || size.Height < 1690 || size.Height > 1710 {
-		t.Fatalf("rasterized to %dx%d, want about %dx1707", size.Width, size.Height, MaxCachedOriginalDimension)
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
 	}
+	return n
 }
