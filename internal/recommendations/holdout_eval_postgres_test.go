@@ -581,6 +581,13 @@ func newEvalFixture(t *testing.T) *relevanceFixture {
 			t.Fatal(err)
 		}
 	}
+	// Cleanups run last first, so this vacuum follows the delete below. The
+	// evaluation deletes about a thousand embeddings, which stay in the HNSW
+	// graph until a vacuum; left there, they lower the recall of the next
+	// run's nearest-neighbour tests on a reused database.
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `VACUUM media_item_embeddings`)
+	})
 	cleanupRecoMediaItems(t, f.pool, f.prefix)
 	return f
 }
