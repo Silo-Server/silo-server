@@ -1719,6 +1719,18 @@ func (r *Repo) MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) 
 type StaleProfile struct {
 	UserID    int
 	ProfileID string
+	// StaleAt is the profile's stale mark.
+	StaleAt time.Time
+}
+
+// StaleProfilesPage selects one page of GetStaleProfiles.
+type StaleProfilesPage struct {
+	// After, when set, starts the page after this profile in mark order, so
+	// a caller can step past profiles it left marked.
+	After *StaleProfile
+	// MarkedBy, when set, leaves out marks newer than it.
+	MarkedBy time.Time
+	Limit    int
 }
 
 // GetStaleProfiles returns profiles with a stale mark, oldest mark first. A
@@ -1727,13 +1739,24 @@ type StaleProfile struct {
 // refresh clears a mark (ClearStaleAt): the nightly taste job stores the
 // taste vector as of its start but does not rebuild cached rows, so a mark it
 // passed over stays pending although it is older than updated_at.
-func (r *Repo) GetStaleProfiles(ctx context.Context, limit int) ([]StaleProfile, error) {
+func (r *Repo) GetStaleProfiles(ctx context.Context, page StaleProfilesPage) ([]StaleProfile, error) {
+	var markedBy, afterAt *time.Time
+	var afterUser int
+	var afterProfile string
+	if !page.MarkedBy.IsZero() {
+		markedBy = &page.MarkedBy
+	}
+	if page.After != nil {
+		afterAt, afterUser, afterProfile = &page.After.StaleAt, page.After.UserID, page.After.ProfileID
+	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT user_id, profile_id
+		SELECT user_id, profile_id, stale_at
 		FROM   user_taste_profiles
 		WHERE  stale_at IS NOT NULL
+		  AND  ($1::timestamptz IS NULL OR stale_at <= $1)
+		  AND  ($2::timestamptz IS NULL OR (stale_at, user_id, profile_id) > ($2, $3, $4))
 		ORDER  BY stale_at, user_id, profile_id
-		LIMIT  $1`, limit)
+		LIMIT  $5`, markedBy, afterAt, afterUser, afterProfile, page.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("get stale profiles: %w", err)
 	}
@@ -1742,7 +1765,7 @@ func (r *Repo) GetStaleProfiles(ctx context.Context, limit int) ([]StaleProfile,
 	var profiles []StaleProfile
 	for rows.Next() {
 		var p StaleProfile
-		if err := rows.Scan(&p.UserID, &p.ProfileID); err != nil {
+		if err := rows.Scan(&p.UserID, &p.ProfileID, &p.StaleAt); err != nil {
 			return nil, fmt.Errorf("scan stale profile: %w", err)
 		}
 		profiles = append(profiles, p)

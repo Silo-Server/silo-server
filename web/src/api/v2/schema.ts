@@ -21307,7 +21307,7 @@ export interface components {
       last_run?: components["schemas"]["AdminRecommendationJobRun"];
       /**
        * Format: int64
-       * @description Profiles whose recommendations wait for a rebuild. The sweep rebuilds up to 50 every 5 minutes; a profile whose rebuild fails stays pending.
+       * @description Profiles whose recommendations wait for a rebuild. The sweep runs every 2 minutes and rebuilds them oldest first for up to a minute; a profile whose rebuild fails stays pending.
        */
       pending: number;
     };

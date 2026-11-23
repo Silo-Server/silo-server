@@ -54,7 +54,7 @@ type AdminRecommendationsStatus struct {
 	CacheRefreshedAt *Instant                      `json:"cache_refreshed_at,omitempty" doc:"When the newest cached recommendation row was written, by the cache job or a profile refresh. It is not job health: profile refreshes keep it recent while the cache job fails; read recommendations.last_run for that. Absent when nothing is cached."`
 }
 type AdminRecommendationStaleSweep struct {
-	Pending int                        `json:"pending" doc:"Profiles whose recommendations wait for a rebuild. The sweep rebuilds up to 50 every 5 minutes; a profile whose rebuild fails stays pending."`
+	Pending int                        `json:"pending" doc:"Profiles whose recommendations wait for a rebuild. The sweep runs every 2 minutes and rebuilds them oldest first for up to a minute; a profile whose rebuild fails stays pending."`
 	LastRun *AdminRecommendationJobRun `json:"last_run,omitempty" doc:"The newest sweep on any server that rebuilt or failed at least one profile. Absent until one does."`
 }
 type AdminRecommendationsStatusOutput struct{ Body AdminRecommendationsStatus }

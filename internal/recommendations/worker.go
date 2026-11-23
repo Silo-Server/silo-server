@@ -35,8 +35,22 @@ const (
 	cacheJobTimeout         = 45 * time.Minute
 	globalRowsJobTimeout    = 10 * time.Minute
 
-	staleSweepInterval = 5 * time.Minute
-	staleSweepBatch    = 50
+	// staleSweepInterval spaces the stale sweeps. A sweep drains every mark
+	// older than its start, so the interval is the most a mark that no
+	// server queued (an access change, stored embeddings, a deferred or
+	// failed refresh) waits for its sweep to start. Two minutes keeps that
+	// wait short while an idle tick, one advisory lock and one scan of the
+	// taste profiles, stays cheap, and leaves an embeddings reset, which the
+	// sweep refuses, at least a minute between budget-long sweeps.
+	staleSweepInterval = 2 * time.Minute
+	// staleSweepBatch is how many stale profiles the sweep reads at a time.
+	staleSweepBatch = 50
+	// staleSweepBudget bounds how long one sweep starts new refreshes. The
+	// sweep holds staleSweepLock throughout, and an embeddings reset is
+	// refused while it does, so a large backlog is drained over several
+	// sweeps instead of one long one. The refresh running when the budget
+	// runs out finishes.
+	staleSweepBudget = time.Minute
 
 	// embedMissingInterval spaces the catch-up passes that embed newly
 	// matched items between nightly embedding runs.
@@ -1171,7 +1185,7 @@ func (w *Worker) stalenessLoop(ctx context.Context) {
 
 // staleSweepResult counts one stale sweep's profiles.
 type staleSweepResult struct {
-	// Stale counts the marked profiles the sweep took, up to its batch.
+	// Stale counts the marked profiles the sweep took.
 	Stale     int `json:"stale"`
 	Refreshed int `json:"refreshed"`
 	// Failed counts refreshes that failed; their profiles are marked stale
@@ -1183,6 +1197,9 @@ type staleSweepResult struct {
 	// server.
 	Deferred int `json:"deferred"`
 	Queued   int `json:"queued"`
+	// OutOfTime marks a sweep that stopped at staleSweepBudget with
+	// profiles left for the next one.
+	OutOfTime bool `json:"out_of_time,omitempty"`
 }
 
 // refreshStaleProfiles refreshes the profiles marked stale. One server sweeps
@@ -1204,7 +1221,7 @@ func (w *Worker) refreshStaleProfiles(ctx context.Context) {
 	defer held.Release()
 
 	started := time.Now()
-	res, err := w.sweepStaleProfiles(ctx, held)
+	res, err := w.sweepStaleProfiles(ctx, held, started.Add(staleSweepBudget))
 	if err == nil && res.Refreshed == 0 && res.Failed == 0 {
 		return
 	}
@@ -1214,43 +1231,70 @@ func (w *Worker) refreshStaleProfiles(ctx context.Context) {
 	case res.Failed > 0:
 		slog.WarnContext(ctx, "stale profile sweep completed with errors", "component", "recommendations", "stale", res.Stale, "refreshed", res.Refreshed, "failed", res.Failed)
 	}
-	data, _ := json.Marshal(res) // only ints: it cannot fail
+	data, _ := json.Marshal(res) // ints and a bool: it cannot fail
 	w.recordRun(staleSweepTaskKey, started, time.Now(), data, err)
 }
 
-func (w *Worker) sweepStaleProfiles(ctx context.Context, held clusterLock) (staleSweepResult, error) {
+// sweepStaleProfiles refreshes, one at a time on held's connection, the
+// profiles marked stale when it starts, in mark order, until none is left or
+// deadline passes. It takes each profile at most once: it pages past the ones
+// it took, including those already queued here, which keep their mark until
+// the queue clears it, and leaves out marks newer than its start, which a
+// deferred or failed refresh, or a change during a refresh, sets. Those wait
+// for the next sweep.
+func (w *Worker) sweepStaleProfiles(ctx context.Context, held clusterLock, deadline time.Time) (staleSweepResult, error) {
 	var res staleSweepResult
-	stale, err := w.engine.repo.GetStaleProfiles(ctx, staleSweepBatch)
+	markedBy, err := w.engine.repo.Now(ctx)
 	if err != nil {
-		return res, fmt.Errorf("list stale profiles: %w", err)
+		return res, fmt.Errorf("read the sweep's start: %w", err)
 	}
-	res.Stale = len(stale)
-	if len(stale) == 0 {
-		return res, nil
-	}
-
-	slog.InfoContext(ctx, "refreshing stale taste profiles", "component", "recommendations", "count", len(stale))
+	page := StaleProfilesPage{MarkedBy: markedBy, Limit: staleSweepBatch}
 	// A sweep cut short by shutdown leaves the rest marked for the next one.
-	for i := 0; i < len(stale) && ctx.Err() == nil; i++ {
-		p := stale[i]
-		key := profileRefreshKey(p.UserID, p.ProfileID)
-		if !w.claimProfileRefresh(key) {
-			res.Queued++ // already queued or refreshing on this server
-			continue
+	for ctx.Err() == nil {
+		stale, err := w.engine.repo.GetStaleProfiles(ctx, page)
+		if err != nil {
+			return res, fmt.Errorf("list stale profiles: %w", err)
 		}
-		switch err := w.runProfileRefresh(ctx, held, p.UserID, p.ProfileID, w.refreshProfile); {
-		case err == nil:
-			res.Refreshed++
-		case errors.Is(err, errProfileRefreshElsewhere), errors.Is(err, errPolicyNotLoaded):
-			res.Deferred++
-		case errors.Is(err, errJobLockLost):
-			res.Failed++
-			return res, err
-		default:
-			res.Failed++
+		if len(stale) == 0 {
+			return res, nil
+		}
+		page.After = &stale[len(stale)-1]
+		slog.InfoContext(ctx, "refreshing stale taste profiles", "component", "recommendations", "count", len(stale))
+		for i := 0; i < len(stale) && ctx.Err() == nil; i++ {
+			p := stale[i]
+			if !time.Now().Before(deadline) {
+				res.OutOfTime = true
+				return res, nil
+			}
+			res.Stale++
+			if err := w.sweepStaleProfile(ctx, held, p, &res); err != nil {
+				return res, err
+			}
 		}
 	}
 	return res, nil
+}
+
+// sweepStaleProfile refreshes one stale profile for the sweep and counts the
+// outcome in res. It returns an error only when the sweep must stop.
+func (w *Worker) sweepStaleProfile(ctx context.Context, held clusterLock, p StaleProfile, res *staleSweepResult) error {
+	key := profileRefreshKey(p.UserID, p.ProfileID)
+	if !w.claimProfileRefresh(key) {
+		res.Queued++ // already queued or refreshing on this server
+		return nil
+	}
+	switch err := w.runProfileRefresh(ctx, held, p.UserID, p.ProfileID, w.refreshProfile); {
+	case err == nil:
+		res.Refreshed++
+	case errors.Is(err, errProfileRefreshElsewhere), errors.Is(err, errPolicyNotLoaded):
+		res.Deferred++
+	case errors.Is(err, errJobLockLost):
+		res.Failed++
+		return err
+	default:
+		res.Failed++
+	}
+	return nil
 }
 
 func (w *Worker) profileRefreshLoop(ctx context.Context) {
