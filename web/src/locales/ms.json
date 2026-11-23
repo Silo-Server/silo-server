@@ -521,6 +521,12 @@
       "value": "Sesi main balik ini telah tamat. Mulakan main semula."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Strim ini telah diganti. Main balik diteruskan pada strim semasa."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -60904,6 +60910,12 @@
     {
       "type": 0,
       "value": "Tandakan ditonton pada"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Tajuk yang mempunyai penanda kredit juga dikira sebagai ditonton sebaik sahaja main balik sampai ke kredit."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

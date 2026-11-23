@@ -892,7 +892,9 @@ A play ends at the first Stopped report carrying its per-play identifier or
 `DELETE /Videos/ActiveEncodings`; for ID-less players and clients that never
 stop, idle cleanup ends it. Silo then records the play the way it records native
 playback: a watch-history row with source `playback` once the position passes the
-minimum resume threshold, completed past the watched threshold, and an admin
+minimum resume threshold or finishes the item, completed past the watched
+threshold or inside the played version's end credits (which finishes the item
+even below the minimum resume threshold), and an admin
 playback-history row. Each play is recorded once across retried stops, API
 replicas, and idle cleanup; a later copy of the session that saw more of the play
 completes the row and updates the admin row's watched time. The play's resume

@@ -521,6 +521,12 @@
       "value": "Tämä toistoistunto päättyi. Aloita toisto uudelleen."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Tämä suoratoisto on korvattu. Toisto jatkuu nykyisessä suoratoistossa."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -67707,6 +67713,12 @@
     {
       "type": 0,
       "value": "Merkitse katsotuksi kohdassa"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Kohteet, joissa on lopputekstien merkki, lasketaan katsotuiksi myös silloin, kun toisto saavuttaa lopputekstit."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

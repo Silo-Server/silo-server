@@ -521,6 +521,12 @@
       "value": "Šī atskaņošanas sesija ir beigusies. Sāciet atskaņošanu no jauna."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Šī straume tika aizstāta. Atskaņošana turpinās pašreizējā straumē."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -75700,6 +75706,12 @@
     {
       "type": 0,
       "value": "Atzīmēt kā skatītu pie"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Vienumi ar beigu titru marķieri arī tiek uzskatīti par noskatītiem, tiklīdz atskaņošana sasniedz beigu titrus."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

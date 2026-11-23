@@ -87,6 +87,26 @@ func (l CreditsLimits) CheckCreditsPlacement(start, end, duration float64, intro
 	return nil
 }
 
+// EndCreditsStart returns where the end credits among segments start, for a
+// file of duration seconds, or 0 when it has none. Reaching that point
+// finishes the item (userstore.ProgressThresholds.CreditsStartSeconds). Only
+// credits starting inside the tail window count, so a misplaced legacy marker
+// never finishes an item early. The last such occurrence wins, which in a
+// file spanning several episodes is the final episode's.
+func (l CreditsLimits) EndCreditsStart(segments []models.MarkerSegment, duration float64) float64 {
+	if duration <= 0 {
+		return 0
+	}
+	windowStart := l.WindowStart(duration)
+	start := 0.0
+	for _, segment := range segments {
+		if segment.Kind == models.MarkerSegmentCredits && segment.StartSeconds >= windowStart && segment.StartSeconds < duration {
+			start = math.Max(start, segment.StartSeconds)
+		}
+	}
+	return start
+}
+
 // KeepPlaced returns the credits in ranges that pass CheckCreditsPlacement.
 func (l CreditsLimits) KeepPlaced(ranges []models.MarkerSegment, duration float64, introEnd *float64) []models.MarkerSegment {
 	kept := make([]models.MarkerSegment, 0, len(ranges))

@@ -1789,8 +1789,7 @@ func (m *SessionManager) EndTransport(sessionID string) error {
 // A progressive remux is a single HTTP response whose ffmpeg is owned by the
 // serving handler and canceled only by that request's context, so removing the
 // session from this manager does not reach it: an unnegotiated client would go
-// on consuming a stream the server has already disowned — for a copy-unsafe
-// source, corrupt bytes its decoder cannot recover from. This is the smallest
+// on consuming a stream the server has already disowned. This is the smallest
 // handle that lets a stop interrupt one. Segmented transports (HLS, transcode)
 // do not need it: each of their requests is short, and the next one is refused
 // once the session is gone.

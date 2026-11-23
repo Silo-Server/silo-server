@@ -521,6 +521,12 @@
       "value": "انتهت جلسة التشغيل هذه. ابدأ التشغيل من جديد."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "تم استبدال هذا البث. يستمر التشغيل على البث الحالي."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -93701,6 +93707,12 @@
     {
       "type": 0,
       "value": "التعليم كمُشاهَد عند"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "تُحتسب العناوين التي تحتوي على علامة لشارة النهاية مُشاهَدةً أيضًا بمجرد وصول التشغيل إلى شارة النهاية."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

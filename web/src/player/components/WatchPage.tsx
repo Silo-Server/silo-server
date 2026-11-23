@@ -35,15 +35,11 @@ function patchChapterThumbnail(
 ): PlayerFileVersion[] {
   let changed = false;
   const nextVersions = versions.map((version) => {
-    if (version.file_id !== fileId || !version.chapters?.length) {
-      return version;
-    }
+    if (version.file_id !== fileId || !version.chapters?.length) return version;
 
     let versionChanged = false;
     const nextChapters = version.chapters.map((chapter) => {
-      if (chapter.index !== chapterIndex) {
-        return chapter;
-      }
+      if (chapter.index !== chapterIndex) return chapter;
       if (
         chapter.thumbnail_url === thumbnailUrl &&
         chapter.thumbnail_thumbhash === thumbnailThumbhash
@@ -185,6 +181,7 @@ function WatchPagePlayer({
   forceInitialPosition,
   qualityPreference,
   maxBitrateKbps,
+  networkTier,
   explicitAudioTrackIndex,
   initialSubtitleTrackIndexByFileId,
   initialBitmapSubtitleTrackIndexByFileId,
@@ -250,6 +247,7 @@ function WatchPagePlayer({
     !watchTogetherRoomId,
     bufferingMode,
     versionPicked,
+    networkTier,
   );
 
   const fallbackHandledRef = useRef<string | null>(null);
@@ -740,6 +738,7 @@ function WatchPagePlayer({
       showMarkerSource={showMarkerSource}
       bufferingMode={bufferingMode}
       bandwidthCapKbps={maxBitrateKbps}
+      networkTierRevision={session.networkTierRevision}
       bufferingTitleId={contentId}
       playbackAttemptId={session.playbackAttemptId}
       onKeptEstimate={session.setKeptEstimate}

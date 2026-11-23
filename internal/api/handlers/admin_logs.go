@@ -104,6 +104,14 @@ func parseAuditLogOptionsFromRequest(r *http.Request) (activitylog.ListOptions, 
 		Limit:             parseLimit(r, 100),
 	}
 
+	if opts.ClientIP != "" {
+		normalized, ok := activitylog.NormalizeClientIPFilter(opts.ClientIP)
+		if !ok {
+			return activitylog.ListOptions{}, invalidQueryError("client_ip")
+		}
+		opts.ClientIP = normalized
+	}
+
 	statusCode, err := parseOptionalIntQuery(r, "status_code")
 	if err != nil {
 		return activitylog.ListOptions{}, err
