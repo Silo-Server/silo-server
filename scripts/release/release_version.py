@@ -87,10 +87,11 @@ def docker_tags(tags, version):
         same_major = [k for k in existing if is_stable(k) and k[0] == key[0]]
         if key[0] >= 1 and key == same_major[-1]:
             out.append(f"{key[0]}")
-    # Release candidates compete for latest only until a 1.x release exists.
+    # Of the release candidates, only 1.0.0's compete for latest, and only
+    # until a 1.x release exists.
     v1_released = any(is_stable(k) and k[0] >= 1 for k in existing)
-    candidates = [k for k in existing if is_stable(k) or not v1_released]
-    if key == candidates[-1]:
+    candidates = [k for k in existing if is_stable(k) or (k[:3] == (1, 0, 0) and not v1_released)]
+    if candidates and key == candidates[-1]:
         out.append("latest")
     return out
 
