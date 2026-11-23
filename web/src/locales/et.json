@@ -521,6 +521,12 @@
       "value": "See esitusseanss lõppes. Alustage esitamist uuesti."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "See voog asendati. Esitus jätkub praeguses voos."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -68291,6 +68297,12 @@
     {
       "type": 0,
       "value": "Märgi vaadatuks alates"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Lõputiitrite märgisega pealkirjad loetakse vaadatuks ka siis, kui esitus jõuab lõputiitriteni."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -140872,13 +140884,13 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "Ühendage, et alustada vaatamisajaloo importimist ja esituse edastamist."
+      "value": "Ühendage teenus ja valige seejärel jaotises „Seaded“, mida sünkroonida."
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
     {
       "type": 0,
-      "value": "Ühendage teenuse "
+      "value": "Ühendage oma teenuse "
     },
     {
       "type": 1,
@@ -140886,7 +140898,7 @@
     },
     {
       "type": 0,
-      "value": " API-võtmega, et importida vaatamisajalugu ja edastada esitust."
+      "value": " API-võtmega ja valige seejärel jaotises „Seaded“, mida sünkroonida."
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [

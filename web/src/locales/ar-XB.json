@@ -521,6 +521,12 @@
       "value": "\u200F\u202EThis playback session ended. Start playing again.\u202C"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis stream was replaced. Playback continues on the current one.\u202C"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -71375,6 +71381,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EMark watched at\u202C"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETitles with a credits marker also count as watched once playback reaches the credits.\u202C"
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -146820,7 +146832,7 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "\u200F\u202EConnect to start importing watch history and scrobbling playback.\u202C"
+      "value": "\u200F\u202EConnect, then choose what to sync under Settings.\u202C"
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
@@ -146834,7 +146846,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E API key to import watch history and scrobble playback.\u202C"
+      "value": "\u202E API key, then choose what to sync under Settings.\u202C"
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [

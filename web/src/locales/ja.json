@@ -521,6 +521,12 @@
       "value": "この再生セッションは終了しました。もう一度再生してください。"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "このストリームは置き換えられました。現在のストリームで再生を続行しています。"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -61060,6 +61066,12 @@
     {
       "type": 0,
       "value": "視聴済みにする進行度"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "クレジットのマーカーがあるタイトルは、再生がクレジットに達した時点でも視聴済みになります。"
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -127762,7 +127774,7 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "接続すると、視聴履歴のインポートと再生のスクロブルを開始します。"
+      "value": "接続後、同期する項目を設定で選択してください。"
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
@@ -127772,7 +127784,7 @@
     },
     {
       "type": 0,
-      "value": "のAPIキーで接続して、視聴履歴のインポートと再生のスクロブルを行います。"
+      "value": "のAPIキーで接続した後、同期する項目を設定で選択してください。"
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [
