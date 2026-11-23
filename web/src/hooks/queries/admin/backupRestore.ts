@@ -9,6 +9,7 @@ import {
   getRestoreSet,
   listRestoreJobs,
   startRestore,
+  type RestoreJob,
   type RestoreSelection,
 } from "@/api/v2/adminBackupRestore";
 import { backupsRootKey } from "@/hooks/queries/admin/backups";
@@ -55,23 +56,45 @@ export function useRestoreSet(source: RestoreSource | null, acceptUnauthenticate
   });
 }
 
+function restoreJobsKey() {
+  return [...restoreRootKey(), "jobs"] as const;
+}
+
+function restoreJobKey(jobId: string | null) {
+  return [...restoreRootKey(), "job", jobId] as const;
+}
+
 /** One restore job, read until it ends. */
 export function useRestoreJob(jobId: string | null) {
   const context = captureProfileRequestContext();
   return useQuery({
-    queryKey: [...restoreRootKey(), "job", jobId],
+    queryKey: restoreJobKey(jobId),
     queryFn: () => getRestoreJob(captureAdminAuthority(), jobId!),
     enabled: context !== null && jobId !== null,
     refetchInterval: (query) => (query.state.data?.terminal ? false : RESTORE_POLL_MS),
   });
 }
 
-/** Recent restore jobs, to find the one for a backup after a reload. */
+/**
+ * Recent restore jobs, to find the one for a backup after a reload. A job
+ * whose own read says it ended shows as ended, even when this list was read
+ * before that: the restore page opens a running job from this list, and would
+ * otherwise send Choose again back to a finished run's report.
+ */
 export function useRestoreJobs() {
   const context = captureProfileRequestContext();
+  const queryClient = useQueryClient();
   return useQuery({
-    queryKey: [...restoreRootKey(), "jobs"],
+    queryKey: restoreJobsKey(),
     queryFn: () => listRestoreJobs(captureAdminAuthority()),
+    // Read on every render, not only when the list changes, so a job read
+    // that lands after the list still counts.
+    select: (jobs) =>
+      jobs.map((job) => {
+        if (job.terminal) return job;
+        const read = queryClient.getQueryData<RestoreJob>(restoreJobKey(job.id));
+        return read?.terminal ? read : job;
+      }),
     enabled: context !== null,
     staleTime: 0,
   });
