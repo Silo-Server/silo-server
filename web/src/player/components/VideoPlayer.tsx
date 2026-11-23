@@ -37,7 +37,11 @@ import { useSubtitleTracks } from "../hooks/useSubtitleTracks";
 import { useASSSubtitles } from "../hooks/useASSSubtitles";
 import { usePGSSubtitles } from "../hooks/usePGSSubtitles";
 import type { EngineCapabilities } from "../engine/capabilities";
-import { resolveOriginalPlaybackRoute, type NativeOriginalSupport } from "../engine/routing";
+import {
+  pageOriginProtocol,
+  resolveOriginalPlaybackRoute,
+  type NativeOriginalSupport,
+} from "../engine/routing";
 import type { BrowserEngineSession } from "../engine";
 import { ENGINE_READ_FAILED, ENGINE_STARTUP_TIMEOUT } from "../engine/protocol";
 import { useSubtitleSync } from "../hooks/useSubtitleSync";
@@ -331,6 +335,8 @@ interface VideoPlayerProps {
    * change, so the controller starts over and drops its kept estimate.
    */
   bandwidthCapKbps?: number | null;
+  /** Bumped when a network-tier quality replan is adopted, even at an equal cap. */
+  networkTierRevision?: number;
   onBufferingSummary?: (
     plan: BufferingPlan,
     summary: BufferingSummary,
@@ -570,6 +576,7 @@ export function VideoPlayer({
   showMarkerSource = false,
   bufferingMode = "always",
   bandwidthCapKbps,
+  networkTierRevision = 0,
   bufferingTitleId,
   onBufferingSummary,
   playbackAttemptId,
@@ -1049,6 +1056,10 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!onConnectionLost || !video || !streamFramedRef.current) return false;
     if (connectionStatusRef.current === "connected") {
+      // The transport is gone. When the session recovers the route instead of
+      // reconnecting (a progressive remux that drops again at the same point),
+      // a refusal of that recovery is this revision's to show.
+      transportFailedForPlanRevisionRef.current = planRevisionRef.current;
       // A seek still in flight is where the viewer wants to be.
       const positionSeconds =
         pendingSeekTimeRef.current ?? toMediaTime(video.currentTime, timelineOffsetRef.current);
@@ -1611,7 +1622,12 @@ export function VideoPlayer({
     if (reportedPlanFailureKeyRef.current === failureKey) {
       reportedPlanFailureKeyRef.current = null;
     }
-    if (transportFailedForPlanRevisionRef.current === planRevision || !isPlayerReady) {
+    // While the session reconnects, its own status says what happened.
+    if (
+      (transportFailedForPlanRevisionRef.current === planRevision &&
+        connectionStatusRef.current === "connected") ||
+      !isPlayerReady
+    ) {
       setError(replanError);
     }
   }, [isPlayerReady, plan.plan_attempt_key, planRevision, replanError, replanning, sessionId]);
@@ -3274,12 +3290,15 @@ export function VideoPlayer({
                 },
                 engine: routeInput.browserEngine,
                 audioTracks: routeInput.audioTracks,
-                navigationProtocol:
+                navigationProtocol: pageOriginProtocol(
                   (
                     performance.getEntriesByType?.("navigation")[0] as
                       | PerformanceNavigationTiming
                       | undefined
                   )?.nextHopProtocol ?? "",
+                  (performance.getEntriesByType?.("resource") ?? []) as PerformanceResourceTiming[],
+                  location.origin,
+                ),
               })
             : ({ kind: "native" } as const);
         if (route.kind === "unsupported") {
@@ -5168,14 +5187,22 @@ export function VideoPlayer({
     },
     [answerBufferingPill],
   );
-  // A new cap on the session's replans is a quality change (see the prop).
+  // A new cap or adopted network-tier replan (including equal-cap Wi-Fi
+  // restoration) is a quality change for the buffering controller.
   const capForBuffering = bandwidthCapKbps ?? null;
-  const capForBufferingRef = useRef(capForBuffering);
+  const bufferingQualityTriggerRef = useRef({
+    cap: capForBuffering,
+    tierRevision: networkTierRevision,
+  });
   useEffect(() => {
-    if (capForBufferingRef.current === capForBuffering) return;
-    capForBufferingRef.current = capForBuffering;
+    const prev = bufferingQualityTriggerRef.current;
+    if (prev.cap === capForBuffering && prev.tierRevision === networkTierRevision) return;
+    bufferingQualityTriggerRef.current = {
+      cap: capForBuffering,
+      tierRevision: networkTierRevision,
+    };
     answerBufferingPill("quality_changed");
-  }, [answerBufferingPill, capForBuffering]);
+  }, [answerBufferingPill, capForBuffering, networkTierRevision]);
   // An answer removes the pill; focus that was on it moves to the transport.
   const answerBuffering = useCallback(
     (answer: BufferingAnswer) => {

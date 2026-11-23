@@ -1,4 +1,4 @@
-import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
+import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
 import {
   consumeAutomaticStart,
   expectAutomaticStart,
@@ -90,7 +90,7 @@ import {
 } from "@/pages/watchRouteHelpers";
 import { canEditMarkers as canEditMarkersForUser } from "@/lib/permissions";
 import { markPlaybackIntent } from "@/player/first-frame";
-import { onMeteredConnection } from "@/player/bandwidth-probe";
+import { usePlaybackNetworkTier } from "@/hooks/queries/qualityPreference";
 import { isInNextUpPromptWindow } from "./nextUpPrompt";
 import { playbackQualitySettings } from "./playbackQualitySettings";
 
@@ -618,6 +618,7 @@ function WatchPlaybackHostContent() {
   const navigate = useViewTransitionNavigate();
   const { profile: currentProfile } = useCurrentProfile();
   const playbackProfileId = currentProfile?.id ?? null;
+  const networkTier = usePlaybackNetworkTier();
   const canEditMarkers = canEditMarkersForUser(user, currentProfile);
   const settingsCapabilities = useSettingsCapabilities({ enabled: signedIn });
   // Three answers, not two: the connected server defines the enum, it provably
@@ -1224,7 +1225,7 @@ function WatchPlaybackHostContent() {
 
   const { qualityPreference: canonicalQuality, maxBitrateKbps } = playbackQualitySettings(
     effectivePlaybackSettings,
-    onMeteredConnection(),
+    networkTier,
   );
   const watchPageProps = buildWatchPageProps({
     request: activeRequest,
@@ -1297,6 +1298,7 @@ function WatchPlaybackHostContent() {
         <WatchPage
           {...watchPageProps}
           maxBitrateKbps={maxBitrateKbps ?? null}
+          networkTier={networkTier}
           introSkipMode={introSkipMode}
           showMarkerConfidence={showMarkerConfidence}
           showMarkerSource={showMarkerSource}
@@ -1355,7 +1357,7 @@ function WatchPlaybackHostContent() {
 
 export function WatchPlaybackBar() {
   const t = useT();
-  const barRef = usePlaybackBarHeight("watch");
+  const barRef = useRootHeightProperty("--watch-bar-height", { includeBottomInset: true });
   const controller = useContext(WatchPlaybackControllerContext);
   if (!controller) {
     throw new Error("Watch playback bar is unavailable outside WatchPlaybackProvider");
@@ -1378,10 +1380,16 @@ export function WatchPlaybackBar() {
   const subtitle = buildPlaybackSubtitle(t, request, item);
   const displayedTime = scrubValue ?? snapshot?.currentTime ?? 0;
 
+  // Starts where the shell's sidebar ends (`--app-sidebar-offset` is 0 where
+  // none shows), so the bar centres on the content column, like the page's own
+  // floating bars, instead of covering the foot of the sidebar. The offset
+  // snaps when the sidebar collapses or expands; `follows-sidebar-collapse`
+  // (app.css) moves the bar with the sidebar's animation instead. Its centre
+  // moves half the sidebar's travel, hence the 98px.
   return (
     <div
       ref={barRef}
-      className="pointer-events-none fixed inset-x-3 bottom-3 z-40 flex justify-center"
+      className="follows-sidebar-collapse pointer-events-none fixed start-[calc(var(--app-sidebar-offset,0px)+0.75rem)] end-3 bottom-3 z-40 flex justify-center [--sidebar-follow-shift:98px]"
     >
       <div className="glass-dark border-border/70 pointer-events-auto w-full max-w-4xl rounded-2xl border px-4 py-3 shadow-[0_24px_80px_-32px_rgba(0,0,0,0.7)] backdrop-blur-xl">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
@@ -1392,7 +1400,9 @@ export function WatchPlaybackBar() {
                 <Play className="ml-0.5 h-4 w-4 fill-current" />
               </div>
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-white">{title}</div>
+                <div dir="auto" className="bidi-text truncate text-sm font-semibold text-white">
+                  {title}
+                </div>
                 <div className="text-xs text-white/60">
                   {subtitle ??
                     (snapshot

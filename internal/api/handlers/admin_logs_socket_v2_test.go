@@ -14,6 +14,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"github.com/Silo-Server/silo-server/internal/access"
+	"github.com/Silo-Server/silo-server/internal/activitylog"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	evt "github.com/Silo-Server/silo-server/internal/events"
@@ -99,6 +100,7 @@ func TestAdminLogsSocketV2HandshakeAndReplay(t *testing.T) {
 	refuse(t, base+"?stream=app", nil, websocket.Dialer{}, 400)
 	refuse(t, base+"?stream=nope", nil, dialer, 400)
 	refuse(t, base+"?stream=app&user_id=abc", nil, dialer, 400)
+	refuse(t, base+"?stream=audit&client_ip=not-an-address", nil, dialer, 400)
 	// Still unspent: the good handshake succeeds.
 	conn, resp, err := dialer.DialContext(t.Context(), base+"?stream=app", http.Header{"Origin": []string{server.URL}})
 	if err != nil {
@@ -221,4 +223,38 @@ func TestAdminLogsSocketV2RefusesProfileLessAdminOnHouseholdRequiringProfile(t *
 		t.Fatal("ticket minted before the household gained a PIN still connected")
 	}
 	_ = resp.Body.Close()
+}
+
+// A client_ip filter matches a live audit event whenever the inet comparison
+// would match the stored row: whatever the filter's text form, and for events
+// from older servers that still carry the /32 or /128 suffix.
+func TestAuditSocketClientIPFilterMatchesLikeHistory(t *testing.T) {
+	for _, tc := range []struct{ filter, entry string }{
+		{"192.0.2.10", "192.0.2.10"},
+		{"192.0.2.10/32", "192.0.2.10"},
+		{"2001:db8::7348/128", "2001:db8::7348"},
+		{"2001:DB8:0:0:0:0:0:7348", "2001:db8::7348"},
+		{"192.0.2.10", "192.0.2.10/32"},
+	} {
+		opts, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?client_ip="+url.QueryEscape(tc.filter), nil))
+		if err != nil {
+			t.Fatalf("filter %q: %v", tc.filter, err)
+		}
+		if !matchesAuditLog(opts, activitylog.AuditEntry{ClientIP: tc.entry}) {
+			t.Errorf("filter %q does not match a live event from %q", tc.filter, tc.entry)
+		}
+	}
+}
+
+// The socket normalizes client_ip like history: a value history refuses (here
+// a zero-padded mask PostgreSQL would accept but the live matcher would not
+// match) is refused, and the snapshot and live matching share one form.
+func TestAuditSocketClientIPFilterValidationMatchesHistory(t *testing.T) {
+	if _, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?client_ip=192.0.2.10/032", nil)); err == nil {
+		t.Error("zero-padded client_ip mask accepted")
+	}
+	opts, err := parseAuditLogOptionsFromRequest(httptest.NewRequest("GET", "/api/v2/admin/logs/ws?client_ip=2001:DB8::7348", nil))
+	if err != nil || opts.ClientIP != "2001:db8::7348" {
+		t.Fatalf("valid client_ip: %q, %v", opts.ClientIP, err)
+	}
 }

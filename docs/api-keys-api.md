@@ -56,8 +56,7 @@ credential: provisioning and managing ordinary accounts is in scope.
 | `POST` with `password` and a non-admin `role` | allowed |
 | `PUT` with `password` when the target account is not an admin | allowed |
 
-The frozen v1 routes refuse the same writes with `403 insufficient_scope`; v1 has no
-`break_glass` member. Unscoped keys and JWT sessions are unaffected.
+Unscoped keys and JWT sessions are unaffected.
 
 Each scope has an `audience`. An `admin` scope names operations that need an
 administrator account. A `user` scope acts as a profile and needs no role; the
@@ -216,7 +215,7 @@ a stream, a download, a setting, a credential, or household management, and
 
 ## Restricted discovery scopes
 
-The scope catalog includes two additional native v2 read permissions:
+The scope catalog includes two additional native read permissions:
 
 | Scope | Allowed reads |
 |---|---|
@@ -229,8 +228,7 @@ account filter. Neither scope grants diagnostic session details, playback contro
 media playback, account editing, filesystem paths or API-key management.
 
 These additions do not change existing unscoped credentials or add client-specific
-permission rules. Existing native clients need no migration; scope catalogs and
-capability documents remain additive.
+permission rules. Scope catalogs and capability documents remain additive.
 
 ## Monitoring and session control scopes
 

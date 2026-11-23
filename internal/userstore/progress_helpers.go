@@ -225,6 +225,11 @@ type SeriesEpisodeRollupStore interface {
 	SeriesSeasonWatchCounts(ctx context.Context, profileID, seriesID string) (map[int]SeriesWatchCounts, error)
 	// SeasonEpisodeWatchCounts groups episodes by their season row ID.
 	SeasonEpisodeWatchCounts(ctx context.Context, profileID string, seasonIDs []string) (map[string]SeriesWatchCounts, error)
+	// SeriesLatestViewedAt returns when the profile last finished an episode
+	// of each series (RFC 3339, UTC): its latest visible completed history
+	// row or completed progress row, the plays the catalog's date viewed sort
+	// counts. Series without one are absent.
+	SeriesLatestViewedAt(ctx context.Context, profileID string, seriesIDs []string) (map[string]string, error)
 }
 
 // HomeDismissalItemReader reads a profile's dismissals of specific items on

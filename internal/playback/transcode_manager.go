@@ -1,9 +1,12 @@
 package playback
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -1451,6 +1454,44 @@ var remoteTranscodeControlClient = func() *http.Client {
 	transport.DialContext = nodepool.NodeDialContext()
 	return &http.Client{Transport: transport, CheckRedirect: nodepool.RefuseRedirects}
 }()
+
+// remoteOutputBoundTimeout bounds the output-bound read a replan makes. The
+// replan waits on it, and a node that cannot answer this quickly is no
+// evidence for either cause of a stall.
+const remoteOutputBoundTimeout = 2 * time.Second
+
+// RemoteOutputBound asks the transcode node at transcodeNodeURL whether the
+// client of transportID has fetched every segment the node produced but at
+// most the newest, so the node's encoder paces playback
+// (TranscodeSession.OutputBoundsClient on the node). Any failure, including a
+// node that does not run the transport (404), is an error: the caller decides
+// what an unknown answer means.
+func (m *TranscodeManager) RemoteOutputBound(ctx context.Context, transportID, transcodeNodeURL string) (bool, error) {
+	readCtx, cancel := context.WithTimeout(ctx, remoteOutputBoundTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(readCtx, http.MethodGet, transcodeNodeURL+"/transcode/"+url.PathEscape(transportID)+"/output-bound", nil)
+	if err != nil {
+		return false, fmt.Errorf("build output-bound read: %w", err)
+	}
+	if err := nodeauth.SignTranscode(req, transcodeNodeURL, m.nodeKeys()); err != nil {
+		return false, fmt.Errorf("sign output-bound read: %w", err)
+	}
+	resp, err := telemetry.DoTrustedNode(remoteTranscodeControlClient, req, "output_bound")
+	if err != nil {
+		return false, fmt.Errorf("send output-bound read: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("output-bound read returned status %d", resp.StatusCode)
+	}
+	var answer struct {
+		OutputBound *bool `json:"output_bound"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<10)).Decode(&answer); err != nil || answer.OutputBound == nil {
+		return false, fmt.Errorf("decode output-bound answer: %w", cmp.Or(err, errors.New("output_bound missing")))
+	}
+	return *answer.OutputBound, nil
+}
 
 // deleteRemoteTranscode sends DELETE to the assigned transcode node with a
 // bounded timeout. A missing process is already canceled and therefore

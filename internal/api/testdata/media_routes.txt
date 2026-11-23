@@ -208,6 +208,8 @@ GET /api/v2/admin/diagnostics/reports	non-media
 DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}/download	non-media
+GET /api/v2/admin/direct-connections/capabilities	non-media
+GET /api/v2/admin/direct-connections/status	non-media
 GET /api/v2/admin/downloads/devices	non-media
 GET /api/v2/admin/downloads/entries	non-media
 GET /api/v2/admin/downloads/preparations	non-media
@@ -1284,6 +1286,8 @@ GET /api/v2/admin/diagnostics/reports	non-media
 DELETE /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}	non-media
 GET /api/v2/admin/diagnostics/reports/{id}/download	non-media
+GET /api/v2/admin/direct-connections/capabilities	non-media
+GET /api/v2/admin/direct-connections/status	non-media
 GET /api/v2/admin/downloads/devices	non-media
 GET /api/v2/admin/downloads/entries	non-media
 GET /api/v2/admin/downloads/preparations	non-media

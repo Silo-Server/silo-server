@@ -48,7 +48,7 @@ const (
 	// (catalogSearchMeilisearchIndexSettings: searchable, filterable or
 	// displayed attributes, ranking rules, typo tolerance, pagination); the
 	// sync task applies those in place.
-	SearchMeilisearchSchemaVersion = 4
+	SearchMeilisearchSchemaVersion = 5
 
 	DefaultMeilisearchSyncBatchSize    = 500
 	DefaultMeilisearchRebuildBatchSize = 5000
@@ -205,7 +205,13 @@ func DefaultCatalogSearchSettings() CatalogSearchSettings {
 	}
 }
 
-func LoadCatalogSearchSettings(ctx context.Context, store SettingsStore) (CatalogSearchSettings, error) {
+// SearchSettingsStore reads server settings for catalog search configuration.
+// Satisfied by *serversettings.ServerSettingsRepo and *serversettings.EncryptedSettingsRepo.
+type SearchSettingsStore interface {
+	GetAll(ctx context.Context) (map[string]string, error)
+}
+
+func LoadCatalogSearchSettings(ctx context.Context, store SearchSettingsStore) (CatalogSearchSettings, error) {
 	settings := DefaultCatalogSearchSettings()
 	if store == nil {
 		return settings, nil

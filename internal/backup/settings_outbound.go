@@ -14,6 +14,8 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/plugins"
+	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // settingOff is a switch setting turned off.
@@ -34,10 +36,12 @@ type outboundBundle struct {
 	name string
 	// keys are every setting of the bundle.
 	keys []string
-	// secrets are the ones cleared where the live server has no bundle.
+	// secrets are the ones cleared where the live server has no bundle,
+	// with the settings that only name an entry of one.
 	secrets []string
-	// enabled is the switch turned off then, or "".
-	enabled string
+	// off are the values a cleared bundle is left with: its switch turned
+	// off, or an AI provider registry with no providers.
+	off map[string]string
 }
 
 // outboundBundles are the settings a full restore never takes from the
@@ -48,10 +52,17 @@ var outboundBundles = func() []outboundBundle {
 	// (mail.SMTPSettingKeys, config.AIConnectionSettingKeys), so a restore
 	// never mixes the live server's values with the backup's.
 	ai := append(config.AIConnectionSettingKeys(), chatgpt.CredentialsKey)
+	// The job bindings name providers in the registry, so they go with it.
+	// The registry is left empty but converted, so the next start builds no
+	// provider from the endpoint settings the backup keeps or the Ollama
+	// default (config.PlanAIProviderConversion).
+	aiSecrets := append([]string{config.AIProvidersSettingKey, chatgpt.CredentialsKey, settingAIKey, settingASRKey,
+		settingSubtitleAIKey, settingEmbeddingToken, settingOpenAIEmbeddingKey}, config.AIProviderBindingKeys()...)
+	noProviders, _, _ := config.PlanAIProviderConversion(nil)
 	out := []outboundBundle{
-		{name: "mail (SMTP)", keys: mail.SMTPSettingKeys(), secrets: []string{settingSMTPPassword}, enabled: settingEmailEnabled},
-		{name: "AI providers", keys: ai, secrets: []string{config.AIProvidersSettingKey, chatgpt.CredentialsKey, settingAIKey, settingASRKey,
-			settingSubtitleAIKey, settingEmbeddingToken, settingOpenAIEmbeddingKey}},
+		{name: "mail (SMTP)", keys: mail.SMTPSettingKeys(), secrets: []string{settingSMTPPassword}, off: map[string]string{settingEmailEnabled: settingOff}},
+		{name: "AI providers", keys: ai, secrets: aiSecrets,
+			off: map[string]string{config.AIProvidersSettingKey: noProviders[config.AIProvidersSettingKey]}},
 	}
 	whole := func(keys ...string) outboundBundle { return outboundBundle{name: keys[0], keys: keys, secrets: keys} }
 	out = append(out,
@@ -85,9 +96,10 @@ func outboundKeys() []string {
 // secrets a service again. A bundle the live server does not have, or
 // every bundle when liveURL is "" (another deployment, or a separate
 // restore), keeps the backup's other settings with its secrets cleared and
-// its switch off. It returns the bundles it took from the live server and
-// those it cleared, by name.
-func (l PGLoader) CarryOutboundSettings(ctx context.Context, dbURL, liveURL string) (carried, cleared []string, err error) {
+// its off values written, a sensitive one encrypted with cipher (nil for
+// none). It returns the bundles it took from the live server and those it
+// cleared, by name.
+func (l PGLoader) CarryOutboundSettings(ctx context.Context, dbURL, liveURL string, cipher *secret.Cipher) (carried, cleared []string, err error) {
 	live := map[string]string{}
 	if liveURL != "" {
 		if live, err = readSettingsAt(ctx, liveURL, outboundKeys()); err != nil {
@@ -115,7 +127,7 @@ func (l PGLoader) CarryOutboundSettings(ctx context.Context, dbURL, liveURL stri
 			if !slices.ContainsFunc(b.secrets, func(k string) bool { return restored[k] != "" }) {
 				continue
 			}
-			if err := b.clear(ctx, tx); err != nil {
+			if err := b.clear(ctx, tx, cipher); err != nil {
 				return err
 			}
 			cleared = append(cleared, b.name)
@@ -140,23 +152,33 @@ func (b outboundBundle) takeLive(ctx context.Context, tx pgx.Tx, live map[string
 	return nil
 }
 
-// clear deletes the bundle's secrets in tx and turns its switch off.
-func (b outboundBundle) clear(ctx context.Context, tx pgx.Tx) error {
+// clear deletes the bundle's secrets in tx and writes its off values,
+// encrypting a sensitive one with cipher. Without one it stays plaintext,
+// which Silo reads as it is and encrypts when it starts.
+func (b outboundBundle) clear(ctx context.Context, tx pgx.Tx, cipher *secret.Cipher) error {
 	if _, err := tx.Exec(ctx, `DELETE FROM server_settings WHERE key = ANY($1)`, b.secrets); err != nil {
 		return err
 	}
-	if b.enabled == "" {
-		return nil
+	for key, value := range b.off {
+		if cipher != nil && serversettings.SensitiveSettingKeys[key] {
+			sealed, err := cipher.Encrypt(value, secret.SettingsAAD(key))
+			if err != nil {
+				return err
+			}
+			value = sealed
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, $2)
+			ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, key, value); err != nil {
+			return err
+		}
 	}
-	_, err := tx.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, $2)
-		ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, b.enabled, settingOff)
-	return err
+	return nil
 }
 
 // carryOutboundSettings takes the outbound settings from the live server
 // (liveURL, or none for "") and says what it cleared.
-func carryOutboundSettings(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, out io.Writer) error {
-	carried, cleared, err := loader.CarryOutboundSettings(ctx, dbURL, liveURL)
+func carryOutboundSettings(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, cipher *secret.Cipher, out io.Writer) error {
+	carried, cleared, err := loader.CarryOutboundSettings(ctx, dbURL, liveURL, cipher)
 	if err != nil {
 		return fmt.Errorf("keeping the live server's connections to outside services: %w", err)
 	}

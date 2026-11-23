@@ -203,7 +203,7 @@ as a view: when the person's metadata is incomplete or stale and no provider loo
 ran recently, the server queues a background refresh.
 
 Person detail and `POST /api/v2/catalog/people/{id}/refresh` (`refreshPerson`)
-apply the same visibility rule as a v2 people search without `media_scope`: the
+apply the same visibility rule as a people search without `media_scope`: the
 viewer must be able to see at least one of the person's credits. Otherwise both
 answer `404`, exactly as for an unknown ID, so these routes do not return the
 name, biography, or photo of someone who appears only in titles the viewer cannot
@@ -317,6 +317,17 @@ before the source default. `GET /api/v2/catalog` reports an applied saved/defaul
 sort as `effective_sort`; source order omits that field. `effective_sort` is
 reported the same way for `group=work` requests, and `sort_metrics` on each item
 describes the effective sort rather than the (possibly empty) requested one.
+
+The catalog's `date_viewed` sort dates each title by the profile's latest finished
+play: a completed history event or a completed progress row, whichever is newer,
+ignoring plays from before the profile hid the item from its history. Plays are
+recorded against episodes, so a series takes the latest finished play of any of
+its episodes. An ebook counts once its reading progress passes the finished
+threshold. A title the profile never finished sorts after the watched ones in
+both directions, then by title. `sort_metrics.viewed_at` reports the same date on
+each card, and is absent for a title with none. This differs from
+[history ordering](#history-ordering), which uses the latest visible event whether
+or not it was a finished watch.
 
 ## Feature detection
 
@@ -780,11 +791,10 @@ rating override, or a stricter `MaxOfficialRating` a Jellyfin client sends. See
 
 ## Episodes left on a series card
 
-On a series or season card the profile has not finished, v2 `user_state` adds
+On a series or season card the profile has not finished, `user_state` adds
 `watched_count` (episodes the profile watched) and `unplayed_count` (available
 episodes it has not). Both are absent on a finished series or season, on movies
-and episodes, and when the user store has no episode rollup; the frozen v1 card
-never carries them. "Available" and "watched" follow `played`: an episode counts
+and episodes, and when the user store has no episode rollup. "Available" and "watched" follow `played`: an episode counts
 while it belongs to a library, and is watched when its visible progress or a
 visible completed history row says so. Clients draw the episodes-left mark in a
 card's top-right status corner from the pair (see
@@ -1182,7 +1192,7 @@ before pagination. History does not currently support saved sort preferences.
 
 ## Series and season completion
 
-A v2 catalog item and a v2 season can carry `availability`, with `have` and
+A catalog item and a season can carry `availability`, with `have` and
 `total`. On a series, `have` is released seasons whose known episodes are all
 playable for this viewer, and `total` is released seasons: those with an aired
 episode, and those with no air dates at all once an episode is in the library.
@@ -1196,7 +1206,7 @@ with nothing aired and nothing in the library, and when the episode list is
 incomplete: episode metadata still owes a refresh, or a season that has aired,
 or that precedes a season with episodes, lists none. A trailing season with no
 air date or a future one and no episodes yet, as a provider lists a renewal,
-does not count as incomplete. `/api/v1` does not send it.
+does not count as incomplete.
 
 Home and library section cards, catalog listings and search, box sets, and the
 season list and season detail carry the field. Item detail, favorites,
@@ -1252,7 +1262,7 @@ for each image and its widths.
 
 ## Play target season
 
-A v2 item detail whose `play_content_id` names an episode also carries
+An item detail whose `play_content_id` names an episode also carries
 `play_season_number`, that episode's season (`0` for specials). A client that
 opens a series or season on its play target can request that season's episode
 list without fetching the episode first. The season comes from the same query
@@ -1274,7 +1284,7 @@ profiles. Clients apply the settings. An episode counts as unwatched while its
 artwork and overviews are not affected. Detect support from the settings contract
 capabilities (`manifest_revision` 17 or later).
 
-The v2 API reports image provenance after artwork fallback selection:
+The API reports image provenance after artwork fallback selection:
 `poster_is_episode_still` and `backdrop_is_episode_still` on catalog cards and
 details, and `still_is_episode_still` on episode rows. `true` identifies an episode
 still; `false` identifies other artwork (or no image). An absent field means the
@@ -1311,12 +1321,12 @@ none of its titles from any of these reads, as its page refuses them. A row on o
 still lists only that library's titles.
 `previewAdminCollection` previews the same rules with no viewer limits.
 
-Before this, reads narrowed the rules to the collection's `library_ids`, and rules naming no library
-took them. A migration wrote that effective list into each existing collection's rules, so none of
-them changed titles, and restoring a backup made before this change (restore set version 4 or older)
-does the same for the collections it creates. Rules naming only libraries outside the collection's
-own libraries matched nothing before; they now draw from the libraries they name, which is what the
-admin preview already showed.
+Servers before #3711 narrowed the rules to the collection's `library_ids`, and rules naming no
+library took them. A migration wrote that effective list into each existing collection's rules, so
+none of them changed titles. Restoring a restore set of format version 4 or older, the versions
+those servers wrote, does the same for the collections it creates. Rules that named only libraries
+outside the collection's own matched nothing on those servers; they now draw from the libraries
+they name, as the admin preview always showed.
 
 ## Admin template list
 
@@ -1341,7 +1351,7 @@ Check `template_summaries` in the `getAdminCollectionCapabilities` document befo
 
 `featured` is the pinned-first flag a collection created from the template starts with.
 `needs_setup` is true for a template whose collection is created empty and cannot sync until an
-administrator sets its source; today that is the `tmdb_franchise_placeholder` template, which has
+administrator sets its source: the `tmdb_franchise_placeholder` template, which has
 no TMDB collection ID. Applying the bundle still creates that collection.
 
 The route requires acting administrator access.
@@ -1380,14 +1390,11 @@ dates, each the earliest in any country. A theatrical release never reaches a
 media server, so the calendar does not use `release_date` for movies, and a
 movie with no home release date yet is not listed. The event carries a
 `digital` or `physical` badge naming the release it is listed on; when both
-fall on the same day, it is `digital`. The frozen `/api/v1/calendar` lists
-movies on the same dates, because both read the same events, but never sends
-these two badges.
+fall on the same day, it is `digital`.
 
 The home release dates pick only the calendar day. The upcoming titles in the
 For You discover row follow the same day, and their `upcoming_event.badges`
-carry the same `digital` or `physical` badge on `/api/v2` (never on
-`/api/v1/recommendations/discover`). Item detail, sorting, filters and the year
+carry the same `digital` or `physical` badge. Item detail, sorting, filters and the year
 still use `release_date`, and no item response carries the home release dates.
 
 Metadata providers supply them as `digital_release_date` and
@@ -1472,9 +1479,9 @@ discovery with `requests_allowed` (boolean, default `true`); see
 
 ## Ratings on title pages
 
-Every client shows a title's external ratings the same way: the v2 item detail
+Every client shows a title's external ratings the same way: the item detail
 carries `ratings`, the list to render, already chosen and formatted by the
-server. It is present on every v2 item detail, as an empty array when there is
+server. It is present on every item detail, as an empty array when there is
 nothing to show. Each entry has:
 
 - `source`: `imdb`, `tmdb`, or a name a metadata plugin declared (see "Rating
@@ -1501,7 +1508,7 @@ IMDb, TMDB and Rotten Tomatoes come from the `rating_*` members, the same
 numbers poster badges and browse sorting use; the other sources come from
 `rating_sources`.
 
-Cards follow the same choice: every v2 card leaves out `rating_rt_critic` and
+Cards follow the same choice: every card leaves out `rating_rt_critic` and
 `rating_rt_audience` unless a plugin declares that source and the
 administrator turned it on, so poster
 badges show a Rotten Tomatoes score only where title pages do. Item detail
@@ -1511,7 +1518,7 @@ account with the metadata curation permission): their item detail, and the
 detail `updateAdminItemMetadata` returns, keep every stored value for the
 metadata editor.
 
-Browse follows the choice too. A v2 catalog browse sorted by
+Browse follows the choice too. A catalog browse sorted by
 `rating_rt_critic` or `rating_rt_audience` while that source is hidden orders
 as if no sort was given: the saved or default order, reported as
 `effective_sort`.
@@ -1530,7 +1537,7 @@ server's `display` does: a stored IMDb 7.35 reads `7.4`.
 
 ## Rating sources
 
-The v2 item detail of a movie or series may carry `rating_sources`, a list of
+The item detail of a movie or series may carry `rating_sources`, a list of
 per-source ratings metadata providers reported, limited to the sources title
 pages show. Each entry has:
 
@@ -1611,7 +1618,7 @@ administrator can show, with the plugin that declared it;
 `GET /api/v2/admin/rating-sources/capabilities` reports
 `plugin_declared_sources: true` on a server that has that list.
 
-## Local theme songs, V2
+## Local theme songs
 
 Movies, series, and seasons can own local theme audio. Place `theme.mp3`
 (or `.m4a`, `.m4b`, `.flac`, `.ogg`, `.opus`, `.wav`, `.aac`) in the item's directory,
@@ -1729,7 +1736,7 @@ ordinary localized fields; these members describe it:
 - On-view translation covers what the page shows: a movie or series its own
   overview and tagline, a season its overview and its episodes' overviews, an
   episode itself. A season's `pending_translation_language` is therefore also
-  set while any of its episodes lacks the language, and v2 episode rows carry
+  set while any of its episodes lacks the language, and episode rows carry
   their own `pending_translation_language`, so a client that lists episodes
   inline (a single-season series) can translate that season. Children whose
   source text is already in the target language are skipped.

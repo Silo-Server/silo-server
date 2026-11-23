@@ -174,6 +174,7 @@ export default function SearchSettings() {
                 value={form.getValue(MEILI_URL_KEY)}
                 onChange={(value) => form.setValue(MEILI_URL_KEY, value)}
                 hint={MEILI_URL_EXAMPLE}
+                dir="ltr"
                 disabled={!meiliEnabled || connectionUnknown}
                 managedByEnv={form.envVar(MEILI_URL_KEY)}
                 restartRequired={restartKeys.has(MEILI_URL_KEY)}
@@ -189,7 +190,9 @@ export default function SearchSettings() {
                 onClear={() => form.setValue(MEILI_API_KEY, "")}
                 cleared={form.isClearStaged(MEILI_API_KEY)}
                 hint={t("web.admin.settings.search.meili.apiKey.hint")}
-                disabled={!meiliEnabled || connectionUnknown}
+                // Emptying the field takes its draft back, so it holds still
+                // while a save is in flight, like the Email password.
+                disabled={!meiliEnabled || connectionUnknown || form.isSaving}
                 managedByEnv={form.envVar(MEILI_API_KEY)}
                 restartRequired={restartKeys.has(MEILI_API_KEY)}
               />
@@ -245,17 +248,18 @@ export default function SearchSettings() {
               <>
                 <SettingField
                   label={t("web.admin.settings.search.meili.index.label")}
-                  value={form.getValue("catalog.search.meilisearch.index") || "silo_media_items"}
+                  value={form.getValue("catalog.search.meilisearch.index")}
                   onChange={(value) => form.setValue("catalog.search.meilisearch.index", value)}
                   description={t("web.admin.settings.search.meili.index.description")}
-                  disabled={!meiliEnabled}
+                  disabled={!meiliEnabled || connectionUnknown}
                   restartRequired={restartKeys.has("catalog.search.meilisearch.index")}
+                  managedByEnv={form.envVar("catalog.search.meilisearch.index")}
                 />
                 <SettingField
                   label={t("web.admin.settings.search.meili.timeout.label")}
                   type="number"
                   unit={t("web.admin.common.units.milliseconds")}
-                  value={form.getValue("catalog.search.meilisearch.timeout_ms") || "800"}
+                  value={form.getValue("catalog.search.meilisearch.timeout_ms")}
                   onChange={(value) =>
                     form.setValue("catalog.search.meilisearch.timeout_ms", value)
                   }
@@ -266,7 +270,7 @@ export default function SearchSettings() {
                 <SettingField
                   label={t("web.admin.settings.search.meili.batch.label")}
                   type="number"
-                  value={form.getValue("catalog.search.meilisearch.sync_batch_size") || "500"}
+                  value={form.getValue("catalog.search.meilisearch.sync_batch_size")}
                   onChange={(value) =>
                     form.setValue("catalog.search.meilisearch.sync_batch_size", value)
                   }
@@ -277,7 +281,7 @@ export default function SearchSettings() {
                 <SettingField
                   label={t("web.admin.settings.search.meili.ratio.label")}
                   type="number"
-                  value={form.getValue("catalog.search.meilisearch.semantic_ratio") || "0.50"}
+                  value={form.getValue("catalog.search.meilisearch.semantic_ratio")}
                   onChange={(value) =>
                     form.setValue("catalog.search.meilisearch.semantic_ratio", value)
                   }

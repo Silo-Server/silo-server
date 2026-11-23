@@ -374,11 +374,11 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Disconnect a provider and discard its key. A provider a job uses cannot be deleted. */
+    /** Disconnect a provider and discard its key. A provider a job uses cannot be deleted, and one the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment. */
     delete: operations["deleteAdminAIProvider"];
     options?: never;
     head?: never;
-    /** Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request. */
+    /** Edit a provider. Every job using it switches to the new values at once. Its type is fixed, and a new host needs its key in the same request. A provider the deployment declares (managed_by_env_var) is 422 validation_failed with code managed_by_environment. */
     patch: operations["updateAdminAIProvider"];
     trace?: never;
   };
@@ -1723,6 +1723,40 @@ export interface paths {
     };
     /** Stream a ready diagnostic bundle through the API host. Range requests receive the complete bundle; no presigned URL is returned. */
     get: operations["downloadAdminDiagnosticReport"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/direct-connections/capabilities": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Discover direct-connection readiness operations and service configuration, independently of probe health and the hidden setting. */
+    get: operations["getAdminDirectConnectionsCapabilities"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/direct-connections/status": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read the API host's direct-connection readiness. Network probes run only when the hidden setting is enabled. Refresh joins an in-flight check or starts a new one. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds. */
+    get: operations["getAdminDirectConnectionsStatus"];
     put?: never;
     post?: never;
     delete?: never;
@@ -10137,7 +10171,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Process a tokenized notification email link and render its standalone result. */
+    /** Render an unsubscribe confirmation page without changing email preferences. */
     get: operations["unsubscribeNotificationEmail"];
     put?: never;
     /** Process a tokenized notification email link and render its standalone result. */
@@ -14319,6 +14353,8 @@ export interface components {
       capabilities: ("chat" | "embeddings" | "speech")[];
       has_api_key: boolean;
       id: string;
+      /** @description The variable in the server's environment that declares this provider, such as SILO_CONFIG_FILE, when the deployment declares it. Updating or deleting such a provider is 422 validation_failed with code managed_by_environment. */
+      managed_by_env_var?: string;
       name: string;
       /** @enum {string} */
       type: "openai" | "gemini" | "openrouter" | "groq" | "ollama" | "whisper" | "custom";
@@ -15236,6 +15272,7 @@ export interface components {
        * @example 1
        */
       local_id?: string;
+      /** @description The matched account's username, or its email when it has none */
       local_username?: string;
       /**
        * @description account_id: the backup is this server's and the account id exists; restored: an earlier restore of this backup's server created it; username_email: the one account here whose username or email is this account's username or email; new: restoring creates it
@@ -15266,8 +15303,20 @@ export interface components {
     AdminBackupRestoreCollection: {
       /** @description The template bundle that created a template collection */
       bundle_id?: string;
-      /** @description A template collection's fields the admin changed from the template's defaults that a restore writes here: title, description, visibility, featured, sort order, item sort, source, sync schedule, poster, backdrop */
-      changes?: string[];
+      /** @description What a restore writes to a template collection here: the fields the admin changed from the template's defaults, and libraries when it adds the collection to more of them */
+      changes?: (
+        | "title"
+        | "description"
+        | "visibility"
+        | "featured"
+        | "sort_order"
+        | "item_sort"
+        | "source"
+        | "sync_schedule"
+        | "poster"
+        | "backdrop"
+        | "libraries"
+      )[];
       /** Format: int64 */
       items: number;
       /** @description Libraries here the collection maps to */
@@ -15319,8 +15368,20 @@ export interface components {
       pending?: number;
     };
     AdminBackupRestoreHomeSection: {
-      /** @description What a restore replaces in the section here: title, position, featured, item limit, enabled, web only, configuration, and N collection items */
-      changes?: string[];
+      /** @description What a restore replaces in the section here */
+      changes?: (
+        | "type"
+        | "title"
+        | "title_translation"
+        | "position"
+        | "featured"
+        | "item_limit"
+        | "enabled"
+        | "web_only"
+        | "collection_replaced"
+        | "configuration"
+        | "collection_items"
+      )[];
       /**
        * @description The library here whose page holds the section
        * @example 1
@@ -15328,6 +15389,11 @@ export interface components {
       library_id?: string;
       /** @description The matching section here: the same id on the server that took the backup, else the one section of the page with the same type and title */
       local_id?: string;
+      /**
+       * Format: int64
+       * @description With the collection_items change: the items of the backup's collection, in this server's catalog, that the section's collection here lacks and a restore adds
+       */
+      missing_collection_items?: number;
       /** @enum {string} */
       scope: "home" | "library";
       section_type: string;
@@ -15388,7 +15454,8 @@ export interface components {
         | "kept_stricter"
         | "unverified_backup"
         | "over_restore_budget"
-        | "needs_primary_profile";
+        | "needs_primary_profile"
+        | "managed_by_environment";
       /** @description Items (section:id) that must be chosen with this one: a collection whose library is restored by the same request */
       requires: string[];
       restart_required: boolean;
@@ -15610,7 +15677,8 @@ export interface components {
         | "kept_stricter"
         | "unverified_backup"
         | "over_restore_budget"
-        | "needs_primary_profile";
+        | "needs_primary_profile"
+        | "managed_by_environment";
       restart_keys: string[];
       restart_required: boolean;
       /** @enum {string} */
@@ -15722,7 +15790,7 @@ export interface components {
       /** @description The setting applies after a restart */
       restart_required: boolean;
       /**
-       * @description on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores
+       * @description on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores; managed_by_environment: this server's environment sets it, or sets another setting of the outside-service connection it belongs to (mail's SMTP settings, for example), so a restore never writes it and this server keeps its value
        * @enum {string}
        */
       status:
@@ -15731,7 +15799,8 @@ export interface components {
         | "needs_another_key"
         | "kept_stricter"
         | "cleared"
-        | "unverified_backup";
+        | "unverified_backup"
+        | "managed_by_environment";
     };
     AdminBackupRestoreSource: {
       /** @description The backup restored from; absent for an upload */
@@ -19328,6 +19397,8 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       created_at: string;
+      /** @description The API servers' deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE) lists this transcode node and supplies its key. issueAdminNodeKey and deleteAdminNode refuse it with node_deployment_managed until an API server starts with a document that no longer lists it (nodes: {} releases every node). An API server started with neither variable set leaves it managed. Requires the deployment_nodes node capability. */
+      deployment_managed: boolean;
       /** @description This node's own prepared-download directory; absent when inherited. */
       download_artifact_dir_override?: string;
       /**
@@ -19390,6 +19461,8 @@ export interface components {
     AdminNodeCapabilities: {
       /** @description Whether the current principal may use the capability */
       allowed: boolean;
+      /** @description API servers can create transcode nodes and their keys from their deployment configuration (SILO_TRANSCODE_NODES or SILO_TRANSCODE_NODES_FILE): deployment_managed on node rows, and issueAdminNodeKey and deleteAdminNode refuse such a node with node_deployment_managed. An API server that starts with a document no longer listing a node releases it (nodes: {} releases every node); one started with neither variable set changes nothing. */
+      deployment_nodes: boolean;
       /** @description Transcode nodes can drain: the drain and resume operations, and drain_requested and drain_state on node rows. */
       drain: boolean;
       /** @description Nodes can declare their own configuration from their environment: env_managed on node rows names the fields a node declares, and updateAdminNode refuses a change to them with field code managed_by_environment. */
@@ -20559,7 +20632,7 @@ export interface components {
       auth_bindings: components["schemas"]["AdminPluginAuthBinding"][];
       available_version?: string;
       capabilities: components["schemas"]["AdminPluginCapability"][];
-      /** @description True when POST config/test contacts the provider for this plugin: a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics can still answer that checks are not supported. */
+      /** @description True when POST config/test contacts the provider for this plugin: a plugin declaring configuration_check, a metadata provider that serves movies, or a marker provider. Offer that check only when this is true. For other plugins it either answers that connection checks are not supported or succeeds without contacting anything. A marker provider that does not implement account statistics, or a plugin declaring configuration_check without serving it, can still answer that checks are not supported. */
       connection_check_supported: boolean;
       /**
        * Format: date-time
@@ -22550,6 +22623,11 @@ export interface components {
        */
       content_id: string;
       /**
+       * Format: int64
+       * @description Episode number for an episode that still exists; absent otherwise
+       */
+      episode_number?: number;
+      /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
        */
@@ -22562,7 +22640,15 @@ export interface components {
       next_refresh_at: string;
       /** Format: int64 */
       reason_mask: number;
+      /**
+       * Format: int64
+       * @description Season number for a season or episode that still exists; absent otherwise
+       */
+      season_number?: number;
+      /** @description Series title for a season or episode that still exists; absent otherwise */
+      series_title?: string;
       target_type: string;
+      /** @description The target's own title as stored: the item's, the season's or the episode's, without its series. Empty when the target has no title or no longer exists */
       title: string;
       type: string;
     };
@@ -26806,6 +26892,101 @@ export interface components {
        * @description JSON manifest file, first part; at most 65536 bytes.
        */
       manifest: string;
+    };
+    DirectConnectionsCapabilities: {
+      /** @description Whether the current principal may use the capability */
+      allowed: boolean;
+      refresh: boolean;
+      /** @description Opaque revision of this document */
+      revision: string;
+      /**
+       * @description Support and configuration state, not health
+       * @enum {string}
+       */
+      state: "available" | "disabled" | "not_configured" | "unsupported";
+      status: boolean;
+    };
+    DirectConnectionsFeature: {
+      detail?: string;
+      /** @enum {string} */
+      feature:
+        | "direct"
+        | "nat_mapping"
+        | "nat_hairpin"
+        | "ipv4"
+        | "ipv6"
+        | "port_mapping"
+        | "reachability"
+        | "socket_receive_buffer"
+        | "socket_send_buffer"
+        | "gso"
+        | "gro"
+        | "pmtu_fallback"
+        | "cap_net_admin";
+      granted?: string;
+      /** @enum {string} */
+      kind: "local" | "network";
+      /** @enum {string} */
+      reason?:
+        | "disabled"
+        | "admin_off"
+        | "kernel_unsupported"
+        | "limit"
+        | "force_failed"
+        | "no_cap_net_admin"
+        | "net_admin_dropped"
+        | "unsupported_platform"
+        | "probe_failed"
+        | "not_available"
+        | "no_gateway"
+        | "gateway_unsupported"
+        | "mapping_varies"
+        | "not_measured";
+      requested?: string;
+      /** @enum {string} */
+      state: "on" | "off" | "capped" | "fallback" | "degraded" | "unknown";
+    };
+    DirectConnectionsHostStatus: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      checked_at: string;
+      features: components["schemas"]["DirectConnectionsFeature"][];
+      host: components["schemas"]["NetworkAccessHostRef"];
+      knobs: components["schemas"]["DirectConnectionsKnob"][];
+      listeners?: components["schemas"]["DirectConnectionsListener"][];
+    };
+    DirectConnectionsKnob: {
+      allowed?: string[];
+      default: string;
+      effective: string;
+      env: string;
+      reason?: string;
+      requested?: string;
+    };
+    DirectConnectionsListener: {
+      errno?: string;
+      granted: string;
+      /** @enum {string} */
+      listener: "api" | "jellyfin" | "abs" | "proxy";
+      reason: string;
+      requested: string;
+      send_buffer: components["schemas"]["DirectConnectionsSendBuffer"];
+      state: string;
+    };
+    DirectConnectionsSendBuffer: {
+      errno?: string;
+      /** Format: int64 */
+      granted: number;
+      reason: string;
+      /** Format: int64 */
+      requested: number;
+      state: string;
+    };
+    DirectConnectionsStatus: {
+      enabled: boolean;
+      hosts: components["schemas"]["DirectConnectionsHostStatus"][];
     };
     DirectDownloadLink: {
       /**
@@ -54636,6 +54817,247 @@ export interface operations {
       };
     };
   };
+  getAdminDirectConnectionsCapabilities: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional first precondition, evaluated before If-None-Match: a tag that does not match the current representation is 412 precondition_failed. */
+        "If-Match"?: string;
+        "If-None-Match"?: string;
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          "Cache-Control"?: string;
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DirectConnectionsCapabilities"];
+        };
+      };
+      /** @description The representation named by If-None-Match is current; no body. */
+      304: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Precondition Failed */
+      412: {
+        headers: {
+          /** @description The strong, opaque validator of the representation; send it back in If-Match on a guarded mutation or If-None-Match on a conditional read. */
+          ETag?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminDirectConnectionsStatus: {
+    parameters: {
+      query?: {
+        /** @description Run a new check, or wait for the in-flight check. The settings read and the check have separate fifteen-second bounds, so a request can take about thirty seconds */
+        refresh?: boolean;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["DirectConnectionsStatus"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
   listAdminDownloadDevices: {
     parameters: {
       query?: {
@@ -68748,6 +69170,15 @@ export interface operations {
       };
       /** @description Not Acceptable */
       406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
         headers: {
           [name: string]: unknown;
         };
@@ -127932,7 +128363,7 @@ export interface operations {
   unsubscribeNotificationEmail: {
     parameters: {
       query?: {
-        /** @description Email capability token. Missing, expired or consumed proof returns an HTML error page. */
+        /** @description Email capability token. Missing proof returns an HTML error page; validity is checked only when the confirmation is submitted with POST. */
         token?: string;
       };
       header?: never;
@@ -127988,7 +128419,7 @@ export interface operations {
   unsubscribeNotificationEmailOneClick: {
     parameters: {
       query?: {
-        /** @description Email capability token. Missing, expired or consumed proof returns an HTML error page. */
+        /** @description Email capability token. Missing or unknown proof returns an HTML error page. The token stays valid after use. */
         token?: string;
       };
       header?: never;

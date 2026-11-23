@@ -1526,3 +1526,41 @@ func TestPluginProviderRedactsEverySecretFromPageWarnings(t *testing.T) {
 		t.Fatalf("warnings = %q, want both secrets redacted", batch.Warnings)
 	}
 }
+
+// A stop Silo counts as finished, such as one inside the end credits below
+// the watched threshold, reaches the provider as a play to the end, so a
+// provider that judges completion from progress records the play. An
+// unfinished stop keeps its real position.
+func TestPluginProviderReportsFinishedStopAsPlayToTheEnd(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		completed    bool
+		wantPosition float64
+	}{
+		{name: "finished", completed: true, wantPosition: 1440},
+		{name: "unfinished", completed: false, wantPosition: 1100},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &fakeWatchSyncPluginClient{applyStatus: pluginv1.WatchSyncApplyStatus_WATCH_SYNC_APPLY_STATUS_APPLIED}
+			provider := testPluginProvider(t, client)
+			err := provider.Stop(context.Background(), ServerConfig{}, Connection{}, ScrobbleEvent{
+				PlaybackSessionID: "session-1",
+				Kind:              historyimport.KindEpisode,
+				PositionSeconds:   1100,
+				DurationSeconds:   1440,
+				Completed:         tc.completed,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			events := client.applyRequest.GetEvents()
+			if len(events) != 1 {
+				t.Fatalf("apply request = %#v", client.applyRequest)
+			}
+			event := events[0]
+			if event.GetPositionSeconds() != tc.wantPosition || event.GetCompletionPercent() != tc.wantPosition/1440*100 || event.GetCompleted() != tc.completed {
+				t.Fatalf("event position %v, completion %v, completed %v; want position %v", event.GetPositionSeconds(), event.GetCompletionPercent(), event.GetCompleted(), tc.wantPosition)
+			}
+		})
+	}
+}

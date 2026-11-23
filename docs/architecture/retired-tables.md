@@ -34,7 +34,8 @@ with this migrated database merely because it is available for download.
   state to `webhook_sync_*`. The same feature change removed `internal/plexsync`.
   Current webhook services and the legacy Plex HTTP DTOs use `webhook_sync_*`.
   Old Plex binding rows have no active sync consumer. Catalog cleanup and
-  provider-ID merges still maintained stale references until this change;
+  provider-ID merges still maintained stale references until
+  `20260912230857_drop_dead_tables` removed them with the tables;
   dynamic content-ID remapping also discovers these columns while they exist.
 - `user_playback_sessions` is an unused baseline table. Active playback uses
   `playback_sessions` and `playback_sessions_sync`.

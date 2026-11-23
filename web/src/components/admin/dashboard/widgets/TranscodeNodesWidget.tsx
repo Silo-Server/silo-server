@@ -33,6 +33,7 @@ import {
 } from "@/pages/adminNodesPresentation";
 import { SectionError } from "../feedback";
 import { formatMbps, formatMbpsValue } from "../format";
+import { NodeName } from "./NodeName";
 import { formatLocale } from "@/lib/appLocale";
 import { useT, type Translate } from "@/i18n";
 
@@ -396,26 +397,6 @@ function ColumnHeadings({ showsGPU }: { showsGPU: boolean }) {
   );
 }
 
-/** Enough to keep a worker's number and role, as in "-4 Transcode". */
-const NODE_NAME_TAIL_LENGTH = 12;
-
-/**
- * A name shortened in the middle when it does not fit. Workers tend to share
- * their start and differ at the end, so cutting the end would make rows look alike.
- */
-function NodeName({ name }: { name: string }) {
-  const tail = name.slice(-NODE_NAME_TAIL_LENGTH);
-  const head = name.slice(0, name.length - tail.length);
-  return (
-    <span className="flex min-w-0 font-semibold" title={name}>
-      {head ? (
-        <span className="min-w-0 overflow-hidden text-ellipsis whitespace-pre">{head}</span>
-      ) : null}
-      <span className="flex-shrink-0 whitespace-pre">{tail}</span>
-    </span>
-  );
-}
-
 function NodeFlag({
   icon: Icon,
   title,
@@ -478,7 +459,7 @@ function GroupRows({
           <th scope="rowgroup" className="pt-1.5 pb-0.5 text-start text-[11px] font-bold">
             <div className="flex min-w-0 items-center gap-1.5">
               <StatusIcon state={group.state} />
-              <span className="min-w-0 truncate" title={group.name || undefined}>
+              <span dir="auto" className="min-w-0 truncate" title={group.name || undefined}>
                 {group.label}
               </span>
             </div>

@@ -95,6 +95,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -160,6 +161,9 @@ jobs:
           fi
           if [ -f scripts/test_lint_changed.py ]; then
             python3 scripts/test_lint_changed.py
+          fi
+          if [ -f scripts/ci/test_content_mtimes.py ]; then
+            python3 scripts/ci/test_content_mtimes.py
           fi
       - name: Check workflows and shell
         run: make verify-actionlint verify-shellcheck
@@ -364,10 +368,18 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # golangci-lint needs the merge base to tell this branch's lines
-          # from the ones it inherited.
+        with: &go-history-checkout
+          # golangci-lint and the contract diff need the merge base, but not
+          # frontend image or locale blobs (~390 MB). blob:none keeps full
+          # commit and tree history while downloading only checked-out files.
           fetch-depth: 0
+          filter: blob:none
+          sparse-checkout: |
+            /*
+            !/web/assets-source/
+            !/web/src/locales/
+            !/web/public/images/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       # After the PR checkout, which would otherwise clean it away, and
@@ -381,6 +393,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -448,10 +461,12 @@ jobs:
             golangci-lint-cache-${{ runner.os }}-${{ env.GOLANGCI_LINT_VERSION }}-
 
       - name: Normalize tracked source mtimes
-        run: python3 scripts/ci/content_mtimes.py
+        run: python3 .ci-tools/scripts/ci/content_mtimes.py
 
       - name: Check Go module tidiness without rewriting
         run: go mod tidy -diff
+      - name: Check fork pins against shunpike
+        run: make verify-fork-pins
       # - name: Check dependency edges with depaware
       #   run: depaware ./...
       # Not measured; needs a prototype with reviewed edge allowances.
@@ -488,10 +503,7 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          # The contract diff needs the merge base with the target branch.
-          fetch-depth: 0
-          persist-credentials: false
+        with: *go-history-checkout
 
       # After the PR checkout, which would otherwise clean it away, and
       # before any PR code runs.
@@ -504,6 +516,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -517,7 +530,7 @@ jobs:
       - *libvips-save
 
       - name: Normalize tracked source mtimes
-        run: python3 scripts/ci/content_mtimes.py
+        run: python3 .ci-tools/scripts/ci/content_mtimes.py
 
       - name: Scan reachable Go vulnerabilities
         if: github.event_name == 'schedule' || (github.event_name == 'push' && github.ref_name == 'main')
@@ -553,6 +566,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Go tests need collection-template image paths, not the ~130 MB of
+          # web translation catalogs.
+          filter: blob:limit=1m
+          sparse-checkout: |
+            /*
+            !/web/src/locales/
+          sparse-checkout-cone-mode: false
           persist-credentials: false
 
       # After the PR checkout, which would otherwise clean it away, and
@@ -566,6 +586,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false
@@ -581,7 +602,7 @@ jobs:
       - *libvips-save
 
       - name: Normalize tracked source mtimes
-        run: python3 scripts/ci/content_mtimes.py
+        run: python3 .ci-tools/scripts/ci/content_mtimes.py
 
       - name: Run Go tests
         shell: bash
@@ -639,13 +660,16 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: &no-assets
-          # Fetch small files in the first pack. Checkout then requests only
-          # the remaining large files it needs, excluding the source artwork.
-          filter: blob:limit=1m
+        with: &go-db-checkout
+          # Fetch only trees in the initial pack, then download only the
+          # checked-out files in one batch, skipping frontend assets, images,
+          # and translation catalogs (~390 MB on disk) that no DB job reads.
+          filter: blob:none
           sparse-checkout: |
             /*
             !/web/assets-source/
+            !/web/src/locales/
+            !/web/public/images/
           sparse-checkout-cone-mode: false
           persist-credentials: false
       - name: Set up Go
@@ -670,7 +694,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/race"
-          go test -p 2 -race -c -o "$RUNNER_TEMP/race/" \
+          go test -race -c -o "$RUNNER_TEMP/race/" \
             ./internal/watchtogether/ ./migrations/ ./internal/historyimport/ ./internal/api/handlers/ ./internal/adminjob/ ./internal/auth/ ./internal/recommendations/ ./cmd/silo/
 
       - name: Test Watch Party coordination against Postgres
@@ -746,7 +770,7 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: *no-assets
+        with: *go-db-checkout
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -870,7 +894,7 @@ jobs:
 
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: *no-assets
+        with: *go-db-checkout
 
       - name: Set up Go
         uses: ./.github/actions/setup-go
@@ -892,7 +916,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p "$RUNNER_TEMP/race"
-          go test -p 2 -race -c -o "$RUNNER_TEMP/race/" \
+          go test -race -c -o "$RUNNER_TEMP/race/" \
             ./internal/api/handlers/ ./internal/auth/ ./internal/jellycompat/ ./internal/plugins/
 
       # Account resolution and linking, the local-password policy, the OAuth
@@ -1156,6 +1180,7 @@ jobs:
           fetch-depth: 1
           sparse-checkout: |
             /.github/actions/ci-tools/
+            /scripts/ci/content_mtimes.py
             /scripts/lint-changed.sh
           sparse-checkout-cone-mode: false
           persist-credentials: false

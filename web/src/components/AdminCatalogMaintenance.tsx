@@ -42,7 +42,12 @@ import {
   type PathRewriteRow,
   updatePathRewrite,
 } from "./adminCatalogMaintenancePathRewrites";
-import { formatExportProgressLabel, formatJobProgress } from "./adminCatalogMaintenanceFormatters";
+import {
+  formatExportProgressLabel,
+  formatJobProgress,
+  jobStatusLabel,
+} from "./adminCatalogMaintenanceFormatters";
+import { PathText } from "@/components/PathText";
 import { Download, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDateTime } from "@/lib/datetime";
@@ -50,13 +55,16 @@ import { toast } from "sonner";
 import type { ReactNode } from "react";
 import { numberText, useT, type Translate } from "@/i18n";
 
-// Example paths and URLs shown as placeholders; not translated.
+// Example paths and URLs shown as placeholders; not translated. A path or URL reads left to
+// right in every language, so the fields that take one set dir="ltr".
 const LOCAL_PATH_EXAMPLE = "/catalog-seeds/my-catalog.json.gz";
 const REMOTE_URL_EXAMPLE = "https://example.com/catalog-seeds/export.json.gz";
 const REWRITE_FROM_EXAMPLE = "/srv/media";
 const REWRITE_TO_EXAMPLE = "/media";
 
-const monospace = (chunks: ReactNode[]) => <span className="font-mono">{chunks}</span>;
+// A <code> element, not a span: inline code takes its own text's direction
+// (app.css), so "/srv/media" keeps its slash in front in a right-to-left language.
+const monospace = (chunks: ReactNode[]) => <code className="font-mono">{chunks}</code>;
 
 export default function AdminCatalogMaintenance() {
   const t = useT();
@@ -255,6 +263,7 @@ export default function AdminCatalogMaintenance() {
                   <div className="space-y-2">
                     <Label>{t("web.admin.catalogMaintenance.import.filePathLabel")}</Label>
                     <Input
+                      dir="ltr"
                       value={localPath}
                       onChange={(e) => setLocalPath(e.target.value)}
                       placeholder={LOCAL_PATH_EXAMPLE}
@@ -286,13 +295,7 @@ export default function AdminCatalogMaintenance() {
                               )}
                             />
                           </SelectTrigger>
-                          <SelectContent>
-                            {localImportSources.map((source) => (
-                              <SelectItem key={source.key} value={source.key}>
-                                {describeImportSource(source)}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
+                          <SelectContent>{localImportSources.map(importSourceItem)}</SelectContent>
                         </Select>
                       </>
                     )}
@@ -394,11 +397,7 @@ export default function AdminCatalogMaintenance() {
                             {t("web.admin.catalogMaintenance.import.noBucketSeeds")}
                           </SelectItem>
                         ) : (
-                          bucketImportSources.map((source) => (
-                            <SelectItem key={source.key} value={source.key}>
-                              {describeImportSource(source)}
-                            </SelectItem>
-                          ))
+                          bucketImportSources.map(importSourceItem)
                         )}
                       </SelectContent>
                     </Select>
@@ -410,6 +409,7 @@ export default function AdminCatalogMaintenance() {
                   <div className="space-y-2">
                     <Label>{t("web.admin.catalogMaintenance.import.remoteUrlLabel")}</Label>
                     <Input
+                      dir="ltr"
                       value={remoteURL}
                       onChange={(e) => setRemoteURL(e.target.value)}
                       placeholder={REMOTE_URL_EXAMPLE}
@@ -450,11 +450,13 @@ export default function AdminCatalogMaintenance() {
                   {pathRewrites.map((rewrite, index) => (
                     <div key={rewrite.id} className="grid gap-2 sm:grid-cols-[1fr_1fr_auto]">
                       <Input
+                        dir="ltr"
                         value={rewrite.from}
                         onChange={(e) => updateRewrite(index, "from", e.target.value)}
                         placeholder={REWRITE_FROM_EXAMPLE}
                       />
                       <Input
+                        dir="ltr"
                         value={rewrite.to}
                         onChange={(e) => updateRewrite(index, "to", e.target.value)}
                         placeholder={REWRITE_TO_EXAMPLE}
@@ -535,7 +537,7 @@ export default function AdminCatalogMaintenance() {
                               : "outline"
                         }
                       >
-                        {job.status}
+                        {jobStatusLabel(job.status, t)}
                       </Badge>
                       <span className="text-sm font-medium">{describeImportJob(t, job)}</span>
                       <span className="text-muted-foreground text-xs">
@@ -643,7 +645,7 @@ export default function AdminCatalogMaintenance() {
                               : "outline"
                         }
                       >
-                        {job.status}
+                        {jobStatusLabel(job.status, t)}
                       </Badge>
                       <span className="text-sm font-medium">{scopeLabel}</span>
                       <span className="text-muted-foreground text-xs">
@@ -758,21 +760,35 @@ function describeExportJob(t: Translate, job: AdminJob) {
   return `${exportScopeLabel(t, job)} • ${formatDateTime(job.requested_at)}`;
 }
 
-function describeImportJob(t: Translate, job: AdminJob) {
-  const importRequest = job.request_payload as {
-    source_label?: string;
-    source_key?: string;
-  };
-  return (
-    importRequest.source_label ||
-    importRequest.source_key ||
+function describeImportJob(t: Translate, job: AdminJob): ReactNode {
+  const label = (job.request_payload as { source_label?: string }).source_label;
+  // The server's label: the remote URL, a file name, or "Export job <id>", untranslated.
+  return label ? (
+    <bdi dir="ltr">
+      <PathText path={label} />
+    </bdi>
+  ) : (
     t("web.admin.catalogMaintenance.imports.seedFallback")
   );
 }
 
-function describeImportSource(source: CatalogSeedImportSource) {
-  const label = source.last_modified ? formatDateTime(source.last_modified) : source.key;
-  return `${label} • ${source.key}`;
+/** Decorative separator in an import source's label; not text, so not translated. */
+const SOURCE_LABEL_SEPARATOR = " • ";
+
+// The key is a path, so <bdi dir="ltr"> keeps it in order in any language without adding
+// characters to the label. textValue makes type-to-select match the path, not the date.
+function importSourceItem(source: CatalogSeedImportSource) {
+  const key = <bdi dir="ltr">{source.key}</bdi>;
+  return (
+    <SelectItem key={source.key} value={source.key} textValue={source.key}>
+      {/* One span, so the item's flex layout wraps the label as one run of text. */}
+      <span>
+        {source.last_modified ? formatDateTime(source.last_modified) : key}
+        {SOURCE_LABEL_SEPARATOR}
+        {key}
+      </span>
+    </SelectItem>
+  );
 }
 
 function getJobProgressPercent(job: AdminJob) {

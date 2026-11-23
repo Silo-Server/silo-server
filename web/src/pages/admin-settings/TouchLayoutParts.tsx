@@ -37,7 +37,8 @@ export function FullScreenDialogHeader({
   return (
     <DialogHeader className="max-sm:flex-row max-sm:items-start max-sm:text-start">
       <div className="flex min-w-0 flex-1 flex-col gap-2">
-        <DialogTitle className="max-sm:pt-3">{title}</DialogTitle>
+        {/* From sm up the built-in close button shows beside this title. */}
+        <DialogTitle className="max-sm:pt-3 sm:pe-6">{title}</DialogTitle>
         <DialogDescription>{description}</DialogDescription>
       </div>
       <DialogClose asChild>

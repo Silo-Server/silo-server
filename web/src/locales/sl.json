@@ -281,6 +281,18 @@
       "value": "Ta koda za prijavo je potekla. Začnite znova."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "Ta račun je dosegel omejitev števila naprav za neposredne povezave."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "Ta ključ povezave že uporablja druga naprava. Poskusite znova."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -339,6 +351,12 @@
     {
       "type": 0,
       "value": "Nastavljeno v okolju. Spremenite nastavitev tam in znova zaženite prizadeto storitev."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "Ta vrednost manjka."
     }
   ],
   "error.field.out_of_range": [
@@ -501,6 +519,12 @@
     {
       "type": 0,
       "value": "Ta seja predvajanja se je končala. Znova začnite predvajanje."
+    }
+  ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Ta pretok je bil zamenjan. Predvajanje se nadaljuje s trenutnim pretokom."
     }
   ],
   "error.precondition_failed": [
@@ -14704,7 +14728,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – prikazane zbirke ni ne tukaj ne v varnostni kopiji"
+              "value": " element se ne more obnoviti – zbirke, ki jo prikazuje, ni ne tukaj ne v varnostni kopiji"
             }
           ]
         },
@@ -14716,7 +14740,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – prikazane zbirke ni ne tukaj ne v varnostni kopiji"
+              "value": " elementa se ne moreta obnoviti – zbirke, ki jo prikazujeta, ni ne tukaj ne v varnostni kopiji"
             }
           ]
         },
@@ -14728,7 +14752,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – prikazane zbirke ni ne tukaj ne v varnostni kopiji"
+              "value": " elementi se ne morejo obnoviti – zbirke, ki jo prikazujejo, ni ne tukaj ne v varnostni kopiji"
             }
           ]
         },
@@ -14740,7 +14764,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – prikazane zbirke ni ne tukaj ne v varnostni kopiji"
+              "value": " elementov se ne more obnoviti – zbirke, ki jo prikazujejo, ni ne tukaj ne v varnostni kopiji"
             }
           ]
         }
@@ -14762,7 +14786,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – nastavitve so šifrirane z drugim SECRET_KEY"
+              "value": " element se ne more obnoviti – njegove nastavitve so šifrirane z drugim SECRET_KEY"
             }
           ]
         },
@@ -14774,7 +14798,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – nastavitve so šifrirane z drugim SECRET_KEY"
+              "value": " elementa se ne moreta obnoviti – njune nastavitve so šifrirane z drugim SECRET_KEY"
             }
           ]
         },
@@ -14786,7 +14810,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – nastavitve so šifrirane z drugim SECRET_KEY"
+              "value": " elementi se ne morejo obnoviti – njihove nastavitve so šifrirane z drugim SECRET_KEY"
             }
           ]
         },
@@ -14798,7 +14822,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – nastavitve so šifrirane z drugim SECRET_KEY"
+              "value": " elementov se ne more obnoviti – njihove nastavitve so šifrirane z drugim SECRET_KEY"
             }
           ]
         }
@@ -14936,7 +14960,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – datoteke na tem strežniku manjkajo"
+              "value": " element se ne more obnoviti – njegove datoteke na tem strežniku manjkajo"
             }
           ]
         },
@@ -14948,7 +14972,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – datoteke na tem strežniku manjkajo"
+              "value": " elementa se ne moreta obnoviti – njune datoteke na tem strežniku manjkajo"
             }
           ]
         },
@@ -14960,7 +14984,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – datoteke na tem strežniku manjkajo"
+              "value": " elementi se ne morejo obnoviti – njihove datoteke na tem strežniku manjkajo"
             }
           ]
         },
@@ -14972,7 +14996,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – datoteke na tem strežniku manjkajo"
+              "value": " elementov se ne more obnoviti – njihove datoteke na tem strežniku manjkajo"
             }
           ]
         }
@@ -14994,7 +15018,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – ustreznih map ni na tem strežniku"
+              "value": " element se ne more obnoviti – njegovih map ni na tem strežniku"
             }
           ]
         },
@@ -15006,7 +15030,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – ustreznih map ni na tem strežniku"
+              "value": " elementa se ne moreta obnoviti – njunih map ni na tem strežniku"
             }
           ]
         },
@@ -15018,7 +15042,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – ustreznih map ni na tem strežniku"
+              "value": " elementi se ne morejo obnoviti – njihovih map ni na tem strežniku"
             }
           ]
         },
@@ -15030,7 +15054,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – ustreznih map ni na tem strežniku"
+              "value": " elementov se ne more obnoviti – njihovih map ni na tem strežniku"
             }
           ]
         }
@@ -15052,7 +15076,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – skupine za dostop ni na tem strežniku"
+              "value": " element se ne more obnoviti – njegove skupine za dostop ni na tem strežniku"
             }
           ]
         },
@@ -15064,7 +15088,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – skupine za dostop ni na tem strežniku"
+              "value": " elementa se ne moreta obnoviti – njune skupine za dostop ni na tem strežniku"
             }
           ]
         },
@@ -15076,7 +15100,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – skupine za dostop ni na tem strežniku"
+              "value": " elementi se ne morejo obnoviti – njihove skupine za dostop ni na tem strežniku"
             }
           ]
         },
@@ -15088,7 +15112,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – skupine za dostop ni na tem strežniku"
+              "value": " elementov se ne more obnoviti – njihove skupine za dostop ni na tem strežniku"
             }
           ]
         }
@@ -15110,7 +15134,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – naslova ni v katalogu tega strežnika"
+              "value": " element se ne more obnoviti – njegovega naslova ni v katalogu tega strežnika"
             }
           ]
         },
@@ -15122,7 +15146,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – naslova ni v katalogu tega strežnika"
+              "value": " elementa se ne moreta obnoviti – njunega naslova ni v katalogu tega strežnika"
             }
           ]
         },
@@ -15134,7 +15158,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – naslova ni v katalogu tega strežnika"
+              "value": " elementi se ne morejo obnoviti – njihovega naslova ni v katalogu tega strežnika"
             }
           ]
         },
@@ -15146,7 +15170,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – naslova ni v katalogu tega strežnika"
+              "value": " elementov se ne more obnoviti – njihovega naslova ni v katalogu tega strežnika"
             }
           ]
         }
@@ -15204,7 +15228,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – razširilo bi dostop, zato ta strežnik ohrani svoje strožje vrednosti"
+              "value": " elementov se ne more obnoviti – razširili bi dostop, zato ta strežnik ohrani svoje strožje vrednosti"
             }
           ]
         }
@@ -15226,7 +15250,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – knjižnice ni na tem strežniku"
+              "value": " element se ne more obnoviti – njegove knjižnice ni na tem strežniku"
             }
           ]
         },
@@ -15238,7 +15262,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – knjižnice ni na tem strežniku"
+              "value": " elementa se ne moreta obnoviti – njune knjižnice ni na tem strežniku"
             }
           ]
         },
@@ -15250,7 +15274,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – knjižnice ni na tem strežniku"
+              "value": " elementi se ne morejo obnoviti – njihove knjižnice ni na tem strežniku"
             }
           ]
         },
@@ -15262,7 +15286,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – knjižnice ni na tem strežniku"
+              "value": " elementov se ne more obnoviti – njihove knjižnice ni na tem strežniku"
             }
           ]
         }
@@ -15284,7 +15308,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – knjižnice tukaj ni mogoče obnoviti"
+              "value": " element se ne more obnoviti – njegove knjižnice tukaj ni mogoče obnoviti"
             }
           ]
         },
@@ -15296,7 +15320,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – knjižnice tukaj ni mogoče obnoviti"
+              "value": " elementa se ne moreta obnoviti – njune knjižnice tukaj ni mogoče obnoviti"
             }
           ]
         },
@@ -15308,7 +15332,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – knjižnice tukaj ni mogoče obnoviti"
+              "value": " elementi se ne morejo obnoviti – njihove knjižnice tukaj ni mogoče obnoviti"
             }
           ]
         },
@@ -15320,7 +15344,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – knjižnice tukaj ni mogoče obnoviti"
+              "value": " elementov se ne more obnoviti – njihove knjižnice tukaj ni mogoče obnoviti"
             }
           ]
         }
@@ -15494,7 +15518,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – šifriranih je z drugim SECRET_KEY"
+              "value": " elementov se ne more obnoviti – šifrirani so z drugim SECRET_KEY"
             }
           ]
         }
@@ -15574,7 +15598,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – hkrati je treba obnoviti tudi glavni profil"
+              "value": " element se ne more obnoviti – njegov glavni profil je treba obnoviti hkrati z njim"
             }
           ]
         },
@@ -15586,7 +15610,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – hkrati je treba obnoviti tudi glavni profil"
+              "value": " elementa se ne moreta obnoviti – njun glavni profil je treba obnoviti hkrati z njima"
             }
           ]
         },
@@ -15598,7 +15622,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – hkrati je treba obnoviti tudi glavni profil"
+              "value": " elementi se ne morejo obnoviti – njihov glavni profil je treba obnoviti hkrati z njimi"
             }
           ]
         },
@@ -15610,7 +15634,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – hkrati je treba obnoviti tudi glavni profil"
+              "value": " elementov se ne more obnoviti – njihov glavni profil je treba obnoviti hkrati z njimi"
             }
           ]
         }
@@ -15980,7 +16004,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – tukaj je že vse enako"
+              "value": " element se ne more obnoviti – tukaj je že enak"
             }
           ]
         },
@@ -15992,7 +16016,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – tukaj je že vse enako"
+              "value": " elementa se ne moreta obnoviti – tukaj sta že enaka"
             }
           ]
         },
@@ -16004,7 +16028,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – tukaj je že vse enako"
+              "value": " elementi se ne morejo obnoviti – tukaj so že enaki"
             }
           ]
         },
@@ -16016,7 +16040,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – tukaj je že vse enako"
+              "value": " elementov se ne more obnoviti – tukaj so že enaki"
             }
           ]
         }
@@ -16096,7 +16120,7 @@
             },
             {
               "type": 0,
-              "value": " element se ne more obnoviti – kopije v varnostni kopiji ni mogoče prebrati"
+              "value": " element se ne more obnoviti – njegove kopije v varnostni kopiji ni mogoče prebrati"
             }
           ]
         },
@@ -16108,7 +16132,7 @@
             },
             {
               "type": 0,
-              "value": " elementa se ne moreta obnoviti – kopije v varnostni kopiji ni mogoče prebrati"
+              "value": " elementa se ne moreta obnoviti – njune kopije v varnostni kopiji ni mogoče prebrati"
             }
           ]
         },
@@ -16120,7 +16144,7 @@
             },
             {
               "type": 0,
-              "value": " elementi se ne morejo obnoviti – kopije v varnostni kopiji ni mogoče prebrati"
+              "value": " elementi se ne morejo obnoviti – njihove kopije v varnostni kopiji ni mogoče prebrati"
             }
           ]
         },
@@ -16132,7 +16156,7 @@
             },
             {
               "type": 0,
-              "value": " elementov se ne more obnoviti – kopije v varnostni kopiji ni mogoče prebrati"
+              "value": " elementov se ne more obnoviti – njihove kopije v varnostni kopiji ni mogoče prebrati"
             }
           ]
         }
@@ -17039,8 +17063,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skrij jih"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij ju"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij jih"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17261,8 +17311,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Prikaži jih"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži ju"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži jih"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -18199,10 +18275,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -18214,11 +18290,11 @@
             },
             {
               "type": 0,
-              "value": ", saj to potrebuje vaša izbira."
+              "value": ", ker to potrebuje vaša izbira."
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -18230,23 +18306,7 @@
             },
             {
               "type": 0,
-              "value": ", saj to potrebuje vaša izbira."
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Izbrano je tudi: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ", saj to potrebuje vaša izbira."
+              "value": ", ker ju potrebuje vaša izbira."
             }
           ]
         },
@@ -18262,21 +18322,19 @@
             },
             {
               "type": 0,
-              "value": ", saj to potrebuje vaša izbira."
+              "value": ", ker jih potrebuje vaša izbira."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -18288,11 +18346,11 @@
             },
             {
               "type": 0,
-              "value": ", saj je to odvisno od tega, kar ste odznačili."
+              "value": ", ker potrebuje to, kar ste odznačili."
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -18304,23 +18362,7 @@
             },
             {
               "type": 0,
-              "value": ", saj je to odvisno od tega, kar ste odznačili."
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Odznačeno je tudi: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ", saj je to odvisno od tega, kar ste odznačili."
+              "value": ", ker potrebujeta to, kar ste odznačili."
             }
           ]
         },
@@ -18336,13 +18378,11 @@
             },
             {
               "type": 0,
-              "value": ", saj je to odvisno od tega, kar ste odznačili."
+              "value": ", ker potrebujejo to, kar ste odznačili."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -21105,6 +21145,178 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Ozadje"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " element zbirke"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementa zbirke"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementi zbirke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementov zbirke"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Zamenjava zbirke"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Nastavitve"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Opis"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Vklop"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Izpostavljeno"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Omejitev elementov"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Razvrščanje elementov"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Knjižnice"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Položaj"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Plakat"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Vrstni red"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Vir"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Urnik sinhronizacije"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Naslov"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Prevod naslova"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Vrsta"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Vidnost"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Samo splet"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -23043,6 +23255,20 @@
       "value": "V časovnem pasu strežnika."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "V časovnem pasu strežnika. V vašem časovnem pasu je to ob "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -24023,10 +24249,10 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24034,19 +24260,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "njunih podatkov ni bilo mogoče prebrati"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "njihovih podatkov ni bilo mogoče prebrati"
             }
           ]
         },
@@ -24058,9 +24276,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -24139,20 +24355,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Skrij račune"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij račun"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij računa"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij račune"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Skrij datoteke"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij datoteko"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij datoteki"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij datoteke"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Skrij datoteke"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij datoteko"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij datoteki"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrij datoteke"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -24255,6 +24549,586 @@
     {
       "type": 0,
       "value": "Podatkovna baza se sklicuje nanje, vendar jih v shrambi ni bilo mogoče najti; obnovitve jih izpustijo."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " slika blagovne znamke"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " sliki blagovne znamke"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " slike blagovne znamke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " slik blagovne znamke"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ozadje zbirke"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ozadji zbirk"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ozadja zbirk"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ozadij zbirk"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakat zbirke"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakata zbirk"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakati zbirk"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakatov zbirk"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prenesen podnapis"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prenesena podnapisa"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " preneseni podnapisi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prenesenih podnapisov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakat knjižnice"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakata knjižnic"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakati knjižnic"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakatov knjižnic"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prekrivna slika"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prekrivni sliki"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prekrivne slike"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prekrivnih slik"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakat osebne zbirke"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakata osebnih zbirk"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakati osebnih zbirk"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakatov osebnih zbirk"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatar profila"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatarja profilov"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatarji profilov"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatarjev profilov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naložena slikovna datoteka"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naloženi slikovni datoteki"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naložene slikovne datoteke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naloženih slikovnih datotek"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naložen podnapis"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naložena podnapisa"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naloženi podnapisi"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " naloženih podnapisov"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -24669,10 +25543,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24684,23 +25558,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "njunega dela ni bilo mogoče prebrati: "
-            },
-            {
-              "type": 1,
-              "value": "part"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "njihovega dela ni bilo mogoče prebrati: "
             },
             {
               "type": 1,
@@ -24720,9 +25582,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -24737,8 +25597,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Prikaži račune"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži račun"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži računa"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži račune"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -24817,22 +25703,74 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Prikaži datoteke"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži datoteko"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži datoteki"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži datoteke"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Prikaži datoteke"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži datoteko"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži datoteki"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži datoteke"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24840,19 +25778,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "njuni podatki so preveliki za nabor za obnovitev"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "njihovi podatki so preveliki za nabor za obnovitev"
             }
           ]
         },
@@ -24864,9 +25794,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -27837,6 +28765,12 @@
       "value": "Ponudnik pretvorbe govora v besedilo začasno ni na voljo. Poskusite znova pozneje."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Ponudnik besedilne UI nima razpoložljivega dobroimetja ali pa je bila dosežena omejitev uporabe ali porabe. Preverite stanje in omejitve pri ponudniku ali nastavitve uporabe v storitvi ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -27847,6 +28781,80 @@
     {
       "type": 0,
       "value": "Povezava z besedilno UI ni uspela. Preverite model, raven sklepanja, raven storitve, povezavo računa in omejitve uporabe pri ponudniku."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Dostop do besedilne UI je bil zavrnjen. Preverite, ali lahko ključ API ali račun ChatGPT uporablja ta model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Končna točka ali model besedilne UI ni na voljo. Preverite osnovni URL ponudnika in model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Povezani račun ChatGPT ne more deliti uporabe svojega paketa. Preverite nastavitve uporabe v storitvi ChatGPT ali povežite drug račun."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Ponudnik besedilne UI omejuje število zahtev. Poskusite znova pozneje."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Ponudnik besedilne UI je zavrnil zahtevo za preverjanje. Preverite model, raven sklepanja in nastavitve uporabe računa. Napaka ponudnika je zapisana v dnevniku strežnika."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Ponudnik besedilne UI je zavrnil zahtevo za preverjanje (koda stanja "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Preverite model, raven sklepanja in raven storitve. Napaka ponudnika je zapisana v dnevniku strežnika."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Preverjanje povezave z besedilno UI je poteklo. Preverite razpoložljivost ponudnika in poskusite znova."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Ponudnik besedilne UI je zavrnil poverilnice. Zamenjajte ključ API ponudnika ali se znova prijavite s storitvijo ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Ponudnik besedilne UI začasno ni na voljo. Poskusite znova pozneje."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo ne more doseči ponudnika besedilne UI. Preverite osnovni URL ponudnika in ali se ta strežnik lahko poveže z njim."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Besedilni model je vrnil odgovor, ki ga Silo ne more uporabiti. Izberite drug model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -27959,6 +28967,12 @@
     {
       "type": 0,
       "value": "Počisti omejitev"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "Neposredna"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -34425,6 +35439,12 @@
     {
       "type": 0,
       "value": "neuspešno"
+    }
+  ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Opravilo ni uspelo. Podrobnosti preverite v skrbniški diagnostiki."
     }
   ],
   "web.admin.common.taskStatus.queued": [
@@ -56211,6 +57231,144 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Pregledi in osvežitve metapodatkov so prikazani tukaj, dokler se izvajajo."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Ni dejavnih pregledov ali osvežitev"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Vse ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Skrij čakalno vrsto"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ še "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " knjižnica"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ še "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " knjižnici"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ še "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " knjižnice"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ še "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " knjižnic"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Osvežitve metapodatkov"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Osveževanje metapodatkov …"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Prikaži čakalno vrsto"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Visoka"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Nizka"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Srednja"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -56793,6 +57951,30 @@
       "value": "Potrditev čiščenja praznih korenskih map"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Preveri"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "V čakalni vrsti povezovalnika metapodatkov ni elementov."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Ni zabeleženih preskočenih korenskih map."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Ni zabeleženih zastarelih zunanjih ID-jev."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -56829,6 +58011,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Uredi"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Nobena knjižnica še ni nastavljena."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -56903,6 +58097,12 @@
       "value": "Skrij poti"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Nedejavno"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -56937,6 +58137,12 @@
       "value": "Delni pregled"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Dopolni manjkajoče ali zamenjaj vse metapodatke"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -56949,6 +58155,12 @@
       "value": "Korenska mapa ni dosegljiva"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Preglej"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -56959,6 +58171,12 @@
     {
       "type": 0,
       "value": "Prikaži poti"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Ustavi"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -56977,6 +58195,22 @@
     {
       "type": 0,
       "value": "Preveri priklope"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Preveri, ali so vse mape knjižnice dosegljive"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Prikaži dejavne preglede knjižnice "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -57080,7 +58314,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Upravljajte korenske mape in preglede knjižnic. Uvoz/izvoz kataloga je zdaj v razdelku Vzdrževanje."
+      "value": "Upravljajte mape s predstavnostjo, spremljajte preglede in razrešujte težave s povezovanjem."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -57719,6 +58953,78 @@
       "value": "Zastareli zunanji ID-ji"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dejavno"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dejavni"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dejavna"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dejavnih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Dejavnost pregledov"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Stanje kataloga"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Knjižnice"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -58209,6 +59515,24 @@
     {
       "type": 0,
       "value": "Iščite med prezrtimi elementi po naslovu, knjižnici ali vrsti …"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Dvoumno"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "V čakanju"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Nepovezano"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -62140,7 +63464,7 @@
   "web.admin.nodes.unit.deleteDeploymentManaged": [
     {
       "type": 0,
-      "value": "Nastavljeno v konfiguraciji namestitve strežnika. Odstranite ga tam, da ga boste lahko izbrisali tukaj."
+      "value": "Nastavljeno v konfiguraciji namestitve strežnika. Odstranite ga tam in znova zaženite strežnike API, da ga boste lahko izbrisali tukaj."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -73724,6 +75048,12 @@
       "value": "Preverjanje povezave ni uspelo."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Ni bilo mogoče preveriti, ali okolje strežnika nastavlja to možnost. Če jo želite urediti, znova naložite stran."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -74310,6 +75640,30 @@
     {
       "type": 0,
       "value": "Kanala ni bilo mogoče posodobiti"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Znova naložite, da vidite trenutne vrednosti. Če se je na tej strani kaj spremenilo ali ste urejali shranjeno geslo ali ključ, bodo vse vaše spremembe razveljavljene; sicer bodo ohranjene."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Znova naloži"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nastavitev ni bilo mogoče znova naložiti. Poskusite znova."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Nastavitve so bile spremenjene drugje"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -76408,6 +77762,612 @@
     {
       "type": 0,
       "value": "Sinhroniziraj spletne oznake"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "Algoritem: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "zahtevano: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; aktivno: "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "Dovoljeno: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "Nadzor zasičenosti: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "Račun"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "Na tej poti od"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "Naprava"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "Nobena naprava ni povezana neposredno."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "Končna točka odjemalca"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "Povezane naprave"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "na vrata "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "Privzeto: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "Preverite pripravljenost tega strežnika za neposredne povezave."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "Veljavno: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "Omogoči neposredne povezave"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Zmožnost NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "Mehanizem neposrednih povezav"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT hairpin"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "Preslikava NAT"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "Nadomestni način PMTU"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "Dosegljivost"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "Sprejemni medpomnilnik vtičnice"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "Oddajni medpomnilnik vtičnice"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "Uglaševanje gostitelja"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "Redčenje ACK"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "Pravilnik BBR za izgubo paketov"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "Razbremenitev segmentacije UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "Sprejemno okno odjemalca"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "Vrata UDP za neposredne povezave"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "Nadzor zasičenosti TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "Oddajni medpomnilnik TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "Zadnje preverjanje: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "Posredniški strežnik"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "Poslušalci"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "Zaznani javni naslov: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "Preveri, ali usmerjevalnik podpira UPnP, NAT-PMP ali PCP."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "Preslikava vrat"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "Preverjanja pripravljenosti ne začnejo neposrednega predvajanja."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "Onemogočil skrbnik"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "Onemogočeno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "Mehanizma neposrednih povezav ni bilo mogoče zagnati"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "Medpomnilnika ni bilo mogoče povečati"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "Usmerjevalnik ne podpira preslikave vrat"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "Medpomnilnik je manjši od zahtevanega"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "Pomožni program za uglaševanje omrežja ni na voljo"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "Neveljavna vrednost; nastavitev je izklopljena"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "Sistem te nastavitve ni mogel uveljaviti ali prebrati"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "To jedro tega ne podpira"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "Dosežena omejitev medpomnilnika gostitelja"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "Omejitev medpomnilnika gostitelja ni bilo mogoče prebrati"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "Javni naslov se razlikuje glede na cilj"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR ni na voljo"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR ni naložen ali dovoljen"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "Deluje več kot en strežnik API"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "Zmožnost NET_ADMIN je bila opuščena"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Zmožnost NET_ADMIN manjka"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "Usmerjevalnik ni bil najden"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "Zmožnost NET_ADMIN manjka"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "Dovoljenje zavrnjeno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "Ni na voljo"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "Ni izmerjeno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "Povečanje ni potrebno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "Pravilnik gostitelja je izbral drug algoritem"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "Preverjanje ni uspelo"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "Drugih strežnikov API ni bilo mogoče preveriti"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "Neposredne povezave gosti drug strežnik API"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "Čakanje, da strežnik postane gostitelj neposrednih povezav"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "Stanje neposrednih povezav ni na voljo"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "Vrat UDP ni bilo mogoče odpreti"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "Vrata UDP so neveljavna"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "Ni podprto na tej platformi"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "Zahtevano: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "Zahtevano: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; dodeljeno: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "Zaženi preverjanje"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "Oddajni medpomnilnik: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "Omejeno"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "Poslabšano"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "Nadomestno"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "Ni potrebno"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "Izklopljeno"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "Vklopljeno"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "Neznano"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "Z vejicami ločen seznam največ osmih vnosov host:port. Pustite prazno, če želite uporabiti privzete vrednosti."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "Strežniki STUN"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "Neposredne povezave"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "Dovolite napravam, da ta strežnik dosežejo prek neposredne poti UDP. Vrata UDP določa spremenljivka "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " in so tukaj samo za branje."
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -79540,6 +81500,12 @@
     {
       "type": 0,
       "value": "Označi kot ogledano pri"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Naslovi z oznako za odjavno špico se štejejo za ogledane tudi, ko predvajanje doseže odjavno špico."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -89492,6 +91458,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Shrambe ni mogoče premakniti sem, dokler okolje določa nastavitve shrambe ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Najprej odstranite te spremenljivke in znova zaženite vse strežnike API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -91106,10 +93086,66 @@
       "value": "Nedavne napake"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Osvežitev ni uspela. Podrobnosti preverite v skrbniški diagnostiki."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Preglej trenutni urnik"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -91554,6 +93590,18 @@
     {
       "type": 0,
       "value": "Ponovni poskus webhookov Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Znova prebere glavo datotek MKV s podnapisi ASS, pregledanih, preden je strežnik Silo izpuščal vdelane pisave iz bitne hitrosti, da se ne prekodirajo zaradi bitne hitrosti, s katero se v resnici ne pretakajo."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Popravljanje bitne hitrosti datotek z vdelanimi pisavami"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -119762,6 +121810,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -129694,6 +131756,12 @@
       "value": "Prikazuje"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "To vrstico upravlja ta strežnik. Tega, kaj prikazuje, tukaj ni mogoče spremeniti; če želite sami izbrati, kaj se prikazuje, dodajte svojo vrstico."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -133903,6 +135971,12 @@
     {
       "type": 0,
       "value": "Glavna pasica · Samo splet"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Strežnik"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -149101,6 +151175,16 @@
       "value": "Nazaj na stran 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Pojdi na stran "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -149191,6 +151275,20 @@
     {
       "type": 0,
       "value": "Strani razdelka Zahteva za dodajanje"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Stran "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " je za koncem teh rezultatov."
     }
   ],
   "web.requests.toAdd.series": [
@@ -151087,6 +153185,12 @@
     {
       "type": 0,
       "value": "Branje obvestil profila ob njihovem prejemu in označevanje obvestil kot prebranih."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Ogled tega, kar se trenutno predvaja v profilu ali, če ključ ne navaja nobenega profila, v vseh profilih računa: naslov, položaj predvajanja, stanje premora, naprava in način predvajanja. Brez upravljanja predvajanja in brez podatkov o omrežju."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

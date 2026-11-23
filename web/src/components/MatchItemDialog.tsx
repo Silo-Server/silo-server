@@ -12,6 +12,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import type { FileVersion, ItemDetail, ItemMatchSearchRequest, MatchCandidate } from "@/api/types";
 import MediaLocations from "@/components/MediaLocations";
 import { ItemLibraryPicker } from "@/components/ItemLibraryPicker";
+import { PathText } from "@/components/PathText";
 import {
   useApplyItemMatch,
   useItemFiles,
@@ -168,6 +169,7 @@ export default function MatchItemDialog({
 
   const searchMutation = useSearchItemMatchCandidates(item.content_id);
   const applyMutation = useApplyItemMatch();
+  const searchDisabled = searchMutation.isPending || searchBlocked || hintsLoading;
 
   // Results found under another library's settings do not apply to this one,
   // e.g. after a split left the item in a single library.
@@ -320,123 +322,128 @@ export default function MatchItemDialog({
             ))}
 
           {/* Search inputs */}
-          <div className="grid shrink-0 grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <Label htmlFor="match-title">{t("web.item.dialog.fieldTitle")}</Label>
-              <Input
-                id="match-title"
-                value={title}
-                onChange={editField(setTitle)}
-                placeholder={t("web.item.dialog.fieldTitle")}
-              />
-            </div>
-            <div>
-              <Label htmlFor="match-year">{t("web.item.dialog.fieldYear")}</Label>
-              <Input
-                id="match-year"
-                value={year}
-                onChange={editField(setYear)}
-                placeholder={t("web.item.dialog.fieldYear")}
-                type="number"
-              />
-            </div>
-            {showVideoExternalIds ? (
-              <>
-                <div>
-                  <Label htmlFor="match-imdb">{t("web.item.dialog.imdbId")}</Label>
-                  <Input
-                    id="match-imdb"
-                    value={imdbId}
-                    onChange={editField(setImdbId)}
-                    placeholder={EXAMPLE_IMDB_ID}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="match-tmdb">{t("web.item.dialog.tmdbId")}</Label>
-                  <Input
-                    id="match-tmdb"
-                    value={tmdbId}
-                    onChange={editField(setTmdbId)}
-                    placeholder={EXAMPLE_NUMERIC_ID}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="match-tvdb">{t("web.item.dialog.tvdbId")}</Label>
-                  <Input
-                    id="match-tvdb"
-                    value={tvdbId}
-                    onChange={editField(setTvdbId)}
-                    placeholder={EXAMPLE_NUMERIC_ID}
-                  />
-                </div>
-              </>
-            ) : (
-              <div className="col-span-2 space-y-2">
-                <Label>{t("web.item.match.providerIds")}</Label>
-                {providerIdInputs.map((entry, index) => (
-                  <div
-                    key={entry.id}
-                    className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_2rem] gap-2"
-                  >
+          <form
+            className="contents"
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!searchDisabled) handleSearch();
+            }}
+          >
+            <div className="grid shrink-0 grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <Label htmlFor="match-title">{t("web.item.dialog.fieldTitle")}</Label>
+                <Input
+                  id="match-title"
+                  value={title}
+                  onChange={editField(setTitle)}
+                  placeholder={t("web.item.dialog.fieldTitle")}
+                />
+              </div>
+              <div>
+                <Label htmlFor="match-year">{t("web.item.dialog.fieldYear")}</Label>
+                <Input
+                  id="match-year"
+                  value={year}
+                  onChange={editField(setYear)}
+                  placeholder={t("web.item.dialog.fieldYear")}
+                  type="number"
+                />
+              </div>
+              {showVideoExternalIds ? (
+                <>
+                  <div>
+                    <Label htmlFor="match-imdb">{t("web.item.dialog.imdbId")}</Label>
                     <Input
-                      value={entry.provider}
-                      onChange={(e) => updateProviderIdInput(index, "provider", e.target.value)}
-                      placeholder={EXAMPLE_PROVIDER}
-                      aria-label={t("web.item.match.provider")}
+                      id="match-imdb"
+                      value={imdbId}
+                      onChange={editField(setImdbId)}
+                      placeholder={EXAMPLE_IMDB_ID}
                     />
-                    <Input
-                      value={entry.value}
-                      onChange={(e) => updateProviderIdInput(index, "value", e.target.value)}
-                      placeholder={EXAMPLE_PROVIDER_ID}
-                      aria-label={t("web.item.match.providerId")}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9"
-                      onClick={() => removeProviderIdInput(index)}
-                      disabled={providerIdInputs.length === 1 && !entry.provider && !entry.value}
-                      aria-label={t("web.item.match.removeProviderId")}
-                      title={t("web.item.match.removeProviderId")}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
                   </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-9 w-9"
-                  onClick={addProviderIdInput}
-                  aria-label={t("web.item.match.addProviderId")}
-                  title={t("web.item.match.addProviderId")}
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
+                  <div>
+                    <Label htmlFor="match-tmdb">{t("web.item.dialog.tmdbId")}</Label>
+                    <Input
+                      id="match-tmdb"
+                      value={tmdbId}
+                      onChange={editField(setTmdbId)}
+                      placeholder={EXAMPLE_NUMERIC_ID}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="match-tvdb">{t("web.item.dialog.tvdbId")}</Label>
+                    <Input
+                      id="match-tvdb"
+                      value={tvdbId}
+                      onChange={editField(setTvdbId)}
+                      placeholder={EXAMPLE_NUMERIC_ID}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="col-span-2 space-y-2">
+                  <Label>{t("web.item.match.providerIds")}</Label>
+                  {providerIdInputs.map((entry, index) => (
+                    <div
+                      key={entry.id}
+                      className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_2rem] gap-2"
+                    >
+                      <Input
+                        value={entry.provider}
+                        onChange={(e) => updateProviderIdInput(index, "provider", e.target.value)}
+                        placeholder={EXAMPLE_PROVIDER}
+                        aria-label={t("web.item.match.provider")}
+                      />
+                      <Input
+                        value={entry.value}
+                        onChange={(e) => updateProviderIdInput(index, "value", e.target.value)}
+                        placeholder={EXAMPLE_PROVIDER_ID}
+                        aria-label={t("web.item.match.providerId")}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() => removeProviderIdInput(index)}
+                        disabled={providerIdInputs.length === 1 && !entry.provider && !entry.value}
+                        aria-label={t("web.item.match.removeProviderId")}
+                        title={t("web.item.match.removeProviderId")}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={addProviderIdInput}
+                    aria-label={t("web.item.match.addProviderId")}
+                    title={t("web.item.match.addProviderId")}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {needsLibraryPick && (
+              <div className="shrink-0">
+                <ItemLibraryPicker
+                  libraryIds={itemLibraryIds}
+                  value={currentPick}
+                  onChange={pickLibrary}
+                />
               </div>
             )}
-          </div>
 
-          {needsLibraryPick && (
-            <div className="shrink-0">
-              <ItemLibraryPicker
-                libraryIds={itemLibraryIds}
-                value={currentPick}
-                onChange={pickLibrary}
-              />
-            </div>
-          )}
-
-          <Button
-            onClick={handleSearch}
-            disabled={searchMutation.isPending || searchBlocked || hintsLoading}
-            className="w-full shrink-0 gap-2"
-          >
-            <Search className={cn("h-4 w-4", searchMutation.isPending && "animate-spin")} />
-            {t("web.item.dialog.search")}
-          </Button>
+            <Button type="submit" disabled={searchDisabled} className="w-full shrink-0 gap-2">
+              <Search className={cn("h-4 w-4", searchMutation.isPending && "animate-spin")} />
+              {t("web.item.dialog.search")}
+            </Button>
+          </form>
 
           {searchResults?.truncated && (
             <p className="text-muted-foreground text-sm">{t("web.item.match.truncated")}</p>
@@ -653,11 +660,16 @@ function FolderPathsList({ paths }: { paths: string[] }) {
               {t("web.item.match.rootPath")}
             </div>
             <div className="flex items-center gap-2">
-              <span
-                className="text-muted-foreground min-w-0 flex-1 truncate font-mono text-xs"
-                title={folderData.rootPath}
-              >
-                {folderData.rootPath}
+              {/* The outer span takes the free space so the button stays at the end.
+                  The path inside reads left to right in any language, so a cut one
+                  keeps its start, and w-fit keeps it on the page's start side. */}
+              <span className="min-w-0 flex-1" title={folderData.rootPath}>
+                <span
+                  dir="ltr"
+                  className="text-muted-foreground block w-fit max-w-full truncate font-mono text-xs"
+                >
+                  <PathText path={folderData.rootPath} />
+                </span>
               </span>
               <Button
                 type="button"
@@ -684,11 +696,16 @@ function FolderPathsList({ paths }: { paths: string[] }) {
           {folderData.folders.map(({ fullPath, displayName }) => (
             <div key={fullPath} className="group flex items-center gap-2 px-3 py-2">
               <Folder className="text-muted-foreground h-3.5 w-3.5 shrink-0" />
-              <span
-                className="min-w-0 flex-1 truncate font-mono text-xs font-medium"
-                title={fullPath}
-              >
-                {displayName}
+              {/* The outer span takes the free space so the button stays at the end.
+                  The name inside keeps its start when cut, in either script, and
+                  w-fit keeps a short one on the page's start side. */}
+              <span className="min-w-0 flex-1" title={fullPath}>
+                <span
+                  dir="auto"
+                  className="block w-fit max-w-full truncate font-mono text-xs font-medium"
+                >
+                  {displayName}
+                </span>
               </span>
               <Button
                 type="button"

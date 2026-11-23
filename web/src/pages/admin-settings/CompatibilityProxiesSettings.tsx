@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -157,7 +157,11 @@ function StatusLine({
   const t = useT();
   return (
     <div className="flex min-h-9 items-center justify-between gap-4 py-2 text-sm">
-      <span className="text-muted-foreground">{label}</span>
+      <span
+        className={mono ? "text-muted-foreground max-w-[60%] shrink-0" : "text-muted-foreground"}
+      >
+        {label}
+      </span>
       <span className={mono ? "max-w-[60%] truncate font-mono text-xs" : "text-end"}>
         {typeof value === "boolean"
           ? value
@@ -179,6 +183,22 @@ export default function CompatibilityProxiesSettings() {
   const removeWeb = useRemoveJellyfinCompatWeb();
   const updateCompatSettings = useUpdateJellyfinCompatSettings();
   const status = statusQuery.data;
+  // Switching the API off also turns Jellyfin Web off (setJellyfinAPIEnabled),
+  // as the server's own Jellyfin settings endpoint does. That edit has no field
+  // here, so it stays only while an API switch-off is staged: flipping the
+  // switch back, switching off an API that is already off, or the environment
+  // taking the switch over (the form then drops its draft) takes it back.
+  // A layout effect, so the save bar never paints the extra count.
+  const webOffAlone =
+    form.isDirty("jellyfin_compat.web_enabled") &&
+    !(
+      form.isDirty("jellyfin_compat.enabled") &&
+      form.getValue("jellyfin_compat.enabled") === "false"
+    );
+  const { resetValue } = form;
+  useLayoutEffect(() => {
+    if (webOffAlone) resetValue("jellyfin_compat.web_enabled");
+  }, [webOffAlone, resetValue]);
 
   if (form.isLoading || statusQuery.isLoading)
     return (
@@ -251,6 +271,7 @@ export default function CompatibilityProxiesSettings() {
           <SettingField
             label={t("web.admin.settings.compatibilityProxies.jellyfin.address")}
             hint={PUBLIC_URL_HINT}
+            dir="ltr"
             value={publicURL}
             onChange={(v) => form.setValue("jellyfin_compat.public_url", v)}
             status={
@@ -434,7 +455,7 @@ export default function CompatibilityProxiesSettings() {
               id="compatibility.jellyfin.web-details"
               title={t("web.admin.settings.compatibilityProxies.details.title")}
             >
-              <div className="grid gap-x-8 py-2 md:grid-cols-2">
+              <div className="grid grid-cols-1 gap-x-8 py-2 md:grid-cols-2">
                 <StatusLine
                   label={t("web.admin.settings.compatibilityProxies.details.apiState")}
                   value={status ? statusLabel(status.api_state) : ""}
@@ -578,6 +599,7 @@ export default function CompatibilityProxiesSettings() {
             <SettingField
               label={t("web.admin.settings.compatibilityProxies.advanced.webDir")}
               description={t("web.admin.settings.compatibilityProxies.advanced.webDirDescription")}
+              dir="ltr"
               value={form.getValue("jellyfin_compat.web_install_dir")}
               onChange={(v) => form.setValue("jellyfin_compat.web_install_dir", v)}
               restartRequired={restartKeys.has("jellyfin_compat.web_install_dir")}

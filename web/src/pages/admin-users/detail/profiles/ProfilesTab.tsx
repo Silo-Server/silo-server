@@ -205,7 +205,11 @@ function ProfileRow({
       <InitialAvatar name={profile.name} seed={seed} src={profile.avatar_url} />
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
-          <span title={profile.name} className="max-w-full min-w-0 truncate text-sm font-medium">
+          <span
+            title={profile.name}
+            dir="auto"
+            className="max-w-full min-w-0 truncate text-sm font-medium"
+          >
             {profile.name}
           </span>
           {profile.is_primary ? (

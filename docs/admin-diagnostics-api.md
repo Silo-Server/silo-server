@@ -8,16 +8,13 @@ attachment filename, and a content length when the stored size is known.
 
 The API host opens the stored bundle and streams it directly. It does not return
 a presigned storage URL. Range requests receive the entire archive with status
-200 and `Accept-Ranges: none`. This preserves the existing web proxy download
-behavior. Failures before streaming use v2 Problems: 404 for a missing report or
+200 and `Accept-Ranges: none`. Failures before streaming are problem documents: 404 for a missing report or
 object, 409 for a report that is not ready, and 503 for unavailable storage or
 report services. Interrupted transfers after headers cannot become JSON errors.
 
 The web administrator download helper uses the captured session and profile for
 the request and checks that authority again after reading the body. A profile
-change prevents creating a browser download from the completed response. The
-native Apple and Android clients do not consume this administrator endpoint;
-Jellyfin compatibility has no diagnostic administration counterpart.
+change prevents creating a browser download from the completed response.
 
 ## Report list and detail
 
@@ -41,8 +38,7 @@ as downloads. An unavailable report service returns 503 and a missing detail
 returns 404.
 
 The web queries preserve opaque IDs and reject decoded responses if profile
-authority changed while reading the body. Existing report deletion and upload
-settings remain separate migration scopes.
+authority changed while reading the body.
 
 ## Report deletion
 
