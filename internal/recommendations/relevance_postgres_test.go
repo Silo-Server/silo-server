@@ -274,6 +274,204 @@ func TestRelevanceRubricLeakagePostgres(t *testing.T) {
 	check("served", f.servedRows(t, userID, kid))
 }
 
+// The Similar Users row reads every like of the viewer and its peers, and
+// matches peers by the viewer's own parental controls. Each case seeds a
+// viewer, minSimilarUsersPeerAccounts peer accounts sharing its taste, and an
+// open G title only the peers liked; the row holds that title exactly when the
+// peers count. It takes a few seconds: each case runs a full profile refresh.
+func TestSimilarUsersReadsEveryLikePostgres(t *testing.T) {
+	const yearAgo = 365 * 24 * time.Hour
+	type seed = similarUsersSeed
+	// likesOpen is a peer that rated the open title 10 an hour ago, its
+	// taste row carrying maxContentRating.
+	likesOpen := func(maxContentRating string) seed {
+		return func(t *testing.T, f *relevanceFixture, it similarUsersItems, userID int, profileID string) {
+			rateAgo(t, f, userID, profileID, it.open, 10, time.Hour)
+			seedPeerTaste(t, f, userID, profileID, maxContentRating)
+		}
+	}
+	cases := []struct {
+		name    string
+		ceiling string
+		// viewer seeds the viewer's signals; nil finishes the liked titles.
+		viewer seed
+		// peer seeds one peer's signals and taste row, liking it.open.
+		peer     seed
+		wantOpen bool
+	}{
+		{
+			name: "a peer's like older than its 100 newest ratings counts",
+			peer: func(t *testing.T, f *relevanceFixture, it similarUsersItems, userID int, profileID string) {
+				rateAgo(t, f, userID, profileID, it.open, 10, yearAgo)
+				rateFillerLow(t, f, userID, profileID, 100)
+				seedPeerTaste(t, f, userID, profileID, "")
+			},
+			wantOpen: true,
+		},
+		{
+			name: "a peer's favorite older than its 100 newest episode favorites counts",
+			peer: func(t *testing.T, f *relevanceFixture, it similarUsersItems, userID int, profileID string) {
+				if _, err := f.pool.Exec(t.Context(), `
+					INSERT INTO user_favorites(user_id, profile_id, media_item_id, added_at)
+					SELECT $1::int, $2::text, $3::text, NOW() - INTERVAL '1 year'
+					UNION ALL
+					SELECT $1, $2, content_id, NOW() FROM media_items WHERE content_id LIKE $4`,
+					userID, profileID, it.open, f.prefix+"episode-%"); err != nil {
+					t.Fatal(err)
+				}
+				seedPeerTaste(t, f, userID, profileID, "")
+			},
+			wantOpen: true,
+		},
+		{
+			name: "a viewer's like older than its 1000 newest ratings shapes its taste",
+			viewer: func(t *testing.T, f *relevanceFixture, it similarUsersItems, userID int, profileID string) {
+				rateAgo(t, f, userID, profileID, it.liked[0], 10, yearAgo)
+				rateFillerLow(t, f, userID, profileID, 1000)
+			},
+			peer:     likesOpen(""),
+			wantOpen: true,
+		},
+		{
+			name:     "an unrestricted viewer matches peers who took to R titles",
+			peer:     likesOpen("R"),
+			wantOpen: true,
+		},
+		{
+			name:    "a PG viewer does not match peers who took to R titles",
+			ceiling: "PG",
+			peer:    likesOpen("R"),
+		},
+		{
+			name: "a viewer limited by advisory age alone does not match peers who took to R titles",
+			viewer: func(t *testing.T, f *relevanceFixture, it similarUsersItems, userID int, profileID string) {
+				f.finish(t, userID, profileID, it.liked...)
+				if _, err := f.pool.Exec(t.Context(), `UPDATE user_profiles SET max_advisory_age = 10 WHERE id = $1`, profileID); err != nil {
+					t.Fatal(err)
+				}
+			},
+			peer: likesOpen("R"),
+		},
+		{
+			name:    "an R title a peer finished and disliked does not keep it from a PG viewer",
+			ceiling: "PG",
+			peer: func(t *testing.T, f *relevanceFixture, it similarUsersItems, userID int, profileID string) {
+				f.finish(t, userID, profileID, append(slices.Clone(it.liked), it.ratedR)...)
+				rateAgo(t, f, userID, profileID, it.ratedR, 2, time.Hour)
+				rateAgo(t, f, userID, profileID, it.open, 10, time.Hour)
+				if err := f.engine.RefreshTasteProfile(t.Context(), userID, profileID); err != nil {
+					t.Fatal(err)
+				}
+			},
+			wantOpen: true,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			row, open := similarUsersRow(t, tc.ceiling, tc.viewer, tc.peer)
+			if got := slices.Contains(row, open); got != tc.wantOpen {
+				t.Errorf("Similar Users = %v, holds the peers' title: %v, want %v", row, got, tc.wantOpen)
+			}
+		})
+	}
+}
+
+// similarUsersSeed seeds the signals of one profile of a
+// TestSimilarUsersReadsEveryLikePostgres case.
+type similarUsersSeed func(t *testing.T, f *relevanceFixture, it similarUsersItems, userID int, profileID string)
+
+// similarUsersRow refreshes a viewer under ceiling, seeded by viewer (nil
+// finishes the liked titles), next to minSimilarUsersPeerAccounts peer
+// accounts seeded by peer, and returns its cached Similar Users row and the
+// open title the peers like.
+func similarUsersRow(t *testing.T, ceiling string, viewer, peer similarUsersSeed) ([]string, string) {
+	t.Helper()
+	f := newRelevanceFixture(t, "peers")
+	it := newSimilarUsersItems(t, f)
+	userID, _ := newTasteTestAccount(t, f.pool, f.prefix+"viewer-")
+	profileID := f.profile(t, userID, "Viewer", ceiling)
+	if viewer != nil {
+		viewer(t, f, it, userID, profileID)
+	} else {
+		f.finish(t, userID, profileID, it.liked...)
+	}
+	for i := range minSimilarUsersPeerAccounts {
+		peerID, peerProfile := newTasteTestAccount(t, f.pool, fmt.Sprintf("%speer-%d-", f.prefix, i))
+		peer(t, f, it, peerID, peerProfile)
+	}
+	if err := f.worker.refreshProfile(t.Context(), nil, userID, profileID); err != nil {
+		t.Fatalf("refresh: %v", err)
+	}
+	row, ok := f.cachedPersonalRows(t, userID, profileID)[RecTypeSimilarUsersLiked+"|"]
+	if !ok {
+		t.Fatal("no Similar Users row was cached")
+	}
+	return row, it.open
+}
+
+// similarUsersTestAxis is the taste TestSimilarUsersReadsEveryLikePostgres
+// gives its viewer and peers.
+const similarUsersTestAxis = 2380
+
+// similarUsersItems are the titles of a TestSimilarUsersReadsEveryLikePostgres
+// case: G titles on the shared taste, an R one beside them, and the open G
+// title only the peers like.
+type similarUsersItems struct {
+	liked        []string
+	ratedR, open string
+}
+
+// newSimilarUsersItems seeds the case's titles, plus 1000 filler movies to
+// rate and 100 episodes to favorite.
+func newSimilarUsersItems(t *testing.T, f *relevanceFixture) similarUsersItems {
+	t.Helper()
+	const axis = similarUsersTestAxis
+	var it similarUsersItems
+	for i := range 4 {
+		it.liked = append(it.liked, f.movie(t, fmt.Sprintf("liked-%d", i), []string{"Family"}, "G", 0, axisVector(axis, map[int]float32{axis + 1 + i: 0.05})))
+	}
+	it.ratedR = f.movie(t, "rated-r", []string{"Family"}, "R", 17, axisVector(axis, map[int]float32{axis + 10: 0.05}))
+	it.open = f.movie(t, "open", []string{"Family"}, "G", 0, axisVector(axis, map[int]float32{axis + 20: 0.05}))
+	if _, err := f.pool.Exec(t.Context(), `
+		INSERT INTO media_items(content_id, type, title, status)
+		SELECT $1 || 'filler-' || g, 'movie', 'filler', 'matched' FROM generate_series(1, 1000) g
+		UNION ALL
+		SELECT $1 || 'episode-' || g, 'episode', 'episode', 'matched' FROM generate_series(1, 100) g`, f.prefix); err != nil {
+		t.Fatal(err)
+	}
+	return it
+}
+
+// rateAgo stores the profile's score for the item, rated ago.
+func rateAgo(t *testing.T, f *relevanceFixture, userID int, profileID, itemID string, score int, ago time.Duration) {
+	t.Helper()
+	if _, err := f.pool.Exec(t.Context(), `INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating, rated_at) VALUES($1, $2, $3, $4, NOW() - $5 * INTERVAL '1 second')`,
+		userID, profileID, itemID, score, int(ago.Seconds())); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// rateFillerLow rates n of newSimilarUsersItems' filler movies 1 star within
+// the last hour.
+func rateFillerLow(t *testing.T, f *relevanceFixture, userID int, profileID string, n int) {
+	t.Helper()
+	if _, err := f.pool.Exec(t.Context(), `
+		INSERT INTO user_ratings(user_id, profile_id, media_item_id, rating, rated_at)
+		SELECT $1, $2, $3 || 'filler-' || g, 2, NOW() - g * INTERVAL '1 second' FROM generate_series(1, $4::int) g`,
+		userID, profileID, f.prefix, n); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// seedPeerTaste stores a taste profile for a peer on similarUsersTestAxis,
+// with maxContentRating as the highest rating among the titles it took to.
+func seedPeerTaste(t *testing.T, f *relevanceFixture, userID int, profileID, maxContentRating string) {
+	t.Helper()
+	if err := f.repo.UpsertTasteProfile(t.Context(), userID, profileID, axisVector(similarUsersTestAxis, nil), map[string]int{"rated_5": 1}, maxContentRating, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // Two profiles of one account with distinct histories get distinct personal
 // rows: their served For You rows share at most a fifth of their titles.
 // The fixture's tastes are orthogonal, so the expected overlap is none.

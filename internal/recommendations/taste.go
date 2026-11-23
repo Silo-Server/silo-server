@@ -110,32 +110,32 @@ func contentRatingScore(rating string) int {
 	return 0
 }
 
-// maxContentRatingFromSets derives the highest content rating among
-// positively-signaled and completed canonical items.
-func maxContentRatingFromSets(ratedSet, completedSet, favSet map[string]struct{}, itemContentRatings map[string]string) string {
+// maxContentRatingOfPositives derives the highest content rating among the
+// titles the profile took to: rated, finished or favorited, with a positive
+// combined weight, and not marked Not interested. A title it turned down,
+// even one it finished, does not raise it, so disliking an R film does not
+// make the profile a taste neighbor of R-film viewers (see FindSimilarUsers,
+// which matches peers by this value). Ties go to the lowest title ID.
+func maxContentRatingOfPositives(signals map[string]*canonicalWeightComponents, completedSet map[string]struct{}, itemContentRatings map[string]string) string {
 	best := ""
 	bestScore := -1
-
-	check := func(id string) {
-		cr, ok := itemContentRatings[id]
-		if !ok || cr == "" {
-			return
+	for _, id := range slices.Sorted(maps.Keys(signals)) {
+		s := signals[id]
+		_, completed := completedSet[id]
+		if s.Rating == nil && !completed && !s.Favorited {
+			continue
 		}
-		s := contentRatingScore(cr)
-		if s > bestScore {
-			bestScore = s
+		if s.NotInterested || combineCanonicalWeight(s.Rating, s.ExplicitWeight, s.ImplicitWeight, s.IntentWeight) <= 0 {
+			continue
+		}
+		cr := itemContentRatings[id]
+		if cr == "" {
+			continue
+		}
+		if score := contentRatingScore(cr); score > bestScore {
+			bestScore = score
 			best = cr
 		}
-	}
-
-	for id := range ratedSet {
-		check(id)
-	}
-	for id := range completedSet {
-		check(id)
-	}
-	for id := range favSet {
-		check(id)
 	}
 	return best
 }
@@ -198,17 +198,20 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		return false, fmt.Errorf("get user store for user %d: %w", userID, err)
 	}
 
-	ratings, err := e.ratingsRepo.List(ctx, userID, profileID, 1000, 0)
+	// Every signal is read, as the exclusions and aversion read every
+	// rating: a heavy user's older ratings and favorites still shape the
+	// profile, at their decayed weight.
+	ratings, err := e.ratingsRepo.ListAll(ctx, userID, profileID)
 	if err != nil {
 		return false, fmt.Errorf("list ratings: %w", err)
 	}
 
-	favorites, err := store.ListFavorites(ctx, profileID, 1000, 0)
+	favorites, err := allFavorites(ctx, store, profileID)
 	if err != nil {
 		return false, fmt.Errorf("list favorites: %w", err)
 	}
 
-	watchlist, err := store.ListWatchlist(ctx, profileID, 1000, 0)
+	watchlist, err := allWatchlist(ctx, store, profileID)
 	if err != nil {
 		return false, fmt.Errorf("list watchlist: %w", err)
 	}
@@ -271,8 +274,6 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		signals[id] = s
 		return s
 	}
-	ratedSet := make(map[string]struct{})
-
 	for _, r := range ratings {
 		ref, ok := refs[r.MediaItemID]
 		if !ok || !ref.isCanonicalTasteItem() {
@@ -282,7 +283,6 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		s := ensureSignal(ref.CanonicalID)
 		rating := r.Stars()
 		s.Rating = &rating
-		ratedSet[ref.CanonicalID] = struct{}{}
 
 		weight, kind := ratingSignal(rating)
 		s.ExplicitWeight += weight * timeDecay(r.RatedAt, now, halfLife)
@@ -296,22 +296,19 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		ensureSignal(canonicalID).ImplicitWeight += weight
 	}
 
-	// Favorites and watchlist entries count once per canonical title, as
-	// watches do, so favorited episodes of one series are one favorite.
-	favSet := make(map[string]struct{}, len(favorites))
-	// Favorites and watchlist entries weigh once per canonical title, at
-	// their newest entry: several favorited episodes are one favorited series.
+	// Favorites and watchlist entries count and weigh once per canonical
+	// title, at their newest entry, as watches do: several favorited
+	// episodes are one favorited series.
 	favDecay := newestDecayByTitle(favorites, refs, func(f userstore.Favorite) (string, time.Time) {
 		return f.MediaItemID, parseSignalTime(f.AddedAt, now)
 	}, now, halfLife)
 	for id, decay := range favDecay {
-		favSet[id] = struct{}{}
 		s := ensureSignal(id)
 		s.IntentWeight += WeightFavorited * decay
 		s.Favorited = true
 	}
-	if len(favSet) > 0 {
-		signalCounts["favorited"] = len(favSet)
+	if len(favDecay) > 0 {
+		signalCounts["favorited"] = len(favDecay)
 	}
 
 	// A marked title says the profile does not want more like it, whatever
@@ -385,7 +382,7 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		for _, item := range items {
 			crMap[item.ContentID] = item.ContentRating
 		}
-		maxContentRating = maxContentRatingFromSets(ratedSet, completedSet, favSet, crMap)
+		maxContentRating = maxContentRatingOfPositives(signals, completedSet, crMap)
 	}
 
 	positiveItems, levelTitles := positiveTasteItems(signals, embMap)
@@ -599,7 +596,7 @@ func (e *Engine) GetTasteProfileSummary(ctx context.Context, userID int, profile
 	topGenres := clusterTopGenres(clusters, summaryTopGenres)
 
 	// Gather top-rated and favorited item IDs to derive director preferences.
-	ratings, err := e.ratingsRepo.List(ctx, userID, profileID, 1000, 0)
+	ratings, err := e.ratingsRepo.ListAll(ctx, userID, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("list ratings for summary: %w", err)
 	}
@@ -609,7 +606,7 @@ func (e *Engine) GetTasteProfileSummary(ctx context.Context, userID int, profile
 		return nil, fmt.Errorf("get user store for summary: %w", err)
 	}
 
-	favorites, err := store.ListFavorites(ctx, profileID, 1000, 0)
+	favorites, err := allFavorites(ctx, store, profileID)
 	if err != nil {
 		return nil, fmt.Errorf("list favorites for summary: %w", err)
 	}
