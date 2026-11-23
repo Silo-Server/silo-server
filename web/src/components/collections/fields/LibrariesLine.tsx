@@ -36,7 +36,7 @@ export function LibrariesLine({
   return (
     <div className="grid gap-2.5">
       <div id={LIBRARIES_LINE_ID} className="flex flex-wrap items-center gap-2.5">
-        <span className="text-muted-foreground text-[14px]">{lead}</span>
+        <span className="text-muted-foreground text-[0.875rem]">{lead}</span>
         <LibraryMultiSelect
           libraries={libraries}
           value={value}

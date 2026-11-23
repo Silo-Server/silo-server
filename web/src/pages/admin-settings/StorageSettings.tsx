@@ -337,7 +337,7 @@ function S3Group({
       ) && (
         <div className="settings-field-note my-3 flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/5 p-4">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-          <div className="text-[13px] leading-relaxed">
+          <div className="text-[0.8125rem] leading-relaxed">
             <p className="font-medium text-amber-500">
               {t("web.admin.settings.storage.s3.locationChange")}
             </p>

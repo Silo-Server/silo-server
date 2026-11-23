@@ -91,7 +91,7 @@ export function RowPicker({
           orientation={narrow ? "horizontal" : "vertical"}
         />
         {narrow ? null : (
-          <p className="border-border text-muted-foreground mx-1 mt-3.5 border-t px-2 pt-3.5 text-[13px] leading-[1.55]">
+          <p className="border-border text-muted-foreground mx-1 mt-3.5 border-t px-2 pt-3.5 text-[0.8125rem] leading-[1.55]">
             {t("web.home.addRow.picker.onPageNote", {
               page: pageLabel,
               b: (chunks) => <b className="text-foreground font-medium">{chunks}</b>,
@@ -115,7 +115,7 @@ export function RowPicker({
             aria-labelledby={groupTabId(baseId, group.group)}
             className="scroll-mt-4"
           >
-            <h3 className="mb-3 flex items-baseline gap-2.5 text-[13px] font-semibold">
+            <h3 className="mb-3 flex items-baseline gap-2.5 text-[0.8125rem] font-semibold">
               {group.label}
               <span className="text-muted-foreground font-normal">{group.blurb}</span>
             </h3>

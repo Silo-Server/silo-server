@@ -139,6 +139,9 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
         // center moves down by half of what the rail loses, so the bottom edge
         // stays exactly where it is without a banner, capped or not.
         "top-[calc(50%+2rem+(min(42rem,100dvh-14rem)-min(42rem,100dvh-14rem-var(--impersonation-banner-height)))/2)] h-[min(42rem,calc(100dvh-14rem-var(--impersonation-banner-height)))]",
+        // One row's height (the rail less its padding and border), so a letter
+        // never grows taller than its row when large text meets a short rail.
+        "[--letter-row:calc((min(42rem,100dvh-14rem-var(--impersonation-banner-height))-0.75rem-2px)/27)] [@media(max-height:599px)]:[--letter-row:calc((100dvh-9rem-var(--impersonation-banner-height)-0.75rem-2px)/14)]",
         // A short viewport (a phone on its side) can't fit 27 readable rows,
         // so the letters wrap into two columns of 14 in the same order.
         "[@media(max-height:599px)]:top-[calc(50%+0.5rem+var(--impersonation-banner-height)/2)] [@media(max-height:599px)]:grid [@media(max-height:599px)]:h-[calc(100dvh-9rem-var(--impersonation-banner-height))] [@media(max-height:599px)]:grid-flow-col [@media(max-height:599px)]:grid-rows-[repeat(14,minmax(0,1fr))] [@media(max-height:599px)]:rounded-2xl [@media(max-height:599px)]:px-1",
@@ -173,7 +176,7 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
             onFocus={() => setFocused(letter)}
             onClick={() => jump(letter)}
             className={cn(
-              "focus-visible:ring-ring flex min-h-0 w-5 flex-1 items-center justify-center rounded-full text-[10px] leading-none font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none sm:w-6 sm:text-[11px]",
+              "focus-visible:ring-ring flex min-h-0 w-5 flex-1 items-center justify-center rounded-full text-[length:min(0.625rem,var(--letter-row))] leading-none font-semibold transition-colors focus-visible:ring-2 focus-visible:outline-none sm:w-6 sm:text-[length:min(0.6875rem,var(--letter-row))]",
               !entry && "text-muted-foreground/35 cursor-default",
               entry && !isActive && "text-muted-foreground hover:text-foreground",
               isActive && "bg-primary text-primary-foreground",

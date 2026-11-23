@@ -395,13 +395,13 @@ function LegacyAudiobookImportRow({ prefs }: { prefs: ReturnType<typeof useSeekP
     <div className="border-border/50 grid gap-3 border-t pt-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
       <div className="min-w-0 space-y-1">
         <p className="text-sm font-medium">{t("web.settings.playback.legacy.title")}</p>
-        <p className="text-muted-foreground text-[13px] leading-relaxed">{body}</p>
+        <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">{body}</p>
         {outcome ? (
           <p
             className={
               outcome.failed.length > 0
-                ? "text-destructive text-[13px] leading-relaxed"
-                : "text-muted-foreground text-[13px] leading-relaxed"
+                ? "text-destructive text-[0.8125rem] leading-relaxed"
+                : "text-muted-foreground text-[0.8125rem] leading-relaxed"
             }
             role="status"
           >
@@ -456,7 +456,7 @@ function SeekControls() {
         <h3 className="text-base font-semibold tracking-tight">
           {t("web.settings.playback.seek.title")}
         </h3>
-        <p className="text-muted-foreground max-w-2xl text-[13px] leading-relaxed">
+        <p className="text-muted-foreground max-w-2xl text-[0.8125rem] leading-relaxed">
           {t("web.settings.playback.seek.description")}
         </p>
       </div>

@@ -36,7 +36,7 @@ function discoverFinds(t: Translate, config: Record<string, unknown>): string {
 export function LockedSourceSummary({ config }: { config: Record<string, unknown> }) {
   const t = useT();
   return (
-    <div className="bg-muted/40 grid gap-3 rounded-xl px-4 py-3.5 text-[13.5px]">
+    <div className="bg-muted/40 grid gap-3 rounded-xl px-4 py-3.5 text-[0.84375rem]">
       <p className="flex items-center gap-2 font-semibold">
         <Lock aria-hidden className="size-4 shrink-0" />
         {discoverLocked()}
@@ -47,7 +47,7 @@ export function LockedSourceSummary({ config }: { config: Record<string, unknown
         <dt className="text-muted-foreground">{t("web.collections.editor.lockedFinds")}</dt>
         <dd className="break-words">{discoverFinds(t, config)}</dd>
       </dl>
-      <p className="text-muted-foreground text-[13px]">{discoverStillEditable()}</p>
+      <p className="text-muted-foreground text-[0.8125rem]">{discoverStillEditable()}</p>
     </div>
   );
 }

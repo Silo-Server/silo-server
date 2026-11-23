@@ -199,7 +199,7 @@ const SEGMENTED_GROUP_CLASS =
   "border-border bg-border inline-flex max-w-full flex-wrap gap-px overflow-hidden rounded-md border";
 
 function segmentClass(active: boolean): string {
-  return `focus-visible:ring-ring inline-flex h-[30px] grow items-center justify-center gap-1.5 px-2.5 text-[12px] font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset ${
+  return `focus-visible:ring-ring inline-flex h-7.5 grow items-center justify-center gap-1.5 px-2.5 text-[0.75rem] font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset ${
     active
       ? "bg-primary/10 text-foreground"
       : "bg-surface text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -230,7 +230,7 @@ function NodeFilterMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className={`focus-visible:ring-ring inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:outline-none ${
+        className={`focus-visible:ring-ring inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-[0.75rem] font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:outline-none ${
           selectedNode
             ? "border-primary/40 bg-primary/10 text-foreground"
             : "border-border bg-surface text-muted-foreground hover:text-foreground"
@@ -259,7 +259,7 @@ function NodeFilterMenu({
         {groups.map((group, index) => (
           <div key={group[0]!.kind} role="group" aria-label={group[0]!.label}>
             {index > 0 && <DropdownMenuSeparator />}
-            <DropdownMenuLabel className="text-muted-foreground text-[11px] font-medium">
+            <DropdownMenuLabel className="text-muted-foreground text-[0.6875rem] font-medium">
               {group[0]!.label}
             </DropdownMenuLabel>
             {group.map((node) => (
@@ -267,7 +267,7 @@ function NodeFilterMenu({
                 key={node.key}
                 checked={node.key === selected}
                 onCheckedChange={(checked) => onSelect(checked ? node.key : null)}
-                className="text-[13px]"
+                className="text-[0.8125rem]"
               >
                 <span dir="auto" className="truncate">
                   {node.name}
@@ -549,7 +549,7 @@ export default function AdminActivity() {
             aria-label={t("web.admin.activity.filter.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 ps-9 pe-8 text-[13px]"
+            className="h-8 ps-9 pe-8 text-[0.8125rem]"
           />
           {search && (
             <button
@@ -622,7 +622,7 @@ export default function AdminActivity() {
               setNodeFilter(null);
               setTypeFilter(null);
             }}
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[12px]"
+            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[0.75rem]"
           >
             <X className="h-3 w-3" />
             {t("web.admin.activity.filter.clear")}
@@ -632,7 +632,7 @@ export default function AdminActivity() {
 
       {/* Filter status */}
       {(search || activeFilters > 0) && (
-        <div className="text-muted-foreground text-[12px]">
+        <div className="text-muted-foreground text-[0.75rem]">
           {t("web.admin.activity.filter.showing", {
             total: sessions.length,
             shown: filtered.length,
@@ -652,7 +652,7 @@ export default function AdminActivity() {
             aria-label={t("web.admin.activity.sort.group")}
             className={`border-border bg-surface/50 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b px-4 py-2.5 ${layout.stacked}`}
           >
-            <span className="text-muted-foreground text-[12px]">
+            <span className="text-muted-foreground text-[0.75rem]">
               {t("web.admin.activity.sort.heading")}
             </span>
             {STACKED_SORT_FIELDS.filter(([field]) => showRoute || field !== "node").map(
@@ -734,7 +734,7 @@ function RealtimeStatus({ state }: { state: "connecting" | "live" | "disconnecte
     <span
       role="status"
       title={t("web.admin.activity.realtime.heading")}
-      className={`inline-flex items-center gap-1.5 px-1 text-[12px] ${
+      className={`inline-flex items-center gap-1.5 px-1 text-[0.75rem] ${
         state === "live" ? "text-muted-foreground" : "text-warning font-medium"
       }`}
     >
@@ -918,11 +918,11 @@ function StreamRow({
               <TitleLink session={session} />
               {isEpisodeSession(session) ? (
                 // The episode code and title, under the show's title.
-                <div className="text-muted-foreground truncate text-[12px]">
+                <div className="text-muted-foreground truncate text-[0.75rem]">
                   {getPlaybackSessionSubtitle(session)}
                 </div>
               ) : null}
-              <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
+              <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[0.75rem]">
                 <Link
                   to={`/admin/users/${session.user_id}`}
                   title={username}
@@ -1007,12 +1007,12 @@ function TitleLink({ session }: { session: AdminSession }) {
       to={itemHref}
       title={title}
       dir="auto"
-      className={`${ROW_LINK_CLASS} flow-root w-fit max-w-full text-[13px] font-medium`}
+      className={`${ROW_LINK_CLASS} flow-root w-fit max-w-full text-[0.8125rem] font-medium`}
     >
       <RowLinkText className="bidi-text">{title}</RowLinkText>
     </Link>
   ) : (
-    <div title={title} dir="auto" className="bidi-text truncate text-[13px] font-medium">
+    <div title={title} dir="auto" className="bidi-text truncate text-[0.8125rem] font-medium">
       {title}
     </div>
   );
@@ -1026,7 +1026,7 @@ function MediaCell({ session }: { session: AdminSession }) {
       <div className="min-w-0 flex-1">
         <TitleLink session={session} />
         {subtitle ? (
-          <div className="text-muted-foreground truncate text-[12px]">{subtitle}</div>
+          <div className="text-muted-foreground truncate text-[0.75rem]">{subtitle}</div>
         ) : null}
         <ProgressLine session={session} />
       </div>
@@ -1046,7 +1046,7 @@ function ProgressLine({ session }: { session: AdminSession }) {
   const t = useT();
   const progress = getPlaybackProgress(session);
   return (
-    <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px]">
+    <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.6875rem]">
       {progress !== null ? (
         <span
           aria-hidden="true"
@@ -1081,7 +1081,7 @@ function ProfilePill({ session }: { session: AdminSession }) {
     <span
       title={profile}
       dir="auto"
-      className="border-primary/30 bg-primary/10 text-primary max-w-[7rem] shrink-0 truncate rounded border px-1.5 py-0.5 text-[10px] leading-none"
+      className="border-primary/30 bg-primary/10 text-primary max-w-[7rem] shrink-0 truncate rounded border px-1.5 py-0.5 text-[0.625rem] leading-none"
     >
       {profile}
     </span>
@@ -1122,13 +1122,13 @@ function ViewerCell({
           to={`/admin/users/${session.user_id}`}
           title={username}
           dir="auto"
-          className={`${ROW_LINK_CLASS} min-w-0 text-[13px] font-medium`}
+          className={`${ROW_LINK_CLASS} min-w-0 text-[0.8125rem] font-medium`}
         >
           <RowLinkText>{username}</RowLinkText>
         </Link>
         <ProfilePill session={session} />
       </div>
-      <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
+      <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[0.75rem]">
         <JellyfinSessionPill session={session} />
         {clientLabel ? (
           <span title={clientTitle} dir="auto" className="truncate">
@@ -1137,7 +1137,7 @@ function ViewerCell({
         ) : null}
       </div>
       {(location || clientIP) && (
-        <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[11px]">
+        <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[0.6875rem]">
           {location ? <span className="shrink-0">{location}</span> : null}
           {location && clientIP ? (
             <span aria-hidden="true" className="shrink-0">
@@ -1183,7 +1183,7 @@ function MethodLine({
     <div className="flex min-w-0 items-center gap-2">
       <ActivityMethodBadge method={method} />
       {first ? (
-        <span title={first.description} className="min-w-0 truncate text-[12px]">
+        <span title={first.description} className="min-w-0 truncate text-[0.75rem]">
           {first.label}
         </span>
       ) : null}
@@ -1199,7 +1199,7 @@ function MethodLine({
             count_text: rest.length,
           })}
           title={joinList(rest.map((reason) => reason.label))}
-          className="text-muted-foreground hover:text-foreground border-border shrink-0 rounded border px-1 text-[11px] leading-4 tabular-nums transition-colors"
+          className="text-muted-foreground hover:text-foreground border-border shrink-0 rounded border px-1 text-[0.6875rem] leading-4 tabular-nums transition-colors"
         >
           {t("web.admin.activity.row.moreReasons", { count_text: rest.length })}
         </button>
@@ -1221,7 +1221,7 @@ function ConversionLine({ kind, session }: { kind: "video" | "audio"; session: A
   const mode =
     kind === "video" && conversion.delivered ? formatTranscodeModeSummary(session) : null;
   return (
-    <div className="flex min-w-0 items-center gap-1.5 text-[12px]">
+    <div className="flex min-w-0 items-center gap-1.5 text-[0.75rem]">
       <Icon aria-hidden="true" className="text-muted-foreground h-3 w-3 shrink-0" />
       <span className="sr-only">
         {kind === "video" ? t("web.admin.activity.row.video") : t("web.admin.activity.row.audio")}
@@ -1235,7 +1235,7 @@ function ConversionLine({ kind, session }: { kind: "video" | "audio"; session: A
           : conversion.source}
       </span>
       {mode ? (
-        <span className="border-border text-muted-foreground shrink-0 rounded border px-1 text-[10px] leading-4">
+        <span className="border-border text-muted-foreground shrink-0 rounded border px-1 text-[0.625rem] leading-4">
           {mode}
         </span>
       ) : null}
@@ -1250,7 +1250,7 @@ function SessionCell({ session }: { session: AdminSession }) {
     <div className="min-w-0 text-end">
       <div
         title={t("web.admin.activity.row.sessionActive", { elapsed })}
-        className="inline-flex items-center gap-1 text-[12px] tabular-nums"
+        className="inline-flex items-center gap-1 text-[0.75rem] tabular-nums"
       >
         <Clock aria-hidden="true" className="text-muted-foreground h-3 w-3" />
         <span className="sr-only">{t("web.admin.activity.row.sessionActive", { elapsed })}</span>
@@ -1271,9 +1271,9 @@ function BitrateCell({ session }: { session: AdminSession }) {
   const reference = bitrateReference(t, limit, source);
   return (
     <div className="min-w-0 tabular-nums">
-      {live ? <div className="truncate text-[12px]">{live}</div> : null}
+      {live ? <div className="truncate text-[0.75rem]">{live}</div> : null}
       {reference ? (
-        <div className="text-muted-foreground text-[11px] leading-snug">{reference}</div>
+        <div className="text-muted-foreground text-[0.6875rem] leading-snug">{reference}</div>
       ) : null}
       {share !== null ? (
         <div
@@ -1305,7 +1305,7 @@ function ActivityMethodBadge({ method }: { method: string }) {
     <span
       aria-label={t("web.admin.activity.row.methodBadge", { method: meta.label })}
       title={meta.description}
-      className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[10px] leading-none font-semibold ${meta.badgeClass}`}
+      className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[0.625rem] leading-none font-semibold ${meta.badgeClass}`}
     >
       {meta.label}
     </span>
@@ -1357,7 +1357,7 @@ function PlaybackExpandedPanel({
 
   return (
     <div id={id} className="border-border/40 bg-surface/30 space-y-4 border-t px-4 py-3">
-      <div className={`grid gap-x-5 gap-y-4 text-[12px] ${layout.panel}`}>
+      <div className={`grid gap-x-5 gap-y-4 text-[0.75rem] ${layout.panel}`}>
         <div className="min-w-0 space-y-4">
           <dl className={FACT_LIST_CLASS}>
             <dt className="text-muted-foreground">{t("web.admin.activity.panel.decision")}</dt>
@@ -1454,7 +1454,7 @@ function PlaybackExpandedPanel({
                 <dd className="min-w-0">
                   {devicePlatform ? <div className="break-words">{devicePlatform}</div> : null}
                   {deviceID ? (
-                    <div className="text-muted-foreground font-mono text-[11px] break-all">
+                    <div className="text-muted-foreground font-mono text-[0.6875rem] break-all">
                       {deviceID}
                     </div>
                   ) : null}
@@ -1464,7 +1464,7 @@ function PlaybackExpandedPanel({
             {userAgent ? (
               <>
                 <dt className="text-muted-foreground">{t("web.admin.activity.client.agent")}</dt>
-                <dd className="text-muted-foreground min-w-0 text-[11px] break-words">
+                <dd className="text-muted-foreground min-w-0 text-[0.6875rem] break-words">
                   {userAgent}
                 </dd>
               </>
@@ -1516,7 +1516,7 @@ function PlaybackExpandedPanel({
                 : t("web.admin.activity.session.remoteControlUnavailable")}
             </dd>
             <dt className="text-muted-foreground">{t("web.admin.activity.session.id")}</dt>
-            <dd className="text-muted-foreground min-w-0 font-mono text-[11px] break-all">
+            <dd className="text-muted-foreground min-w-0 font-mono text-[0.6875rem] break-all">
               {session.session_id}
             </dd>
           </dl>
@@ -1547,7 +1547,7 @@ function PlaybackExpandedPanel({
 const FACT_LIST_CLASS = "grid grid-cols-[6rem_1fr] gap-y-1 sm:grid-cols-[9rem_1fr] [&>dt]:pe-3";
 const SIDE_FACT_LIST_CLASS =
   "grid grid-cols-[6rem_1fr] gap-y-1 sm:grid-cols-[7rem_1fr] [&>dt]:pe-3";
-const PANEL_HEADING_CLASS = "text-muted-foreground mb-1.5 text-[11px] font-medium";
+const PANEL_HEADING_CLASS = "text-muted-foreground mb-1.5 text-[0.6875rem] font-medium";
 
 function StreamDetailRow({
   label,
@@ -1570,7 +1570,7 @@ function StreamDetailRow({
           <span>{label}</span>
           {decision ? (
             <span
-              className={`inline-flex rounded border px-1 py-0.5 text-[10px] leading-none font-semibold ${decisionBadgeClass(decision)}`}
+              className={`inline-flex rounded border px-1 py-0.5 text-[0.625rem] leading-none font-semibold ${decisionBadgeClass(decision)}`}
             >
               {formatDecisionLabel(decision)}
             </span>
@@ -1583,7 +1583,7 @@ function StreamDetailRow({
         {tags.filter(Boolean).map((tag) => (
           <span
             key={tag}
-            className="border-border text-muted-foreground ms-1.5 inline-block rounded border px-1 text-[10px] leading-4"
+            className="border-border text-muted-foreground ms-1.5 inline-block rounded border px-1 text-[0.625rem] leading-4"
           >
             {tag}
           </span>
@@ -1608,23 +1608,23 @@ function FFmpegConsole({
   return (
     <div className="terminal-surface space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-muted-foreground text-[11px]">
+        <span className="text-muted-foreground text-[0.6875rem]">
           {isFetching ? t("web.admin.activity.panel.refreshing") : null}
         </span>
         <Link
           to={logsHref}
-          className="text-[11px] font-medium text-[var(--terminal-fg)] hover:text-[var(--terminal-fg)]/80"
+          className="text-[0.6875rem] font-medium text-[var(--terminal-fg)] hover:text-[var(--terminal-fg)]/80"
         >
           {t("web.admin.activity.panel.openFfmpegLogs")}
         </Link>
       </div>
       <div className="overflow-hidden rounded-xl border border-[var(--terminal-border)] bg-[var(--terminal-bg)]">
         {isLoading ? (
-          <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
+          <div className="px-4 py-6 font-mono text-[0.6875rem] text-[var(--terminal-muted)]">
             {t("web.admin.activity.panel.loadingFfmpeg")}
           </div>
         ) : rows.length === 0 ? (
-          <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
+          <div className="px-4 py-6 font-mono text-[0.6875rem] text-[var(--terminal-muted)]">
             {t("web.admin.activity.panel.noFfmpegRows")}
           </div>
         ) : (
@@ -1635,20 +1635,20 @@ function FFmpegConsole({
                 className="grid grid-cols-[120px_1fr] gap-3 border-b border-[var(--terminal-border)]/30 px-4 py-2.5 last:border-b-0"
               >
                 <div className="space-y-1">
-                  <div className="font-mono text-[10px] text-[var(--terminal-muted)]">
+                  <div className="font-mono text-[0.625rem] text-[var(--terminal-muted)]">
                     {formatTimeOnly(row.timestamp)}
                   </div>
-                  <div className="text-[10px] text-[var(--terminal-muted)]/60">
+                  <div className="text-[0.625rem] text-[var(--terminal-muted)]/60">
                     {row.message.includes("stderr")
                       ? t("web.admin.activity.panel.stderr")
                       : t("web.admin.activity.panel.event")}
                   </div>
                 </div>
                 <div className="min-w-0">
-                  <div className="font-mono text-[11px] leading-5 break-words text-[var(--terminal-fg)]">
+                  <div className="font-mono text-[0.6875rem] leading-5 break-words text-[var(--terminal-fg)]">
                     {ffmpegRowText(row)}
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--terminal-muted)]/60">
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[0.625rem] text-[var(--terminal-muted)]/60">
                     {row.node_id && <span>{row.node_id}</span>}
                     {stringAttr(row, "target_resolution") !== "-" && (
                       <span>{stringAttr(row, "target_resolution")}</span>
@@ -1822,13 +1822,13 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onClick(field)}
-      className={`text-muted-foreground flex items-center gap-1 text-[12px] font-medium transition-colors ${
+      className={`text-muted-foreground flex items-center gap-1 text-[0.75rem] font-medium transition-colors ${
         active ? "text-foreground" : "hover:text-foreground"
       } ${className}`}
     >
       {children}
       {active && (
-        <span aria-hidden="true" className="text-[9px]">
+        <span aria-hidden="true" className="text-[0.5625rem]">
           {dir === "asc" ? SORT_ASC_MARK : SORT_DESC_MARK}
         </span>
       )}

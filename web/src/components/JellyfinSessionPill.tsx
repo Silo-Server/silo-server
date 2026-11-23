@@ -14,7 +14,7 @@ export function JellyfinSessionPill({ session }: { session: AdminSession }) {
   }
   return (
     <span
-      className="inline-flex flex-shrink-0 rounded border border-[#AA5CC3]/30 bg-[#AA5CC3]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[#AA5CC3]"
+      className="inline-flex flex-shrink-0 rounded border border-[#AA5CC3]/30 bg-[#AA5CC3]/15 px-1.5 py-0.5 text-[0.5625rem] font-semibold text-[#AA5CC3]"
       title={t("web.player.jellyfinSession.title")}
     >
       {t("web.player.jellyfinSession.label")}

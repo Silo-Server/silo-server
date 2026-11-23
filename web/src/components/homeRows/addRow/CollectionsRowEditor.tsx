@@ -82,7 +82,7 @@ export function CollectionsRowEditor({
             {t("web.home.addRow.collections.chosenLabel")}
           </span>
           {refs.length > 0 ? (
-            <span className="text-muted-foreground text-[13px]">
+            <span className="text-muted-foreground text-[0.8125rem]">
               {t("web.home.addRow.collections.count", {
                 count: refs.length,
                 count_text: refs.length,
@@ -91,14 +91,14 @@ export function CollectionsRowEditor({
           ) : null}
         </div>
         {refs.length === 0 ? (
-          <p className="border-border text-muted-foreground rounded-xl border border-dashed px-3 py-3 text-[13px]">
+          <p className="border-border text-muted-foreground rounded-xl border border-dashed px-3 py-3 text-[0.8125rem]">
             {t("web.home.addRow.collections.empty")}
           </p>
         ) : (
           <ChosenList labelId={chosenId} refs={refs} describe={describe} onChange={onChange} />
         )}
         {full ? (
-          <p role="status" className="text-muted-foreground text-[13px]">
+          <p role="status" className="text-muted-foreground text-[0.8125rem]">
             {t("web.home.addRow.collections.limit", {
               count: MAX_ROW_COLLECTIONS,
               count_text: MAX_ROW_COLLECTIONS,
@@ -299,7 +299,7 @@ function ChosenItem({ id, line, children }: { id: string; line: ChosenLine; chil
           <Skeleton className="h-4 w-32 max-w-full" />
         )}
         {line.meta ? (
-          <span className="text-muted-foreground block truncate text-[13px]">{line.meta}</span>
+          <span className="text-muted-foreground block truncate text-[0.8125rem]">{line.meta}</span>
         ) : null}
       </span>
       {children}

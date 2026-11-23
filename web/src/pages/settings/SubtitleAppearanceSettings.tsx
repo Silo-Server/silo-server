@@ -171,7 +171,7 @@ function SettingRow({ label, description, labelForControl = true, children }: Se
           {label}
         </Label>
         {description ? (
-          <p id={descriptionId} className="text-muted-foreground text-[13px] leading-relaxed">
+          <p id={descriptionId} className="text-muted-foreground text-[0.8125rem] leading-relaxed">
             {description}
           </p>
         ) : null}

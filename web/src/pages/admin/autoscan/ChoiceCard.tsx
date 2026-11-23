@@ -51,7 +51,7 @@ export function ChoiceCard({
         {icon}
         {title}
         {badge && (
-          <span className="bg-success/15 text-success rounded-full px-2 py-0.5 text-[10px] font-semibold tracking-wide uppercase">
+          <span className="bg-success/15 text-success rounded-full px-2 py-0.5 text-[0.625rem] font-semibold tracking-wide uppercase">
             {badge}
           </span>
         )}
@@ -102,7 +102,7 @@ export function StepTrail({ steps }: { steps: Step[] }) {
             >
               <span
                 className={cn(
-                  "grid size-5 shrink-0 place-items-center rounded-full border text-[10px] font-semibold",
+                  "grid size-5 shrink-0 place-items-center rounded-full border text-[0.625rem] font-semibold",
                   active && "bg-foreground text-background border-transparent",
                   done && "border-success/40 bg-success/15 text-success",
                 )}
