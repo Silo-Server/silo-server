@@ -683,29 +683,57 @@ func TestTasteProfileSummaryGenresComeFromTheClustersPostgres(t *testing.T) {
 	}
 }
 
-// A long history builds the taste profile from its heaviest positive titles
-// alone: Not interested and non-positive titles never count, and ties keep a
-// stable order, so the cap drops the lightest of the decayed tail.
-func TestHeaviestPositiveTitlesKeepsTheHeaviestUpToTheLimit(t *testing.T) {
+// A long history builds the taste profile from a bounded set of titles:
+// Not interested and non-positive titles never count, titles the profile
+// rated, favorited or watched come before watchlist-only ones, and within each
+// the heaviest come first.
+func TestRankedPositiveTitlesPutsRealHistoryFirst(t *testing.T) {
+	five := 5
 	signals := map[string]*canonicalWeightComponents{
-		"light":    {ImplicitWeight: 0.2},
-		"heavy":    {ImplicitWeight: 3},
-		"tie-b":    {ImplicitWeight: 1},
-		"tie-a":    {ImplicitWeight: 1},
-		"marked":   {ImplicitWeight: 9, NotInterested: true},
-		"disliked": {ImplicitWeight: -1},
+		"watched-light": {ImplicitWeight: 0.2},
+		"rated":         {Rating: &five, ExplicitWeight: 2},
+		"tie-b":         {ImplicitWeight: 1},
+		"tie-a":         {ImplicitWeight: 1},
+		"watchlist":     {IntentWeight: 9},
+		"marked":        {ImplicitWeight: 9, NotInterested: true},
+		"disliked":      {ImplicitWeight: -1},
 	}
+	want := []string{"rated", "tie-a", "tie-b", "watched-light", "watchlist"}
+	if got := rankedPositiveTitles(signals); !slices.Equal(got, want) {
+		t.Errorf("rankedPositiveTitles = %v, want %v", got, want)
+	}
+}
+
+// The cap counts titles with an embedding: titles without one are passed
+// over, and reading continues until the cap is filled or the titles run out.
+func TestFirstEmbeddedTitlesSkipsTitlesWithoutAnEmbedding(t *testing.T) {
+	stored := map[string][]float32{"b": {1}, "d": {1}, "e": {1}, "f": {1}}
+	fetch := func(ids []string) (map[string][]float32, error) {
+		out := map[string][]float32{}
+		for _, id := range ids {
+			if v, ok := stored[id]; ok {
+				out[id] = v
+			}
+		}
+		return out, nil
+	}
+	ranked := []string{"a", "b", "c", "d", "e", "f"}
 	tests := []struct {
 		limit int
 		want  []string
 	}{
-		{limit: 10, want: []string{"heavy", "tie-a", "tie-b", "light"}},
-		{limit: 2, want: []string{"heavy", "tie-a"}},
+		{limit: 2, want: []string{"b", "d"}},
+		{limit: 3, want: []string{"b", "d", "e"}},
+		{limit: 10, want: []string{"b", "d", "e", "f"}},
 		{limit: 0, want: []string{}},
 	}
 	for _, tt := range tests {
-		if got := heaviestPositiveTitles(signals, tt.limit); !slices.Equal(got, tt.want) {
-			t.Errorf("heaviestPositiveTitles(limit %d) = %v, want %v", tt.limit, got, tt.want)
+		got, err := firstEmbeddedTitles(ranked, tt.limit, fetch)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ids := slices.Sorted(maps.Keys(got)); !slices.Equal(ids, tt.want) {
+			t.Errorf("firstEmbeddedTitles(limit %d) = %v, want %v", tt.limit, ids, tt.want)
 		}
 	}
 }

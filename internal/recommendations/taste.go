@@ -373,10 +373,12 @@ func (e *Engine) rebuildTasteProfile(ctx context.Context, userID int, profileID 
 		}
 	}
 
-	// Only the heaviest positive titles shape the vector and its clusters, so
-	// a long history costs at most tasteMaxTitles embeddings in memory and in
-	// k-means; time decay leaves the rest of it little weight.
-	embMap, err := e.repo.GetBatchEmbeddings(ctx, heaviestPositiveTitles(signals, tasteMaxTitles))
+	// At most tasteMaxTitles positive titles shape the vector and its
+	// clusters, so a long history costs a bounded number of embeddings in
+	// memory and in k-means; time decay leaves the rest of it little weight.
+	embMap, err := firstEmbeddedTitles(rankedPositiveTitles(signals), tasteMaxTitles, func(ids []string) (map[string][]float32, error) {
+		return e.repo.GetBatchEmbeddings(ctx, ids)
+	})
 	if err != nil {
 		return false, fmt.Errorf("get batch embeddings: %w", err)
 	}
@@ -433,33 +435,63 @@ func ratingSignal(rating int) (float64, string) {
 // built from.
 const tasteMaxTitles = 2000
 
-// heaviestPositiveTitles returns up to limit of the titles positiveTasteItems
-// would keep, heaviest combined weight first, ties by ID.
-func heaviestPositiveTitles(signals map[string]*canonicalWeightComponents, limit int) []string {
-	type weighted struct {
-		id     string
-		weight float64
+// rankedPositiveTitles returns the titles positiveTasteItems would keep, in
+// the order a capped taste profile takes them: titles the profile rated,
+// favorited or watched (countsTowardLevel) before watchlist-only ones, so a
+// long watchlist cannot push its real history out of the profile, and within
+// each, heaviest combined weight first, ties by ID.
+func rankedPositiveTitles(signals map[string]*canonicalWeightComponents) []string {
+	type ranked struct {
+		id      string
+		engaged bool
+		weight  float64
 	}
-	var titles []weighted
+	var titles []ranked
 	for id, s := range signals {
 		if s.NotInterested {
 			continue
 		}
 		if w := combineCanonicalWeight(s.Rating, s.ExplicitWeight, s.ImplicitWeight, s.IntentWeight); w > 0 {
-			titles = append(titles, weighted{id, w})
+			titles = append(titles, ranked{id, s.countsTowardLevel(), w})
 		}
 	}
-	slices.SortFunc(titles, func(a, b weighted) int {
+	slices.SortFunc(titles, func(a, b ranked) int {
+		if a.engaged != b.engaged {
+			if a.engaged {
+				return -1
+			}
+			return 1
+		}
 		if c := cmp.Compare(b.weight, a.weight); c != 0 {
 			return c
 		}
 		return strings.Compare(a.id, b.id)
 	})
-	ids := make([]string, 0, min(limit, len(titles)))
-	for _, t := range titles[:min(limit, len(titles))] {
-		ids = append(ids, t.id)
+	ids := make([]string, len(titles))
+	for i, t := range titles {
+		ids[i] = t.id
 	}
 	return ids
+}
+
+// firstEmbeddedTitles returns the embeddings of the first limit titles of
+// ranked that have one, reading them limit titles at a time with fetch, so a
+// title without an embedding does not take a usable title's place.
+func firstEmbeddedTitles(ranked []string, limit int, fetch func(ids []string) (map[string][]float32, error)) (map[string][]float32, error) {
+	out := make(map[string][]float32, min(limit, len(ranked)))
+	for start := 0; start < len(ranked) && len(out) < limit; start += limit {
+		chunk := ranked[start:min(start+limit, len(ranked))]
+		got, err := fetch(chunk)
+		if err != nil {
+			return nil, err
+		}
+		for _, id := range chunk {
+			if emb := got[id]; len(emb) > 0 && len(out) < limit {
+				out[id] = emb
+			}
+		}
+	}
+	return out, nil
 }
 
 // positiveTasteItems returns the titles that shape the taste vector and its
