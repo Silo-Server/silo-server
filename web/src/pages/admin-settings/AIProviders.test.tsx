@@ -157,4 +157,42 @@ describe("AddAIProviderDialog", () => {
       onlineManager.setOnline(true);
     }
   });
+
+  // Writes get no deadline by default. A create the server never answers
+  // would hold the dialog shut for good, so it gives up and lets it close.
+  it("lets the dialog close when the server never answers an add", async () => {
+    const { v2 } = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
+    mocks.v2.mockReset().mockImplementation(v2);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(
+        (_url: unknown, init?: RequestInit) =>
+          new Promise((_resolve, reject) =>
+            init?.signal?.addEventListener("abort", () => reject(init.signal?.reason)),
+          ),
+      ),
+    );
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      const onOpenChange = vi.fn();
+      const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+      render(
+        <AddAIProviderDialog open onOpenChange={onOpenChange} types={types} onCreated={vi.fn()} />,
+      );
+      await user.click(screen.getByRole("button", { name: "Continue" }));
+      await user.type(screen.getByLabelText("API key"), "sk-test");
+      await user.click(screen.getByRole("button", { name: "Add provider" }));
+      expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument(),
+      );
+      await user.keyboard("{Escape}");
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+    }
+  });
 });

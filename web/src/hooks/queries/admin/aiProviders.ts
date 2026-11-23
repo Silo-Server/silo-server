@@ -12,6 +12,14 @@ export type AICapability = AIProvider["capabilities"][number];
 const providersKey = ["admin", "ai", "providers"] as const;
 const createProviderKey = [...providersKey, "create"] as const;
 
+/**
+ * How long an add waits for the server. Writes get no deadline by default, but
+ * the add dialog stays shut while a create is pending, so one the server never
+ * answers must give up. A create that lands late is not selected for the
+ * caller; it shows up in the provider list the next time that loads.
+ */
+const PROVIDER_CREATE_TIMEOUT_MS = 30_000;
+
 export function useAIProviders() {
   return useQuery({
     queryKey: providersKey,
@@ -91,6 +99,7 @@ export function useCreateAIProvider() {
           api_key: draft.api_key || undefined,
           capabilities: draft.capabilities,
         },
+        timeoutMs: PROVIDER_CREATE_TIMEOUT_MS,
       }),
     { mutationKey: createProviderKey },
   );

@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 
+import { readableErrorText } from "@/api/v2/request";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   ProviderPanelActions,
@@ -526,7 +527,7 @@ function ProviderPanel({
       }
       onDone();
     } catch (error) {
-      toast.error(errorMessage(error, t("web.admin.settings.ai.providers.saveFailed")));
+      toast.error(readableErrorText(error, t("web.admin.settings.ai.providers.saveFailed")));
     }
   }
 
