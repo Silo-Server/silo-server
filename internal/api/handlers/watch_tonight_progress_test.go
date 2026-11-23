@@ -214,3 +214,48 @@ func TestDiscoverCardsLeadWithTheBestGenreMatchBeyondThePool(t *testing.T) {
 		t.Fatalf("%d cards, more than the pool of %d", len(cards), discoverCandidatePoolSize(1, 2))
 	}
 }
+
+// coldPopularCardsRepo is a discover cards repo for a profile without a taste
+// profile, whose cached Popular row is popular.
+type coldPopularCardsRepo struct {
+	distanceOrderedCardsRepo
+	popular []recommendations.ScoredItem
+}
+
+func (coldPopularCardsRepo) GetTasteProfile(context.Context, int, string) ([]float32, error) {
+	return nil, nil
+}
+
+func (r coldPopularCardsRepo) GetRecommendationCache(context.Context, int, string, string, string) ([]recommendations.ScoredItem, error) {
+	return r.popular, nil
+}
+
+// The cold-start rows are not filtered for the titles the client already
+// showed, so the pool is cut only after those leave it: a page whose top
+// Popular titles were all shown still fills with the ones after them.
+func TestColdDiscoverCardsSkipShownTitlesBeforeCuttingThePool(t *testing.T) {
+	pool := discoverCandidatePoolSize(1, 0)
+	repo := coldPopularCardsRepo{distanceOrderedCardsRepo: distanceOrderedCardsRepo{genres: map[string][]string{}}}
+	shown := map[string]struct{}{}
+	for i := range 2 * pool {
+		id := fmt.Sprintf("popular-%03d", i)
+		repo.popular = append(repo.popular, recommendations.ScoredItem{MediaItemID: id, Score: float64(2*pool - i)})
+		if i < pool {
+			shown[id] = struct{}{}
+		}
+	}
+	h := &RecommendationsHandler{engine: &fakeRecsEngine{}, enabled: true, cardsRepo: repo}
+
+	cards, cold, err := h.buildDiscoverCards(t.Context(), 1, "p", catalog.AccessFilter{}, nil, shown, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cold || len(cards) != pool {
+		t.Fatalf("got %d cards, cold %v; want %d cold-start cards", len(cards), cold, pool)
+	}
+	for _, card := range cards {
+		if _, ok := shown[card.scored.MediaItemID]; ok {
+			t.Fatalf("card %s was already shown", card.scored.MediaItemID)
+		}
+	}
+}

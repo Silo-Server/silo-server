@@ -440,11 +440,14 @@ func (h *RecommendationsHandler) buildDiscoverCards(ctx context.Context, userID 
 
 	candidates = h.filterRecommendations(ctx, userID, profileID, candidates)
 	candidates = recommendations.FilterAndRankGenreMatches(candidates, genres, genreMap)
-	if len(candidates) > poolSize {
-		candidates = candidates[:poolSize]
+	// The pool is cut after the titles the client already showed leave it:
+	// the cold-start rows are not filtered for them, and cut first they would
+	// take the places of titles the page can still show.
+	items := recommendationCardItems(candidates, excludeIDs)
+	if len(items) > poolSize {
+		items = items[:poolSize]
 	}
-
-	return recommendationCardItems(candidates, excludeIDs), isCold, nil
+	return items, isCold, nil
 }
 
 // withProfileExclusions returns excludeIDs, the titles the client already
