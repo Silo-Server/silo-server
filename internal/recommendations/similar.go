@@ -146,6 +146,24 @@ func candidateEmbeddings(details map[string]CandidateDetails) map[string][]float
 	return embeddings
 }
 
+// candidateMediaTypes maps each candidate in details to its media type.
+func candidateMediaTypes(details map[string]CandidateDetails) map[string]string {
+	types := make(map[string]string, len(details))
+	for id, d := range details {
+		types[id] = d.Meta.Type
+	}
+	return types
+}
+
+// candidateGenres maps each candidate in details to its genres.
+func candidateGenres(details map[string]CandidateDetails) map[string][]string {
+	genres := make(map[string][]string, len(details))
+	for id, d := range details {
+		genres[id] = d.Meta.Genres
+	}
+	return genres
+}
+
 // applyValidation filters and penalizes candidates using the validation
 // pipeline, reading each candidate's title, year and genres from details.
 // Without source metadata there is nothing to validate against, and the

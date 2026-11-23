@@ -3,7 +3,6 @@ package recommendations
 import (
 	"cmp"
 	"context"
-	"errors"
 	"fmt"
 	"math"
 	"math/rand/v2"
@@ -215,21 +214,6 @@ type toyStore struct {
 	taste    []float32
 	clusters []TasteCluster
 	allowed  func(*toyItem) bool
-	// candidateErrAt fails the candidateErrAt-th FindTasteProfileCandidates
-	// call (1-based; 0 never), and embeddingsErr every GetBatchEmbeddings.
-	candidateErrAt int
-	candidateCalls int
-	embeddingsErr  error
-}
-
-func (s *toyStore) GetItemQualityRatings(_ context.Context, ids []string) (map[string]float64, error) {
-	out := make(map[string]float64, len(ids))
-	for _, id := range ids {
-		if item, ok := s.catalog.byID[id]; ok && item.rating > 0 {
-			out[id] = item.rating
-		}
-	}
-	return out, nil
 }
 
 func (s *toyStore) GetTasteProfile(context.Context, int, string) ([]float32, error) {
@@ -240,19 +224,12 @@ func (s *toyStore) GetTasteClusters(context.Context, int, string) ([]TasteCluste
 	return s.clusters, nil
 }
 
-func (s *toyStore) FindTasteProfileCandidates(ctx context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, filter catalog.AccessFilter) ([]ScoredItem, map[string][]string, error) {
-	s.candidateCalls++
-	if s.candidateCalls == s.candidateErrAt {
-		return nil, nil, errors.New("candidate query failed")
-	}
-	return s.FindTasteProfileCandidatesByMediaType(ctx, embedding, excludeIDs, genres, limit, filter, "")
-}
-
-// FindTasteProfileCandidatesByMediaType mirrors findTasteProfileCandidates:
-// the nearest titles first, and with genres only those that share one of them.
-func (s *toyStore) FindTasteProfileCandidatesByMediaType(_ context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, _ catalog.AccessFilter, mediaType string) ([]ScoredItem, map[string][]string, error) {
+// FindTasteProfileCandidatesWithDetails mirrors findTasteProfileCandidates:
+// the nearest titles first, and with genres only those that share one of them,
+// with their details.
+func (s *toyStore) FindTasteProfileCandidatesWithDetails(_ context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, _ catalog.AccessFilter, mediaType string) ([]ScoredItem, map[string]CandidateDetails, error) {
 	if embedding == nil || limit <= 0 {
-		return []ScoredItem{}, map[string][]string{}, nil
+		return []ScoredItem{}, map[string]CandidateDetails{}, nil
 	}
 	type hit struct {
 		item *toyItem
@@ -280,45 +257,16 @@ func (s *toyStore) FindTasteProfileCandidatesByMediaType(_ context.Context, embe
 	})
 	hits = hits[:min(len(hits), limit)]
 	items := make([]ScoredItem, len(hits))
-	genreMap := make(map[string][]string, len(hits))
+	details := make(map[string]CandidateDetails, len(hits))
 	for i, h := range hits {
 		items[i] = ScoredItem{MediaItemID: h.item.id, Score: h.sim, Reason: "taste_profile_match"}
-		genreMap[h.item.id] = h.item.genres
-	}
-	return items, genreMap, nil
-}
-
-func (s *toyStore) GetBatchEmbeddings(_ context.Context, ids []string) (map[string][]float32, error) {
-	if s.embeddingsErr != nil {
-		return nil, s.embeddingsErr
-	}
-	out := make(map[string][]float32, len(ids))
-	for _, id := range ids {
-		if item, ok := s.catalog.byID[id]; ok {
-			out[id] = item.vec
+		d := CandidateDetails{Meta: ItemMetadata{Type: h.item.mediaType, Genres: h.item.genres}, Embedding: h.item.vec, AddedAt: h.item.addedAt}
+		if h.item.rating > 0 {
+			d.Quality = &h.item.rating
 		}
+		details[h.item.id] = d
 	}
-	return out, nil
-}
-
-func (s *toyStore) GetItemMediaTypes(_ context.Context, ids []string) (map[string]string, error) {
-	out := make(map[string]string, len(ids))
-	for _, id := range ids {
-		if item, ok := s.catalog.byID[id]; ok {
-			out[id] = item.mediaType
-		}
-	}
-	return out, nil
-}
-
-func (s *toyStore) GetItemAddedDates(_ context.Context, ids []string) (map[string]time.Time, error) {
-	out := make(map[string]time.Time, len(ids))
-	for _, id := range ids {
-		if item, ok := s.catalog.byID[id]; ok {
-			out[id] = item.addedAt
-		}
-	}
-	return out, nil
+	return items, details, nil
 }
 
 func (s *toyStore) PresentMediaTypes(_ context.Context, mediaTypes []string, _ catalog.AccessFilter) (map[string]struct{}, error) {
