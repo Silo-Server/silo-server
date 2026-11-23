@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/database/readtx"
@@ -62,6 +63,105 @@ func (s *PostgresUserStore) UpdateProgress(ctx context.Context, profileID, media
 	if skip {
 		return nil
 	}
+	return s.updateProgress(ctx, s.pool.Exec, profileID, mediaItemID, position, duration, completed)
+}
+
+// WriteSequencedPlaybackProgress holds the attempt row through the watch-state
+// write. StopAttempt acquires the same row: either this write lands before
+// stop finalization, or the attempt is terminal and this write is skipped.
+func (s *PostgresUserStore) WriteSequencedPlaybackProgress(
+	ctx context.Context, sessionID string, sequence int64, profileID, mediaItemID string,
+	position, duration float64, thresholds userstore.ProgressThresholds, hints userstore.VersionHints,
+) (bool, bool, error) {
+	position, completed, skip := userstore.ResolveProgressState(position, duration, thresholds)
+	if skip {
+		return false, false, nil
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return false, false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	var current bool
+	err = tx.QueryRow(ctx, `
+		SELECT TRUE FROM playback_v3_attempts
+		WHERE session_id = $1::uuid AND last_sequence = $2 AND user_id = $3 AND profile_id = $4
+		  AND stopped_at IS NULL AND expires_at > NOW()
+		FOR UPDATE`, sessionID, sequence, s.userID, profileID).Scan(&current)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, false, nil
+	}
+	if err != nil {
+		return false, false, err
+	}
+	var wasCompleted bool
+	if completed {
+		err = tx.QueryRow(ctx, `
+			SELECT completed FROM user_watch_progress
+			WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3`,
+			s.userID, profileID, mediaItemID).Scan(&wasCompleted)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return false, false, err
+		}
+	}
+	if err := s.updateProgress(ctx, tx.Exec, profileID, mediaItemID, position, duration, completed); err != nil {
+		return false, false, err
+	}
+	if err := s.updateProgressHints(ctx, tx.Exec, profileID, mediaItemID, hints); err != nil {
+		return false, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, false, err
+	}
+	return true, completed && !wasCompleted, nil
+}
+
+// CommitPlaybackStop commits the replay marker alongside the history and
+// progress. History can be removed before the stop's receipt is finalized.
+func (s *PostgresUserStore) CommitPlaybackStop(ctx context.Context, stop userstore.PlaybackStopWrite) ([]userstore.WatchHistoryEntry, bool, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	entry := stop.Entry
+	marker, err := tx.Exec(ctx, `
+		INSERT INTO playback_stop_commits (user_id, profile_id, id, expires_at)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (user_id, id) DO NOTHING`,
+		s.userID, entry.ProfileID, entry.ID, stop.ReplayUntil)
+	if err != nil {
+		return nil, false, err
+	}
+	if marker.RowsAffected() == 0 {
+		return nil, true, nil
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM playback_stop_commits WHERE user_id = $1 AND expires_at <= NOW()`, s.userID); err != nil {
+		return nil, false, err
+	}
+	if _, err := s.addVisibleHistory(ctx, tx, entry); errors.Is(err, userstore.ErrHistoryEntryExists) {
+		return nil, true, tx.Commit(ctx)
+	} else if err != nil {
+		return nil, false, err
+	}
+	position, completed, _ := userstore.ResolveProgressState(stop.PositionSeconds, entry.DurationSeconds, stop.Thresholds)
+	if err := s.updateProgress(ctx, tx.Exec, entry.ProfileID, entry.MediaItemID, position, entry.DurationSeconds, completed); err != nil {
+		return nil, false, err
+	}
+	if err := s.updateProgressHints(ctx, tx.Exec, entry.ProfileID, entry.MediaItemID, stop.Hints); err != nil {
+		return nil, false, err
+	}
+	spanned, err := s.markWatchedBatchTx(ctx, tx, entry.ProfileID, stop.SpannedTargets, stop.SpannedHistory)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, false, err
+	}
+	return spanned, false, nil
+}
+
+func (s *PostgresUserStore) updateProgress(ctx context.Context, exec func(context.Context, string, ...any) (pgconn.CommandTag, error), profileID, mediaItemID string, position, duration float64, completed bool) error {
 	now := time.Now().UTC()
 	// `completed` is a one-way watched latch; position resets to 0 on
 	// completion so `position_seconds > 0` means "has a resume point".
@@ -1189,6 +1289,51 @@ func (s *PostgresUserStore) SeriesEpisodeWatchCounts(ctx context.Context, profil
 		GROUP BY e.series_id`, profileID, seriesIDs)
 }
 
+// SeriesLatestViewedAt is SeriesEpisodeRollupStore's date viewed rollup. A
+// plain join leaves the planner free to hash the profile's plays or look up
+// each episode's, as with the watch-count rollups above.
+func (s *PostgresUserStore) SeriesLatestViewedAt(ctx context.Context, profileID string, seriesIDs []string) (map[string]string, error) {
+	result := make(map[string]string, len(seriesIDs))
+	if len(seriesIDs) == 0 {
+		return result, nil
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT e.series_id, MAX(v.viewed_at)
+		FROM episodes e
+		JOIN (
+			SELECT h.media_item_id, h.watched_at AS viewed_at
+			FROM user_watch_history h
+			WHERE h.user_id = $1
+			  AND h.profile_id = $2
+			  AND h.completed = TRUE`+completedHistoryVisibleSQL+`
+			UNION ALL
+			SELECT p.media_item_id, p.updated_at
+			FROM user_watch_progress p
+			WHERE p.user_id = $1
+			  AND p.profile_id = $2
+			  AND p.completed = TRUE
+			  AND `+visibleProgressSQL("p")+`
+		) v ON v.media_item_id = e.content_id
+		WHERE e.series_id = ANY($3::text[])
+		GROUP BY e.series_id`, s.userID, profileID, seriesIDs)
+	if err != nil {
+		return nil, fmt.Errorf("listing series viewed times: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var seriesID string
+		var viewedAt time.Time
+		if err := rows.Scan(&seriesID, &viewedAt); err != nil {
+			return nil, fmt.Errorf("scanning series viewed time: %w", err)
+		}
+		result[seriesID] = timeToString(viewedAt)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterating series viewed times: %w", err)
+	}
+	return result, nil
+}
+
 // SeriesSeasonWatchCounts is SeriesEpisodeWatchCounts for one series, grouped
 // by episode season number like catalog's ListBySeriesGroupedBySeason. The
 // season list reads each season's episode count from it as well.
@@ -1338,6 +1483,26 @@ func (s *PostgresUserStore) UpdateProgressHints(ctx context.Context, profileID, 
 		}
 		return nil
 	})
+}
+
+// updateProgressHints writes the version hints of an existing progress row
+// through exec, so callers inside a transaction share it. The update matches
+// only when a hint changed: the stamp trigger restamps synced_seq on every
+// update, which would resend an unchanged row to every offline-sync device.
+func (s *PostgresUserStore) updateProgressHints(ctx context.Context, exec func(context.Context, string, ...any) (pgconn.CommandTag, error), profileID, mediaItemID string, hints userstore.VersionHints) error {
+	_, err := exec(ctx, `
+		UPDATE user_watch_progress
+		SET last_file_id = $4, last_resolution = $5, last_hdr = $6, last_codec_video = $7, last_edition_key = $8
+		WHERE user_id = $1 AND profile_id = $2 AND media_item_id = $3
+		  AND (last_file_id IS DISTINCT FROM $4 OR last_resolution IS DISTINCT FROM $5 OR last_hdr IS DISTINCT FROM $6
+		       OR last_codec_video IS DISTINCT FROM $7 OR last_edition_key IS DISTINCT FROM $8)`,
+		s.userID, profileID, mediaItemID,
+		hints.FileID, hints.Resolution, hints.HDR, hints.CodecVideo, nilIfEmpty(hints.EditionKey),
+	)
+	if err != nil {
+		return fmt.Errorf("updating progress hints: %w", err)
+	}
+	return nil
 }
 
 func nilIfEmpty(value string) *string {

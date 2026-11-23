@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import type { ProfileRequestContextSnapshot } from "@/api/client";
 import type { AdminSession, Profile } from "@/api/types";
 import type { components } from "@/api/v2/schema";
-import { v2, type V2Body, type V2Result } from "@/api/v2/request";
+import { v2, v2ErrorText, type V2Body, type V2Result } from "@/api/v2/request";
 import { profileKeys } from "./keys";
 import { toast } from "sonner";
 import { t } from "@/i18n";
@@ -200,6 +200,13 @@ export function useProfiles(options?: { enabled?: boolean; refetchOnWindowFocus?
   };
 }
 
+/**
+ * Writes that change a field of an existing profile are sent even offline, so
+ * they fail at once with an error. Held until reconnect, one would replace
+ * whatever another browser changed that field to in the meantime.
+ */
+const PROFILE_EDIT_NETWORK_MODE = "always";
+
 export function useCreateProfile(profileContext?: ProfileRequestContextSnapshot) {
   const queryClient = useQueryClient();
   return useMutation({
@@ -209,7 +216,7 @@ export function useCreateProfile(profileContext?: ProfileRequestContextSnapshot)
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.common.toast.profiles.saveFailed"));
+      toast.error(v2ErrorText(err, t("web.common.toast.profiles.saveFailed")));
     },
   });
 }
@@ -217,6 +224,7 @@ export function useCreateProfile(profileContext?: ProfileRequestContextSnapshot)
 export function useUpdateProfile() {
   const queryClient = useQueryClient();
   return useMutation({
+    networkMode: PROFILE_EDIT_NETWORK_MODE,
     mutationFn: ({ id, body }: { id: string; body: ProfileUpdate }) =>
       v2("PATCH /api/v2/profiles/{id}", { path: { id }, body }).then(profileFromV2),
     onSuccess: (updatedProfile) => {
@@ -235,7 +243,7 @@ export function useUpdateProfile() {
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.common.toast.profiles.saveFailed"));
+      toast.error(v2ErrorText(err, t("web.common.toast.profiles.saveFailed")));
     },
   });
 }
@@ -243,6 +251,7 @@ export function useUpdateProfile() {
 export function useUploadProfileAvatar(profileContext?: ProfileRequestContextSnapshot) {
   const queryClient = useQueryClient();
   return useMutation({
+    networkMode: PROFILE_EDIT_NETWORK_MODE,
     mutationFn: ({ id, file }: { id: string; file: File }) =>
       uploadProfileAvatar(id, file, profileContext),
     onSuccess: (updatedProfile) => {
@@ -258,9 +267,7 @@ export function useUploadProfileAvatar(profileContext?: ProfileRequestContextSna
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.profiles.avatarUploadFailed"),
-      );
+      toast.error(v2ErrorText(err, t("web.common.toast.profiles.avatarUploadFailed")));
     },
   });
 }
@@ -268,6 +275,7 @@ export function useUploadProfileAvatar(profileContext?: ProfileRequestContextSna
 export function useDeleteProfileAvatar() {
   const queryClient = useQueryClient();
   return useMutation({
+    networkMode: PROFILE_EDIT_NETWORK_MODE,
     // deleteProfileAvatar answers 204 and the editor wants the profile back.
     // The DELETE is the mutation result: once it succeeds the avatar is gone,
     // so a failed follow-up read must not report the mutation as failed. The
@@ -302,9 +310,7 @@ export function useDeleteProfileAvatar() {
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.common.toast.profiles.avatarRemoveFailed"),
-      );
+      toast.error(v2ErrorText(err, t("web.common.toast.profiles.avatarRemoveFailed")));
     },
   });
 }
@@ -322,7 +328,7 @@ export function useDeleteProfile() {
       queryClient.invalidateQueries({ queryKey: profileKeys.list() });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.common.toast.profiles.deleteFailed"));
+      toast.error(v2ErrorText(err, t("web.common.toast.profiles.deleteFailed")));
     },
   });
 }

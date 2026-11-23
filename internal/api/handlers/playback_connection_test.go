@@ -75,7 +75,7 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	}
 
 	lowered := request(playback.BandwidthEstimateObservedRebufferV3, new(44100), "")
-	if limit, err := h.applyLearnedLimit(r, &lowered, true); err != nil || limit == nil || limit.Kbps != 44100 {
+	if limit, err := h.applyLearnedLimit(r, &lowered, true, nil); err != nil || limit == nil || limit.Kbps != 44100 {
 		t.Fatalf("client lowering: limit=%+v err=%v", limit, err)
 	}
 	if _, err := pool.Exec(ctx, `UPDATE playback_connections SET observed_at = now() - interval '1 hour' WHERE user_id = $1`, user); err != nil {
@@ -86,7 +86,7 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	// it plans with min(estimate, limit) and records nothing.
 	for _, tc := range []struct{ sent, planned int }{{50000, 44100}, {44100, 44100}, {30000, 30000}} {
 		kept := request("", new(tc.sent), "")
-		if _, err := h.applyLearnedLimit(r, &kept, true); err != nil || kept.BandwidthEstimateKbps == nil || *kept.BandwidthEstimateKbps != tc.planned {
+		if _, err := h.applyLearnedLimit(r, &kept, true, nil); err != nil || kept.BandwidthEstimateKbps == nil || *kept.BandwidthEstimateKbps != tc.planned {
 			t.Fatalf("kept estimate %d planned %v, want %d (err %v)", tc.sent, kept.BandwidthEstimateKbps, tc.planned, err)
 		}
 	}
@@ -94,11 +94,11 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 		t.Fatalf("a kept estimate changed the limit: kbps=%d observed=%v", kbps, observed)
 	}
 	probed := request(playback.BandwidthEstimateProbeV3, new(20000), "")
-	if limit, err := h.applyLearnedLimit(r, &probed, true); err != nil || limit != nil {
+	if limit, err := h.applyLearnedLimit(r, &probed, true, nil); err != nil || limit != nil {
 		t.Fatalf("lower probe: limit=%+v err=%v", limit, err)
 	}
 	for _, replay := range []playback.StartRequestV3{lowered, probed} {
-		if _, err := h.applyLearnedLimit(r, &replay, false); err != nil {
+		if _, err := h.applyLearnedLimit(r, &replay, false, nil); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -108,13 +108,13 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 
 	cleared := request("", nil, playback.LearnedLimitClearV3)
 	replayedClear := cleared
-	if _, err := h.applyLearnedLimit(r, &replayedClear, false); err != nil {
+	if _, err := h.applyLearnedLimit(r, &replayedClear, false, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, ok := stored(); !ok {
 		t.Fatal("a replayed clear removed the limit")
 	}
-	if _, err := h.applyLearnedLimit(r, &cleared, true); err != nil {
+	if _, err := h.applyLearnedLimit(r, &cleared, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, ok := stored(); ok {
@@ -124,7 +124,7 @@ func TestSeekReplayKeepsLearnedLimitDB(t *testing.T) {
 	// estimate plans with, and records, the throughput.
 	measured := request(playback.BandwidthEstimateObservedRebufferV3, new(44100), "")
 	measured.ObservedThroughputKbps = new(31000)
-	if _, err := h.applyLearnedLimit(r, &measured, true); err != nil {
+	if _, err := h.applyLearnedLimit(r, &measured, true, nil); err != nil {
 		t.Fatal(err)
 	}
 	if kbps, _, _ := stored(); kbps != 31000 || *measured.BandwidthEstimateKbps != 31000 {

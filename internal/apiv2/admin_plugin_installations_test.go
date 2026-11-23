@@ -124,4 +124,6 @@ type noPublicURLOAuth struct{ fakeOAuth }
 
 func (noPublicURLOAuth) PostLogoutRedirectURL() string { return "" }
 
+func (noPublicURLOAuth) CallbackURL(string, int, string) string { return "" }
+
 func (noPublicURLOAuth) NativeSignInAvailable() bool { return false }

@@ -74,7 +74,7 @@ func TestHandleUpdateNodeRejectsUnknownHWAccelOverride(t *testing.T) {
 	handler := NewNodeHandler(repo, nil, nil, nil, nil, nil, "secret")
 
 	recorder := httptest.NewRecorder()
-	awaitNodeUpdate(t, handler, recorder, `{"hw_accel_override":"videotoolbox"}`)
+	awaitNodeUpdate(t, handler, recorder, `{"hw_accel_override":"unobtainium"}`)
 
 	if recorder.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want 400; body = %s", recorder.Code, recorder.Body.String())

@@ -35,20 +35,6 @@ func StartAudioOutcomeFromResultV3(result PlannerResultV3) StartAudioOutcomeV3 {
 	return outcome
 }
 
-// SavedAudioTrackChosen reports whether SelectAudioTrack chose the track by
-// the viewer's saved series identity (its first two steps: the exact
-// signature, or the saved index still in the same language) rather than by
-// language or the file's default flag.
-func SavedAudioTrackChosen(tracks []models.AudioTrack, pref *AudioTrackPreference, chosen int) bool {
-	if pref == nil || chosen < 0 || chosen >= len(tracks) {
-		return false
-	}
-	if findExactAudioTrack(tracks, pref.TrackSignature) == chosen {
-		return true
-	}
-	return pref.AudioTrackIndex == chosen && langMatch(tracks[chosen].Language, pref.AudioLanguage)
-}
-
 // PreferUnconvertedAudioTrackV3 refines a start's preference-based audio
 // choice by what the request can play. outcome plans the file with one track
 // and reports what the route does with it. When the chosen track is converted
@@ -109,6 +95,25 @@ func sameAudioLanguage(a, b string) bool {
 	return langMatch(a, b)
 }
 
+// SavedAudioTrackChosen reports whether SelectAudioTrack chose the track by
+// the viewer's saved series identity (its first two steps: the exact
+// signature, or the saved index still in the same language) rather than by
+// language or the file's default flag.
+func SavedAudioTrackChosen(tracks []models.AudioTrack, pref *AudioTrackPreference, chosen int) bool {
+	if pref == nil || chosen < 0 || chosen >= len(tracks) {
+		return false
+	}
+	if findExactAudioTrack(tracks, pref.TrackSignature) == chosen {
+		return true
+	}
+	return pref.AudioTrackIndex == chosen && langMatch(tracks[chosen].Language, pref.AudioLanguage)
+}
+
+func AtmosAudioTrack(track models.AudioTrack) bool {
+	detail := strings.ToLower(track.Profile + " " + track.Layout)
+	return strings.Contains(detail, "atmos") || strings.Contains(detail, "joc")
+}
+
 func betterUnconvertedAudioTrack(candidate StartAudioOutcomeV3, track models.AudioTrack, current StartAudioOutcomeV3, currentTrack models.AudioTrack) bool {
 	if candidate.Channels != current.Channels {
 		return candidate.Channels > current.Channels
@@ -117,13 +122,6 @@ func betterUnconvertedAudioTrack(candidate StartAudioOutcomeV3, track models.Aud
 		return a
 	}
 	return audioCodecQualityRank(track.Codec) > audioCodecQualityRank(currentTrack.Codec)
-}
-
-// AtmosAudioTrack reports whether the track's profile or layout names Dolby
-// Atmos (JOC is the E-AC-3 carriage).
-func AtmosAudioTrack(track models.AudioTrack) bool {
-	detail := strings.ToLower(track.Profile + " " + track.Layout)
-	return strings.Contains(detail, "atmos") || strings.Contains(detail, "joc")
 }
 
 // audioCodecQualityRanks breaks a channel and Atmos tie between unconverted

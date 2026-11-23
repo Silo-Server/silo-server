@@ -87,7 +87,7 @@ func TestPlaybackAliasLookupFailureWritesNoProgress(t *testing.T) {
 		Position:    600,
 	}
 
-	handler.persistProgress(context.Background(), session)
+	handler.persistProgress(context.Background(), session, playback.ProgressSampleV3{Position: session.Position, IsPaused: session.IsPaused})
 	if progress, err := store.GetProgress(context.Background(), "profile-1", alias); err != nil || progress != nil {
 		t.Fatalf("alias progress = %v, %v; want none", progress, err)
 	}
@@ -122,7 +122,7 @@ func TestPlaybackAliasFileWritesCanonicalProgressAndHistory(t *testing.T) {
 		Position:    600,
 	}
 
-	handler.persistProgress(context.Background(), session)
+	handler.persistProgress(context.Background(), session, playback.ProgressSampleV3{Position: session.Position, IsPaused: session.IsPaused})
 	progress, err := store.GetProgress(context.Background(), "profile-1", canonical)
 	if err != nil {
 		t.Fatalf("get canonical progress: %v", err)

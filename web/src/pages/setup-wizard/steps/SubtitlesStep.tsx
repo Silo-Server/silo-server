@@ -18,8 +18,13 @@ import {
   useTestSubtitleProvider,
   useUpdateSubtitleProvider,
 } from "@/hooks/queries/admin/subtitles";
+import { useT, type MessageKey } from "@/i18n";
 import { sortSubtitleProviders } from "@/lib/subtitleProviders";
-import { SettingField, SettingFieldRow } from "@/pages/admin-settings/SettingField";
+import {
+  SettingField,
+  SettingFieldRow,
+  SettingFieldStatus,
+} from "@/pages/admin-settings/SettingField";
 
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
 import { useStepSummary } from "../useStep";
@@ -27,18 +32,18 @@ import { useWizardContext } from "../WizardContext";
 
 type SubtitleProviderConfig = components["schemas"]["AdminSubtitleProvider"];
 
-const PROVIDER_META: Record<string, { name: string; description: string }> = {
+const PROVIDER_META: Record<string, { name: string; description: MessageKey }> = {
   opensubtitles: {
     name: "OpenSubtitles",
-    description: "The largest subtitle catalogue. Needs a free account.",
+    description: "web.setup.subtitles.openSubtitlesDescription",
   },
   subdl: {
     name: "SubDL",
-    description: "Fast, with a generous free tier. Needs an API key.",
+    description: "web.setup.subtitles.subdlDescription",
   },
   subsource: {
     name: "SubSource",
-    description: "Community-run source. Needs an API key.",
+    description: "web.setup.subtitles.subsourceDescription",
   },
 };
 
@@ -51,6 +56,8 @@ interface ProviderDraft {
   username: string;
   password: string;
   dirty: boolean;
+  /** The last save failed: the draft stays on screen, locked, until a reload. */
+  saveFailed: boolean;
 }
 
 function draftFor(config: SubtitleProviderConfig): ProviderDraft {
@@ -64,10 +71,14 @@ function draftFor(config: SubtitleProviderConfig): ProviderDraft {
     username: "",
     password: "",
     dirty: false,
+    saveFailed: false,
   };
 }
 
 function providerBody(name: string, draft: ProviderDraft) {
+  // Credentials show only while the provider is on, so one switched off sends
+  // none and the server keeps whatever it already stores.
+  if (!draft.enabled) return { enabled: false };
   return name === "opensubtitles"
     ? { enabled: draft.enabled, username: draft.username, password: draft.password }
     : { enabled: draft.enabled, api_key: draft.apiKey };
@@ -81,32 +92,37 @@ function ProviderRow({
   config,
   draft,
   onChange,
+  onReload,
   disabled,
 }: {
   config: SubtitleProviderConfig;
   draft: ProviderDraft;
   onChange: (next: ProviderDraft) => void;
+  onReload: () => void;
   disabled: boolean;
 }) {
+  const t = useT();
   const name = config.provider_name;
-  const meta = PROVIDER_META[name] ?? { name, description: "" };
+  const meta = PROVIDER_META[name];
+  const displayName = meta?.name ?? name;
   const isOpenSubtitles = name === "opensubtitles";
   const canonical = draft.editor?.body ?? config;
   const hasCredentials = isOpenSubtitles ? canonical.has_credentials : canonical.has_api_key;
   const test = useTestSubtitleProvider();
-  // The result is kept with the exact credentials it tested and shown only
-  // while the draft still matches them, so editing a field clears it and a
-  // late response for an older draft is never shown against the new one.
+  // The result is kept with the exact credentials it tested, and the saved
+  // revision behind them, and shown only while both still match. Editing a
+  // field or reloading another admin's save clears it, and a late response
+  // for an older draft is never shown against the new one.
   const [tested, setTested] = useState<{
     signature: string;
     result: { success: boolean; error?: string };
   } | null>(null);
-  const signature = JSON.stringify(providerBody(name, draft));
+  const signature = JSON.stringify([draft.editor?.etag ?? null, providerBody(name, draft)]);
   const testResult = tested?.signature === signature ? tested.result : null;
 
   function runTest() {
     const body = providerBody(name, draft);
-    const testedSignature = JSON.stringify(body);
+    const testedSignature = signature;
     test.mutate(
       { provider: name, config: body },
       {
@@ -118,49 +134,102 @@ function ProviderRow({
         onError: (err) =>
           setTested({
             signature: testedSignature,
-            result: { success: false, error: err instanceof Error ? err.message : "Test failed" },
+            result: {
+              success: false,
+              error: err instanceof Error ? err.message : t("web.setup.subtitles.testFailed"),
+            },
           }),
       },
     );
   }
 
-  const rowDisabled = disabled || draft.loading || draft.loadFailed;
+  const rowDisabled = disabled || draft.loading || draft.loadFailed || draft.saveFailed;
+
+  // Reload disappears once the saved state is back, so focus moves to the
+  // provider's switch instead of dropping to the page. Focus the admin moved
+  // elsewhere meanwhile stays where it is.
+  const switchRef = useRef<HTMLButtonElement>(null);
+  const refocusAfterReload = useRef(false);
+  useEffect(() => {
+    if (!refocusAfterReload.current || draft.saveFailed) return;
+    refocusAfterReload.current = false;
+    if (document.activeElement !== document.body) return;
+    switchRef.current?.focus();
+  }, [draft.saveFailed]);
+
+  let description = meta ? t(meta.description) : "";
+  if (draft.loadFailed && !draft.saveFailed) description = t("web.setup.subtitles.loadFailed");
+
+  let status = null;
+  if (draft.saveFailed) {
+    // A locked row says why it is locked, and Continue waits on it.
+    status = (
+      <SettingFieldStatus tone="warn">
+        {/* A live region, so a failed reload's new message is announced. */}
+        <span role="status">
+          {draft.loadFailed
+            ? t("web.admin.settings.providers.subtitles.loadFailed")
+            : t("web.admin.settings.providers.subtitles.saveNotConfirmed")}
+        </span>
+      </SettingFieldStatus>
+    );
+  } else if (hasCredentials && !draft.dirty) {
+    status = (
+      <span className="text-muted-foreground text-xs">
+        {t("web.setup.subtitles.credentialsSaved")}
+      </span>
+    );
+  }
+
+  const reloadButton = draft.saveFailed ? (
+    // Its own key, so React doesn't turn this node into Test connection (and
+    // carry focus over) when the row unlocks.
+    <Button
+      key="reload"
+      type="button"
+      variant="secondary"
+      size="sm"
+      onClick={() => {
+        if (draft.loading) return;
+        refocusAfterReload.current = true;
+        onReload();
+      }}
+      disabled={disabled}
+      // Stays focusable while the reload runs, so a keyboard user keeps their
+      // place if it fails and can press it again.
+      aria-disabled={draft.loading || undefined}
+      // The label is long and longer still in most languages, so it wraps
+      // rather than widening the card on a phone.
+      className="h-auto min-h-8 min-w-0 shrink py-1.5 text-start whitespace-normal aria-disabled:opacity-50"
+    >
+      {t("web.admin.settings.providers.subtitles.reload")}
+    </Button>
+  ) : null;
 
   return (
     <>
-      <SettingFieldRow
-        label={meta.name}
-        description={
-          draft.loadFailed
-            ? "Couldn't load the saved configuration. Reload the page to edit this provider."
-            : meta.description
-        }
-        status={
-          hasCredentials && !draft.dirty ? (
-            <span className="text-muted-foreground text-xs">Credentials saved</span>
-          ) : undefined
-        }
-      >
+      <SettingFieldRow label={displayName} description={description} status={status}>
         <Switch
+          ref={switchRef}
           checked={draft.enabled}
-          aria-label={`Enable ${meta.name}`}
+          aria-label={t("web.setup.subtitles.enableLabel", { provider: displayName })}
           disabled={rowDisabled}
           onCheckedChange={(v) => onChange({ ...draft, enabled: v, dirty: true })}
         />
       </SettingFieldRow>
-      {draft.enabled && !draft.loadFailed ? (
+      {draft.enabled && (draft.saveFailed || !draft.loadFailed) ? (
         <div className="setup-provider-fields">
           {isOpenSubtitles ? (
             <>
               <SettingField
-                label="Username"
-                description={hasCredentials ? "Leave blank to keep the saved username." : undefined}
+                label={t("web.auth.username")}
+                description={hasCredentials ? t("web.setup.subtitles.usernameKeep") : undefined}
                 value={draft.username}
                 onChange={(v) => onChange({ ...draft, username: v, dirty: true })}
                 disabled={rowDisabled}
               />
               <SecretField
-                label="Password"
+                label={t("web.auth.password")}
                 value={draft.password}
                 configured={hasCredentials}
                 onChange={(v) => onChange({ ...draft, password: v, dirty: true })}
@@ -169,7 +238,7 @@ function ProviderRow({
             </>
           ) : (
             <SecretField
-              label="API key"
+              label={t("web.setup.subtitles.apiKey")}
               value={draft.apiKey}
               configured={hasCredentials}
               onChange={(v) => onChange({ ...draft, apiKey: v, dirty: true })}
@@ -177,36 +246,49 @@ function ProviderRow({
             />
           )}
           <div className="setup-provider-actions">
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={runTest}
-              disabled={rowDisabled || test.isPending}
-            >
-              {test.isPending ? (
-                <>
-                  <Loader2 className="mr-1.5 size-3 animate-spin" />
-                  Testing
-                </>
-              ) : (
-                "Test connection"
-              )}
-            </Button>
-            {testResult !== null ? (
-              <span className={testResult.success ? "text-green-500" : "text-red-400"}>
-                {testResult.success ? "Connected" : (testResult.error ?? "Failed")}
-              </span>
-            ) : null}
+            {/* A locked row can only be reloaded, so Reload takes Test's place. */}
+            {reloadButton ?? (
+              <>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  onClick={runTest}
+                  disabled={rowDisabled || test.isPending}
+                >
+                  {test.isPending ? (
+                    <>
+                      <Loader2 className="me-1.5 size-3 animate-spin" />
+                      {t("web.setup.subtitles.testing")}
+                    </>
+                  ) : (
+                    t("web.setup.subtitles.test")
+                  )}
+                </Button>
+                {testResult !== null ? (
+                  <span className={testResult.success ? "text-green-500" : "text-red-400"}>
+                    {testResult.success
+                      ? t("web.setup.wizard.connected")
+                      : (testResult.error ?? t("web.setup.subtitles.failed"))}
+                  </span>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
+      ) : reloadButton ? (
+        // A provider switched off has no fields, so Reload gets its own row.
+        <div className="setup-provider-actions pb-3.5">{reloadButton}</div>
       ) : null}
     </>
   );
 }
 
+const SAVE_ERROR_TOAST = "setup-subtitles-save-failed";
+
 export function SubtitlesStep() {
   const { markDone } = useWizardContext();
+  const t = useT();
   const providers = useSubtitleProviders();
   const updateProvider = useUpdateSubtitleProvider();
   const [submitting, setSubmitting] = useState(false);
@@ -220,9 +302,9 @@ export function SubtitlesStep() {
 
   // Editing a provider needs its strong validator, which only the per-provider
   // read returns. Each one is loaded once when the list arrives so the switch
-  // can be flipped straight away, and reloaded after a failed save so a retry
-  // never carries a stale validator. A row whose editor fails to load stays
-  // read-only.
+  // can be flipped straight away, and again after a save or when the admin
+  // reloads a failed one. A load always shows the saved state and drops any
+  // draft. A row whose editor fails to load stays read-only.
   const loadEditor = useCallback(
     (config: SubtitleProviderConfig, isCancelled: () => boolean) => {
       const name = config.provider_name;
@@ -244,18 +326,10 @@ export function SubtitlesStep() {
             loaded.current.delete(name);
             return;
           }
-          setDrafts((prev) => {
-            const current = prev[name] ?? draftFor(config);
-            return {
-              ...prev,
-              [name]: {
-                ...current,
-                editor,
-                loading: false,
-                enabled: current.dirty ? current.enabled : editor.body.enabled,
-              },
-            };
-          });
+          setDrafts((prev) => ({
+            ...prev,
+            [name]: { ...draftFor(editor.body), editor, loading: false },
+          }));
         })
         .catch(() => {
           if (isCancelled()) {
@@ -291,7 +365,10 @@ export function SubtitlesStep() {
   useStepSummary(
     "subtitles",
     enabledProviders > 0
-      ? `${enabledProviders} ${enabledProviders === 1 ? "source" : "sources"}`
+      ? t("web.setup.subtitles.summary", {
+          count: enabledProviders,
+          shown: enabledProviders,
+        })
       : undefined,
   );
 
@@ -307,8 +384,9 @@ export function SubtitlesStep() {
     }
     setSubmitting(true);
     // Each provider is its own resource with its own validator, so the saves
-    // are independent and run together. A failed one keeps its draft but
-    // reloads its validator, so the retry cannot send a stale If-Match.
+    // are independent and run together. A failed one may still have been
+    // written, or lost to another admin's save, so its draft is never sent
+    // again: the row locks until the admin reloads it and sees what is saved.
     const results = await Promise.allSettled(
       changed.map(async (config) => {
         const name = config.provider_name;
@@ -347,36 +425,51 @@ export function SubtitlesStep() {
         ...prev,
         [failure.config.provider_name]: {
           ...prev[failure.config.provider_name]!,
-          editor: null,
-          loading: true,
-          loadFailed: false,
+          saveFailed: true,
         },
       }));
-      loadEditor(failure.config, () => false);
     }
     const reason = failures[0]!.reason;
-    toast.error(reason instanceof Error ? reason.message : "Failed to save subtitle sources");
+    toast.error(reason instanceof Error ? reason.message : t("web.setup.subtitles.saveFailed"), {
+      id: SAVE_ERROR_TOAST,
+    });
+  }
+
+  function reloadEditor(config: SubtitleProviderConfig) {
+    const name = config.provider_name;
+    // The failed save's toast says to fetch again and retry; a reload does that.
+    toast.dismiss(SAVE_ERROR_TOAST);
+    setDrafts((prev) => ({
+      ...prev,
+      [name]: { ...prev[name]!, loading: true, loadFailed: false },
+    }));
+    loadEditor(config, () => false);
   }
 
   if (providers.isLoading) return <StepSkeleton rows={3} />;
 
   return (
     <StepFrame
-      title="Subtitle sources"
-      lede="When a file has no subtitles in the language someone wants, Vio can fetch them. Each source needs its own free account or API key."
+      title={t("web.setup.subtitles.title")}
+      lede={t("web.setup.subtitles.lede")}
       onSubmit={handleSubmit}
       busy={submitting}
+      // A failed save must be reloaded first, so the step never finishes with
+      // that change unsaved. Skip still leaves without saving.
+      disabled={providerList.some((p) => drafts[p.provider_name]?.saveFailed)}
       onSkip={() => markDone("subtitles")}
-      footnote="Languages and matching rules are in Admin › Settings › Providers."
+      footnote={t("web.setup.subtitles.footnote")}
     >
       <StepSection>
+        {/* A failed refresh shows its error above the rows it already has,
+            so a locked row's Reload stays reachable. */}
         {providers.isError ? (
           <div className="py-4">
-            <p className="text-sm font-medium">Couldn't load subtitle sources</p>
+            <p className="text-sm font-medium">{t("web.setup.subtitles.listLoadFailed")}</p>
             <p className="text-muted-foreground mt-1 text-xs">
               {providers.error instanceof Error
                 ? providers.error.message
-                : "The server did not answer."}
+                : t("web.setup.subtitles.noAnswer")}
             </p>
             <Button
               type="button"
@@ -385,13 +478,12 @@ export function SubtitlesStep() {
               className="mt-3"
               onClick={() => void providers.refetch()}
             >
-              Try again
+              {t("common.tryAgain")}
             </Button>
           </div>
-        ) : providerList.length === 0 ? (
-          <p className="text-muted-foreground py-4 text-sm">
-            No subtitle providers are installed on this server.
-          </p>
+        ) : null}
+        {!providers.data ? null : providerList.length === 0 ? (
+          <p className="text-muted-foreground py-4 text-sm">{t("web.setup.subtitles.none")}</p>
         ) : (
           providerList.map((config) => (
             <ProviderRow
@@ -399,6 +491,7 @@ export function SubtitlesStep() {
               config={config}
               draft={drafts[config.provider_name] ?? draftFor(config)}
               onChange={(next) => setDrafts((prev) => ({ ...prev, [config.provider_name]: next }))}
+              onReload={() => reloadEditor(config)}
               disabled={submitting}
             />
           ))

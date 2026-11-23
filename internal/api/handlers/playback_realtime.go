@@ -22,13 +22,13 @@ type playbackCommandRecord struct {
 // then deleted); empty for system teardown such as an ffmpeg-exit cleanup,
 // where the card is kept so the client can reconstruct.
 func (h *PlaybackHandler) stopPlaybackSession(ctx context.Context, session *playback.Session, reason PlaybackEndReason) error {
-	_, err := h.stopPlaybackSessionWithResult(ctx, session, reason)
+	_, err := h.stopPlaybackSessionWithResult(ctx, session, reason, nil)
 	return err
 }
 
 // stopPlaybackSessionWithResult is stopPlaybackSession reporting the history
 // writer's result, which the v2 stop receipt carries.
-func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, session *playback.Session, reason PlaybackEndReason) (watchstate.PlaybackStopResult, error) {
+func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, session *playback.Session, reason PlaybackEndReason, accepted *playback.ProgressSampleV3) (watchstate.PlaybackStopResult, error) {
 	if h == nil || session == nil || session.ID == "" {
 		return watchstate.PlaybackStopResult{}, playback.ErrSessionNotFound
 	}
@@ -57,6 +57,12 @@ func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, ses
 	current, err := h.endPlaybackSessionAuthority(ctx, session, reason.userInitiated())
 	if err != nil {
 		return watchstate.PlaybackStopResult{}, err
+	}
+	// The stopped attempt owns the final position. A heartbeat may have
+	// updated this replica's live snapshot after the stop reached PostgreSQL.
+	if accepted != nil {
+		current.Position, current.IsPaused = accepted.Position, accepted.IsPaused
+		observeEndSample(current, time.Now())
 	}
 	return h.finalizeSessionStopWithResult(ctx, current, true, "stop", reason)
 }

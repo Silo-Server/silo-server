@@ -364,7 +364,7 @@ func (b *HDR10PlusBackfiller) backfillFile(ctx context.Context, c hdr10PlusCandi
 		  AND file_size = $2
 		  AND date_trunc('microseconds', file_modified_at) IS NOT DISTINCT FROM $3::timestamptz
 		  AND video_tracks->0 = $4::jsonb`,
-		c.id, c.size, c.normalizedModifiedAt(), c.trackJSON, hdr10Plus, mediaprobe.RangeTypeWithHDR10Plus(c.track), mediaprobe.RecordedFrameColorRange(frame.ColorRange))
+		c.id, c.size, normalizedStoredModifiedAt(c.modifiedAt), c.trackJSON, hdr10Plus, mediaprobe.RangeTypeWithHDR10Plus(c.track), mediaprobe.RecordedFrameColorRange(frame.ColorRange))
 	if err != nil {
 		return 0, fmt.Errorf("recording HDR10+ status for file %d: %w", c.id, err)
 	}
@@ -393,7 +393,7 @@ func (b *HDR10PlusBackfiller) recordNoFrame(ctx context.Context, c hdr10PlusCand
 			file_size = EXCLUDED.file_size,
 			file_modified_at = EXCLUDED.file_modified_at,
 			read_at = EXCLUDED.read_at`,
-		c.id, c.size, c.normalizedModifiedAt(), c.trackJSON)
+		c.id, c.size, normalizedStoredModifiedAt(c.modifiedAt), c.trackJSON)
 	if err != nil {
 		return 0, fmt.Errorf("recording HDR10+ frame read failure for file %d: %w", c.id, err)
 	}
@@ -449,11 +449,12 @@ func logHDR10PlusUnreadable(ctx context.Context, result HDR10PlusBackfillResult)
 	}
 }
 
-// normalizedModifiedAt is the stored mtime in the form row comparisons use.
-func (c hdr10PlusCandidate) normalizedModifiedAt() *time.Time {
-	if c.modifiedAt == nil {
+// normalizedStoredModifiedAt is a stored mtime in the form the backfills'
+// row comparisons use.
+func normalizedStoredModifiedAt(modifiedAt *time.Time) *time.Time {
+	if modifiedAt == nil {
 		return nil
 	}
-	normalized := models.NormalizeFileModifiedAt(*c.modifiedAt)
+	normalized := models.NormalizeFileModifiedAt(*modifiedAt)
 	return &normalized
 }

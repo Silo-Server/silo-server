@@ -571,7 +571,7 @@ func (h *ProgressHandler) SyncProgress(ctx context.Context, userID int, profileI
 				profileID,
 				id,
 				seriesByEpisode[id],
-				"progress",
+				userStateChangeProgress,
 				userStateEventState{},
 			)
 		}

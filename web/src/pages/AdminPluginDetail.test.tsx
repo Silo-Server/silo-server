@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { PluginCatalogEntry, PluginInstallation } from "@/api/types";
+import type { PluginProvisionStatus } from "@/hooks/queries/admin/plugins";
 
 import AdminPluginDetail from "./AdminPluginDetail";
 
@@ -30,6 +31,7 @@ function query<T>(data: T | undefined, overrides: Partial<QueryState<T>> = {}): 
 
 let installationsQuery: QueryState<PluginInstallation[]> = query<PluginInstallation[]>([]);
 let catalogQuery: QueryState<PluginCatalogEntry[]> = query<PluginCatalogEntry[]>([]);
+const provisioningQuery: QueryState<PluginProvisionStatus[]> = query<PluginProvisionStatus[]>([]);
 const catalogOptions: Array<{ enabled?: boolean }> = [];
 const updateInstallationMock = vi.fn();
 let updateInstallationPending = false;
@@ -52,6 +54,7 @@ vi.mock("@/hooks/queries/admin/plugins", () => ({
     catalogOptions.push(options);
     return catalogQuery;
   },
+  useAdminPluginProvisioningStatus: () => provisioningQuery,
   useUpdatePluginInstallation: () => ({
     mutate: updateInstallationMock,
     isPending: updateInstallationPending,
@@ -154,6 +157,8 @@ function makeInstallation(overrides: Partial<PluginInstallation> = {}): PluginIn
     plugin_id: "silo.mdblist",
     version: "0.1.0",
     install_path: "/plugins/mdblist",
+    signature: { state: "unsigned" },
+    connection_check_supported: false,
     enabled: true,
     runtime: { resident: false, state: "stopped", restart_count: 0 },
     source_kind: "silo",

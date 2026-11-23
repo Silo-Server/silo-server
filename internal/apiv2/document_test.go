@@ -431,6 +431,9 @@ func TestGeneratedDocumentStatuses(t *testing.T) {
 		"reportPlaybackBandwidthProbe", "resetAdminDeviceLearnedLimit", "resetApplePushInstallation",
 		"resetRequestDiscoverLayout", "searchCatalogBoxSets", "updateAdminAIProvider",
 		"updateRequestDiscoverLayout", "uploadAdminItemImage", "uploadAdminOverlayImage",
+		"getAdminPluginCapabilities", "listAdminPluginProvisioningStatus",
+		"getAdminDirectConnectionsCapabilities", "getAdminDirectConnectionsStatus",
+		"getAdminRequestPoster", "getProfileSectionBaseline",
 	} {
 		profileToken[id] = true
 	}

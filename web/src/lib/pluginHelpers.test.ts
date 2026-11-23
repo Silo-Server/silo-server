@@ -30,6 +30,8 @@ function installation(overrides: Partial<PluginInstallation> = {}): PluginInstal
     plugin_id: "silo.test",
     version: "1.0.0",
     install_path: "/plugins/test",
+    signature: { state: "unsigned" },
+    connection_check_supported: false,
     enabled: true,
     runtime: { resident: false, state: "stopped", restart_count: 0 },
     source_kind: "silo",
@@ -297,12 +299,12 @@ describe("taskTrigger", () => {
   it("defaults a missing or unreadable plugin trigger to startup, like the server", () => {
     expect(pluginTaskTrigger(undefined)).toEqual({ type: "startup" });
     expect(pluginTaskTrigger({ type: "" })).toEqual({ type: "startup" });
-    // The server builds no live trigger for an unknown type, so don't claim startup.
-    expect(pluginTaskTrigger({ type: "sometimes" })).toEqual({ type: "sometimes" });
+    // An unknown type is not a live trigger, so it reads as startup.
+    expect(pluginTaskTrigger({ type: "sometimes" })).toEqual({ type: "startup" });
     expect(pluginTaskTrigger({ type: "interval", interval_ms: "60000" })).toEqual({
       type: "startup",
     });
-    expect(describeTrigger(pluginTaskTrigger({ type: "sometimes" }))).toBe("sometimes");
+    expect(describeTrigger(pluginTaskTrigger({ type: "sometimes" }))).toBe("On server startup");
     expect(describeTrigger({ type: "weekly", day_of_week: 7, time_of_day: "02:00" })).toBe(
       "Day 7 at 02:00",
     );

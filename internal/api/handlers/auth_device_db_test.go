@@ -52,6 +52,13 @@ func TestDeviceApprovalInheritsSessionProviderChainDB(t *testing.T) {
 	})
 
 	users := auth.NewUserRepository(pool)
+	// External sign-in becomes available after local account setup.
+	if _, err := users.Create(ctx, models.CreateUserInput{
+		Username: "local-" + suffix, Email: "local-" + suffix + "@example.test",
+		Password: uuid.NewString(), Role: models.RoleAdmin,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	stores := pgstore.NewPostgresProvider(pool)
 	resolver := auth.NewAccountResolver(pool, auth.NewAccountProvisioner(users, stores), nil)
 	user, identityID, err := resolver.Resolve(ctx, auth.ResolveInput{InstallationID: installationID, AutoProvision: true,

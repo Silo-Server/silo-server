@@ -37,6 +37,14 @@ frontend:
 build: frontend
 	go build -ldflags "$(GO_LDFLAGS)" -o vio ./cmd/silo/
 
+# Cross-build the macOS transcode node as the image's node_darwin stage does.
+# Without cgo, a new cgo import or an imageutil function missing from its node
+# stub fails here before the image build does.
+.PHONY: build-node-darwin
+NODE_DARWIN_OUT ?= silo-darwin-arm64
+build-node-darwin: embed-stub
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -tags silo_node -trimpath -ldflags "-s -w $(GO_LDFLAGS)" -o "$(NODE_DARWIN_OUT)" ./cmd/silo/
+
 # Run frontend dev server (proxies API to localhost:8080)
 dev-frontend:
 	cd web && pnpm run dev
@@ -55,7 +63,7 @@ dev-proxy:
 # defaults to 8090 so it does not collide with dev-backend on 8080.
 dev-transcode:
 	@test -n "$$SILO_CORE_URL" || { echo 'dev-transcode: set SILO_CORE_URL to the main server URL, e.g. http://localhost:8080' >&2; exit 1; }
-	@test -n "$$SILO_NODE_KEY" || { echo 'dev-transcode: set SILO_NODE_KEY to the key issued for this node on the admin nodes page' >&2; exit 1; }
+	@test -n "$$SILO_NODE_KEY$$SILO_NODE_KEY_FILE" || { echo 'dev-transcode: set SILO_NODE_KEY (or SILO_NODE_KEY_FILE) to the key issued for this node on the admin nodes page' >&2; exit 1; }
 	MODE=transcode PORT=$${PORT:-8090} go run ./cmd/silo/
 
 # Lint Go and frontend code
@@ -68,7 +76,10 @@ lint:
 lint-changed:
 	BASE_REF=$(BASE_REF) scripts/lint-changed.sh
 
-.PHONY: verify-actionlint verify-shellcheck
+.PHONY: verify-fork-pins verify-actionlint verify-shellcheck
+verify-fork-pins:
+	go run ./scripts/ci/forkpins
+
 verify-actionlint:
 	@test "$$(actionlint -version | head -n 1)" = 1.7.12 || { echo 'actionlint 1.7.12 is required' >&2; exit 1; }
 	actionlint

@@ -26,12 +26,12 @@ import (
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/backup/backuptest"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
-	"github.com/Silo-Server/silo-server/internal/mail"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/s3client/s3test"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // testDB opens SILO_TEST_DATABASE_URL, a migrated database other tests share.
@@ -90,7 +90,7 @@ func createDatabase(t *testing.T, pool *pgxpool.Pool, dsn string) string {
 // setSetting writes a setting for the test and puts the previous state back.
 // Other packages' tests share the database, so the keys a test sets are ones
 // nothing else reads.
-func setSetting(t *testing.T, pool *pgxpool.Pool, settings *catalog.EncryptedSettingsRepo, key, value string) {
+func setSetting(t *testing.T, pool *pgxpool.Pool, settings *serversettings.EncryptedSettingsRepo, key, value string) {
 	t.Helper()
 	ctx := t.Context()
 	var previous string
@@ -127,7 +127,7 @@ type roundTripSeed struct {
 // branding asset, a library with a poster, a library whose poster is gone,
 // and a profile with an uploaded avatar, all removed again when the test
 // ends.
-func seedRoundTrip(t *testing.T, pool *pgxpool.Pool, settings *catalog.EncryptedSettingsRepo, store blobstore.Store) roundTripSeed {
+func seedRoundTrip(t *testing.T, pool *pgxpool.Pool, settings *serversettings.EncryptedSettingsRepo, store blobstore.Store) roundTripSeed {
 	t.Helper()
 	ctx := t.Context()
 	suffix := randomHex(t, 4)
@@ -221,7 +221,7 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	manifestKey := manifestKeyOf(t, masterKey)
-	settings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
+	settings := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher)
 	root := t.TempDir()
 	store, err := blobstore.NewFilesystem(root)
 	if err != nil {
@@ -297,7 +297,7 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 		defer restoredPool.Close()
 		checkRestoredFiles(t, seed, blobsInto, restoredPool)
 		checkCredentials(t, loader, pool, dsn, into, restoredPool, seed.userID)
-		restoredSettings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(restoredPool), cipher)
+		restoredSettings := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(restoredPool), cipher)
 		if got, err := restoredSettings.Get(ctx, seed.secretKey); err != nil || got != seed.secretValue {
 			t.Fatalf("restored encrypted setting = %q, %v; want %q", got, err, seed.secretValue)
 		}
@@ -783,66 +783,6 @@ func checkLiveReleasesAndNodes(t *testing.T, loader PGLoader, pool *pgxpool.Pool
 	}
 }
 
-// checkOutboundSettings: a full restore keeps the live mail route as a
-// unit, an SMTP host and password changed since the backup included; a
-// route the live server does not have comes back with its secret cleared
-// and turned off, and so does every route of a restore that carries none.
-func checkOutboundSettings(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn, into string, restored *pgxpool.Pool) {
-	t.Helper()
-	ctx := t.Context()
-	set := func(db *pgxpool.Pool, values map[string]string) {
-		t.Helper()
-		for key, value := range values {
-			if _, err := db.Exec(ctx, `INSERT INTO server_settings (key, value) VALUES ($1, $2)
-				ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`, key, value); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	read := func(key string) string {
-		t.Helper()
-		var v string
-		if err := restored.QueryRow(ctx, `SELECT coalesce((SELECT value FROM server_settings WHERE key = $1), '')`, key).Scan(&v); err != nil {
-			t.Fatal(err)
-		}
-		return v
-	}
-	keys := []string{settingSMTPHost, settingSMTPPassword, mail.SettingSMTPUsername, settingEmailEnabled, settingAIBaseURL, settingAIKey}
-	var saved []string
-	for _, key := range keys {
-		var v *string
-		_ = pool.QueryRow(ctx, `SELECT value FROM server_settings WHERE key = $1`, key).Scan(&v)
-		if v != nil {
-			saved = append(saved, key, *v)
-		}
-	}
-	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM server_settings WHERE key = ANY($1)`, keys)
-		for i := 0; i+1 < len(saved); i += 2 {
-			_, _ = pool.Exec(context.Background(), `INSERT INTO server_settings (key, value) VALUES ($1, $2)`, saved[i], saved[i+1])
-		}
-	})
-	set(restored, map[string]string{settingSMTPHost: "smtp.then.invalid", settingSMTPPassword: "then", mail.SettingSMTPUsername: "then-user", settingEmailEnabled: "true",
-		settingAIBaseURL: "https://ai.then.invalid", settingAIKey: "then-key"})
-	set(pool, map[string]string{settingSMTPHost: "smtp.now.invalid", settingSMTPPassword: "now", mail.SettingSMTPUsername: "now-user", settingEmailEnabled: "true"})
-	if _, err := pool.Exec(ctx, `DELETE FROM server_settings WHERE key = ANY($1)`, []string{settingAIBaseURL, settingAIKey}); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := loader.CarryOutboundSettings(ctx, into, dsn); err != nil {
-		t.Fatal(err)
-	}
-	if read(settingSMTPHost) != "smtp.now.invalid" || read(settingSMTPPassword) != "now" || read(mail.SettingSMTPUsername) != "now-user" {
-		t.Fatalf("mail route %s / %s, want the live one", read(settingSMTPHost), read(settingSMTPPassword))
-	}
-	if read(settingAIBaseURL) != "https://ai.then.invalid" || read(settingAIKey) != "" {
-		t.Fatalf("a route the live server lacks: %s / %q, want the address kept and the key cleared", read(settingAIBaseURL), read(settingAIKey))
-	}
-	if _, cleared, err := loader.CarryOutboundSettings(ctx, into, ""); err != nil || read(settingSMTPPassword) != "" || read(settingEmailEnabled) != settingOff ||
-		!slices.Contains(cleared, "mail (SMTP)") {
-		t.Fatalf("carrying none (%v): password %q, enabled %q, cleared %v; want it cleared and off", err, read(settingSMTPPassword), read(settingEmailEnabled), cleared)
-	}
-}
-
 // checkInterruptedWork: after a full restore nothing the backup had queued
 // or running runs by itself. A storage transition queued when the backup
 // was taken, and canceled on the live server since, ends canceled, its
@@ -1231,7 +1171,7 @@ func checkAnotherKey(t *testing.T, src *Source, loader PGLoader, pool *pgxpool.P
 		t.Fatalf("%d encrypted settings left, want only the new signing keys; output %q must name %s and not the signing key", left, out.String(), secretKey)
 	}
 	// The signing key is a new one, encrypted with this server's key.
-	jwt, err := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(restored), other).Get(ctx, settingJWTSecret)
+	jwt, err := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(restored), other).Get(ctx, settingJWTSecret)
 	if err != nil || jwt == "" || strings.HasPrefix(jwt, "backup-jwt-") {
 		t.Fatalf("restored signing key = %q, %v; want a new one", jwt, err)
 	}
@@ -1470,7 +1410,7 @@ func TestBackupAndDeleteWithOnePoolConnectionDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
+	settings := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher)
 	// The stores as the server opens them: the first write records the
 	// storage identity through the settings, and so through the pool.
 	stores, _, err := blobstore.Open(ctx, blobstore.Options{Backend: blobstore.BackendLocal, LocalPath: t.TempDir(), Settings: settings})
@@ -1507,7 +1447,7 @@ func TestBackupAndDeleteWithOnePoolConnectionDB(t *testing.T) {
 
 // setBackupBucket gives the test server a backup bucket of its own, which a
 // copy restored from its backup must not use.
-func setBackupBucket(t *testing.T, pool *pgxpool.Pool, settings *catalog.EncryptedSettingsRepo) {
+func setBackupBucket(t *testing.T, pool *pgxpool.Pool, settings *serversettings.EncryptedSettingsRepo) {
 	t.Helper()
 	setSetting(t, pool, settings, config.BackupDestinationSettingKey, DestinationS3)
 	setSetting(t, pool, settings, config.BackupS3SecretKeySettingKey, "bucket-secret")
@@ -1515,7 +1455,7 @@ func setBackupBucket(t *testing.T, pool *pgxpool.Pool, settings *catalog.Encrypt
 
 // checkNoBackupBucket fails unless a restored copy has no backup bucket
 // settings, so it never writes to the original's bucket.
-func checkNoBackupBucket(t *testing.T, settings *catalog.EncryptedSettingsRepo) {
+func checkNoBackupBucket(t *testing.T, settings *serversettings.EncryptedSettingsRepo) {
 	t.Helper()
 	bucket, err := settings.GetMany(t.Context(), config.BackupDestinationSettingKey, config.BackupS3SecretKeySettingKey)
 	if err != nil || len(bucket) != 0 {
@@ -1550,7 +1490,7 @@ func TestEncryptedS3RoundTripDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	settings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
+	settings := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher)
 	store, err := blobstore.NewFilesystem(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -1631,7 +1571,7 @@ func TestEncryptedS3RoundTripDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer restoredPool.Close()
-	restoredSettings := catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(restoredPool), cipher)
+	restoredSettings := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(restoredPool), cipher)
 	if got, err := restoredSettings.Get(ctx, seed.secretKey); err != nil || got != seed.secretValue {
 		t.Fatalf("restored encrypted setting = %q, %v; want %q", got, err, seed.secretValue)
 	}
@@ -1759,7 +1699,7 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 		}
 		_, rotated := rotatedSettings[key]
 		switch {
-		case rotated:
+		case rotated || key == plugins.ProvisionRestoreHoldKey:
 			if got == nil || *got != "backup" {
 				t.Errorf("%s = %v, want the restore's own value kept", key, got)
 			}

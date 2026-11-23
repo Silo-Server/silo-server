@@ -883,7 +883,7 @@ export default function WebhookSyncSettings() {
                       {t("web.settings.webhooks.detail.webhookUrl")}
                     </Label>
                     <div className="flex flex-col gap-2 sm:flex-row">
-                      <Input value={webhookURL} readOnly className="font-mono text-xs" />
+                      <Input dir="ltr" value={webhookURL} readOnly className="font-mono text-xs" />
                       <div className="flex gap-2">
                         <Button
                           variant="outline"

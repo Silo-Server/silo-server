@@ -281,6 +281,18 @@
       "value": "Αυτός ο κωδικός σύνδεσης έληξε. Ξεκινήστε ξανά."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "Αυτός ο λογαριασμός έχει φτάσει το όριο συσκευών για απευθείας συνδέσεις."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "Μια άλλη συσκευή χρησιμοποιεί ήδη αυτό το κλειδί σύνδεσης. Δοκιμάστε ξανά."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -338,7 +350,13 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Ορίζεται από το περιβάλλον του κόμβου. Αλλάξτε το εκεί και επανεκκινήστε τον κόμβο."
+      "value": "Ορίζεται από το περιβάλλον. Αλλάξτε το εκεί και επανεκκινήστε την υπηρεσία που επηρεάζεται."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "Αυτή η τιμή λείπει."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +465,12 @@
     {
       "type": 0,
       "value": "Συνδεθείτε μέσω της υπηρεσίας σύνδεσης του δικτύου σας για να συνεχίσετε."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Αυτός ο κόμβος ορίζεται από τη διαμόρφωση ανάπτυξης του διακομιστή. Αφαιρέστε τον από εκεί και επανεκκινήστε τους διακομιστές API για να τον διαχειρίζεστε εδώ."
     }
   ],
   "error.not_acceptable": [
@@ -13418,7 +13442,7 @@
             },
             {
               "type": 0,
-              "value": " δεν μπορούν να επαναφερθούν – οι ρυθμίσεις έχουν κρυπτογραφηθεί με διαφορετικό SECRET_KEY"
+              "value": " δεν μπορούν να επαναφερθούν – οι ρυθμίσεις τους έχουν κρυπτογραφηθεί με διαφορετικό SECRET_KEY"
             }
           ]
         }
@@ -13520,7 +13544,7 @@
             },
             {
               "type": 0,
-              "value": " δεν μπορούν να επαναφερθούν – τα αρχεία λείπουν από αυτόν τον διακομιστή"
+              "value": " δεν μπορούν να επαναφερθούν – τα αρχεία τους λείπουν από αυτόν τον διακομιστή"
             }
           ]
         }
@@ -13554,7 +13578,7 @@
             },
             {
               "type": 0,
-              "value": " δεν μπορούν να επαναφερθούν – οι φάκελοι δεν υπάρχουν σε αυτόν τον διακομιστή"
+              "value": " δεν μπορούν να επαναφερθούν – οι φάκελοί τους δεν υπάρχουν σε αυτόν τον διακομιστή"
             }
           ]
         }
@@ -13588,7 +13612,7 @@
             },
             {
               "type": 0,
-              "value": " δεν μπορούν να επαναφερθούν – η ομάδα πρόσβασης δεν υπάρχει σε αυτόν τον διακομιστή"
+              "value": " δεν μπορούν να επαναφερθούν – η ομάδα πρόσβασής τους δεν υπάρχει σε αυτόν τον διακομιστή"
             }
           ]
         }
@@ -13644,7 +13668,7 @@
             },
             {
               "type": 0,
-              "value": " δεν μπορεί να επαναφερθεί – θα διεύρυνε την πρόσβαση, οπότε αυτός ο διακομιστής διατηρεί τις αυστηρότερες τιμές του"
+              "value": " δεν μπορεί να επαναφερθεί – θα διεύρυνε την πρόσβαση, οπότε αυτός ο διακομιστής διατηρεί τις δικές του αυστηρότερες τιμές"
             }
           ]
         },
@@ -13759,6 +13783,40 @@
             {
               "type": 0,
               "value": " δεν μπορούν να επαναφερθούν – άλλος λογαριασμός εδώ συνδέεται με το ίδιο όνομα χρήστη ή email"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " δεν μπορεί να επαναφερθεί – το περιβάλλον αυτού του διακομιστή ορίζει τις ρυθμίσεις που διαφέρουν ή μέρος της σύνδεσής τους"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " δεν μπορούν να επαναφερθούν – το περιβάλλον αυτού του διακομιστή ορίζει τις ρυθμίσεις που διαφέρουν ή μέρος της σύνδεσής τους"
             }
           ]
         }
@@ -14291,6 +14349,40 @@
       "value": "Η διεύθυνση μιας υπηρεσίας αλλάζει χωρίς τα διαπιστευτήριά της στο αντίγραφο ασφαλείας, οπότε η επαναφορά τα διαγράφει εδώ και απενεργοποιεί την υπηρεσία μέχρι να εισαχθούν ξανά."
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ρύθμιση διατηρεί την τρέχουσα τιμή της, επειδή την ορίζει το περιβάλλον αυτού του διακομιστή ή αυτό ορίζει μέρος της σύνδεσής της."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ρυθμίσεις διατηρούν τις τρέχουσες τιμές τους, επειδή τις ορίζει το περιβάλλον αυτού του διακομιστή ή αυτό ορίζει μέρος της σύνδεσής τους."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -14735,8 +14827,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Απόκρυψη"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14885,8 +15003,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Εμφάνιση"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15595,14 +15739,14 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Επιλέχθηκε επίσης "
+              "value": "Επιλέχθηκε επίσης ό,τι απαιτείται από την επιλογή σας: "
             },
             {
               "type": 1,
@@ -15610,7 +15754,23 @@
             },
             {
               "type": 0,
-              "value": ", που απαιτείται από ό,τι επιλέξατε."
+              "value": "."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Επιλέχθηκαν επίσης όσα απαιτούνται από την επιλογή σας: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "."
             }
           ]
         },
@@ -15618,7 +15778,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Επιλέχθηκαν επίσης "
+              "value": "Επιλέχθηκαν επίσης όσα απαιτούνται από την επιλογή σας: "
             },
             {
               "type": 1,
@@ -15626,25 +15786,23 @@
             },
             {
               "type": 0,
-              "value": ", που απαιτούνται από ό,τι επιλέξατε."
+              "value": "."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Αποεπιλέχθηκε επίσης "
+              "value": "Αποεπιλέχθηκε επίσης ό,τι εξαρτάται από όσα αποεπιλέξατε: "
             },
             {
               "type": 1,
@@ -15652,7 +15810,23 @@
             },
             {
               "type": 0,
-              "value": ", που απαιτεί ό,τι αποεπιλέξατε."
+              "value": "."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Αποεπιλέχθηκαν επίσης όσα εξαρτώνται από όσα αποεπιλέξατε: "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "."
             }
           ]
         },
@@ -15660,7 +15834,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Αποεπιλέχθηκαν επίσης "
+              "value": "Αποεπιλέχθηκαν επίσης όσα εξαρτώνται από όσα αποεπιλέξατε: "
             },
             {
               "type": 1,
@@ -15668,13 +15842,11 @@
             },
             {
               "type": 0,
-              "value": ", που απαιτούν ό,τι αποεπιλέξατε."
+              "value": "."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -17113,6 +17285,12 @@
       "value": "Ένας άλλος λογαριασμός εδώ συνδέεται με το ίδιο όνομα χρήστη ή email."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Το περιβάλλον αυτού του διακομιστή ορίζει τις ρυθμίσεις που διαφέρουν ή μέρος της σύνδεσής τους, οπότε αυτός ο διακομιστής διατηρεί τις τρέχουσες τιμές του."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -17655,6 +17833,154 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Εικόνα φόντου"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " στοιχείο συλλογής"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " στοιχεία συλλογής"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Αντικατάσταση συλλογής"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Διαμόρφωση"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Περιγραφή"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Ενεργοποίηση"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Προβολή στα προτεινόμενα"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Όριο στοιχείων"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Ταξινόμηση στοιχείων"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Βιβλιοθήκες"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Θέση"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Αφίσα"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Σειρά ταξινόμησης"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Πηγή"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Πρόγραμμα συγχρονισμού"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Τίτλος"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Μετάφραση τίτλου"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Τύπος"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Ορατότητα"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Μόνο στην εφαρμογή web"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -18195,6 +18521,16 @@
     {
       "type": 0,
       "value": " (διατηρείται: αυστηρότερη)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (διατηρείται: περιβάλλον)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -19267,6 +19603,20 @@
       "value": "Στη ζώνη ώρας του διακομιστή."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Στη ζώνη ώρας του διακομιστή. Η αντίστοιχη ώρα στη δική σας ζώνη ώρας είναι "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -20179,14 +20529,22 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "δεν ήταν δυνατή η ανάγνωση των δεδομένων του"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "δεν ήταν δυνατή η ανάγνωση των δεδομένων τους"
             }
           ]
         },
@@ -20198,9 +20556,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -20247,20 +20603,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Απόκρυψη των λογαριασμών"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη του λογαριασμού"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη των λογαριασμών"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη των λογαριασμών"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Απόκρυψη των αρχείων"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη του αρχείου"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη των αρχείων"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη των αρχείων"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Απόκρυψη αρχείων"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη αρχείου"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη αρχείων"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Απόκρυψη αρχείων"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20323,6 +20757,346 @@
     {
       "type": 0,
       "value": "Αναφέρονται στη βάση δεδομένων αλλά δεν βρέθηκαν στον χώρο αποθήκευσης. Οι επαναφορές τα παραλείπουν."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " στοιχείο επωνυμίας"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " στοιχεία επωνυμίας"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " φόντο συλλογής"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " φόντα συλλογών"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αφίσα συλλογής"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αφίσες συλλογών"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " υπότιτλος από λήψη"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " υπότιτλοι από λήψη"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αφίσα βιβλιοθήκης"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αφίσες βιβλιοθηκών"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " εικόνα επικάλυψης"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " εικόνες επικάλυψης"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αφίσα προσωπικής συλλογής"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αφίσες προσωπικών συλλογών"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " εικόνα προφίλ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " εικόνες προφίλ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αρχείο εικαστικών που έχει αποσταλεί"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " αρχεία εικαστικών που έχουν αποσταλεί"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " υπότιτλος που έχει αποσταλεί"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " υπότιτλοι που έχουν αποσταλεί"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -20573,14 +21347,26 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "δεν ήταν δυνατή η ανάγνωση των δεδομένων του: "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "δεν ήταν δυνατή η ανάγνωση των δεδομένων τους: "
             },
             {
               "type": 1,
@@ -20600,9 +21386,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -20617,8 +21401,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Εμφάνιση των λογαριασμών"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση του λογαριασμού"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση των λογαριασμών"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση των λογαριασμών"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20665,26 +21475,86 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Εμφάνιση των αρχείων"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση του αρχείου"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση των αρχείων"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση των αρχείων"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Εμφάνιση αρχείων"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση αρχείου"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση αρχείων"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εμφάνιση αρχείων"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "τα δεδομένα του είναι πολύ μεγάλα για το σύνολο επαναφοράς"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "τα δεδομένα τους είναι πολύ μεγάλα για το σύνολο επαναφοράς"
             }
           ]
         },
@@ -20696,9 +21566,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -23349,6 +24217,12 @@
       "value": "Ο πάροχος μετατροπής ομιλίας σε κείμενο δεν είναι προσωρινά διαθέσιμος. Δοκιμάστε ξανά αργότερα."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος AI κειμένου δεν έχει διαθέσιμη πίστωση ή εξαντλήθηκε κάποιο όριο χρήσης ή δαπανών. Ελέγξτε το υπόλοιπο και τα όρια στον πάροχο ή τις ρυθμίσεις χρήσης του ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -23359,6 +24233,80 @@
     {
       "type": 0,
       "value": "Η σύνδεση με τον πάροχο AI κειμένου απέτυχε. Ελέγξτε το μοντέλο, το επίπεδο συλλογισμού, το επίπεδο υπηρεσίας, τη σύνδεση λογαριασμού και τα όρια χρήσης του παρόχου."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Η πρόσβαση στον πάροχο AI κειμένου απορρίφθηκε. Ελέγξτε ότι το κλειδί API ή ο λογαριασμός ChatGPT έχει δικαίωμα χρήσης αυτού του μοντέλου."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Το endpoint ή το μοντέλο AI κειμένου δεν είναι διαθέσιμο. Ελέγξτε το βασικό URL του παρόχου και το μοντέλο."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Ο συνδεδεμένος λογαριασμός ChatGPT δεν μπορεί να μοιραστεί τη χρήση της συνδρομής του. Ελέγξτε τις ρυθμίσεις χρήσης του ChatGPT ή συνδέστε άλλον λογαριασμό."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος AI κειμένου περιορίζει τον ρυθμό των αιτημάτων. Δοκιμάστε ξανά αργότερα."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος AI κειμένου αρνήθηκε το αίτημα ελέγχου. Ελέγξτε το μοντέλο, το επίπεδο συλλογισμού και τις ρυθμίσεις χρήσης του λογαριασμού. Το σφάλμα του παρόχου υπάρχει στο αρχείο καταγραφής του διακομιστή."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος AI κειμένου απέρριψε το αίτημα ελέγχου (κατάσταση "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Ελέγξτε το μοντέλο, το επίπεδο συλλογισμού και το επίπεδο υπηρεσίας. Το σφάλμα του παρόχου υπάρχει στο αρχείο καταγραφής του διακομιστή."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Ο χρόνος του ελέγχου σύνδεσης με τον πάροχο AI κειμένου έληξε. Ελέγξτε τη διαθεσιμότητα του παρόχου και δοκιμάστε ξανά."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος AI κειμένου απέρριψε τα διαπιστευτήρια. Αντικαταστήστε το κλειδί API του παρόχου ή συνδεθείτε ξανά με το ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Ο πάροχος AI κειμένου δεν είναι προσωρινά διαθέσιμος. Δοκιμάστε ξανά αργότερα."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Το Silo δεν μπόρεσε να επικοινωνήσει με τον πάροχο AI κειμένου. Ελέγξτε το βασικό URL του παρόχου και ότι αυτός ο διακομιστής μπορεί να συνδεθεί σε αυτόν."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Το μοντέλο κειμένου επέστρεψε απάντηση που το Silo δεν μπορεί να χρησιμοποιήσει. Επιλέξτε άλλο μοντέλο."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -23447,6 +24395,12 @@
     {
       "type": 0,
       "value": "Εκκαθάριση ορίου"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "Απευθείας"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -28579,6 +29533,12 @@
       "value": "απέτυχε"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Η εργασία απέτυχε. Ελέγξτε τα διαγνωστικά στοιχεία διαχειριστή για λεπτομέρειες."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -30606,7 +31566,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Λίστα συνεδριών αναπαραγωγής που ξεκίνησαν πρόσφατα"
+      "value": "Οι πιο πρόσφατες αναπαραγωγές σε όλους τους λογαριασμούς"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32239,6 +33199,72 @@
     {
       "type": 0,
       "value": "Δεν ήταν δυνατή η φόρτωση της δραστηριότητας."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " αναπαρήγαγε το στοιχείο "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " αναπαρήγαγε το στοιχείο "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -45422,6 +46448,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Οι σαρώσεις και οι ανανεώσεις μεταδεδομένων εμφανίζονται εδώ όσο εκτελούνται."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Δεν υπάρχουν ενεργές σαρώσεις ή ανανεώσεις"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Όλα ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Απόκρυψη ουράς"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ακόμη βιβλιοθήκη"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ακόμη βιβλιοθήκες"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Ανανεώσεις μεταδεδομένων"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Ανανέωση μεταδεδομένων…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Προβολή ουράς"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Υψηλή"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Χαμηλή"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Μέτρια"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -45860,6 +46994,30 @@
       "value": "Επιβεβαίωση εκκαθάρισης κενών ριζικών φακέλων"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Έλεγχος"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Δεν υπάρχουν στοιχεία σε αναμονή στην ουρά αντιστοίχισης μεταδεδομένων."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Δεν έχουν καταγραφεί ριζικοί φάκελοι που παραλείφθηκαν."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Δεν έχουν καταγραφεί παρωχημένα εξωτερικά αναγνωριστικά."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -45896,6 +47054,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Επεξεργασία"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Δεν έχουν ρυθμιστεί ακόμη βιβλιοθήκες."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -45948,6 +47118,12 @@
       "value": "Απόκρυψη διαδρομών"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Σε αδράνεια"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -45982,6 +47158,12 @@
       "value": "Μερική σάρωση"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Συμπλήρωση όσων λείπουν ή αντικατάσταση όλων των μεταδεδομένων"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -45994,6 +47176,12 @@
       "value": "Μη προσβάσιμος ριζικός φάκελος"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Σάρωση"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -46004,6 +47192,12 @@
     {
       "type": 0,
       "value": "Εμφάνιση διαδρομών"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Διακοπή"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -46022,6 +47216,22 @@
     {
       "type": 0,
       "value": "Επαλήθευση προσαρτήσεων"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Έλεγχος ότι όλοι οι φάκελοι της βιβλιοθήκης είναι προσβάσιμοι"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Προβολή ενεργών σαρώσεων της βιβλιοθήκης "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -46125,7 +47335,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Διαχείριση ριζικών φακέλων βιβλιοθηκών και σαρώσεων. Η εισαγωγή/εξαγωγή καταλόγου βρίσκεται πλέον στην ενότητα «Συντήρηση»."
+      "value": "Διαχείριση φακέλων πολυμέσων, παρακολούθηση σαρώσεων και επίλυση προβλημάτων αντιστοίχισης."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -46612,6 +47822,56 @@
       "value": "Παρωχημένα εξωτερικά αναγνωριστικά"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ενεργή"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " ενεργές"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Δραστηριότητα σαρώσεων"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Κατάσταση καταλόγου"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Βιβλιοθήκες"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -47054,6 +48314,24 @@
     {
       "type": 0,
       "value": "Αναζήτηση στοιχείων σε παράβλεψη κατά τίτλο, βιβλιοθήκη ή τύπο…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Αμφίσημη αντιστοίχιση"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Σε εκκρεμότητα"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Χωρίς αντιστοίχιση"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -49708,6 +50986,12 @@
       "value": "Εισαγάγετε τη διεύθυνση του διακομιστή για να ολοκληρωθούν οι ρυθμίσεις."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Κλειδί ορισμένο από τη διαμόρφωση ανάπτυξης του διακομιστή"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50620,6 +51904,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ορίζεται από τη διαμόρφωση ανάπτυξης του διακομιστή. Αφαιρέστε τον κόμβο από εκεί και επανεκκινήστε τους διακομιστές API για να τον διαγράψετε εδώ."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52419,6 +53709,68 @@
       "value": "Πρόσθετα"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Εφαρμόστηκε"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Σε αναστολή"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η φόρτωση της κατάστασης παροχής πρόσθετων."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Διαχειρίζεται από το περιβάλλον"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Σε εκκρεμότητα"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Απορρίφθηκε"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Η πηγή του πακέτου και η αφαίρεσή του ελέγχονται από τη διαμόρφωση ανάπτυξης."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Κατάσταση παροχής"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Η διαμόρφωση ανάπτυξης κλειδώνει αυτό το πρόσθετο στην έκδοση "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -53179,6 +54531,114 @@
       "value": "Η δημιουργία προτάσεων σταμάτησε. Οι αποθηκευμένες προτάσεις παραμένουν ορατές στην Ανακάλυψη μέχρι την επανεκκίνηση του διακομιστή."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Κατάταξη προφίλ ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Ανάκτηση λιστών TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Αναζήτηση και ενσωμάτωση τίτλων ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εκκαθαρίστηκε "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " τίτλος που έληξε"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Εκκαθαρίστηκαν "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " τίτλοι που έληξαν"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53211,6 +54671,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Επιλύστε την παρακάτω διένεξη κλειδώματος ενσωματώσεων πριν από τη δημιουργία προτάσεων Ανακάλυψης."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Εκτελέστε πρώτα τη διεργασία «Ενσωματώσεις», ώστε το Silo να έχει διανύσματα της βιβλιοθήκης για σύγκριση."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Συνδέστε έναν πάροχο ενσωματώσεων στην ενότητα «Υπηρεσίες AI» πριν από τη δημιουργία προτάσεων Ανακάλυψης."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Κανένα προφίλ δεν έχει ακόμα προφίλ προτιμήσεων. Εκτελέστε τη διεργασία «Προφίλ προτιμήσεων» μόλις κάποιος παρακολουθήσει ή βαθμολογήσει τίτλους."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -55069,6 +56553,32 @@
       "value": "Παραμένει κενή μέχρι να ενεργοποιηθούν οι προτάσεις Ανακάλυψης στη Διαχείριση → Προτάσεις."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Οι γραμμές προτάσεων παραμένουν κενές μέχρι να ενεργοποιηθούν οι προτάσεις Ανακάλυψης στη "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Διαχείριση → Προτάσεις"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Ανενεργό στις Προτάσεις"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56547,6 +58057,12 @@
       "value": "Οι νέες γραμμές προστίθενται στο κάτω μέρος της Ανακάλυψης"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Άνοιγμα των ρυθμίσεων Προτάσεων"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56559,6 +58075,12 @@
       "value": "Η ροή του MDBList δεν περιλαμβάνει την ταξινόμηση που έχει αποθηκευτεί στη σελίδα της λίστας. Επιλέξτε αυτήν που εμφανίζεται εκεί."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Το προφίλ σας δεν έχει ακόμα προτάσεις Ανακάλυψης. Εκτελέστε τη διεργασία «Προτάσεις Ανακάλυψης» ή παρακολουθήστε και βαθμολογήστε μερικούς τίτλους για να δείτε προεπισκόπηση αυτής της γραμμής."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56569,6 +58091,12 @@
     {
       "type": 0,
       "value": "Επιλέξτε μια λίστα ή επικολλήστε τον σύνδεσμό της για να δείτε τους τίτλους της."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Ενεργοποιήστε τις προτάσεις Ανακάλυψης στη Διαχείριση → Προτάσεις για να δείτε προεπισκόπηση αυτής της γραμμής."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -57363,6 +58891,12 @@
     {
       "type": 0,
       "value": "Το μήνυμα στάλθηκε"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Το πρόγραμμα αναπαραγωγής δεν επιβεβαίωσε τη λήψη του μηνύματος. Μπορεί να εμφανιστεί με καθυστέρηση ή να μην εμφανιστεί καθόλου."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -60237,6 +61771,12 @@
       "value": "Ο έλεγχος σύνδεσης απέτυχε."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατός ο έλεγχος για το αν το περιβάλλον του διακομιστή ορίζει αυτήν τη ρύθμιση. Ανανεώστε τη σελίδα για να την επεξεργαστείτε."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60791,6 +62331,30 @@
     {
       "type": 0,
       "value": "Αποτυχία ενημέρωσης καναλιού"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Ανανεώστε για να δείτε τις τρέχουσες τιμές. Αν άλλαξε κάτι σε αυτήν τη σελίδα ή αν επεξεργαστήκατε αποθηκευμένο κωδικό πρόσβασης ή κλειδί, αναιρούνται όλες οι αλλαγές σας. Διαφορετικά, διατηρούνται."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Ανανέωση"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η ανανέωση των ρυθμίσεων. Δοκιμάστε ξανά."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Οι ρυθμίσεις άλλαξαν αλλού"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -62793,6 +64357,612 @@
     {
       "type": 0,
       "value": "Συγχρονισμός διαδικτυακών δεικτών"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "Αλγόριθμος: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "ζητούμενος: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": " – ενεργός: "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "Επιτρεπόμενες τιμές: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "Έλεγχος συμφόρησης: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "Λογαριασμός"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "Σε αυτή τη διαδρομή από"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "Συσκευή"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "Δεν υπάρχει συσκευή με απευθείας σύνδεση."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "Endpoint ομότιμου κόμβου"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "Συνδεδεμένες συσκευές"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "στη θύρα "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "Προεπιλογή: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "Ελέγξτε την ετοιμότητα αυτού του διακομιστή για απευθείας συνδέσεις."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "Σε ισχύ: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "Ενεργοποίηση απευθείας συνδέσεων"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Δυνατότητα NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "Μηχανή απευθείας συνδέσεων"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT hairpin"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "Αντιστοίχιση NAT"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "Εναλλακτική λύση PMTU"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "Δυνατότητα πρόσβασης"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "Προσωρινή μνήμη λήψης socket"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "Προσωρινή μνήμη αποστολής socket"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "Βελτιστοποίηση κεντρικού υπολογιστή"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "Αραίωση ACK"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "Πολιτική απωλειών BBR"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "Εκφόρτωση τμηματοποίησης UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "Παράθυρο λήψης προγράμματος-πελάτη"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "Θύρα UDP απευθείας συνδέσεων"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "Έλεγχος συμφόρησης TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "Προσωρινή μνήμη αποστολής TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "Τελευταίος έλεγχος: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "Διακομιστής μεσολάβησης"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "Listener"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "Δημόσια διεύθυνση που εντοπίστηκε: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "Ελέγχει τον δρομολογητή για υποστήριξη UPnP, NAT-PMP ή PCP."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "Αντιστοίχιση θυρών"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "Οι έλεγχοι ετοιμότητας δεν ξεκινούν απευθείας αναπαραγωγή."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "Απενεργοποιήθηκε από διαχειριστή"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "Ανενεργό"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η εκκίνηση της μηχανής απευθείας συνδέσεων"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η αύξηση της προσωρινής μνήμης"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "Ο δρομολογητής δεν υποστηρίζει αντιστοίχιση θυρών"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "Η προσωρινή μνήμη είναι μικρότερη από τη ζητούμενη"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "Το βοηθητικό πρόγραμμα ρύθμισης δικτύου δεν είναι διαθέσιμο"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "Μη έγκυρη τιμή – χρησιμοποιείται «Ανενεργό»"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "Το σύστημα δεν μπόρεσε να εφαρμόσει ή να διαβάσει αυτή τη ρύθμιση"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "Δεν υποστηρίζεται από αυτόν τον πυρήνα"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "Συμπληρώθηκε το όριο προσωρινής μνήμης του κεντρικού υπολογιστή"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η ανάγνωση των ορίων προσωρινής μνήμης του κεντρικού υπολογιστή"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "Η δημόσια διεύθυνση διαφέρει ανάλογα με τον προορισμό"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "Το BBR δεν είναι διαθέσιμο"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "Το BBR δεν έχει φορτωθεί ή δεν επιτρέπεται"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "Εκτελούνται περισσότεροι από ένας διακομιστές API"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "Η δυνατότητα NET_ADMIN αφαιρέθηκε"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Λείπει η δυνατότητα NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "Δεν βρέθηκε δρομολογητής"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "Λείπει η δυνατότητα NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "Άρνηση πρόσβασης"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "Μη διαθέσιμο"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "Δεν έχει μετρηθεί"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "Δεν χρειάζεται αύξηση"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "Η πολιτική του κεντρικού υπολογιστή επέλεξε άλλον αλγόριθμο"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "Ο έλεγχος απέτυχε"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατός ο έλεγχος για άλλους διακομιστές API"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "Άλλος διακομιστής API φιλοξενεί τις απευθείας συνδέσεις"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "Αναμονή για ανάληψη της φιλοξενίας των απευθείας συνδέσεων"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "Η κατάσταση των απευθείας συνδέσεων δεν είναι διαθέσιμη"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατό το άνοιγμα της θύρας UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "Η θύρα UDP δεν είναι έγκυρη"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "Δεν υποστηρίζεται σε αυτή την πλατφόρμα"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "Ζητούμενη τιμή: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "Ζητούμενο: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": " – παραχωρημένο: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "Εκτέλεση ελέγχου"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "Προσωρινή μνήμη αποστολής: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "Περιορισμένο"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "Υποβαθμισμένο"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "Εναλλακτική λύση"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "Δεν χρειάζεται"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "Ανενεργό"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "Ενεργό"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "Άγνωστο"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "Λίστα με έως οκτώ καταχωρίσεις host:port, χωρισμένες με κόμματα. Αφήστε την κενή για να χρησιμοποιηθούν οι προεπιλογές."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "Διακομιστές STUN"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "Απευθείας συνδέσεις"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "Επιτρέψτε στις συσκευές να συνδέονται σε αυτόν τον διακομιστή μέσω απευθείας διαδρομής UDP. Η θύρα UDP ορίζεται από τη μεταβλητή "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " και εδώ είναι μόνο για ανάγνωση."
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -66257,6 +68427,24 @@
       "value": "Η αλλαγή σε άλλο μοντέλο απαιτεί επαναφορά των ενσωματώσεων, η οποία τις διαγράφει όλες. Ένας άλλος πάροχος που εξυπηρετεί το ίδιο μοντέλο εφαρμόζεται μετά από επανεκκίνηση."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Προσθήκη στην Ανακάλυψη"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Δεν ήταν δυνατή η προσθήκη γραμμών προτάσεων στη σελίδα Ανακάλυψης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Οι γραμμές προτάσεων προστέθηκαν στη σελίδα Ανακάλυψης."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66279,6 +68467,44 @@
     {
       "type": 0,
       "value": "Πόσους τίτλους που δεν υπάρχουν στη βιβλιοθήκη διατηρεί ο διακομιστής για να κάνει προτάσεις. Για τον καθένα γίνεται αναζήτηση στο TMDB και δημιουργείται ενσωμάτωση. Η ενσωμάτωση είναι συνήθως φθηνή, αλλά ένας μεγαλύτερος αριθμός μπορεί να κοστίσει περισσότερο ή να διαρκέσει περισσότερο, ανάλογα με τον πάροχο ενσωματώσεων, και χρησιμοποιεί περισσότερο χώρο αποθήκευσης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Η σελίδα Ανακάλυψης δεν εμφανίζει ακόμα καμία γραμμή Προτάσεων."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Ενεργοποιήστε την επιλογή «Ενεργοποίηση προτάσεων» παραπάνω και επανεκκινήστε τον διακομιστή, για να μπορούν να εκτελεστούν οι προτάσεις Ανακάλυψης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Τα αιτήματα είναι προς το παρόν ανενεργά. Ενεργοποιήστε τα στις "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Ρυθμίσεις αιτημάτων"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", ώστε οι θεατές να βλέπουν τη σελίδα Ανακάλυψης."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Άνοιγμα σελίδας Ανακάλυψης"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75577,6 +77803,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Δεν είναι δυνατή η μετακίνηση του χώρου αποθήκευσης εδώ όσο οι μεταβλητές περιβάλλοντος ορίζουν ρυθμίσεις αποθήκευσης ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Πρώτα καταργήστε τον ορισμό αυτών των μεταβλητών και επανεκκινήστε κάθε διακομιστή API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76713,6 +78953,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Αυτό το πρόγραμμα προέρχεται από τις ρυθμίσεις αντιγράφων ασφαλείας. Αλλάξτε το στη σελίδα "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Διακομιστής › Αντίγραφα ασφαλείας"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -77015,10 +79275,66 @@
       "value": "Πρόσφατα σφάλματα"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Η ανανέωση απέτυχε. Ελέγξτε τα διαγνωστικά στοιχεία διαχειριστή για λεπτομέρειες."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Έλεγχος τρέχοντος προγράμματος"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -77463,6 +79779,18 @@
     {
       "type": 0,
       "value": "Νέα προσπάθεια webhook του Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Διαβάζει ξανά την κεφαλίδα των αρχείων MKV με υπότιτλους ASS που σαρώθηκαν πριν το Silo αρχίσει να εξαιρεί τις ενσωματωμένες γραμματοσειρές από τον ρυθμό μετάδοσης bit, ώστε να μην διακωδικοποιούνται εξαιτίας ενός ρυθμού μετάδοσης bit που δεν χρησιμοποιούν στη ροή."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Διόρθωση ρυθμού μετάδοσης bit αρχείων με ενσωματωμένες γραμματοσειρές"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -87026,25 +89354,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Δεν ήταν δυνατή η σύνδεση της τηλεόρασης. Δοκιμάστε ξανά."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Ελέγξτε ότι η εφαρμογή σας εμφανίζει"
+      "value": "Δεν ήταν δυνατή η έγκριση της σύνδεσης. Δοκιμάστε ξανά."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Ελέγξτε ότι η τηλεόρασή σας εμφανίζει"
+      "value": "Βεβαιωθείτε ότι αυτός ο κωδικός ταιριάζει"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Εισαγάγετε τον κωδικό που εμφανίζεται στην τηλεόραση ή στην εφαρμογή σας"
+      "value": "Εισαγάγετε τον κωδικό που εμφανίζεται στη συσκευή σας"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -87056,13 +89378,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Συνδέστε μια τηλεόραση ή άλλη συσκευή με τον λογαριασμό σας."
+      "value": "Σύνδεση τηλεόρασης, εφαρμογής ή άλλης συσκευής."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Σύνδεση τηλεόρασης"
+      "value": "Έγκριση σύνδεσης"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -87082,13 +89404,13 @@
     },
     {
       "type": 0,
-      "value": " για να εγκρίνετε μια τηλεόραση. Μόνο ο ίδιος ο λογαριασμός μπορεί να συνδέσει μια τηλεόραση."
+      "value": " για να εγκρίνετε αυτή τη σύνδεση. Μόνο ο ίδιος ο λογαριασμός μπορεί να εγκρίνει συσκευές."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Σταματήστε την προβολή ως αυτός ο χρήστης για να εγκρίνετε μια τηλεόραση. Μόνο ο ίδιος ο λογαριασμός μπορεί να συνδέσει μια τηλεόραση."
+      "value": "Σταματήστε την προβολή ως αυτός ο χρήστης για να εγκρίνετε αυτή τη σύνδεση. Μόνο ο ίδιος ο λογαριασμός μπορεί να εγκρίνει συσκευές."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -87106,39 +89428,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Δεν βρέθηκε αυτός ο κωδικός. Ελέγξτε τον κωδικό στην τηλεόρασή σας."
+      "value": "Δεν ήταν δυνατή η εύρεση αυτού του κωδικού. Ελέγξτε τον κωδικό και δοκιμάστε ξανά."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Όχι τώρα"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Οι παλαιότερες εφαρμογές τηλεόρασης εμφανίζουν στη θέση του τις λέξεις "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Εγκρίνετε μόνο μια συσκευή που βρίσκεται μπροστά σας αυτή τη στιγμή."
+      "value": "Απόρριψη"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Εγκρίνετε μόνο μια τηλεόραση που βρίσκεται μπροστά σας αυτή τη στιγμή."
+      "value": "Εγκρίνετε μόνο αν ξεκινήσατε εσείς τη σύνδεση."
     }
   ],
   "web.auth.activate.playOn": [
@@ -87164,7 +89466,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Όποιος χρησιμοποιεί αυτή την τηλεόραση μπορεί να επιλέξει από τα προφίλ σας. Τα προφίλ με PIN παραμένουν κλειδωμένα."
+      "value": "Έτσι αποκτά πρόσβαση στα προφίλ σας. Τα προφίλ με PIN παραμένουν κλειδωμένα."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -87211,6 +89513,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Ζητήθηκε "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -87224,7 +89536,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Αυτή η τηλεόραση σταμάτησε να περιμένει. Ξεκινήστε ξανά από την τηλεόραση."
+      "value": "Αυτή η συσκευή σταμάτησε να περιμένει. Ξεκινήστε ξανά τη σύνδεση σε αυτήν."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -87233,10 +89545,38 @@
       "value": "Αυτή η σύνδεση απορρίφθηκε."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Ολοκληρώθηκε. Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " συνδέεται."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Η συσκευή "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " συνδέθηκε."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Αυτός ο κωδικός έληξε. Η τηλεόρασή σας εμφανίζει έναν νέο. Χρησιμοποιήστε εκείνον τον κωδικό."
+      "value": "Αυτός ο κωδικός έληξε. Λάβετε νέο κωδικό στη συσκευή και δοκιμάστε ξανά."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -87320,25 +89660,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Η τηλεόραση έχει ήδη συνδεθεί."
+      "value": "Αυτή η συσκευή έχει ήδη συνδεθεί."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Αυτή η τηλεόραση εγκρίθηκε και ολοκληρώνει τη σύνδεση."
+      "value": "Αυτή η συσκευή εγκρίθηκε και ολοκληρώνει τη σύνδεση."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Ολοκληρώθηκε. Η τηλεόρασή σας συνδέεται."
+      "value": "Ολοκληρώθηκε. Η συσκευή σας συνδέεται."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Η τηλεόρασή σας συνδέθηκε."
+      "value": "Η συσκευή σας συνδέθηκε."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87382,7 +89722,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Σύνδεση της συσκευής "
+      "value": "Να επιτραπεί η σύνδεση της συσκευής "
     },
     {
       "type": 1,
@@ -87396,7 +89736,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Σύνδεση αυτής της συσκευής;"
+      "value": "Να επιτραπεί η σύνδεση αυτής της συσκευής;"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87416,13 +89756,13 @@
     },
     {
       "type": 0,
-      "value": " για να εγκρίνετε αυτή την τηλεόραση."
+      "value": " για να εγκρίνετε αυτή τη σύνδεση."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Σύνδεση τηλεόρασης"
+      "value": "Έγκριση σύνδεσης"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88472,7 +90812,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Δεν ήταν δυνατή η σύνδεση της συσκευής. Δοκιμάστε ξανά."
+      "value": "Δεν ήταν δυνατή η έγκριση της σύνδεσης. Δοκιμάστε ξανά."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -101028,6 +103368,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -109586,6 +111940,12 @@
       "value": "Περιεχόμενο"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Τη διαχείριση αυτής της γραμμής κάνει αυτός ο διακομιστής. Το περιεχόμενό της δεν μπορεί να αλλάξει εδώ. Για να επιλέξετε τι θα εμφανίζεται, προσθέστε μια δική σας γραμμή."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -109900,6 +112260,12 @@
       "value": "Μετάφραση…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Απόκρυψη γραμμών του διακομιστή που προστέθηκαν μετά από αυτή την εξαγωγή:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109918,6 +112284,12 @@
     {
       "type": 0,
       "value": " και αντικαθιστούν ενότητες που είχατε προσθέσει εδώ παλαιότερα. Οι αλλαγές σας στις ενότητες αυτού του διακομιστή παραμένουν."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Οι γραμμές αυτού του διακομιστή άλλαξαν από τότε που εξήχθη αυτό το αρχείο, οπότε επιλέξτε παρακάτω όποιες γραμμές θέλετε να αποκρύψετε."
     }
   ],
   "web.home.layout.checking": [
@@ -109968,6 +112340,26 @@
     {
       "type": 0,
       "value": "Ενεργοποιεί την επιλογή «Απόκρυψη στοιχείων που έχετε δει»."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Αποκρύπτει τις επιλεγμένες γραμμές στις σελίδες: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " χωρίς να αλλάζει τις άλλες γραμμές σας εκεί."
     }
   ],
   "web.home.layout.import": [
@@ -110072,6 +112464,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -110280,6 +112690,12 @@
     {
       "type": 0,
       "value": "Ενότητα χωρίς τίτλο"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Απόκρυψη γραμμών του διακομιστή που δεν υπάρχουν σε αυτό το αρχείο:"
     }
   ],
   "web.home.page.customize": [
@@ -113255,6 +115671,12 @@
     {
       "type": 0,
       "value": "Κεντρικό banner · Μόνο web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Διακομιστής"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -126951,6 +129373,16 @@
       "value": "Επιστροφή στη σελίδα 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Μετάβαση στη σελίδα "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -127041,6 +129473,20 @@
     {
       "type": 0,
       "value": "Σελίδες αιτημάτων για προσθήκη"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Η σελίδα "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " είναι πέρα από το τέλος αυτών των αποτελεσμάτων."
     }
   ],
   "web.requests.toAdd.series": [
@@ -128633,6 +131079,12 @@
     {
       "type": 0,
       "value": "Ανάγνωση των ειδοποιήσεων του προφίλ καθώς φτάνουν και επισήμανσή τους ως αναγνωσμένων."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Προβολή όσων αναπαράγονται αυτή τη στιγμή στο προφίλ ή σε όλα τα προφίλ του λογαριασμού, όταν το κλειδί δεν ορίζει προφίλ: τίτλος, σημείο αναπαραγωγής, κατάσταση παύσης, συσκευή και μέθοδος αναπαραγωγής. Χωρίς έλεγχο της αναπαραγωγής ή στοιχεία δικτύου."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

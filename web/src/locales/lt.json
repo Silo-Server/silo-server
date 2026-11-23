@@ -281,6 +281,18 @@
       "value": "Šio prisijungimo kodo galiojimas baigėsi. Pradėkite iš naujo."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "Ši paskyra pasiekė tiesioginėms jungtims leidžiamą įrenginių ribą."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "Kitas įrenginys jau naudoja šį jungties raktą. Bandykite dar kartą."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -338,7 +350,13 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Nustatyta mazgo aplinkoje. Pakeiskite tai ten ir paleiskite mazgą iš naujo."
+      "value": "Nustatyta aplinkoje. Pakeiskite reikšmę ten ir paleiskite paveiktą paslaugą iš naujo."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "Trūksta šios reikšmės."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +465,12 @@
     {
       "type": 0,
       "value": "Prisijunkite per savo tinklo prisijungimo sistemą, kad tęstumėte."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Šis mazgas nustatytas serverio diegimo konfigūracijoje. Pašalinkite jį iš ten ir paleiskite API serverius iš naujo, kad galėtumėte jį tvarkyti čia."
     }
   ],
   "error.not_acceptable": [
@@ -15465,6 +15489,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elemento negalima atkurti – besiskiriančius jo nustatymus arba dalį jo ryšio nustato šio serverio aplinka"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementų negalima atkurti – besiskiriančius jų nustatymus arba dalį jų ryšio nustato šio serverio aplinka"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elemento negalima atkurti – besiskiriančius jo nustatymus arba dalį jo ryšio nustato šio serverio aplinka"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementų negalima atkurti – besiskiriančius jų nustatymus arba dalį jų ryšio nustato šio serverio aplinka"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -16325,6 +16407,64 @@
       "value": "Paslaugos adresas keičiasi, o atsarginėje kopijoje nėra jos prisijungimo duomenų, todėl atkuriant jie čia išvalomi, o paslauga išjungiama, kol jie bus įvesti iš naujo."
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nustatymas išlaiko dabartinę reikšmę, nes jį arba dalį jo ryšio nustato šio serverio aplinka."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nustatymai išlaiko dabartines reikšmes, nes juos arba dalį jų ryšio nustato šio serverio aplinka."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nustatymo išlaiko dabartines reikšmes, nes juos arba dalį jų ryšio nustato šio serverio aplinka."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nustatymų išlaiko dabartines reikšmes, nes juos arba dalį jų ryšio nustato šio serverio aplinka."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -17033,8 +17173,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Slėpti"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17271,8 +17437,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Rodyti"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -18237,10 +18429,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -18256,7 +18448,7 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -18268,23 +18460,7 @@
             },
             {
               "type": 0,
-              "value": ", nes to reikia tam, ką pasirinkote."
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Taip pat pasirinkta: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ", nes to reikia tam, ką pasirinkote."
+              "value": ", nes jų reikia tam, ką pasirinkote."
             }
           ]
         },
@@ -18300,21 +18476,19 @@
             },
             {
               "type": 0,
-              "value": ", nes to reikia tam, ką pasirinkote."
+              "value": ", nes jų reikia tam, ką pasirinkote."
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -18330,23 +18504,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Taip pat atsisakyta: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ", nes tam reikia to, ko atsisakėte."
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -18378,9 +18536,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -20471,6 +20627,12 @@
       "value": "Šiame serveryje kita paskyra jau prisijungia jo naudotojo vardu arba el. paštu."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Besiskiriančius nustatymus arba dalį jų ryšio nustato šio serverio aplinka, todėl šis serveris palieka dabartines reikšmes."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -21217,6 +21379,178 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Fono vaizdas"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijos elementas"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijos elementai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijos elemento"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijos elementų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Kolekcija pakeista"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Konfigūracija"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Aprašymas"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Įjungimo būsena"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Rekomenduojama"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Elementų riba"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Elementų rikiavimas"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Bibliotekos"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Vieta"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Plakatas"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Rikiavimo tvarka"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Šaltinis"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Sinchronizavimo tvarkaraštis"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Pavadinimas"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Pavadinimo vertimas"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Tipas"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Matomumas"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Tik žiniatinklyje"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -21897,6 +22231,16 @@
     {
       "type": 0,
       "value": " (palikta kaip griežtesnė reikšmė)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (palikta: aplinka)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -23233,6 +23577,20 @@
       "value": "Serverio laiko juostoje."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Serverio laiko juostoje. Jūsų laiku tai "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -24225,10 +24583,10 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24236,15 +24594,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "jų duomenų nepavyko nuskaityti"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -24260,9 +24610,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -24341,20 +24689,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Slėpti paskyras"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti paskyrą"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti paskyras"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti paskyras"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Slėpti failus"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti failą"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti failus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti failus"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Slėpti failus"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti failą"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti failus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Slėpti failus"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -24457,6 +24883,586 @@
     {
       "type": 0,
       "value": "Jie nurodyti duomenų bazėje, bet nerasti saugykloje; atkuriant jie praleidžiami."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prekės ženklo elementas"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prekės ženklo elementai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prekės ženklo elemento"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prekės ženklo elementų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijos fono vaizdas"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijų fono vaizdai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijos fono vaizdo"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijų fono vaizdų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijos plakatas"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijų plakatai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijos plakato"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kolekcijų plakatų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " atsisiųstas subtitrų failas"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " atsisiųsti subtitrų failai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " atsisiųsto subtitrų failo"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " atsisiųstų subtitrų failų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " bibliotekos plakatas"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " bibliotekų plakatai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " bibliotekos plakato"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " bibliotekų plakatų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " perdangos vaizdas"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " perdangų vaizdai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " perdangos vaizdo"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " perdangų vaizdų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " asmeninės kolekcijos plakatas"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " asmeninių kolekcijų plakatai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " asmeninės kolekcijos plakato"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " asmeninių kolekcijų plakatų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profilio avataras"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profilių avatarai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profilio avataro"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profilių avatarų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " įkeltas viršelio failas"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " įkelti viršelių failai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " įkelto viršelio failo"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " įkeltų viršelių failų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " įkeltas subtitrų failas"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " įkelti subtitrų failai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " įkelto subtitrų failo"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " įkeltų subtitrų failų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -24903,10 +25909,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24922,23 +25928,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "jų dalies „"
-            },
-            {
-              "type": 1,
-              "value": "part"
-            },
-            {
-              "type": 0,
-              "value": "“ nepavyko nuskaityti"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -24970,9 +25960,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -24987,8 +25975,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Rodyti paskyras"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti paskyrą"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti paskyras"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti paskyras"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -25067,22 +26081,74 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Rodyti failus"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti failą"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti failus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti failus"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Rodyti failus"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti failą"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti failus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Rodyti failus"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -25090,15 +26156,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "jų duomenys per dideli atkūrimo rinkiniui"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -25114,9 +26172,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -28071,6 +29127,12 @@
       "value": "Kalbos atpažinimo teikėjas laikinai nepasiekiamas. Bandykite vėliau."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Teksto DI teikėjo paskyroje nėra kredito arba pasiektas naudojimo ar išlaidų limitas. Patikrinkite teikėjo paskyros likutį ir limitus arba „ChatGPT“ naudojimo nustatymus."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -28081,6 +29143,80 @@
     {
       "type": 0,
       "value": "Nepavyko prisijungti prie teksto DI. Patikrinkite modelį, samprotavimo lygį, paslaugos pakopą, paskyros ryšį ir teikėjo naudojimo limitus."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Prieiga prie teksto DI atmesta. Patikrinkite, ar API raktui arba „ChatGPT“ paskyrai leidžiama naudoti šį modelį."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Teksto DI galinis taškas arba modelis nepasiekiamas. Patikrinkite teikėjo bazinį URL ir modelį."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Susieta „ChatGPT“ paskyra negali bendrinti savo plano naudojimo. Patikrinkite „ChatGPT“ naudojimo nustatymus arba susiekite kitą paskyrą."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Teksto DI teikėjas riboja užklausų dažnį. Bandykite vėliau."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Teksto DI teikėjas atsisakė vykdyti patikros užklausą. Patikrinkite modelį, samprotavimo lygį ir paskyros naudojimo nustatymus. Teikėjo klaida įrašyta serverio žurnale."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Teksto DI teikėjas atmetė patikros užklausą (būsenos kodas "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Patikrinkite modelį, samprotavimo lygį ir paslaugos pakopą. Teikėjo klaida įrašyta serverio žurnale."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Baigėsi teksto DI ryšio patikros laikas. Patikrinkite, ar teikėjas pasiekiamas, ir bandykite dar kartą."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Teksto DI teikėjas atmetė prisijungimo duomenis. Pakeiskite teikėjo API raktą arba dar kartą prisijunkite per „ChatGPT“."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Teksto DI teikėjas laikinai nepasiekiamas. Bandykite vėliau."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "„Silo“ nepavyko pasiekti teksto DI teikėjo. Patikrinkite teikėjo bazinį URL ir ar šis serveris gali prie jo prisijungti."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Teksto modelis grąžino atsakymą, kurio „Silo“ negali panaudoti. Pasirinkite kitą modelį."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -28209,6 +29345,12 @@
     {
       "type": 0,
       "value": "Išvalyti ribą"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "Tiesioginė"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -34693,6 +35835,12 @@
       "value": "nepavyko"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Užduotis nepavyko. Išsamią informaciją rasite administratoriaus diagnostikoje."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -37182,7 +38330,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Neseniai pradėtų atkūrimo seansų sąrašas"
+      "value": "Naujausi paleidimai visose paskyrose"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -39169,6 +40317,88 @@
     {
       "type": 0,
       "value": "Nepavyko įkelti veiklos."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " paleido kūrinį "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„"
+        },
+        {
+          "type": 1,
+          "value": "title"
+        },
+        {
+          "type": 0,
+          "value": "“"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " paleido kūrinį "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„"
+        },
+        {
+          "type": 1,
+          "value": "title"
+        },
+        {
+          "type": 0,
+          "value": "“"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -56739,6 +57969,144 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Vykdomi nuskaitymai ir metaduomenų atnaujinimai rodomi čia."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Nėra aktyvių nuskaitymų ar atnaujinimų"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Visos ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Slėpti eilę"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ dar "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " biblioteka"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ dar "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotekos"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ dar "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotekos"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ dar "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " bibliotekų"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Metaduomenų atnaujinimai"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Atnaujinami metaduomenys…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Rodyti eilę"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Didelis"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Mažas"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Vidutinis"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -57321,6 +58689,30 @@
       "value": "Patvirtinti tuščių šakninių aplankų valymą"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Peržiūrėti"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Metaduomenų sutapatinimo eilėje nėra laukiančių elementų."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Praleistų šakninių aplankų neužregistruota."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Pasenusių išorinių ID neužregistruota."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -57365,6 +58757,18 @@
     {
       "type": 0,
       "value": "“"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Redaguoti"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Dar nesukonfigūruota jokių bibliotekų."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -57439,6 +58843,12 @@
       "value": "Slėpti kelius"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Neaktyvi"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -57473,6 +58883,12 @@
       "value": "Dalinis nuskaitymas"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Užpildyti trūkstamus arba pakeisti visus metaduomenis"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -57485,6 +58901,12 @@
       "value": "Šakninis aplankas nepasiekiamas"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Nuskaityti"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -57495,6 +58917,12 @@
     {
       "type": 0,
       "value": "Rodyti kelius"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Sustabdyti"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -57513,6 +58941,26 @@
     {
       "type": 0,
       "value": "Patikrinti prijungimus"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Patikrinti, ar visi bibliotekos aplankai pasiekiami"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Peržiūrėti aktyvius bibliotekos „"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "“ nuskaitymus"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -57616,7 +59064,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Tvarkykite bibliotekų šakninius aplankus ir nuskaitymus. Katalogo importavimas ir eksportavimas dabar yra skiltyje „Priežiūra“."
+      "value": "Tvarkykite medijos aplankus, stebėkite nuskaitymus ir spręskite sutapatinimo problemas."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -58255,6 +59703,78 @@
       "value": "Pasenę išoriniai ID"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktyvus"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktyvūs"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktyvaus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktyvių"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Nuskaitymo veikla"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Katalogo būklė"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Bibliotekos"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -58761,6 +60281,24 @@
     {
       "type": 0,
       "value": "Ieškoti ignoruojamų elementų pagal pavadinimą, biblioteką arba tipą…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Neaiškus"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Laukiama"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Nesusietas"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -61737,6 +63275,12 @@
       "value": "Įveskite serverio adresą, kad užbaigtumėte nustatymus."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Raktas nustatytas serverio diegimo konfigūracijoje"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -62693,6 +64237,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nustatyta serverio diegimo konfigūracijoje. Pašalinkite mazgą iš ten ir paleiskite API serverius iš naujo, kad galėtumėte jį ištrinti čia."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -64894,6 +66444,68 @@
       "value": "Papildiniai"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Pritaikyta"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Sulaikyta"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Nepavyko įkelti papildinių parengimo būsenos."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Valdoma aplinkos"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Laukiama"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Atmesta"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Paketo šaltinį ir pašalinimą valdo diegimo konfigūracija."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Parengimo būsena"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Diegimo konfigūracija fiksuoja šio papildinio versiją "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -65662,6 +67274,146 @@
       "value": "Generavimas sustabdytas. Išsaugotos rekomendacijos lieka matomos skiltyje „Atrasti“, kol serveris bus paleistas iš naujo."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Reitinguojami profiliai ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Gaunami „TMDB“ sąrašai ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Gaunama kūrinių informacija ir kuriami įterpiniai ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Išvalytas "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nebegaliojantis kūrinys"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Išvalyti "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nebegaliojantys kūriniai"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Išvalyta "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nebegaliojančio kūrinio"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Išvalyta "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nebegaliojančių kūrinių"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -65734,6 +67486,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Prieš kurdami skilties „Atrasti“ rekomendacijas, išspręskite toliau nurodytą įterpinių užrakto konfliktą."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Pirmiausia paleiskite darbą „Įterpiniai“, kad „Silo“ turėtų bibliotekos vektorių palyginimui."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Prieš kurdami skilties „Atrasti“ rekomendacijas, skiltyje „DI paslaugos“ prijunkite įterpinių teikėją."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Dar jokie profiliai neturi skonio profilių. Paleiskite darbą „Skonio profiliai“, kai kas nors peržiūrės ar įvertins kūrinių."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -68376,6 +70152,32 @@
       "value": "Liks tuščia, kol skiltyje „Administravimas → Rekomendacijos“ nebus įjungtos skilties „Atrasti“ rekomendacijos."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Rekomendacijų eilutės liks tuščios, kol skiltyje "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„Administravimas → Rekomendacijos“"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " nebus įjungtos skilties „Atrasti“ rekomendacijos."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Išjungta skiltyje „Rekomendacijos“"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -70112,6 +71914,12 @@
       "value": "Naujos eilutės pridedamos puslapio „Atrasti“ apačioje"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Atidaryti rekomendacijų nustatymus"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -70124,6 +71932,12 @@
       "value": "„MDBList“ sklaidos kanale nėra rikiavimo, išsaugoto sąrašo puslapyje. Pasirinkite tą, kurį rodo sąrašas."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Jūsų profilis dar neturi skilties „Atrasti“ rekomendacijų. Paleiskite darbą „Skilties „Atrasti“ rekomendacijos“ arba peržiūrėkite ir įvertinkite kelis kūrinius, kad pamatytumėte šios eilutės peržiūrą."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -70134,6 +71948,12 @@
     {
       "type": 0,
       "value": "Pasirinkite sąrašą arba įklijuokite jo nuorodą, kad pamatytumėte jo kūrinius."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Įjunkite skilties „Atrasti“ rekomendacijas skiltyje „Administravimas → Rekomendacijos“, kad pamatytumėte šios eilutės peržiūrą."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -71112,6 +72932,12 @@
     {
       "type": 0,
       "value": "Žinutė išsiųsta"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Leistuvas nepatvirtino, kad gavo žinutę. Ji gali būti parodyta vėliau arba visai neparodyta."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -74136,6 +75962,12 @@
       "value": "Nepavyko patikrinti ryšio."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nepavyko patikrinti, ar serverio aplinka nustato šią parinktį. Įkelkite puslapį iš naujo, kad galėtumėte ją redaguoti."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -74722,6 +76554,30 @@
     {
       "type": 0,
       "value": "Nepavyko atnaujinti kanalo"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Įkelkite iš naujo, kad matytumėte dabartines reikšmes. Jei šiame puslapyje kas nors pasikeitė arba redagavote išsaugotą slaptažodį ar raktą, visi jūsų pakeitimai atšaukiami; kitu atveju jie išlaikomi."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Įkelti iš naujo"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko iš naujo įkelti nustatymų. Bandykite dar kartą."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Nustatymai pakeisti kitur"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -76828,6 +78684,612 @@
     {
       "type": 0,
       "value": "Sinchronizuoti internetines žymes"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "Algoritmas: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "užklaustas: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; aktyvus: "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "Leidžiama: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "Perkrovos valdymas: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "Paskyra"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "Šiuo keliu nuo"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "Įrenginys"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "Joks įrenginys neprijungtas tiesiogiai."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "Partnerio galinis taškas"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "Prijungti įrenginiai"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "į prievadą "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "Numatytoji reikšmė: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "Patikrinkite, ar šis serveris pasirengęs tiesioginėms jungtims."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "Galiojanti reikšmė: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "Įjungti tiesiogines jungtis"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN teisė"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "Tiesioginių jungčių variklis"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT hairpin"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "NAT susiejimas"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "PMTU atsarginis režimas"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "Pasiekiamumas"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "Lizdo gavimo buferis"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "Lizdo siuntimo buferis"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "Pagrindinio kompiuterio derinimas"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "ACK retinimas"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "BBR paketų praradimo politika"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "UDP segmentavimo perkėlimas"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "Kliento gavimo langas"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "Tiesioginių jungčių UDP prievadas"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "TCP perkrovos valdymas"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "TCP siuntimo buferis"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "Paskutinį kartą tikrinta: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "Tarpinis serveris"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "Klausytojai"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "Aptiktas viešasis adresas: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "Tikrinti, ar maršruto parinktuvas palaiko UPnP, NAT-PMP arba PCP."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "Prievadų susiejimas"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "Parengties patikros nepradeda tiesioginio atkūrimo."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "Išjungė administratorius"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "Išjungta"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "Nepavyko paleisti tiesioginių jungčių variklio"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "Nepavyko padidinti buferio"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "Maršruto parinktuvas nepalaiko prievadų susiejimo"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "Buferis mažesnis, nei užklausta"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "Tinklo derinimo pagalbinė programa nepasiekiama"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "Netinkama reikšmė; naudojama „Išjungta“"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "Sistemai nepavyko pritaikyti arba nuskaityti šio nustatymo"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "Šis branduolys nepalaiko"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "Pasiekta pagrindinio kompiuterio buferio riba"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "Nepavyko nuskaityti pagrindinio kompiuterio buferio ribų"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "Viešasis adresas skiriasi pagal paskirties vietą"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR nepasiekiamas"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR neįkeltas arba neleidžiamas"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "Veikia daugiau nei vienas API serveris"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN teisės atsisakyta"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Trūksta NET_ADMIN teisės"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "Maršruto parinktuvas nerastas"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "Trūksta NET_ADMIN teisės"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "Leidimas nesuteiktas"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "Nepasiekiama"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "Neišmatuota"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "Didinti nereikia"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "Pagrindinio kompiuterio politika parinko kitą algoritmą"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "Nepavyko patikrinti"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "Nepavyko patikrinti, ar veikia kiti API serveriai"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "Tiesiogines jungtis aptarnauja kitas API serveris"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "Laukiama teisės aptarnauti tiesiogines jungtis"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "Tiesioginių jungčių būsena nepasiekiama"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "Nepavyko atidaryti UDP prievado"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "Netinkamas UDP prievadas"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "Šioje platformoje nepalaikoma"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "Užklausta: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "Užklausta: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; suteikta: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "Vykdyti patikrą"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "Siuntimo buferis: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "Apribota"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "Veikia prasčiau"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "Atsarginis būdas"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "Nereikia"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "Išjungta"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "Įjungta"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "Nežinoma"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "Kableliais atskirtas iki aštuonių host:port įrašų sąrašas. Palikite tuščią, kad būtų naudojami numatytieji serveriai."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "STUN serveriai"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "Tiesioginės jungtys"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "Leiskite įrenginiams pasiekti šį serverį tiesioginiu UDP keliu. UDP prievadas nustatomas kintamuoju "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " ir čia tik skaitomas."
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -80416,6 +82878,24 @@
       "value": "Norint pereiti prie kito modelio, reikia iš naujo nustatyti įterpinius, o tai juos visus ištrina. Kitas teikėjas, teikiantis tą patį modelį, pradedamas naudoti po paleidimo iš naujo."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Pridėti prie „Atrasti“"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko pridėti rekomendacijų eilučių prie puslapio „Atrasti“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Rekomendacijų eilutės pridėtos prie puslapio „Atrasti“."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -80438,6 +82918,44 @@
     {
       "type": 0,
       "value": "Kiek bibliotekoje nesančių kūrinių serveris laiko rekomendacijoms. Kiekvieno kūrinio informacija gaunama iš „TMDB“ ir jam sukuriama įterptis. Įterpčių kūrimas paprastai nebrangus, bet, priklausomai nuo jūsų įterpčių teikėjo, didesnis skaičius gali kainuoti daugiau ar užtrukti ilgiau, be to, užima daugiau vietos saugykloje."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Jūsų puslapyje „Atrasti“ dar nerodoma jokių rekomendacijų eilučių."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Kad skilties „Atrasti“ rekomendacijos galėtų veikti, įjunkite aukščiau esančią parinktį „Įjungti rekomendacijas“ ir paleiskite serverį iš naujo."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Užklausos šiuo metu išjungtos. Įjunkite jas skiltyje "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„Užklausų nustatymai“"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", kad žiūrovai matytų puslapį „Atrasti“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Atidaryti puslapį „Atrasti“"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -90000,6 +92518,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Saugyklos negalima perkelti čia, kol saugyklos nustatymai nustatyti aplinkoje ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Pirmiausia panaikinkite šiuos kintamuosius ir iš naujo paleiskite kiekvieną API serverį."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -91292,6 +93824,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Šis tvarkaraštis nustatomas atsarginių kopijų nustatymuose. Pakeiskite jį skiltyje "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Serveris › Atsarginės kopijos"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -91642,10 +94194,66 @@
       "value": "Naujausios klaidos"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Nepavyko atnaujinti. Išsamią informaciją rasite administratoriaus diagnostikoje."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Peržiūrėti dabartinį tvarkaraštį"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -92090,6 +94698,18 @@
     {
       "type": 0,
       "value": "„Autoscan“ webhook pakartojimas"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Iš naujo perskaito MKV failų su ASS subtitrais antraštę, jei failai nuskaityti anksčiau, nei „Silo“ ėmė neįtraukti įterptų šriftų į bitų spartą, kad jie nebūtų perkoduojami dėl bitų spartos, kurios jie iš tikrųjų netransliuoja."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Failų su įterptais šriftais bitų spartos taisymas"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -103577,25 +106197,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Nepavyko patvirtinti televizoriaus prisijungimo. Bandykite dar kartą."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Patikrinkite, ar programėlėje rodoma"
+      "value": "Nepavyko patvirtinti prisijungimo. Bandykite dar kartą."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Patikrinkite, ar televizoriuje rodoma"
+      "value": "Įsitikinkite, kad šis kodas sutampa"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Įveskite kodą, rodomą televizoriuje ar programėlėje"
+      "value": "Įveskite įrenginyje rodomą kodą"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -103607,13 +106221,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Prisijunkite prie savo paskyros televizoriuje ar kitame įrenginyje."
+      "value": "Prisijunkite televizoriuje, programoje ar kitame įrenginyje."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Televizoriaus prisijungimas"
+      "value": "Prisijungimo patvirtinimas"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -103633,13 +106247,13 @@
     },
     {
       "type": 0,
-      "value": ", kad galėtumėte patvirtinti televizorių. Televizoriaus prisijungimą gali patvirtinti tik pati paskyra."
+      "value": ", kad galėtumėte patvirtinti šį prisijungimą. Įrenginius gali patvirtinti tik pati paskyra."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Nustokite peržiūrėti kaip šis naudotojas, kad galėtumėte patvirtinti televizorių. Televizoriaus prisijungimą gali patvirtinti tik pati paskyra."
+      "value": "Nustokite peržiūrėti kaip šis naudotojas, kad galėtumėte patvirtinti šį prisijungimą. Įrenginius gali patvirtinti tik pati paskyra."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -103657,39 +106271,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Tokio kodo neradome. Patikrinkite kodą televizoriuje."
+      "value": "Nepavyko rasti šio kodo. Patikrinkite kodą ir bandykite dar kartą."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ne dabar"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Senesnėse TV programėlėse vietoj jo rodoma "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Tvirtinkite tik tą įrenginį, kuris šiuo metu yra priešais jus."
+      "value": "Atmesti"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Tvirtinkite tik tą televizorių, kuris šiuo metu yra priešais jus."
+      "value": "Patvirtinkite, tik jei prisijungimą pradėjote jūs."
     }
   ],
   "web.auth.activate.playOn": [
@@ -103715,7 +106309,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Bet kas, naudojantis šiuo televizoriumi, galės rinktis iš jūsų profilių. Profiliai su PIN liks užrakinti."
+      "value": "Taip jis gaus prieigą prie jūsų profilių. PIN kodu apsaugoti profiliai lieka užrakinti."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -103762,6 +106356,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Užklausta "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -103775,7 +106379,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Šis televizorius nustojo laukti. Pradėkite iš naujo televizoriuje."
+      "value": "Šis įrenginys nebelaukia. Pradėkite prisijungimą jame iš naujo."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -103784,10 +106388,38 @@
       "value": "Šis prisijungimas atmestas."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Atlikta. Įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ prisijungia."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Įrenginys „"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "“ prisijungė."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Šio kodo galiojimas baigėsi. Televizoriuje rodomas naujas kodas. Naudokite jį."
+      "value": "Šio kodo galiojimas baigėsi. Gaukite naują kodą įrenginyje ir bandykite dar kartą."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -103871,25 +106503,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Tas televizorius jau prisijungė."
+      "value": "Šiame įrenginyje jau prisijungta."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Šis televizorius patvirtintas ir baigia prisijungti."
+      "value": "Šis įrenginys patvirtintas ir baigia prisijungti."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Atlikta. Televizorius prisijungia."
+      "value": "Atlikta. Jūsų įrenginys prisijungia."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Televizorius prisijungė."
+      "value": "Jūsų įrenginys prisijungė."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -103967,13 +106599,13 @@
     },
     {
       "type": 0,
-      "value": ", kad patvirtintumėte šį televizorių."
+      "value": ", kad patvirtintumėte šį prisijungimą."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Patvirtinti TV prisijungimą"
+      "value": "Patvirtinti prisijungimą"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -105035,7 +107667,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Nepavyko prisijungti įrenginyje. Bandykite dar kartą."
+      "value": "Nepavyko patvirtinti prisijungimo. Bandykite dar kartą."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -120708,6 +123340,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -130790,6 +133436,12 @@
       "value": "Rodoma"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Šią eilutę tvarko šis serveris. Čia negalima pakeisti, ką ji rodo; pridėkite savo eilutę, kad pasirinktumėte, ką ji rodys."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 1,
@@ -131100,6 +133752,12 @@
       "value": "Verčiama…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Slėpti serverio eilutes, pridėtas po šio eksporto:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -131118,6 +133776,12 @@
     {
       "type": 0,
       "value": " ir pakeičia skiltis, kurias anksčiau čia pridėjote. Jūsų šio serverio skilčių pakeitimai išlieka."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Šio serverio eilutės pasikeitė po to, kai šis failas buvo eksportuotas, todėl toliau pasirinkite eilutes, kurias norite slėpti."
     }
   ],
   "web.home.layout.checking": [
@@ -131168,6 +133832,26 @@
     {
       "type": 0,
       "value": "Įjungia parinktį „Slėpti žiūrėtus elementus“."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Paslepia pasirinktas eilutes puslapiuose: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", nekeisdamas kitų jūsų eilučių juose."
     }
   ],
   "web.home.layout.import": [
@@ -131272,6 +133956,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -131502,6 +134204,12 @@
     {
       "type": 0,
       "value": "Skiltis be pavadinimo"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Slėpti serverio eilutes, kurių nėra šiame faile:"
     }
   ],
   "web.home.page.customize": [
@@ -134955,6 +137663,12 @@
     {
       "type": 0,
       "value": "Didžioji reklamjuostė · Tik žiniatinklyje"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Serveris"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -150437,6 +153151,20 @@
       "value": "Grįžti į 1 puslapį"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Eiti į "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " puslapį"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -150527,6 +153255,20 @@
     {
       "type": 0,
       "value": "Skilties „Pateikti užklausą pridėti“ puslapiai"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Puslapis "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " yra už šių rezultatų pabaigos."
     }
   ],
   "web.requests.toAdd.series": [
@@ -152443,6 +155185,12 @@
     {
       "type": 0,
       "value": "Skaityti profilio pranešimus, kai jie gaunami, ir pažymėti juos kaip perskaitytus."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Matyti, kas šiuo metu leidžiama profilyje arba, jei raktas nenurodo jokio profilio, visuose paskyros profiliuose: kūrinį, atkūrimo vietą, ar pristabdyta, įrenginį ir atkūrimo būdą. Be atkūrimo valdymo ir tinklo informacijos."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

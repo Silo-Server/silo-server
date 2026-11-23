@@ -3,14 +3,21 @@ package ebooks
 import (
 	"context"
 	"errors"
-
+	"fmt"
+	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
-
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/bookid"
+	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -531,7 +538,7 @@ func (f *fakeEbookProviderIDRepository) GetByContentIDs(
 	return f.rows, f.err
 }
 
-func (f *fakeEbookProviderIDRepository) ReplaceByContentID(context.Context, string, map[string]string) error {
+func (f *fakeEbookProviderIDRepository) ReplaceByContentIDWithWorkClaims(context.Context, string, map[string]string, []bookid.WorkClaims) error {
 	return f.replaceErr
 }
 
@@ -762,5 +769,70 @@ func TestEbookWithoutAnAuthorMatchesTheSearchedTitle(t *testing.T) {
 				t.Fatalf("%q for \"Dune (2019)\": matched = %v, want %v", tc.candidate, matched, tc.matched)
 			}
 		})
+	}
+}
+
+// Two editions of one book enriched apart both keep the work id their record
+// claims, stored with its evidence and source, beside their own ISBN. A
+// record admission rejects contributes no claim.
+func TestEbookEnrichmentStoresWorkClaimsDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := withEnrichmentClaimCheck(t.Context(), func(context.Context) error { return nil })
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	e := &Enricher{pool: pool, itemRepo: catalog.NewItemRepository(pool), providerIDs: catalog.NewProviderIDRepository(pool)}
+	work := "OL" + strings.ToUpper(uuid.NewString()[:6]) + "W"
+
+	for i := range 2 {
+		contentID := "ebook-work-" + uuid.NewString()
+		isbn := fmt.Sprintf("979%010d", time.Now().UnixNano()%10_000_000_000+int64(i))
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO media_items (content_id, type, title, status, genres) VALUES ($1, 'ebook', 'Book', '', '{}'::text[])`, contentID); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM media_items WHERE content_id = $1`, contentID)
+		})
+		claims := func(source, key, value string) []bookid.WorkClaims {
+			return []bookid.WorkClaims{{Source: source, Claims: []bookid.WorkClaim{{Provider: key, ProviderID: value, Evidence: bookid.EvidenceISBN}}}}
+		}
+		providers := []metadata.Provider{
+			&fakeEbookMetadataProvider{slug: "books-metadata", result: &metadata.MetadataResult{
+				HasMetadata: true, Overview: "Overview",
+				ProviderIDs: map[string]string{"isbn": isbn},
+				WorkClaims:  claims("books-metadata", bookid.KeyOpenLibraryWork, work),
+			}},
+			// Names another edition's ISBN, so admission rejects the record.
+			&fakeEbookMetadataProvider{slug: "other", result: &metadata.MetadataResult{
+				HasMetadata: true,
+				ProviderIDs: map[string]string{"isbn": "9780306406157"},
+				WorkClaims:  claims("other", bookid.KeyHardcover, "9"),
+			}},
+		}
+		item := enrichmentItemRow{ContentID: contentID, Title: "Book", ProviderIDs: map[string]string{"isbn": isbn}}
+		if outcome, err := e.enrichWithProvidersOutcome(ctx, item, providers); err != nil || outcome != EnrichmentOutcomeSuccess {
+			t.Fatalf("enrich edition %d = %q, %v", i, outcome, err)
+		}
+		var got []string
+		rows, err := pool.Query(ctx, `
+			SELECT 'work:' || provider || '=' || provider_id || '/' || evidence || '/' || source FROM media_item_work_ids WHERE content_id = $1
+			UNION ALL
+			SELECT 'id:' || provider || '=' || provider_id FROM media_item_provider_ids WHERE content_id = $1
+			ORDER BY 1`, contentID)
+		if err == nil {
+			got, err = pgx.CollectRows(rows, pgx.RowTo[string])
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if want := []string{"id:isbn=" + isbn, "work:openlibrary_work=" + work + "/isbn/books-metadata"}; !slices.Equal(got, want) {
+			t.Fatalf("edition %d rows = %q, want %q", i, got, want)
+		}
 	}
 }

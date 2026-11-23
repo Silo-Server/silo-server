@@ -97,6 +97,16 @@ func (h *PluginHandler) UpdateAdminPluginInstallation(ctx context.Context, id in
 	if current.IsBuiltin() {
 		return PluginInstallationView{}, ErrPluginBuiltinInstallation
 	}
+	if in.UpdatePolicy != nil && *in.UpdatePolicy != current.UpdatePolicy {
+		ownership, err := h.installations.GetProvisionOwnership(ctx, id)
+		if err != nil {
+			return PluginInstallationView{}, err
+		}
+		if ownership.VersionPin != "" {
+			return PluginInstallationView{}, &plugins.ManagedByEnvironmentError{Field: "update_policy"}
+		}
+	}
+
 	if in.Enabled != nil && !*in.Enabled && current.Enabled {
 		if err := h.service.Stop(id); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {
 			return PluginInstallationView{}, err
@@ -134,6 +144,14 @@ func (h *PluginHandler) ApplyAdminPluginUpdate(ctx context.Context, id int) (Plu
 	if current.IsBuiltin() {
 		return PluginInstallationView{}, ErrPluginBuiltinInstallation
 	}
+	ownership, err := h.installations.GetProvisionOwnership(ctx, id)
+	if err != nil {
+		return PluginInstallationView{}, err
+	}
+	if ownership.VersionPin != "" {
+		return PluginInstallationView{}, &plugins.ManagedByEnvironmentError{Field: "version"}
+	}
+
 	if current.AvailableVersion == nil || *current.AvailableVersion == "" || current.RepositoryID == nil || *current.RepositoryID == 0 {
 		return PluginInstallationView{}, ErrPluginUpdateUnavailable
 	}
@@ -190,6 +208,14 @@ func (h *PluginHandler) DeleteAdminPluginInstallation(ctx context.Context, id in
 	if installation.IsBuiltin() {
 		return ErrPluginBuiltinInstallation
 	}
+	ownership, err := h.installations.GetProvisionOwnership(ctx, id)
+	if err != nil {
+		return err
+	}
+	if ownership.Managed {
+		return &plugins.ManagedByEnvironmentError{Field: "installation"}
+	}
+
 	stopped := false
 	if h.service != nil {
 		if err := h.service.Stop(id); err != nil && !errors.Is(err, pluginhost.ErrClientNotFound) {

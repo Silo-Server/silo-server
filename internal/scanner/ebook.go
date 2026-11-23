@@ -24,6 +24,7 @@ import (
 	"golang.org/x/text/encoding/charmap"
 	textunicode "golang.org/x/text/encoding/unicode"
 
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/fspath"
 )
 
@@ -420,75 +421,11 @@ func uniqueTrimmedStrings(values []string) []string {
 	return out
 }
 
+// normalizeEbookISBN returns the ISBN-13 in a metadata field of a file
+// (bookid.ISBNInText), or "" when the field holds none.
 func normalizeEbookISBN(value string) string {
-	value = strings.ToUpper(strings.TrimSpace(value))
-	for _, prefix := range []string{"ISBN-13", "ISBN-10", "ISBN"} {
-		if strings.HasPrefix(value, prefix) {
-			value = strings.TrimSpace(strings.TrimPrefix(value, prefix))
-			value = strings.TrimLeft(value, ": ")
-			break
-		}
-	}
-	var out strings.Builder
-	for _, r := range value {
-		if r >= '0' && r <= '9' {
-			out.WriteRune(r)
-			continue
-		}
-		if r == 'X' {
-			out.WriteRune(r)
-		}
-	}
-	candidate := out.String()
-	switch len(candidate) {
-	case 10:
-		if validISBN10(candidate) {
-			return candidate
-		}
-	case 13:
-		if validISBN13(candidate) {
-			return candidate
-		}
-	}
-	return ""
-}
-
-func validISBN10(candidate string) bool {
-	if len(candidate) != 10 {
-		return false
-	}
-	sum := 0
-	for i, r := range candidate {
-		var value int
-		switch {
-		case r >= '0' && r <= '9':
-			value = int(r - '0')
-		case r == 'X' && i == 9:
-			value = 10
-		default:
-			return false
-		}
-		sum += value * (10 - i)
-	}
-	return sum%11 == 0
-}
-
-func validISBN13(candidate string) bool {
-	if len(candidate) != 13 {
-		return false
-	}
-	sum := 0
-	for i, r := range candidate {
-		if r < '0' || r > '9' {
-			return false
-		}
-		value := int(r - '0')
-		if i%2 == 1 {
-			value *= 3
-		}
-		sum += value
-	}
-	return sum%10 == 0
+	isbn, _ := bookid.ISBNInText(value)
+	return isbn
 }
 
 func parseEbookEPUB(path string) (parsedEbook, error) {

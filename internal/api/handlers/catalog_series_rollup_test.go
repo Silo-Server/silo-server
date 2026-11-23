@@ -24,6 +24,10 @@ func (s rollupOnlyStore) SeriesEpisodeWatchCounts(context.Context, string, []str
 	return s.series, nil
 }
 
+func (s rollupOnlyStore) SeriesLatestViewedAt(context.Context, string, []string) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
 func (s rollupOnlyStore) SeasonEpisodeWatchCounts(context.Context, string, []string) (map[string]userstore.SeriesWatchCounts, error) {
 	return s.seasons, nil
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -36,9 +37,13 @@ type PluginProviderRegistryConfig struct {
 	Manifests interface {
 		ManifestForInstallation(ctx context.Context, installationID int) (*pluginv1.PluginManifest, error)
 	}
-	Clients  PluginAuthClientResolver
-	Sessions *SessionRepository
-	Resolver *AccountResolver
+	// NeedsSetup uses the same first-account predicate as the auth service.
+	NeedsSetup func(context.Context) (bool, error)
+	// OAuthAvailable reports whether there is a public redirect URL.
+	OAuthAvailable func() bool
+	Clients        PluginAuthClientResolver
+	Sessions       *SessionRepository
+	Resolver       *AccountResolver
 }
 
 // PluginProviderRegistry holds the sign-in providers built from enabled
@@ -49,10 +54,15 @@ type PluginProviderRegistryConfig struct {
 // RunRebuilds.
 type PluginProviderRegistry struct {
 	cfg     PluginProviderRegistryConfig
-	current atomic.Pointer[[]RegisteredProvider]
+	current atomic.Pointer[pluginProviderSet]
 	mu      sync.Mutex
 	// wake asks RunRebuilds for a rebuild; one pending request is enough.
 	wake chan struct{}
+}
+
+type pluginProviderSet struct {
+	enabled []RegisteredProvider // Account checks do not need an OAuth redirect.
+	signIn  []RegisteredProvider
 }
 
 // Provider registry resync timing for RunRebuilds.
@@ -68,8 +78,7 @@ const (
 // NewPluginProviderRegistry returns an empty registry; call Rebuild.
 func NewPluginProviderRegistry(cfg PluginProviderRegistryConfig) *PluginProviderRegistry {
 	r := &PluginProviderRegistry{cfg: cfg, wake: make(chan struct{}, 1)}
-	empty := []RegisteredProvider{}
-	r.current.Store(&empty)
+	r.current.Store(&pluginProviderSet{signIn: []RegisteredProvider{}})
 	return r
 }
 
@@ -121,7 +130,7 @@ func (r *PluginProviderRegistry) Providers() []RegisteredProvider {
 	if r == nil {
 		return nil
 	}
-	return *r.current.Load()
+	return r.current.Load().signIn
 }
 
 // Rebuild reads the bindings again and swaps the provider list. On error the
@@ -133,6 +142,16 @@ func (r *PluginProviderRegistry) Rebuild(ctx context.Context) error {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.cfg.NeedsSetup != nil {
+		pending, err := r.cfg.NeedsSetup(ctx)
+		if err != nil {
+			return fmt.Errorf("check sign-in setup: %w", err)
+		}
+		if pending {
+			r.current.Store(&pluginProviderSet{signIn: []RegisteredProvider{}})
+			return nil
+		}
+	}
 	bindings, err := r.cfg.Bindings.ListAuthBindings(ctx)
 	if err != nil {
 		return fmt.Errorf("list plugin auth bindings: %w", err)
@@ -174,7 +193,13 @@ func (r *PluginProviderRegistry) Rebuild(ctx context.Context) error {
 		slog.WarnContext(ctx, "more than one external sign-in provider is enabled; turn all but one off",
 			"component", "auth", "count", primary)
 	}
-	r.current.Store(&providers)
+	set := &pluginProviderSet{enabled: providers, signIn: providers}
+	if r.cfg.OAuthAvailable != nil && !r.cfg.OAuthAvailable() {
+		set.signIn = slices.DeleteFunc(slices.Clone(providers), func(p RegisteredProvider) bool {
+			return p.Info.Mode == ProviderModeOAuth
+		})
+	}
+	r.current.Store(set)
 	return nil
 }
 
@@ -252,6 +277,7 @@ func (r *PluginProviderRegistry) providerFor(ctx context.Context, binding *plugi
 				CapabilityID:   binding.CapabilityID,
 				DisplayName:    displayName,
 				AutoProvision:  binding.AutoProvision,
+				CallbackMode:   binding.CallbackMode,
 			},
 			r.cfg.Sessions,
 			r.cfg.Resolver,

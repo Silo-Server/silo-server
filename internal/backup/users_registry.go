@@ -114,6 +114,7 @@ var excludedUserTables = map[string]string{
 	"playback_session_lifecycle":         excludedPlaybackLogs,
 	"playback_sessions_sync":             excludedPlayback,
 	"playback_shuffles":                  excludedPlayback,
+	"playback_stop_commits":              excludedPlaybackLogs,
 	"playback_v3_attempts":               excludedPlaybackLogs,
 	"jellycompat_playback_sessions":      excludedPlayback,
 	"jellycompat_sessions":               "login sessions",

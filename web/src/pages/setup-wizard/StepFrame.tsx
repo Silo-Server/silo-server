@@ -1,7 +1,10 @@
+import { useEffect, useRef } from "react";
 import type { FormEvent, ReactNode } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useT } from "@/i18n";
+import { cn } from "@/lib/utils";
 
 interface StepFrameProps {
   title: string;
@@ -33,8 +36,8 @@ export function StepFrame({
   title,
   lede,
   children,
-  continueLabel = "Continue",
-  busyLabel = "Saving…",
+  continueLabel,
+  busyLabel,
   busy = false,
   disabled = false,
   onSkip,
@@ -42,6 +45,23 @@ export function StepFrame({
   onContinue,
   footnote,
 }: StepFrameProps) {
+  const t = useT();
+  // Locking the fields drops focus from the one Enter was pressed in. When the
+  // save fails and the step stays open, put the admin back where they were.
+  const focusAtSubmit = useRef<Element | null>(null);
+  useEffect(() => {
+    if (busy) return;
+    const target = focusAtSubmit.current;
+    focusAtSubmit.current = null;
+    if (
+      target instanceof HTMLElement &&
+      target.isConnected &&
+      document.activeElement === document.body
+    ) {
+      target.focus();
+    }
+  }, [busy]);
+
   const actions = (
     <div className="setup-actions">
       <Button
@@ -50,11 +70,13 @@ export function StepFrame({
         disabled={busy || disabled}
         className="min-w-32"
       >
-        {busy ? busyLabel : continueLabel}
+        {busy
+          ? (busyLabel ?? t("web.setup.wizard.saving"))
+          : (continueLabel ?? t("web.ui.continue"))}
       </Button>
       {onSkip ? (
         <Button type="button" variant="ghost" onClick={onSkip} disabled={busy}>
-          Skip for now
+          {t("web.ui.skipForNow")}
         </Button>
       ) : null}
       {footnote ? <p className="setup-footnote">{footnote}</p> : null}
@@ -67,14 +89,28 @@ export function StepFrame({
         <h1 className="setup-step-title">{title}</h1>
         <p className="setup-step-lede">{lede}</p>
       </header>
-      <div className="setup-step-body">{children}</div>
+      <div className="setup-step-body">
+        {/* Lock the fields while the step saves: an edit made after Continue
+            would miss the saved batch and the step would advance past it. A
+            disabled fieldset does not stop a Radix select from opening on
+            pointerdown, so pointer input is cut off as well. */}
+        <fieldset disabled={busy} className={cn("contents", busy && "pointer-events-none")}>
+          {children}
+        </fieldset>
+      </div>
       {actions}
     </>
   );
 
   if (onSubmit) {
     return (
-      <form onSubmit={onSubmit} className="setup-step">
+      <form
+        onSubmit={(event) => {
+          focusAtSubmit.current = document.activeElement;
+          onSubmit(event);
+        }}
+        className="setup-step"
+      >
         {body}
       </form>
     );
@@ -107,8 +143,9 @@ export function StepSection({
 
 /** Loading placeholder shaped like a short stack of rows. */
 export function StepSkeleton({ rows = 3 }: { rows?: number }) {
+  const t = useT();
   return (
-    <div className="setup-step" role="status" aria-label="Loading">
+    <div className="setup-step" role="status" aria-label={t("common.loading")}>
       <div className="setup-step-header">
         <Skeleton className="h-8 w-56" />
         <Skeleton className="mt-3 h-4 w-80" />

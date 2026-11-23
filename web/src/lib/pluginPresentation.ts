@@ -35,7 +35,12 @@ export function installationTier(installation: PluginInstallation): PluginTier {
  * can't be applied, so it is not offered.
  */
 export function pendingUpdateVersion(installation: PluginInstallation): string | null {
-  if (installationTier(installation) === "unverified" || installation.updates_paused) return null;
+  if (
+    installation.env_managed?.version_pin ||
+    installationTier(installation) === "unverified" ||
+    installation.updates_paused
+  )
+    return null;
   return installation.available_version || null;
 }
 

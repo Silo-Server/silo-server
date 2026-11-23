@@ -281,6 +281,18 @@
       "value": "See sisselogimiskood on aegunud. Alustage uuesti."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "Selle konto otseühendusega seadmete arv on jõudnud piirini."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "Seda ühendusvõtit kasutab juba teine seade. Proovige uuesti."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -338,7 +350,13 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Selle määrab sõlme keskkond. Muutke seda seal ja taaskäivitage sõlm."
+      "value": "Selle määrab keskkond. Muutke seda seal ja taaskäivitage asjaomane teenus."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "See väärtus puudub."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +465,12 @@
     {
       "type": 0,
       "value": "Jätkamiseks logige sisse oma võrgu sisselogimise kaudu."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Selle sõlme määrab serveri juurutuskonfiguratsioon. Et seda siin hallata, eemaldage see sealt ja taaskäivitage API-serverid."
     }
   ],
   "error.not_acceptable": [
@@ -13456,7 +13480,7 @@
             },
             {
               "type": 0,
-              "value": " – nende kuvatavat kollektsiooni pole siin ega varukoopias"
+              "value": " – selle kuvatavat kollektsiooni pole siin ega varukoopias"
             }
           ]
         },
@@ -13498,7 +13522,7 @@
             },
             {
               "type": 0,
-              "value": " – nende seaded on krüptitud teise võtmega SECRET_KEY"
+              "value": " – selle seadistused on krüptitud teise võtmega SECRET_KEY"
             }
           ]
         },
@@ -13514,7 +13538,7 @@
             },
             {
               "type": 0,
-              "value": " – nende seaded on krüptitud teise võtmega SECRET_KEY"
+              "value": " – nende seadistused on krüptitud teise võtmega SECRET_KEY"
             }
           ]
         }
@@ -13540,7 +13564,7 @@
             },
             {
               "type": 0,
-              "value": " – see server ei saa neid vastu võtta"
+              "value": " – see server ei saa seda vastu võtta"
             }
           ]
         },
@@ -13624,7 +13648,7 @@
             },
             {
               "type": 0,
-              "value": " – nende failid puuduvad selles serveris"
+              "value": " – selle failid puuduvad selles serveris"
             }
           ]
         },
@@ -13666,7 +13690,7 @@
             },
             {
               "type": 0,
-              "value": " – nende kaustu pole selles serveris"
+              "value": " – selle kaustu pole selles serveris"
             }
           ]
         },
@@ -13708,7 +13732,7 @@
             },
             {
               "type": 0,
-              "value": " – nende juurdepääsugruppi pole selles serveris"
+              "value": " – selle juurdepääsugruppi pole selles serveris"
             }
           ]
         },
@@ -13750,7 +13774,7 @@
             },
             {
               "type": 0,
-              "value": " – nende pealkirja pole selle serveri kataloogis"
+              "value": " – selle pealkirja pole selle serveri kataloogis"
             }
           ]
         },
@@ -13792,7 +13816,7 @@
             },
             {
               "type": 0,
-              "value": " – need laiendaksid juurdepääsu, seega jätab see server alles oma rangemad väärtused"
+              "value": " – see laiendaks juurdepääsu, seega jätab see server alles oma rangemad väärtused"
             }
           ]
         },
@@ -13834,7 +13858,7 @@
             },
             {
               "type": 0,
-              "value": " – nende meediakogu pole selles serveris"
+              "value": " – selle meediakogu pole selles serveris"
             }
           ]
         },
@@ -13876,7 +13900,7 @@
             },
             {
               "type": 0,
-              "value": " – nende meediakogu ei saa siin taastada"
+              "value": " – selle meediakogu ei saa siin taastada"
             }
           ]
         },
@@ -13943,6 +13967,48 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ei saa taastada: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " – selle serveri keskkond määrab erinevad seadistused või osa nende ühendusest"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ei saa taastada: "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " – selle serveri keskkond määrab erinevad seadistused või osa nende ühendusest"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13960,7 +14026,7 @@
             },
             {
               "type": 0,
-              "value": " – need on krüptitud teise võtmega SECRET_KEY"
+              "value": " – see on krüptitud teise võtmega SECRET_KEY"
             }
           ]
         },
@@ -14002,7 +14068,7 @@
             },
             {
               "type": 0,
-              "value": " – need tuleb esmalt installida pistikprogrammide kataloogist"
+              "value": " – see tuleb esmalt installida pistikprogrammide kataloogist"
             }
           ]
         },
@@ -14044,7 +14110,7 @@
             },
             {
               "type": 0,
-              "value": " – nende põhiprofiil tuleb taastada koos nendega"
+              "value": " – selle põhiprofiil tuleb taastada koos sellega"
             }
           ]
         },
@@ -14086,7 +14152,7 @@
             },
             {
               "type": 0,
-              "value": " – varukoopias neid pole"
+              "value": " – varukoopias seda pole"
             }
           ]
         },
@@ -14254,7 +14320,7 @@
             },
             {
               "type": 0,
-              "value": " – see server annaks neile rohkem juurdepääsu kui varukoopia"
+              "value": " – see server annaks sellele rohkem juurdepääsu kui varukoopia"
             }
           ]
         },
@@ -14338,7 +14404,7 @@
             },
             {
               "type": 0,
-              "value": " – need on siin juba samad"
+              "value": " – see on siin juba sama"
             }
           ]
         },
@@ -14422,7 +14488,7 @@
             },
             {
               "type": 0,
-              "value": " – nende koopiat varukoopias ei saa lugeda"
+              "value": " – selle koopiat varukoopias ei saa lugeda"
             }
           ]
         },
@@ -14464,7 +14530,7 @@
             },
             {
               "type": 0,
-              "value": " – need ühenduvad välisteenustega ja see server ei saa varukoopiat kontrollida"
+              "value": " – see ühendub välisteenustega ja see server ei saa varukoopiat kontrollida"
             }
           ]
         },
@@ -14577,6 +14643,40 @@
     {
       "type": 0,
       "value": "Teenuse aadress muutub, kuid varukoopias pole selle mandaate, seega tühjendab taastamine need siin ja lülitab teenuse välja, kuni need uuesti sisestatakse."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seadistus jääb praeguse väärtusega, sest selle serveri keskkond määrab selle või osa selle ühendusest."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " seadistust jääb praeguste väärtustega, sest selle serveri keskkond määrab need või osa nende ühendusest."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15031,8 +15131,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Peida need"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida see"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida need"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida need"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -15181,8 +15307,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Näita neid"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita seda"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita neid"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita neid"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15903,10 +16055,26 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Valiti ka "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", mida teie valik vajab."
+            }
+          ]
+        },
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -15938,17 +16106,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -15961,6 +16127,22 @@
             {
               "type": 0,
               "value": ", mis vajab seda, mille valikust eemaldasite."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Valikust eemaldati ka "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", mis vajavad seda, mille valikust eemaldasite."
             }
           ]
         },
@@ -15980,9 +16162,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -17425,6 +17605,12 @@
       "value": "Siin logib selle kasutajanime või e-posti aadressiga sisse teine konto."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Selle serveri keskkond määrab erinevad seadistused või osa nende ühendusest, seega jätab see server alles oma praegused väärtused."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -17965,6 +18151,154 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Taustapilt"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kollektsiooniüksus"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kollektsiooniüksust"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Kollektsioon asendatakse"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Seadistus"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Kirjeldus"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Lubatud"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Esiletõstetud"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Üksuste arvu piirang"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Üksuste sortimine"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Meediakogud"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Asukoht"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Plakat"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Sortimisjärjestus"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Allikas"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Sünkroonimise ajakava"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Pealkiri"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Pealkirja tõlge"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Tüüp"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Nähtavus"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Ainult veebis"
     }
   ],
   "web.admin.backups.restore.rows.changes": [
@@ -18515,6 +18849,16 @@
     {
       "type": 0,
       "value": " (säilitatud: rangem)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (alles jäetud: keskkond)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -19607,6 +19951,20 @@
       "value": "Serveri ajavööndis."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Serveri ajavööndis. Teie ajavööndis on see "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -20515,14 +20873,22 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "selle andmeid ei õnnestunud lugeda"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "nende andmeid ei õnnestunud lugeda"
             }
           ]
         },
@@ -20534,9 +20900,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -20583,20 +20947,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Peida kontod"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida konto"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida kontod"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida kontod"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Peida failid"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida fail"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida failid"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida failid"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Peida failid"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida fail"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida failid"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Peida failid"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20651,6 +21093,346 @@
     {
       "type": 0,
       "value": "Neile viidatakse andmebaasis, kuid neid ei leitud salvestusruumist; taastamisel jäetakse need välja."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " brändingufail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " brändingufaili"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kollektsiooni taustapilt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kollektsiooni taustapilti"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kollektsiooni plakat"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " kollektsiooni plakatit"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " allalaaditud subtiitrifail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " allalaaditud subtiitrifaili"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " meediakogu plakat"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " meediakogu plakatit"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ülekattepilt"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ülekattepilti"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " isikliku kollektsiooni plakat"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " isikliku kollektsiooni plakatit"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profiili avatar"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " profiili avatari"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " üleslaaditud kujundusfail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " üleslaaditud kujundusfaili"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " üleslaaditud subtiitrifail"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " üleslaaditud subtiitrifaili"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -20897,14 +21679,26 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "selle andmeid ei õnnestunud lugeda: "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "nende andmeid ei õnnestunud lugeda: "
             },
             {
               "type": 1,
@@ -20924,9 +21718,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -20941,8 +21733,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Näita kontosid"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita kontot"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita kontosid"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita kontosid"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20989,26 +21807,86 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Näita faile"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita faili"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita faile"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita faile"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Näita faile"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita faili"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita faile"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Näita faile"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "selle andmed on taastekomplekti jaoks liiga suured"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "nende andmed on taastekomplekti jaoks liiga suured"
             }
           ]
         },
@@ -21020,9 +21898,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -23641,6 +24517,12 @@
       "value": "Kõnetuvastuse teenusepakkuja pole ajutiselt saadaval. Proovige hiljem uuesti."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI teenusepakkujal pole saadaolevat krediiti või on jõutud kasutus- või kululimiidini. Kontrollige oma saldot ja limiite teenusepakkuja juures või ChatGPT kasutusseadeid."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -23651,6 +24533,80 @@
     {
       "type": 0,
       "value": "Tekstipõhise AI ühendus ebaõnnestus. Kontrollige mudelit, arutlustaset, teenusetaset, konto ühendust ja teenusepakkuja kasutuslimiite."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Juurdepääs tekstipõhisele AI-le keelati. Kontrollige, kas API-võti või ChatGPT konto tohib seda mudelit kasutada."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI lõpp-punkt või mudel pole saadaval. Kontrollige teenusepakkuja baas-URL-i ja mudelit."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Ühendatud ChatGPT konto ei saa oma paketi kasutust jagada. Kontrollige ChatGPT kasutusseadeid või ühendage mõni teine konto."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI teenusepakkuja piirab päringute sagedust. Proovige hiljem uuesti."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI teenusepakkuja keeldus kontrollpäringust. Kontrollige mudelit, arutlustaset ja konto kasutusseadeid. Teenusepakkuja tõrketeade on serveri logis."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI teenusepakkuja lükkas kontrollpäringu tagasi (olek "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Kontrollige mudelit, arutlustaset ja teenusetaset. Teenusepakkuja tõrketeade on serveri logis."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI ühenduse kontroll aegus. Kontrollige teenusepakkuja saadavust ja proovige uuesti."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI teenusepakkuja lükkas mandaadid tagasi. Asendage teenusepakkuja API-võti või logige uuesti sisse ChatGPT kontoga."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Tekstipõhise AI teenusepakkuja pole ajutiselt saadaval. Proovige hiljem uuesti."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo ei saanud tekstipõhise AI teenusepakkujaga ühendust. Kontrollige teenusepakkuja baas-URL-i ja seda, kas see server saab sellega ühenduse luua."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Tekstimudel tagastas vastuse, mida Silo ei saa kasutada. Valige muu mudel."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -23739,6 +24695,12 @@
     {
       "type": 0,
       "value": "Eemalda piirang"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "Otseühendus"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -28875,6 +29837,12 @@
       "value": "ebaõnnestunud"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Ülesanne ebaõnnestus. Üksikasju vaadake administraatori diagnostikast."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -30886,7 +31854,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Hiljuti alustatud esitusseansside loend"
+      "value": "Kõigi kontode viimased esitused"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32515,6 +33483,72 @@
     {
       "type": 0,
       "value": "Tegevuse laadimine ebaõnnestus."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " esitas pealkirja "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " esitas pealkirja "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -45666,6 +46700,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Skannimised ja metaandmete värskendused kuvatakse siin nende käigus."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Aktiivseid skannimisi ega värskendusi pole"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Kõik ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Peida järjekord"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " muu meediakogu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " muud meediakogu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Metaandmete värskendused"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Metaandmete värskendamine…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Vaata järjekorda"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Kõrge"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Madal"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Keskmine"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -46104,6 +47246,30 @@
       "value": "Kinnitage tühjade juurkaustade puhastamine"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Kontrolli"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Metaandmete sobitaja järjekorras pole ootel üksusi."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Vahele jäetud juurkaustu pole registreeritud."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Aegunud väliseid ID-sid pole registreeritud."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -46140,6 +47306,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Muuda"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Meediakogusid pole veel seadistatud."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -46192,6 +47370,12 @@
       "value": "Peida teed"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Jõude"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -46226,6 +47410,12 @@
       "value": "Osaline skannimine"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Täidab puuduvad metaandmed või asendab kõik"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -46238,6 +47428,12 @@
       "value": "Juurkaust pole kättesaadav"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Skanni"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -46248,6 +47444,12 @@
     {
       "type": 0,
       "value": "Näita teid"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Lõpeta"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -46266,6 +47468,26 @@
     {
       "type": 0,
       "value": "Kontrolli haakepunkte"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Kontrollib, kas kõik meediakogu kaustad on kättesaadavad"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Vaata meediakogu "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " aktiivseid skannimisi"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -46369,7 +47591,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Hallake meediakogude juurkaustu ja skannimisi. Kataloogi import ja eksport asuvad nüüd jaotises „Hooldus“."
+      "value": "Hallake meediakaustu, jälgige skannimisi ja lahendage vastendamisprobleeme."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -46848,6 +48070,56 @@
       "value": "Aegunud välised ID-d"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktiivne"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktiivset"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Skannimistegevus"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Kataloogi seisund"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Meediakogud"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -47298,6 +48570,24 @@
     {
       "type": 0,
       "value": "Otsi ignoreeritud üksusi pealkirja, meediakogu või tüübi järgi…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Ebaselge"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Ootel"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Vastendamata"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -49964,6 +51254,12 @@
       "value": "Seadistuse lõpuleviimiseks sisestage serveri aadress."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Võtme määrab serveri juurutuskonfiguratsioon"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50888,6 +52184,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Selle määrab serveri juurutuskonfiguratsioon. Et see siin kustutada, eemaldage see sealt ja taaskäivitage API-serverid."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52671,6 +53973,68 @@
       "value": "Pistikprogrammid"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Rakendatud"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Ootele pandud"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Pistikprogrammide ettevalmistamise oleku laadimine ebaõnnestus."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Haldab keskkond"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Ootel"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Tagasi lükatud"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Paketi allikat ja eemaldamist juhib juurutus."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Ettevalmistamise olek"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Juurutus lukustab selle pistikprogrammi versioonile "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -53427,6 +54791,114 @@
       "value": "Loomine on peatatud. Salvestatud soovitused jäävad vahelehel „Avasta“ nähtavaks, kuni server taaskäivitub."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Profiilide järjestamine ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB loendite laadimine ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Pealkirjade otsimine ja manustamine ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Eemaldati "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " aegunud pealkiri"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Eemaldati "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " aegunud pealkirja"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53459,6 +54931,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Enne vahelehe „Avasta“ soovituste koostamist lahendage allpool manustuse luku konflikt."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Käivitage esmalt töö „Manustused“, et Silol oleks meediakogu vektoreid, millega võrrelda."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Enne vahelehe „Avasta“ soovituste koostamist ühendage lehel „AI-teenused“ manustuste teenusepakkuja."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Ühelgi profiilil pole veel maitseprofiili. Käivitage töö „Maitseprofiilid“, kui keegi on pealkirju vaadanud või hinnanud."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -55325,6 +56821,32 @@
       "value": "Jääb tühjaks, kuni vahelehe „Avasta“ soovitused lülitatakse sisse menüüs „Haldus → Soovitused“."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Soovitatud read jäävad tühjaks, kuni vahelehe „Avasta“ soovitused lülitatakse sisse menüüs "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "„Haldus → Soovitused“"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Väljas lehel „Soovitused“"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56811,6 +58333,12 @@
       "value": "Uued read lisatakse lehe „Avasta“ lõppu"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Ava lehe „Soovitused“ seaded"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56823,6 +58351,12 @@
       "value": "MDBListi voog ei sisalda loendi lehel salvestatud sortimist. Valige see, mida leht näitab."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Teie profiilil pole veel vahelehe „Avasta“ soovitusi. Selle rea eelvaate nägemiseks käivitage vahelehe „Avasta“ soovituste töö või vaadake ja hinnake mõnda pealkirja."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56833,6 +58367,12 @@
     {
       "type": 0,
       "value": "Valige loend või kleepige selle link, et näha selle pealkirju."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Selle rea eelvaate nägemiseks lülitage vahelehe „Avasta“ soovitused sisse menüüs „Haldus → Soovitused“."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -57655,6 +59195,12 @@
     {
       "type": 0,
       "value": "Sõnum saadetud"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Mängija ei kinnitanud sõnumi kättesaamist. Sõnum võib ilmuda hilinemisega või jääda üldse näitamata."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -60553,6 +62099,12 @@
       "value": "Ühenduse kontrollimine ebaõnnestus."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Ei õnnestunud kontrollida, kas serveri keskkond selle määrab. Muutmiseks laadige leht uuesti."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -61107,6 +62659,30 @@
     {
       "type": 0,
       "value": "Kanali muutmine ebaõnnestus"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Praeguste väärtuste nägemiseks laadige seaded uuesti. Kui sellel lehel on vahepeal midagi muutunud või muutsite salvestatud parooli või võtit, tühistatakse kõik teie muudatused; vastasel juhul jäävad need alles."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Laadi uuesti"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Seadete uuesti laadimine ebaõnnestus. Proovige uuesti."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Seadeid muudeti mujal"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -63109,6 +64685,612 @@
     {
       "type": 0,
       "value": "Sünkrooni veebimarkerid"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "Algoritm: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "soovitud: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; kasutusel: "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "Lubatud: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "Ummikujuhtimine: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "Konto"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "Sellel teel alates"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "Seade"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "Ükski seade pole otse ühendatud."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "Partneri lõpp-punkt"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "Ühendatud seadmed"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "porti "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "Vaikimisi: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "Kontrollige selle serveri valmisolekut otseühendusteks."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "Kehtiv: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "Luba otseühendused"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN-võimekus"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "Otseühenduste mootor"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT-i tagasisilmus (hairpin)"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "NAT-i vastendus"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "PMTU varulahendus"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "Kättesaadavus"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "Sokli vastuvõtupuhver"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "Sokli saatepuhver"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "Hosti häälestus"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "ACK-de harvendamine"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "BBR-i paketikao käsitlus"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "UDP segmenteerimise üleandmine"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "Kliendi vastuvõtuaken"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "Otseühenduse UDP-port"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "TCP ummikujuhtimine"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "TCP saatepuhver"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "Viimati kontrollitud: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "Puhverserver"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "Kuularid"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "Tuvastatud avalik aadress: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "Kontrollib, kas ruuter toetab UPnP-d, NAT-PMP-d või PCP-d."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "Pordivastendus"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "Valmisoleku kontrollid ei käivita otseesitust."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "Administraator on keelanud"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "Keelatud"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "Otseühenduste mootori käivitamine ebaõnnestus"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "Puhvri suurendamine ebaõnnestus"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "Ruuter ei toeta pordivastendust"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "Puhver on soovitust väiksem"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "Võrgu häälestamise abiprogramm pole saadaval"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "Sobimatu väärtus; lülitati välja"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "Süsteem ei saanud seda seadistust rakendada ega lugeda"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "See tuum ei toeta seda"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "Hosti puhvri piir on saavutatud"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "Hosti puhvri piiride lugemine ebaõnnestus"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "Avalik aadress sõltub sihtkohast"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR pole saadaval"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR pole laaditud või lubatud"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "Töötab rohkem kui üks API-server"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN-võimekusest loobuti"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN-võimekus puudub"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "Ruuterit ei leitud"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN-võimekus puudub"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "Juurdepääs keelatud"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "Pole saadaval"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "Pole mõõdetud"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "Suurendamine pole vajalik"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "Hosti reegel valis teise algoritmi"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "Kontroll ebaõnnestus"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "Teiste API-serverite kontrollimine ebaõnnestus"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "Otseühendusi haldab teine API-server"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "Ootab otseühenduste hostiks saamist"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "Otseühenduste olek pole saadaval"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "UDP-pordi avamine ebaõnnestus"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "UDP-port on sobimatu"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "Sellel platvormil ei toetata"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "Soovitud: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "Soovitud: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; antud: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "Käivita kontroll"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "Saatepuhver: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "Piiratud"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "Halvenenud"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "Varulahendus"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "Pole vajalik"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "Väljas"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "Sees"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "Teadmata"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "Komadega eraldatud loend, kuni kaheksa kirjet kujul host:port. Vaikeväärtuste kasutamiseks jätke see tühjaks."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "STUN-serverid"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "Otseühendused"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "Lubage seadmetel jõuda selle serverini otse UDP kaudu. UDP-pordi määrab muutuja "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " ja siin on see kirjutuskaitstud."
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -66577,6 +68759,24 @@
       "value": "Teisele mudelile üleminekuks tuleb vektoresitused lähtestada, mis kustutab need kõik. Teine teenusepakkuja, mis pakub sama mudelit, rakendub pärast taaskäivitust."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Lisa vahelehele „Avasta“"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Soovitatud ridu ei õnnestunud vahelehele „Avasta“ lisada."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Soovitatud read lisati vahelehele „Avasta“."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66599,6 +68799,44 @@
     {
       "type": 0,
       "value": "Mitu meediakogust puuduvat pealkirja server soovitamiseks hoiab. Iga pealkiri otsitakse TMDB-st ja manustatakse. Manustamine on tavaliselt odav, kuid suurem arv võib olenevalt teie manustuste teenusepakkujast maksta rohkem või võtta kauem aega ning kasutab rohkem salvestusruumi."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Teie vahelehel „Avasta“ pole veel ühtegi soovituste rida."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Enne kui vahelehe „Avasta“ soovitusi saab käivitada, lülitage ülal sisse valik „Luba soovitused“ ja taaskäivitage server."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Taotlused on praegu välja lülitatud. Lülitage need sisse "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "taotluste seadetes"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", et vaatajad näeksid vahelehte „Avasta“."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Ava vaheleht „Avasta“"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75925,6 +78163,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Salvestusruumi ei saa siia teisaldada, kuni salvestusruumi seadeid määravad keskkonnamuutujad ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Eemaldage esmalt need muutujad ja taaskäivitage kõik API-serverid."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -77061,6 +79313,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "See ajakava pärineb varukoopiate seadetest. Muutke seda lehel "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Varukoopiad"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -77363,10 +79635,66 @@
       "value": "Hiljutised vead"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Värskendamine ebaõnnestus. Üksikasju vaadake administraatori diagnostikast."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Vaata praegust ajakava"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -77799,6 +80127,18 @@
     {
       "type": 0,
       "value": "Autoscani webhooki kordus"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Loeb uuesti nende ASS-subtiitritega MKV-failide päise, mis skanniti enne, kui Silo hakkas manustatud fonte bitikiirusest välja jätma, et neid ei transkooditaks bitikiiruse tõttu, millega neid tegelikult ei voogedastata."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Manustatud fontidega failide bitikiiruse parandamine"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -87350,25 +89690,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Teleri sisselogimine ebaõnnestus. Proovige uuesti."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Kontrollige, kas teie rakendus näitab"
+      "value": "Sisselogimist ei õnnestunud kinnitada. Proovige uuesti."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Kontrollige, kas teie teler näitab"
+      "value": "Veenduge, et see kood ühtib"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Sisestage teleris või rakenduses kuvatav kood"
+      "value": "Sisestage oma seadmes kuvatud kood"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -87380,13 +89714,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Logige teler või muu seade oma kontoga sisse."
+      "value": "Logige teler, rakendus või muu seade sisse."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Teleri sisselogimine"
+      "value": "Sisselogimise kinnitamine"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -87398,7 +89732,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "Teleri kinnitamiseks lõpetage kasutajana "
+      "value": "Selle sisselogimise kinnitamiseks lõpetage kasutajana "
     },
     {
       "type": 1,
@@ -87406,13 +89740,13 @@
     },
     {
       "type": 0,
-      "value": " vaatamine. Ainult see konto ise saab teleri sisse logida."
+      "value": " vaatamine. Seadmeid saab kinnitada ainult konto ise."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Teleri kinnitamiseks lõpetage selle kasutajana vaatamine. Ainult see konto ise saab teleri sisse logida."
+      "value": "Selle sisselogimise kinnitamiseks lõpetage selle kasutajana vaatamine. Seadmeid saab kinnitada ainult konto ise."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -87430,39 +89764,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Seda koodi ei leitud. Kontrollige teleris kuvatavat koodi."
+      "value": "Seda koodi ei leitud. Kontrollige koodi ja proovige uuesti."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Mitte praegu"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Vanemad telerirakendused näitavad selle asemel sõnu "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Kinnitage ainult seade, mis on praegu teie ees."
+      "value": "Lükka tagasi"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Kinnitage ainult teler, mis on praegu teie ees."
+      "value": "Kinnitage see ainult siis, kui alustasite sisselogimist ise."
     }
   ],
   "web.auth.activate.playOn": [
@@ -87488,7 +89802,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Kõik selle teleri kasutajad saavad valida teie profiilide seast. PIN-koodiga profiilid jäävad lukustatuks."
+      "value": "See annab seadmele juurdepääsu teie profiilidele. PIN-koodiga profiilid jäävad lukustatuks."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -87535,6 +89849,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Taotletud "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -87548,7 +89872,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "See teler lõpetas ootamise. Alustage teleris uuesti."
+      "value": "See seade lõpetas ootamise. Alustage selles seadmes sisselogimist uuesti."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -87557,10 +89881,34 @@
       "value": "See sisselogimine lükati tagasi."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Valmis. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " logib sisse."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " on sisse logitud."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "See kood aegus. Teie teler näitab uut koodi. Kasutage seda."
+      "value": "Selle koodi kehtivus lõppes. Hankige seadmes uus kood ja proovige uuesti."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -87644,25 +89992,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "See teler on juba sisse logitud."
+      "value": "See seade on juba sisse logitud."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "See teler on kinnitatud ja lõpetab sisselogimist."
+      "value": "See seade on kinnitatud ja lõpetab sisselogimist."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Valmis. Teie teler logib sisse."
+      "value": "Valmis. Teie seade logib sisse."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Teie teler on sisse logitud."
+      "value": "Teie seade on sisse logitud."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87706,7 +90054,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Kas logida sisse seade "
+      "value": "Kas lubada seadmel "
     },
     {
       "type": 1,
@@ -87714,13 +90062,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " sisse logida?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Kas logida sisse see seade?"
+      "value": "Kas lubada sellel seadmel sisse logida?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87732,7 +90080,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "Logige sisse serverisse "
+      "value": "Selle sisselogimise kinnitamiseks logige sisse serverisse "
     },
     {
       "type": 1,
@@ -87740,13 +90088,13 @@
     },
     {
       "type": 0,
-      "value": ", et see teler kinnitada."
+      "value": "."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Kinnita teleri sisselogimine"
+      "value": "Kinnita sisselogimine"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88800,7 +91148,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Seadme sisselogimine ebaõnnestus. Proovige uuesti."
+      "value": "Sisselogimist ei õnnestunud kinnitada. Proovige uuesti."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -101242,6 +103590,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -109838,6 +112200,12 @@
       "value": "Näitab"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Seda rida haldab see server. Seda, mida rida näitab, ei saa siin muuta; lisage oma rida, et ise valida, mida see näitab."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 1,
@@ -110144,6 +112512,12 @@
       "value": "Tõlkimine…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Peida pärast seda eksporti lisatud serveri read:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -110162,6 +112536,12 @@
     {
       "type": 0,
       "value": ", asendades jaotised, mille olete siia varem lisanud. Teie muudatused selle serveri jaotistes jäävad alles."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Selle serveri read on pärast selle faili eksportimist muutunud, seega valige allpool read, mida peita."
     }
   ],
   "web.home.layout.checking": [
@@ -110212,6 +112592,26 @@
     {
       "type": 0,
       "value": "Lülitab valiku „Peida vaadatud üksused“ sisse."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Peidab valitud read lehtedel: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", muutmata teie teisi ridu seal."
     }
   ],
   "web.home.layout.import": [
@@ -110316,6 +112716,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -110524,6 +112942,12 @@
     {
       "type": 0,
       "value": "Nimeta jaotis"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Peida serveri read, mida selles failis pole:"
     }
   ],
   "web.home.page.customize": [
@@ -113503,6 +115927,12 @@
     {
       "type": 0,
       "value": "Suur bänner · ainult veebis"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Server"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -127219,6 +129649,16 @@
       "value": "Tagasi 1. lehele"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Mine lehele "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -127309,6 +129749,20 @@
     {
       "type": 0,
       "value": "Lisamise taotlemise lehed"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Leht "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " jääb nende tulemuste lõpust kaugemale."
     }
   ],
   "web.requests.toAdd.series": [
@@ -128909,6 +131363,12 @@
     {
       "type": 0,
       "value": "Profiili teavituste lugemine nende saabumisel ja loetuks märkimine."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Praegu esitatava sisu nägemine profiilis või, kui võti ühtegi profiili ei määra, konto kõigis profiilides: pealkiri, esituskoht, peatatud olek, seade ja esitusviis. Ilma esituse juhtimise ja võrgu üksikasjadeta."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

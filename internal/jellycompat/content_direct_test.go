@@ -813,3 +813,7 @@ func TestListEpisodesBySeasonIDUsesStoredSeasonRow(t *testing.T) {
 		t.Fatalf("episode lookups = %v, want %v", episodes.calls, want)
 	}
 }
+
+func (s *seriesRollupCountingStore) SeriesLatestViewedAt(context.Context, string, []string) (map[string]string, error) {
+	return map[string]string{}, nil
+}

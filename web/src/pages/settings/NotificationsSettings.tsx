@@ -900,6 +900,9 @@ function WebhookFormDialog({
             </Label>
             <Input
               id="webhook-url"
+              // The URL and the example URL read left to right; the translated placeholder shown
+              // while editing keeps the page's direction.
+              dir={url || !editing ? "ltr" : undefined}
               value={url}
               placeholder={
                 editing

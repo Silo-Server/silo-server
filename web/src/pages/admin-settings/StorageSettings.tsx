@@ -1,3 +1,4 @@
+/* eslint-disable formatjs/no-literal-string-in-jsx, no-restricted-syntax -- Vio's storage page (including the fork-only virtual-library purge) predates the admin i18n pass; its copy and toasts are ported in a follow-up. */
 import { useMemo, useRef, useState } from "react";
 import { AlertTriangle } from "lucide-react";
 
@@ -1315,7 +1316,7 @@ export default function StorageSettings() {
 
               <div className="rounded-lg border border-amber-500/25 bg-amber-500/5 p-4 text-xs leading-relaxed">
                 <p className="font-medium text-amber-500">Before you continue</p>
-                <ul className="text-muted-foreground mt-2 list-disc space-y-1 pl-4">
+                <ul className="text-muted-foreground mt-2 list-disc space-y-1 ps-4">
                   <li>Core metadata in PostgreSQL is retained.</li>
                   {!privateOnlyTransition ? (
                     <>

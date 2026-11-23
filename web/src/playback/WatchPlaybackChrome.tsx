@@ -1314,7 +1314,7 @@ function WatchPlaybackHostContent() {
 
   const { qualityPreference: canonicalQuality, maxBitrateKbps } = playbackQualitySettings(
     effectivePlaybackSettings,
-    onMeteredConnection(),
+    onMeteredConnection() ? "metered" : "unmetered",
   );
   // Stamp the server's liveness verdict on the rows before they become player
   // props (memoized above so the identity only moves with the rows or the

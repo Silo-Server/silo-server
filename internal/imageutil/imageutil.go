@@ -1,5 +1,5 @@
-// Package imageutil provides image resizing and thumbhash generation
-// for collection poster and backdrop uploads.
+//go:build !silo_node
+
 package imageutil
 
 import (
@@ -45,11 +45,6 @@ func init() {
 	bimg.VipsCacheSetMaxMem(0)
 }
 
-// ErrInvalidImage reports source bytes that libvips cannot read as an image.
-// Failures after the header was read, such as encoding a variant, do not wrap
-// it; see PixelDataUndecodable for damaged pixel data.
-var ErrInvalidImage = errors.New("imageutil: invalid image")
-
 // maxGoDecodePixels bounds the raster this package lets the standard library
 // allocate, in PixelDataUndecodable and the thumbhash fallback. A
 // few-kilobyte file can declare large dimensions, and image.Decode allocates
@@ -87,24 +82,6 @@ func SourceUnusable(err error, data []byte) bool {
 		return true
 	}
 	return !errors.Is(err, ErrBusy) && PixelDataUndecodable(data)
-}
-
-// MaxCachedOriginalDimension caps the longest edge of a cached "original"
-// variant at 4K. Provider artwork is rarely larger (TMDB backdrops top out at
-// 3840 wide, posters at 2000x3000), so the original keeps the provider's full
-// resolution; the cap bounds an outlier upload rather than everyday art.
-const MaxCachedOriginalDimension = 3840
-
-// Variant holds a named image variant (e.g. "original", "w500").
-type Variant struct {
-	Key  string
-	Data []byte
-}
-
-// VariantResult contains generated variants and their output format.
-type VariantResult struct {
-	Variants []Variant
-	Ext      string // file extension including dot: ".webp"
 }
 
 // GenerateVariants produces WebP variants of the source image at the requested

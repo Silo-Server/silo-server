@@ -502,6 +502,7 @@ func TestBodyCapIsEnforcedBeforeDecoding(t *testing.T) {
 // TestBodyReadTimeout exercises the 408 boundary over a real connection with
 // an injected deadline, so the test does not wait for BodyReadTimeout.
 func TestBodyReadTimeout(t *testing.T) {
+	t.Parallel()
 	if BodyReadTimeout != 30*time.Second {
 		t.Fatalf("BodyReadTimeout = %v; #135 ratified the 30 s server baseline on 2026-09-02", BodyReadTimeout)
 	}

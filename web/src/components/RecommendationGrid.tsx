@@ -87,7 +87,8 @@ function RecommendationItemCard({
       {showCaption ? (
         <ViewTransitionLink
           to={`/item/${encodeURIComponent(itemId)}`}
-          className="mt-1.5 block truncate text-sm font-medium hover:underline"
+          dir="auto"
+          className="bidi-text mt-1.5 block truncate text-sm font-medium hover:underline"
         >
           {item.title}
         </ViewTransitionLink>

@@ -89,6 +89,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/shuffle"
 	"github.com/Silo-Server/silo-server/internal/storagetransition"
@@ -198,7 +199,8 @@ type ArtworkDelivery struct {
 }
 
 type Dependencies struct {
-	Config *config.Config
+	DirectConnections apiv2.DirectConnectionsService
+	Config            *config.Config
 	// SubtitlePlaySync receives subtitles a player is served, so one never
 	// synced is aligned the first time it is played. The routes here connect
 	// it to the subtitle sync service; the Jellyfin routes share it. May be nil.
@@ -356,6 +358,7 @@ type Dependencies struct {
 	WatchProviderRegistry   handlers.WatchProviderLister
 	WatchCompletionObserver watchstate.CompletionObserver
 	PluginService           *plugins.Service
+	PluginProvisionStatus   func(context.Context) ([]plugins.ProvisionStatus, error)
 	PluginHTTPProxy         *plugins.HTTPProxy
 	PluginUserConfig        *plugins.UserConfigStore
 	AuthProviders           []auth.RegisteredProvider
@@ -682,9 +685,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// Build server settings repo if DB is available (needed by auth and admin).
 	// Wrap it in the encrypting decorator so sensitive keys rest as ciphertext
 	// and every consumer transparently reads plaintext.
-	var settingsRepo catalog.SettingsStore
+	var settingsRepo serversettings.SettingsStore
 	if deps.DB != nil {
-		settingsRepo = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(deps.DB), deps.SecretCipher)
+		settingsRepo = serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(deps.DB), deps.SecretCipher)
 	}
 	// One reader for access.unrated_content shared by every resolver built here.
 	unratedContent := config.NewUnratedContentPolicy(settingsRepo)
@@ -839,6 +842,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		authHandler = handlers.NewAuthHandler(authService, jwtService, deviceLoginService)
 		authHandler.SetPrimaryProfileChecker(checkPrimaryProfile)
+		authService.OnAuthProvidersChanged(deps.OnAuthProvidersChanged)
 		if accessGroupStore != nil {
 			authHandler.SetAccessGroupProvider(accessGroupStore)
 		}
@@ -998,7 +1002,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var calendarHandler *handlers.CalendarHandler
 	var catalogSearchService *catalog.CatalogSearchService
 	var webhookSyncHandler *handlers.WebhookSyncHandler
-	var requestHandler *handlers.RequestsHandler
+	var requestSvc *mediarequests.Service
 	// watchlistTitles is the one watchlist.Titles every surface shares: the
 	// v2 title operations, promotion on library watchlist reads, the title
 	// detail's repair observer and the profile purge.
@@ -1183,7 +1187,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		catalogHandler.SetBoxSetRepository(catalog.NewBoxSetRepository(deps.DB))
 
 		requestsRepo := mediarequests.NewRepository(deps.DB, deps.SecretCipher)
-		requestSvc := mediarequests.NewService(
+		requestSvc = mediarequests.NewService(
 			requestsRepo,
 			deps.TMDB,
 			mediarequests.NewCatalogPresence(itemRepo, providerIDRepo),
@@ -1225,8 +1229,6 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if lifecycle := notifications.NewRequestLifecycleNotifier(deps.Notifications); lifecycle != nil {
 			requestSvc.SetLifecycleNotifier(lifecycle)
 		}
-		requestHandler = handlers.NewRequestsHandler(requestSvc)
-		requestHandler.ReleaseOverrides = catalog.NewReleaseOverrideRepository(deps.DB)
 
 		// Onboarding tour manifest: gates consult live state at request time
 		// so admin toggles apply without a restart. The watch-together gate
@@ -2206,7 +2208,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			if installationCtx == nil {
 				installationCtx = context.Background()
 			}
-			if installationID, err := diagnostics.ServerInstanceID(installationCtx, catalog.NewServerSettingsRepo(deps.DB)); err != nil {
+			if installationID, err := diagnostics.ServerInstanceID(installationCtx, serversettings.NewServerSettingsRepo(deps.DB)); err != nil {
 				slog.Warn("playback installation identity unavailable; v2 playback stays unconfigured", "component", "api", "error", err)
 			} else {
 				playbackHandler.InstallationID = installationID
@@ -3483,18 +3485,18 @@ func newChiRouter(deps Dependencies) chi.Router {
 		if deps.DB != nil && authService != nil && jwtService != nil {
 			stateSecret := auth.DeriveOAuthStateSecret([]byte(deps.Config.Auth.JWTSecret))
 			oauthStore := auth.NewPGOAuthStore(deps.DB, stateSecret)
-			resolveClient := func(ctx context.Context, installationID int) (auth.OAuthClient, string, error) {
+			resolveClient := func(ctx context.Context, installationID int) (auth.OAuthClient, string, string, error) {
 				pp := authService.FindOAuthInstallation(installationID)
 				if pp == nil {
-					return nil, "", auth.ErrUnknownAuthInstallation
+					return nil, "", "", auth.ErrUnknownAuthInstallation
 				}
 				c, err := pp.OAuthClient(ctx)
 				if err != nil {
-					return nil, "", err
+					return nil, "", "", err
 				}
-				return c, pp.CapabilityID(), nil
+				return c, pp.CapabilityID(), pp.CallbackMode(), nil
 			}
-			identity := serveridentity.New(catalog.NewServerSettingsRepo(deps.DB))
+			identity := serveridentity.New(serversettings.NewServerSettingsRepo(deps.DB))
 			oauthHandler = auth.NewOAuthHandler(auth.OAuthHandlerDeps{
 				Store:           oauthStore,
 				CompletionStore: oauthStore,
@@ -3546,7 +3548,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// Server identity is public discovery data, so it reads through the raw
 	// settings repo: a SECRET_KEY rotation must not change who the server is.
 	if deps.DB != nil {
-		v2deps.ServerIdentity = serveridentity.New(catalog.NewServerSettingsRepo(deps.DB))
+		v2deps.ServerIdentity = serveridentity.New(serversettings.NewServerSettingsRepo(deps.DB))
 	}
 	v2deps.ServerConnections = apiv2.ServerConnections{
 		PublicURL: func() string {
@@ -4068,6 +4070,8 @@ func newChiRouter(deps Dependencies) chi.Router {
 	if itemRepo != nil {
 		v2deps.AdminCatalogItems = itemRepo
 	}
+	// Vio does not wire the admin poster URL routes on the v1 router; the
+	// fork's artwork paths stay on the catalog image handlers.
 	if adminImageHandler != nil {
 		v2deps.AdminCatalogImages = adminImageHandler
 	}
@@ -4086,12 +4090,19 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminDiagnosticReads = diagnosticsHandler
 		v2deps.AdminDiagnosticDeletes = diagnosticsHandler
 	}
+	v2deps.AdminPluginProvisionStatus = deps.PluginProvisionStatus
 	if deps.DB != nil {
-		v2deps.AdminPluginCatalogSettings = plugins.NewRepositoryStore(deps.DB)
-		v2deps.AdminPluginRepositories = plugins.NewRepositoryStore(deps.DB)
-		v2deps.AdminPluginRepositoryCreation = plugins.NewRepositoryStore(deps.DB)
-		v2deps.AdminPluginRepositoryUpdates = plugins.NewRepositoryStore(deps.DB)
-		v2deps.AdminPluginRepositoryDeletes = plugins.NewRepositoryStore(deps.DB)
+		if v2deps.AdminPluginProvisionStatus == nil {
+			v2deps.AdminPluginProvisionStatus = func(ctx context.Context) ([]plugins.ProvisionStatus, error) {
+				return plugins.ListProvisionStatus(ctx, deps.DB)
+			}
+		}
+		pluginRepoStore := plugins.NewRepositoryStore(deps.DB)
+		v2deps.AdminPluginCatalogSettings = pluginRepoStore
+		v2deps.AdminPluginRepositories = pluginRepoStore
+		v2deps.AdminPluginRepositoryCreation = pluginRepoStore
+		v2deps.AdminPluginRepositoryUpdates = pluginRepoStore
+		v2deps.AdminPluginRepositoryDeletes = pluginRepoStore
 	}
 	var externalSignInPlugins *handlers.PluginHandler
 	if deps.DB != nil && deps.PluginService != nil && deps.PluginUserConfig != nil {
@@ -4123,6 +4134,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if deps.PluginService != nil {
 		v2deps.NetworkAccess = deps.PluginService
+	}
+	if deps.DirectConnections != nil {
+		v2deps.DirectConnections = deps.DirectConnections
 	}
 	if deps.TaskManager != nil && deps.DB != nil {
 		v2deps.AdminTasks = deps.TaskManager
@@ -4224,18 +4238,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 		v2deps.AdminHistoryImports = historyImportHandler.Service()
 	}
 	v2deps.WatchProviders = deps.WatchProviderService
-	if requestHandler != nil {
-		v2deps.Requests = requestHandler.Service()
-		v2deps.RequestLifecycle = requestHandler.Service()
-		v2deps.AdminRequests = requestHandler.Service()
-		if watchlistRequests, ok := requestHandler.Service().(apiv2.WatchlistRequestService); ok && personalDataHandler != nil && watchlistTitles != nil {
+	if requestSvc != nil {
+		v2deps.Requests = requestSvc
+		v2deps.RequestLifecycle = requestSvc
+		v2deps.AdminRequests = requestSvc
+		v2deps.AdminRequestUsage = requestSvc
+		if personalDataHandler != nil && watchlistTitles != nil {
 			v2deps.WatchlistTitles = personalDataHandler
-			v2deps.WatchlistRequests = watchlistRequests
-		}
-		// *requests.Service implements the usage read (pinned at the top of
-		// this file), so the assertion only fails for a test double.
-		if usage, ok := requestHandler.Service().(apiv2.AdminRequestUsageService); ok {
-			v2deps.AdminRequestUsage = usage
+			v2deps.WatchlistRequests = requestSvc
 		}
 	}
 	if collectionHandler != nil {
@@ -4787,7 +4797,7 @@ func v2Dependencies(
 	actingAdmin apimw.ActingAdminDecider,
 	metadataCuration func(http.Handler) http.Handler,
 	markerEdit func(http.Handler) http.Handler,
-	settings catalog.SettingsStore,
+	settings serversettings.SettingsStore,
 ) apiv2.Dependencies {
 	out := apiv2.Dependencies{
 		Auth:            auth,

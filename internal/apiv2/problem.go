@@ -85,6 +85,12 @@ var TypeRestoreSetChanged = ProblemType{"restore_set_changed", http.StatusConfli
 // (accept_unauthenticated).
 var TypeBackupUnauthenticated = ProblemType{"backup_unauthenticated", http.StatusConflict, "Backup not authenticated"}
 
+// TypeNodeDeploymentManaged: the API servers' deployment configuration
+// (SILO_TRANSCODE_NODES) owns this transcode node, so its key cannot be issued
+// and its row cannot be deleted here. Remove it from that configuration and
+// restart the API servers first.
+var TypeNodeDeploymentManaged = ProblemType{"node_deployment_managed", http.StatusConflict, "Node managed by deployment configuration"}
+
 // ProblemType is one entry of the shared problem catalog.
 type ProblemType struct {
 	// ID is the stable identifier and the final path segment of the type URI.
@@ -143,7 +149,7 @@ var (
 	TypeFileUnavailable                               = ProblemType{"file_unavailable", http.StatusNotFound, "File unavailable"}
 	TypeFileAccessDenied                              = ProblemType{"file_access_denied", http.StatusForbidden, "File access denied"}
 	TypeFormatUnavailable                             = ProblemType{"format_unavailable", http.StatusNotAcceptable, "Format unavailable"}
-	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypePushInstallationKeyMismatch, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackProgressConflict, TypePasswordChangeRequired, TypeNotPermitted, TypeAccountRequired, TypeLocalLoginDisabled, TypeProviderPasswordExpired, TypeEmailInUse, TypeIdentityLinkedElsewhere, TypeProviderAlreadyEnabled, TypeBreakGlassRequired, TypeLastSignInMethod, TypeProviderUnavailable, TypeSubtitleSourceUnavailable, TypeSubtitlePageUnavailable, TypeInvalidGrant, TypeAccountDisabled, TypeLocalPasswordRequired, TypeAlreadyLinked, TypeTokenRefreshRequired, TypeNetworkIdentityRequired, TypePreparedFileExpired, TypeDeviceBindingMismatch, TypeRestoreSetChanged, TypeBackupUnauthenticated, TypeUploadLimitReached}
+	catalog                                           = []ProblemType{TypeRangeNotSatisfiable, TypeDeviceLoginExpired, TypeUnsupportedSource, TypeMalformedRequest, TypeInvalidCursor, TypeAuthenticationRequired, TypeInvalidToken, TypeSessionExpired, TypePermissionDenied, TypeProfileVerificationRequired, TypePushInstallationKeyMismatch, TypeNotFound, TypeMethodNotAllowed, TypeNotAcceptable, TypeRequestTimeout, TypeConflict, TypeIdempotencyConflict, TypeJobNotCancelable, TypeCapabilityDisabled, TypeCapabilityNotConfigured, TypePreconditionFailed, TypePayloadTooLarge, TypeUnsupportedMediaType, TypeValidationFailed, TypePreconditionRequired, TypeRateLimited, TypeInternalError, TypeCapabilityUnsupported, TypeDependencyUnavailable, TypeClientUpgradeRequired, TypeSyncResetRequired, TypeSnapshotRequestConflict, TypeProgressSnapshotTooLarge, TypePlaybackInstallationChanged, TypePlaybackSessionEnded, TypePlaybackProgressConflict, TypePasswordChangeRequired, TypeNotPermitted, TypeAccountRequired, TypeLocalLoginDisabled, TypeProviderPasswordExpired, TypeEmailInUse, TypeIdentityLinkedElsewhere, TypeProviderAlreadyEnabled, TypeBreakGlassRequired, TypeLastSignInMethod, TypeProviderUnavailable, TypeSubtitleSourceUnavailable, TypeSubtitlePageUnavailable, TypeInvalidGrant, TypeAccountDisabled, TypeLocalPasswordRequired, TypeAlreadyLinked, TypeTokenRefreshRequired, TypeNetworkIdentityRequired, TypePreparedFileExpired, TypeDeviceBindingMismatch, TypeRestoreSetChanged, TypeBackupUnauthenticated, TypeNodeDeploymentManaged, TypeUploadLimitReached}
 	defaultTypeByStatus                               = map[int]ProblemType{}
 	problemContentType                                = "application/problem+json"
 	_                               error             = (*Problem)(nil)
@@ -427,6 +433,8 @@ const (
 	codeUnknownParameter = "unknown_parameter"
 	codeMalformedJSON    = "malformed_json"
 	codeMalformedForm    = "malformed_form"
+	// codeManagedByEnvironment refuses a change owned by an environment declaration.
+	codeManagedByEnvironment = "managed_by_environment"
 
 	locationBody     = "body"
 	locationBodyFile = "body.file"

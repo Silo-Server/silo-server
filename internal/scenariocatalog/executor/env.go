@@ -48,7 +48,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/api"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/auth/passwordhash"
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/contractledger"
@@ -60,6 +59,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/scenariocatalog"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 	"github.com/Silo-Server/silo-server/migrations"
@@ -178,7 +178,7 @@ type Env struct {
 	live        *httptest.Server
 	liveLimited *httptest.Server
 	pool        *pgxpool.Pool
-	settings    catalog.SettingsStore
+	settings    serversettings.SettingsStore
 	stores      userstore.UserStoreProvider
 	jwt         *auth.JWTService
 	auth        *auth.Service
@@ -278,7 +278,7 @@ func New(t testing.TB) *Env {
 	if err := database.RunMigrations(ctx, pool, migrations.FS, "sql"); err != nil {
 		t.Fatalf("scenario executor: migrate: %v", err)
 	}
-	e.settings = catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)
+	e.settings = serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher)
 	e.stores = pgstore.NewPostgresProvider(pool)
 	e.jwt = auth.NewJWTService(cfg.Auth.JWTSecret, cfg.Auth.AccessTokenExpiry, cfg.Auth.RefreshTokenExpiry)
 	e.profileTok = access.NewProfileTokenService(cfg.Auth.JWTSecret, 0)
@@ -394,7 +394,7 @@ func (e *Env) Reseed() {
 	// A deployment mints its server identity on first use and keeps it. Seed
 	// it here so the first v2 read that reports server_id (device lookup,
 	// system info) is not observed as a server_settings write.
-	if _, err := serveridentity.Ensure(ctx, catalog.NewServerSettingsRepo(e.pool)); err != nil {
+	if _, err := serveridentity.Ensure(ctx, serversettings.NewServerSettingsRepo(e.pool)); err != nil {
 		e.t.Fatalf("scenario executor: seed server identity: %v", err)
 	}
 	// Media requests on, so the onboarding flow's requests step is present

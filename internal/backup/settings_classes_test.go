@@ -10,8 +10,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/mail"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/serveridentity"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // settingRegistry is every server setting the server's registries name: the
@@ -19,7 +21,7 @@ import (
 // limits, and the route and access tables.
 func settingRegistry() []string {
 	keys := config.AdminSettingDefaultKeys()
-	keys = append(keys, slices.Collect(maps.Keys(catalog.SensitiveSettingKeys))...)
+	keys = append(keys, slices.Collect(maps.Keys(serversettings.SensitiveSettingKeys))...)
 	keys = append(keys, branding.AssetSettingKeys()...)
 	keys = append(keys, slices.Collect(maps.Keys(ratelimit.DefaultSettings()))...)
 	keys = append(keys, AccessSettingKeys()...)
@@ -28,7 +30,7 @@ func settingRegistry() []string {
 	}
 	// Settings the server writes with no admin default, by the constants
 	// that name them where there is one.
-	keys = append(keys, serveridentity.Key, settingJWTSecret, settingABSJWTSecret,
+	keys = append(keys, serveridentity.Key, plugins.ProvisionRestoreHoldKey, settingJWTSecret, settingABSJWTSecret,
 		catalog.SearchSettingProvider, catalog.SearchSettingMeilisearchURL, catalog.SearchSettingMeilisearchAPIKey,
 		catalog.SearchSettingMeilisearchIndex, catalog.SearchSettingMeilisearchIndexTypes,
 		config.AITextProviderSettingKey, config.AISpeechProviderSettingKey, config.EmbeddingProviderSettingKey,
@@ -111,7 +113,7 @@ func TestEveryCredentialSettingIsDecided(t *testing.T) {
 			strings.HasPrefix(key, backupBucketSettingPrefix) || strings.HasPrefix(key, "virtual_library.") || key == "remuxdb.token"
 	}
 	outbound := outboundKeys()
-	for key := range catalog.SensitiveSettingKeys {
+	for key := range serversettings.SensitiveSettingKeys {
 		if !own(key) && !slices.Contains(outbound, key) {
 			t.Errorf("encrypted setting %s is neither carried from the live server (outboundBundles) nor this server's own", key)
 		}

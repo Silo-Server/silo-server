@@ -28,6 +28,7 @@ import {
 import {
   activeCatalogQueryMatchesLibrary,
   activeSectionQueryMatchesLibrary,
+  isLibraryLayoutQueryKey,
 } from "@/lib/queryInvalidation";
 import { bumpHomeRefreshSignal } from "@/pages/homeSurfaceRefresh";
 
@@ -46,6 +47,7 @@ interface InvalidateMediaSurfaceOptions {
    */
   skipItemQueries?: boolean;
   skipSimilarItems?: boolean;
+  skipHomeRefresh?: boolean;
   // Items already found related to itemId, such as through a watch detail
   // dropped since (dropInactiveWatchDetail), which was the only link from an
   // episode to its series.
@@ -425,7 +427,11 @@ function shouldInvalidateMediaSurfaceQuery(
     return activeCatalogQueryMatchesLibrary(queryKey, options.libraryId);
   }
   if (queryKeyStartsWith(queryKey, sectionKeys.all)) {
-    return activeSectionQueryMatchesLibrary(queryKey, options.libraryId);
+    return (
+      !(options.skipHomeRefresh && queryKeyStartsWith(queryKey, sectionKeys.home())) &&
+      !isLibraryLayoutQueryKey(queryKey) &&
+      activeSectionQueryMatchesLibrary(queryKey, options.libraryId)
+    );
   }
   if (queryKeyStartsWith(queryKey, recKeys.all)) {
     return !(options.skipSimilarItems && queryKey[1] === "similar");
@@ -650,6 +656,9 @@ export function scheduleMediaSurfaceInvalidation(
             ...(options.knownRelatedIds ?? []),
           ])
         : undefined,
+    skipHomeRefresh: existing
+      ? Boolean(existing.options.skipHomeRefresh && options.skipHomeRefresh)
+      : options.skipHomeRefresh,
     watchedKeys: [...(existing?.options.watchedKeys ?? []), ...(options.watchedKeys ?? [])],
     // A later event without a series (one whose lookup failed, say) mustn't
     // drop the series an earlier event for the same item named.
@@ -663,10 +672,15 @@ export function scheduleMediaSurfaceInvalidation(
       // Home reads its sections through one-shot `fetchQuery` calls with no
       // observers, so the signal has to be bumped after the invalidation lands
       // or Home re-reads a cache that is still marked fresh.
-      void invalidateMediaSurfaceQueries(queryClient, mergedOptions).then(
-        () => bumpHomeRefreshSignal(queryClient),
-        () => bumpHomeRefreshSignal(queryClient),
-      );
+      const invalidation = invalidateMediaSurfaceQueries(queryClient, mergedOptions);
+      if (mergedOptions.skipHomeRefresh) {
+        void invalidation.catch(() => {});
+      } else {
+        void invalidation.then(
+          () => bumpHomeRefreshSignal(queryClient),
+          () => bumpHomeRefreshSignal(queryClient),
+        );
+      }
     },
     Math.max(0, Math.min(MEDIA_SURFACE_REFRESH_DELAY_MS, deadline - now)),
   );

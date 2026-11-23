@@ -263,7 +263,7 @@ func (h *ItemsHandler) ClearResumePosition(ctx context.Context, userID int, prof
 		return nil
 	}
 	notifySignalsChanged(ctx, h.signalsNotifier, userID, profileID)
-	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, target.seriesID(), "progress", userStateEventState{})
+	publishUserStateEvent(ctx, h.EventsHub, userID, profileID, contentID, target.seriesID(), userStateChangeProgress, userStateEventState{})
 	return nil
 }
 

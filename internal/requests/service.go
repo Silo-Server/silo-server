@@ -897,19 +897,37 @@ func (s *Service) CreateRequest(ctx context.Context, viewer Viewer, input Create
 		return nil, ErrAlreadyRequested
 	}
 
-	// Metadata reads are deferred until after the request is committed. Keep the
-	// client's display snapshot exactly as submitted for the 201 response.
-	var detail *tmdb.MediaDetail
-	facts := RoutingFacts{}
-	if normalized.MediaType == MediaTypeSeries {
-		detail = s.requestDetail(ctx, normalized.MediaType, normalized.TMDBID)
-		facts = s.routingFacts(ctx, detail)
+	// One TMDB detail read, after the cheap refusals, serves routing and the
+	// stored title: the server's copy of the title and year wins over the
+	// client's.
+	detail := s.requestDetail(ctx, normalized.MediaType, normalized.TMDBID)
+	if detail != nil { //nolint:nestif // the detail read fills the stored title fields in one place
+		if title := strings.TrimSpace(detail.Title); title != "" {
+			normalized.Title = title
+		}
+		if detail.Year > 0 {
+			year := detail.Year
+			normalized.Year = &year
+		}
+		// A caller without the display fields (a watchlist add keeps only
+		// its own snapshot) gets TMDB's; one that sent them keeps its own.
+		if normalized.Overview == "" {
+			normalized.Overview = strings.TrimSpace(detail.Overview)
+		}
+		if normalized.PosterPath == "" {
+			normalized.PosterPath = tmdbImagePathOrEmpty(detail.PosterPath)
+		}
+		if normalized.BackdropPath == "" {
+			normalized.BackdropPath = tmdbImagePathOrEmpty(detail.BackdropPath)
+		}
 	}
 	if normalized.MediaType == MediaTypeSeries && !normalized.WholeSeries {
 		if err := s.resolvePartialSeriesSeasons(ctx, &normalized, detail, match); err != nil {
 			return nil, err
 		}
 	}
+
+	facts := s.routingFacts(ctx, detail)
 
 	policy, err := s.EffectivePolicy(ctx, viewer.UserID)
 	if err != nil {
@@ -3542,8 +3560,10 @@ func normalizeCreateInput(input CreateRequestInput) (CreateRequestInput, error) 
 	input.Title = strings.TrimSpace(input.Title)
 	input.IMDbID = strings.TrimSpace(input.IMDbID)
 	input.Overview = strings.TrimSpace(input.Overview)
-	input.PosterPath = strings.TrimSpace(input.PosterPath)
-	input.BackdropPath = strings.TrimSpace(input.BackdropPath)
+	// Art a client sent in another shape is dropped, not refused: the TMDB
+	// detail read fills it, and a watchlist add never fails over a poster.
+	input.PosterPath = tmdbImagePathOrEmpty(input.PosterPath)
+	input.BackdropPath = tmdbImagePathOrEmpty(input.BackdropPath)
 	if input.TVDBID != nil && *input.TVDBID <= 0 {
 		input.TVDBID = nil
 	}

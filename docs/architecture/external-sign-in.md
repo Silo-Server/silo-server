@@ -322,15 +322,24 @@ step.
   "Not you? Switch account" path signs out of Silo only and then starts with
   it. Any other `prompt` value is refused with 400; linking flows always ask
   for `prompt=login`.
-- **Registration URLs.** The administrator registers the callback,
-  `<public URL>/api/v2/auth/oauth/<installation id>/callback`, and, for
-  provider logout, the post-logout redirect `<public URL>/login` at the
-  provider. The admin installation view (`listAdminPluginInstallations` and
-  the other operations that answer an installation) shows both on each OAuth
-  auth binding (`callback_url`,
-  `post_logout_redirect_url`), and the connection test repeats the callback.
-  Both are empty while no public URL is configured and for a password
-  provider.
+- **Registration URLs.** OAuth bindings use either the stable callback
+  `<public URL>/api/v2/auth/oauth/callback` or the installation callback
+  `<public URL>/api/v2/auth/oauth/<installation id>/callback`. Existing bindings
+  and new admin API bindings default to the installation callback. A new
+  OAuth binding provisioned from a deployment document defaults to stable,
+  so an operator can register its redirect URI before starting Silo.
+  When switching an existing binding, register the stable URI alongside
+  the installation URI so outstanding flows can finish. Both routes
+  check the signed state and exchange the code with the redirect URI
+  stored at the start of the flow. The browser cookie uses that URI's
+  public path, including any prefix the proxy strips.
+  The admin installation view shows the callback on the OAuth capability
+  and binding, alongside the post-logout redirect `<public URL>/login`.
+  The connection test repeats the binding's callback. These URLs are
+  empty until a public URL is configured. External providers wait for
+  initial Owner setup. OAuth sign-in also waits for a public URL.
+  Existing sessions can still recheck their accounts through an enabled
+  OAuth provider when the public URL is cleared.
 - **Provider errors.** An `error` on the callback maps to a reason:
   `access_denied` and the interaction errors to `not_permitted`,
   `temporarily_unavailable` and `server_error` to `provider_unavailable`,

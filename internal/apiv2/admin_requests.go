@@ -181,6 +181,7 @@ type AdminRequestCapabilitiesOutputBody struct {
 	RoutingSeriesStatus  bool `json:"routing_series_status" doc:"Whether series routing rules take series_statuses and exclude_series_statuses conditions. Send them only when true. With several API servers, add such conditions only once every server reports true: a server without them ignores them and routes as if the rule had none"`
 	DiscoverLayout       bool `json:"discover_layout" doc:"Whether the Requests Discover page's layout can be edited under /admin/request-discover"`
 	DiscoverListOrder    bool `json:"discover_list_order" doc:"Whether an mdblist Discover row takes list.order. Send it only when true"`
+	RequestPosters       bool `json:"request_posters" doc:"Whether admin request reads return poster_url, a path on this server that serves the request's TMDB poster (getAdminRequestPoster)"`
 }
 
 func adminRequestViewer(ctx context.Context) mediarequests.Viewer {
@@ -228,6 +229,7 @@ func registerAdminRequests(reg *Registry) {
 		out.Body.RoutingSeriesStatus = out.Body.Routing
 		_, out.Body.DiscoverLayout = reg.deps.AdminRequests.(adminRequestDiscover)
 		out.Body.DiscoverListOrder = out.Body.DiscoverLayout
+		_, out.Body.RequestPosters = reg.requestPosters()
 		return out, nil
 	})
 	Register(reg, op(http.MethodGet, "/admin/requests", opListAdminRequests, false), func(ctx context.Context, in *AdminMediaRequestListInput) (*MediaRequestCollectionOutput, error) {
@@ -259,7 +261,9 @@ func registerAdminRequests(reg *Registry) {
 			if err != nil {
 				return nil, requestProblem(ctx, err)
 			}
-			return &MediaRequestOutput{Body: mediaRequestOf(r, v)}, nil
+			out := mediaRequestOf(r, v)
+			reg.setRequestPosterURL(&out, r)
+			return &MediaRequestOutput{Body: out}, nil
 		})
 	}
 	Register(reg, op(http.MethodGet, "/admin/request-settings", opGetAdminRequestSettings, false), reg.getAdminRequestSettings)
@@ -284,6 +288,8 @@ func (reg *Registry) listAdminRequests(ctx context.Context, cursors *Cursors, in
 		return nil, p
 	}
 	v := adminRequestViewer(ctx)
+	// A scoped API key sees no deployment names or transport errors.
+	withhold := scopedAPIKey(ctx)
 	scope := CursorScope{OperationID: opListAdminRequests, Security: strconv.Itoa(v.UserID) + "/" + v.ProfileID, Filter: in.filterKey(), Sort: adminRequestSort, Tiebreaker: "id"}
 	var before *mediarequests.RequestPageKey
 	if in.Cursor != "" {
@@ -315,7 +321,12 @@ func (reg *Registry) listAdminRequests(ctx context.Context, cursors *Cursors, in
 	}
 	items := make([]MediaRequest, 0, len(rows))
 	for _, r := range rows {
-		items = append(items, mediaRequestOf(r, v))
+		item := mediaRequestOf(r, v)
+		reg.setRequestPosterURL(&item, r)
+		if withhold {
+			withholdRequestDeployment(&item)
+		}
+		items = append(items, item)
 	}
 	return &MediaRequestCollectionOutput{Body: MediaRequestCollection{Collection: Paginated(items, next)}}, nil
 }

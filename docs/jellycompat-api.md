@@ -474,8 +474,10 @@ and `MediaSources[i].Name` is the version's edition and quality, such as
 `GET` and `HEAD /Items/{id}/Download` serve the original file through the
 native direct download, the same service as `/api/v2/direct-download`, so they
 follow its rules. Both answer `403` when **Allow downloads** is off, the
-account's download permission is off, or the policy engine refuses the
-download, and `404` for a file outside the viewer's library or quality scope.
+account's download permission is off, the policy engine refuses the
+download, or the original is above the download policy's quality ceiling. A file
+the viewer cannot open under its catalog and file access (library, rating, and
+the profile's playback quality limit) answers `404`.
 The server and per-user download bandwidth limits pace the transfer. Like
 native downloads, each API server process applies them on its own, to its
 native and Jellyfin downloads together. As with the native
@@ -707,10 +709,35 @@ transcode node that advertises `server_dv7_to_hdr10`. With no such executor,
 or when the file's RPUs cannot be parsed, negotiation falls back to a full
 encode, which needs tone mapping.
 
+Chrome on macOS decodes H.264 with VideoToolbox, which rejects some open-GOP
+Blu-ray encodes whose I-frames carry recovery points instead of IDR frames and
+a new PPS per GOP. Copied video from such a file stops with
+`PIPELINE_ERROR_DECODE` (`-12909`); Jellyfin Web then reloads the stream, which
+shows as periodic stutter. The bitstream is valid, and Jellyfin copies H.264 the
+same way. Turning off hardware video decoding in Chrome avoids it.
+
+Repeated unstarted playback negotiations replace only negotiations with the same
+source and track-selection variant. Distinct audio or subtitle selections keep
+their own playback grants until they start or expire.
+
+### Subtitle delivery
+
 Subtitle inventory preserves text and bitmap tracks. Selected embedded text or
 bitmap subtitles can burn through the existing local or remote full-encode
 path when that output is supported. Unsupported output combinations are not
 advertised as playable.
+
+Playback negotiation reads `DeviceProfile.SubtitleProfiles`. For a text track
+delivered separately from the video, it prefers a matching external format and
+otherwise uses an advertised external WebVTT format. This applies to embedded
+text, external sidecars, and downloaded subtitles. Embedded tracks keep
+`IsExternal: false`; `DeliveryMethod: "External"` describes delivery, not where
+the track is stored. An embedded track keeps Embed delivery when the profile
+supports it. Delivery method and format are negotiated for every available text
+track, including when playback starts with subtitles off, so a track enabled or
+switched during playback uses the same client-compatible URL. Each track's
+delivery settings are stored with the playback source, so rebuilding it produces
+the same delivery URL.
 
 | Routes | Behavior |
 |---|---|
@@ -761,12 +788,13 @@ switch to any text track is served from the cache. Background extractions share
 the subtitle cache's two server-wide warm slots and are skipped when both are
 busy.
 
-Chrome on macOS decodes H.264 with VideoToolbox, which rejects some open-GOP
-Blu-ray encodes whose I-frames carry recovery points instead of IDR frames and
-a new PPS per GOP. Copied video from such a file stops with
-`PIPELINE_ERROR_DECODE` (`-12909`); Jellyfin Web then reloads the stream, which
-shows as periodic stutter. The bitstream is valid, and Jellyfin copies H.264 the
-same way. Turning off hardware video decoding in Chrome avoids it.
+The cache key covers the source path, modification time, size, track ordinal,
+and output format. A source that changes during extraction is not published, nor
+is an incomplete extract; a cache write failure does not stop the extracted
+subtitle from being delivered. A node already running as many subtitle demuxes
+as it allows answers `503 ServiceUnavailable` with `Retry-After` instead of
+starting another.
+
 
 ## Sessions and socket
 
@@ -957,9 +985,9 @@ configured servers that never stored a Jellyfin Web version to the previous
 default, `10.11.6`. Existing servers keep what they report and install until an
 admin changes it in the Jellyfin compatibility settings.
 
-Jellyfin 12 behavior not yet provided: `MediaStream.IsOriginal` (needs the
-probed `original` disposition in the native track model), the
-`VideoRotation` profile condition and `VideoRotationNotSupported` reason
+`MediaStream.IsOriginal` is serialized for the Jellyfin 12 SDK models but is
+always `false`: Silo does not record which audio track is the original language.
+Jellyfin 12 behavior not provided: the `VideoRotation` profile condition and `VideoRotationNotSupported` reason
 (rotation is not probed), external delivery of PGS and VobSub tracks during
 direct play or remux (they burn in), `excludeActiveSessions` on resume lists,
 and `Accept-Language` localization.
@@ -1006,7 +1034,7 @@ is unknown, `MaxStreamingBitrate` uses Jellyfin's conservative 40 Mbps estimate.
 stream routes treat `AudioCodec` as a constraint on the original audio.
 Themes do not create playback sessions or update watched state.
 
-See [local theme songs](catalog-api.md#local-theme-songs-v2) for file conventions,
+See [local theme songs](catalog-api.md#local-theme-songs) for file conventions,
 ownership, inheritance, and routing.
 
 ## HEVC video encoding

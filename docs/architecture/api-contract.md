@@ -174,7 +174,7 @@ against the v2 entry points, in the packages that own it. The ledger's history i
 
 ### Contract foundation
 
-The first implementation slice establishes and tests rules shared by every later operation:
+The foundation establishes and tests rules every operation shares:
 
 - one RFC 9457 Problem Details envelope with stable type URIs, safe human-readable text,
   optional field-level validation details, and request correlation;
@@ -189,34 +189,34 @@ The first implementation slice establishes and tests rules shared by every later
   older server;
 - response models that first-party clients decode leniently: clients ignore unknown response
   fields and preserve an unknown-enum fallback;
-- auth, profile, acting-admin, rate-limit, demo-mode, and request-ID middleware behavior identical
-  in strength to the existing router (v2 additionally returns the canonical ID in `X-Request-ID`;
-  see Foundation).
+- auth, profile, acting-admin, rate-limit, demo-mode, and request-ID behavior composed from the
+  shared `internal/api/middleware` gates, with the canonical request ID returned in
+  `X-Request-ID` (see Foundation).
 
-The exact shared schemas and status mapping land in the foundation pull request before domain
-operations begin. Huma defaults are not accepted implicitly: generated validation errors, schema
-hooks, requiredness, and unknown-property handling are configured and locked by tests.
+The shared schemas and status mapping live in `internal/apiv2`. Huma defaults are not accepted
+implicitly: generated validation errors, schema hooks, requiredness, and unknown-property handling
+are configured and locked by tests.
 
-The foundation configures the framework rather than inheriting convenience defaults:
+The foundation configures the framework rather than inheriting convenience defaults. It:
 
-- set `RejectUnknownQueryParameters` so undeclared query parameters fail with the validation
+- sets `RejectUnknownQueryParameters` so undeclared query parameters fail with the validation
   problem instead of being ignored;
-- set `NoFormatFallback` so an unacceptable `Accept` header returns `406` instead of silently
+- sets `NoFormatFallback` so an unacceptable `Accept` header returns `406` instead of silently
   falling back to JSON;
-- add a structured-body media-type guard because Huma otherwise treats a missing `Content-Type`
+- adds a structured-body media-type guard because Huma otherwise treats a missing `Content-Type`
   as JSON and accepts `+json` formats; missing, parameter-incompatible, and vendor media types use
   Silo's `415` problem exactly as specified below;
-- disable Huma's default array nullability and require response builders to initialize slices and
+- disables Huma's default array nullability and requires response builders to initialize slices and
   maps, with schema-validated response tests proving that collections never serialize as `null`;
-- use a named v2 instant transport type or canonical mapper; ordinary `time.Time` marshaling does
+- uses a named v2 instant transport type; ordinary `time.Time` marshaling does
   not guarantee UTC or exactly millisecond precision. Schema and exact-wire tests cover UTC,
   three fractional digits, omission, explicit null where allowed, and zero-value rejection;
-- require explicit Huma `explode` metadata for slice query parameters and lint/test every array
+- requires explicit Huma `explode` metadata for slice query parameters and lint/test every array
   parameter so the accepted repeated-key wire form is not replaced by comma-separated values;
-- disable the built-in OpenAPI, documentation, and schema routes and remove the default schema-link
+- disables the built-in OpenAPI, documentation, and schema routes and removes the default schema-link
   response transformer; Silo serves the exact committed artifact and omits production `$schema`
   additions as specified above; and
-- set the structured-body read deadline to 30 seconds, the server's own `ReadTimeout` baseline,
+- sets the structured-body read deadline to 30 seconds, the server's own `ReadTimeout` baseline,
   rather than inheriting Huma's audited five-second default, which would silently supersede it.
   The deadline, its boundary, and Silo's `408` Problem Details response have integration tests.
 
@@ -269,7 +269,13 @@ The foundation is `internal/apiv2`. These facts about it are not derivable from 
   policy (`internal/contractspec`): pre-lock, a breaking change against the merge base needs
   an exact entry — operation id, rule id, fingerprint — in
   `contracts/api/v2/breaking-approvals.json`; once `contracts/api/v2/LOCKED` exists no entry
-  applies. An approval lives only on the pull request that needs it: an entry matching no
+  applies. A new value on a response enum is additive under the enum rules below, so the policy
+  reports oasdiff's `response-property-enum-value-added` as information that needs no entry,
+  before and after the lock. Two cases stay breaking: an addition paired with a removal on the
+  same response property, which is a rename, and a value removed from a request enum, which
+  stays closed. The spec lint also requires the variants
+  of a `oneOf` to keep a shared required tag (such as `kind`) disjoint, so a new tag value can't make a
+  response match two variants. An approval lives only on the pull request that needs it: an entry matching no
   change in the diff fails the gate, so the next pull request removes entries that have
   merged (the record is the file's history and the entry's `approved_in`), and a push whose
   merge base is the commit itself compares identical documents and consults no approval.
@@ -1179,7 +1185,7 @@ without v1. Silo is pre-1.0 and that update is a coordinated maintenance-window 
 accepting that bounded break keeps the stable contract and routers honest.
 
 Operational liveness and readiness are not native-client operations and gain no v2 JSON
-operation. Owner decision (Quick104, 2026-09-07): the existing probes are **retained unversioned
+operation. Maintainer decision (2026-09-07): the existing probes are **retained unversioned
 on the listener that serves them** — `GET /api/v1/health` and `GET /api/v1/ready` on the API
 listener, `GET /api/v1/health` on the proxy and transcode-node listeners — outside the native
 OpenAPI artifact and generated clients and outside the `/api/v1` tombstone. Only `GET` is
@@ -1452,6 +1458,25 @@ an `admin_only` recipe (Editor's picks, `admin_curated_list`); a row of that kin
 the page is kept and may change. The refusal is `403 permission_denied` saying only an admin can
 add an Editor's picks row. Every profile mutation in the section is demo-restricted (v1's demo guard listed none of them), and `createProfile`'s `Location` names the `PATCH`/`DELETE` resource; the created profile is read back through `listProfiles`.
 
+`getProfileSectionBaseline` (added after the port, with no v1 counterpart) serves home layout
+export and import. For one page (`scope`, `library_id`) it returns `section_tokens`, opaque
+tokens for the server rows on the page in libraries the acting profile is allowed: every stored
+row, enabled or disabled, and, when no stored row is enabled, the default rows the page falls
+back to as well. Libraries the profile only hid from its own browsing still count. It also
+returns `visible_sections`, the active server rows the profile may see before its own overrides,
+each with its `token`. Rows tied to libraries the profile isn't allowed are left out of both, so
+a restricted profile learns nothing about them. A token is an HMAC of the profile, page, and
+section ID keyed by the server's JWT secret: another profile's export matches nothing, tokens
+recorded before the secret rotated match nothing, and tokens identify rows, not servers (the
+client checks the server identity separately). The web client records `section_tokens` in an
+export. When it imports that file on the same server, it offers to hide visible rows whose
+tokens the export lacks, but only if at least one visible row's token is in the export;
+otherwise, or for a file without tokens, it offers nothing and imports the page as before.
+`getProfileSectionFlags` reports `home_layout_baseline: true` on servers that serve it.
+`getProfileSectionSettings` and the admin view of a profile's settings fall back to the default
+rows when no stored row on the page is enabled, the same rows the Home and library feeds show
+there, so a profile can hide or reorder them.
+
 **Settings section (Phase 4).** Operations: `getSettingsContract` (replaced both v1
 `/settings/contract` and `/settings/manifest`), `getSettingsContractCapabilities` (replaced v1
 `/settings/capability`), `getOverlayConfig`, `getEffectiveSubtitleAppearance`,
@@ -1472,10 +1497,10 @@ shortcut `item` are declared extension bags because the plugin and the contract'
 schema own their keys; `X-Silo-Device-Id` is a required declared header on device-override
 mutations; ids are string `ID`s and `updated_at` is an instant. `updateNavigationShortcut` declares
 the `409` `conflict` its seam answers when concurrent shortcut updates exhaust the bounded
-compare-and-set loop; nothing is stored and the same request may be retried. Not carried here: the
-`If-None-Match` conditional manifest GET, the `X-Silo-Mutation-Id` idempotent replay, and the
-admin-only `admin_form` descriptor; the first two land with the foundation caching and
-mutation-retry work.
+compare-and-set loop; nothing is stored and the same request may be retried. The manifest GET
+always answers `200` with its `ETag` and does not honor `If-None-Match`. The writes are classified
+naturally idempotent (`RetrySafetyNaturalIdempotent`): repeating one stores the same value, so they
+take no `X-Silo-Mutation-Id`. The admin-only `admin_form` descriptor is not carried.
 The first Phase 4 section, **settings-prefs** (`internal/apiv2/preferences.go`, tag
 `preferences`), ports the nine `profile_scoped` preference rows: `getAudioPreference`,
 `updateAudioPreference`, `deleteAudioPreference`, `getSubtitlePreference`,
@@ -2196,7 +2221,7 @@ the acting profile's own collections; any other ID is a `422 validation_failed` 
 `body.ordered_ids`. The order validator remains account-wide, so another profile's edit can make a
 profile's order tag stale; clients recover from the 412 as for any stale tag.
 
-Personal collection groups are removed in two phases. Today `groups` is always `[]`, `group_id`
+Personal collection groups are removed in two phases. `groups` is always `[]`, `group_id`
 always null, the `groups` capability false, and the six group operations and a `group_id` update
 answer `501 capability_unsupported`. The members and operations leave `/api/v2` once shipped Apple
 and Android builds tolerate their absence, before the lock. `CollectionCapabilities.login_sharing`
@@ -2516,15 +2541,13 @@ the page's hero spot (`ClearFeaturedForSurface`). A PATCH that makes a row featu
 unless it sends `web_only`, so a value an older server left on a demoted row never returns. The
 web shows a page's first featured section as its banner and any later one as a regular row, so
 `web_only` applies to that first featured section only. The viewer section reads (`getHomeLayout`,
-`listHomeSections`, `getHomeSectionItems`, and the three library page equivalents, on v2 and the
-frozen v1 routes alike) answer it only to a caller whose `X-Silo-Client-Family` is `web`. Any
-other caller, including one that sends no family, never gets it: layouts and lists leave it out and
-its single-section read answers `404`. Dropping the row from the frozen v1 reads changes no shape;
-the v1 bridge exists for the same apps the switch is meant for. The rule is a positive match because some native callers,
-such as the tvOS Top Shelf extension, send no client headers at all. A profile that turns the
-row's hero banner off gets a regular row, which every client receives. The profile layout editor
-reads and the catalog browse of a section (`source=section`) are not filtered, so the web's See
-all keeps working. The frozen `/api/v1` admin bodies neither accept nor answer the field.
+`listHomeSections`, `getHomeSectionItems`, and the three library page equivalents) answer it
+only to a caller whose `X-Silo-Client-Family` is `web`. Any other caller, including one that sends
+no family, never gets it: layouts and lists leave it out and its single-section read answers
+`404`. The rule is a positive match because some native callers, such as the tvOS Top Shelf
+extension, send no client headers at all. A profile that turns the row's hero banner off gets a
+regular row, which every client receives. The profile layout editor reads and the catalog browse
+of a section (`source=section`) are not filtered, so the web's See all keeps working.
 
 ### Administrator policy document storage
 

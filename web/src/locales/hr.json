@@ -281,6 +281,18 @@
       "value": "Ovaj je kôd za prijavu istekao. Počnite ispočetka."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "Ovaj je račun dosegnuo ograničenje broja uređaja za izravne veze."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "Drugi uređaj već koristi ovaj ključ veze. Pokušajte ponovno."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -338,7 +350,13 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Postavlja okruženje čvora. Promijenite to ondje i ponovno pokrenite čvor."
+      "value": "Ovo postavlja okruženje. Promijenite to ondje i ponovno pokrenite zahvaćenu uslugu."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "Ova vrijednost nedostaje."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +465,12 @@
     {
       "type": 0,
       "value": "Prijavite se putem prijave svoje mreže da biste nastavili."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Ovaj čvor postavlja konfiguracija implementacije poslužitelja. Uklonite ga ondje i ponovno pokrenite API poslužitelje da biste njime upravljali ovdje."
     }
   ],
   "error.not_acceptable": [
@@ -14003,7 +14027,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — kolekcija koju prikazuju nije ni ovdje ni u sigurnosnoj kopiji"
+              "value": " nije moguće vratiti — kolekcija koju prikazuje nije ni ovdje ni u sigurnosnoj kopiji"
             }
           ]
         },
@@ -14049,7 +14073,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihove su postavke šifrirane drugim ključem SECRET_KEY"
+              "value": " nije moguće vratiti — postavke su šifrirane drugim ključem SECRET_KEY"
             }
           ]
         },
@@ -14095,7 +14119,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — ovaj ih poslužitelj ne može prihvatiti"
+              "value": " nije moguće vratiti — ovaj poslužitelj to ne može prihvatiti"
             }
           ]
         },
@@ -14187,7 +14211,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihove datoteke nedostaju na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuće datoteke nedostaju na ovom poslužitelju"
             }
           ]
         },
@@ -14233,7 +14257,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihove mape nisu na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuće mape nisu na ovom poslužitelju"
             }
           ]
         },
@@ -14279,7 +14303,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihova grupa pristupa nije na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuća grupa pristupa nije na ovom poslužitelju"
             }
           ]
         },
@@ -14325,7 +14349,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihov naslov nije u katalogu ovog poslužitelja"
+              "value": " nije moguće vratiti — pripadajući naslov nije u katalogu ovog poslužitelja"
             }
           ]
         },
@@ -14371,7 +14395,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — proširili bi pristup pa ovaj poslužitelj zadržava svoje strože vrijednosti"
+              "value": " nije moguće vratiti — to bi proširilo pristup pa ovaj poslužitelj zadržava svoje strože vrijednosti"
             }
           ]
         },
@@ -14417,7 +14441,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihova medijateka nije na ovom poslužitelju"
+              "value": " nije moguće vratiti — pripadajuća medijateka nije na ovom poslužitelju"
             }
           ]
         },
@@ -14463,7 +14487,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihovu medijateku ovdje nije moguće vratiti"
+              "value": " nije moguće vratiti — pripadajuću medijateku ovdje nije moguće vratiti"
             }
           ]
         },
@@ -14542,6 +14566,52 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nije moguće vratiti — okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nije moguće vratiti — okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nije moguće vratiti — okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14555,7 +14625,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — šifrirani su drugim ključem SECRET_KEY"
+              "value": " nije moguće vratiti — šifrirano je drugim ključem SECRET_KEY"
             }
           ]
         },
@@ -14601,7 +14671,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — najprije ih treba instalirati iz kataloga dodataka"
+              "value": " nije moguće vratiti — najprije to treba instalirati iz kataloga dodataka"
             }
           ]
         },
@@ -14647,7 +14717,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihov glavni profil mora se vratiti zajedno s njima"
+              "value": " nije moguće vratiti — zajedno s tim mora se vratiti i pripadajući glavni profil"
             }
           ]
         },
@@ -14693,7 +14763,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — nema ih u sigurnosnoj kopiji"
+              "value": " nije moguće vratiti — sigurnosna kopija to ne sadrži"
             }
           ]
         },
@@ -14877,7 +14947,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — ovaj bi im poslužitelj dao veći pristup nego sigurnosna kopija"
+              "value": " nije moguće vratiti — ovaj bi poslužitelj tome dao veći pristup nego sigurnosna kopija"
             }
           ]
         },
@@ -14969,7 +15039,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — ovdje su već isti"
+              "value": " nije moguće vratiti — ovdje je već isto"
             }
           ]
         },
@@ -15061,7 +15131,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — njihovu kopiju u sigurnosnoj kopiji nije moguće pročitati"
+              "value": " nije moguće vratiti — pripadajuću kopiju u sigurnosnoj kopiji nije moguće pročitati"
             }
           ]
         },
@@ -15107,7 +15177,7 @@
             },
             {
               "type": 0,
-              "value": " nije moguće vratiti — povezuju se s vanjskim uslugama, a ovaj poslužitelj ne može provjeriti sigurnosnu kopiju"
+              "value": " nije moguće vratiti — povezuje se s vanjskim uslugama, a ovaj poslužitelj ne može provjeriti sigurnosnu kopiju"
             }
           ]
         },
@@ -15232,6 +15302,52 @@
     {
       "type": 0,
       "value": "Adresa usluge mijenja se bez njezinih vjerodajnica u sigurnosnoj kopiji pa ih vraćanje ovdje briše i isključuje uslugu dok ih ponovno ne unesete."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postavka zadržava trenutačnu vrijednost jer okruženje ovog poslužitelja postavlja nju ili dio njezine veze."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postavke zadržavaju trenutačne vrijednosti jer okruženje ovog poslužitelja postavlja njih ili dio njihove veze."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postavki zadržava trenutačne vrijednosti jer okruženje ovog poslužitelja postavlja njih ili dio njihove veze."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15798,8 +15914,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Sakrij ih"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij ih"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij ih"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -15984,8 +16126,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Prikaži ih"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži ih"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži ih"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -16810,14 +16978,14 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Odabrano je i ono što je potrebno za vaš odabir: "
+              "value": "Odabrana je i stavka potrebna za vaš odabir: "
             },
             {
               "type": 1,
@@ -16829,11 +16997,11 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Odabrano je i ono što je potrebno za vaš odabir: "
+              "value": "Odabrane su i stavke potrebne za vaš odabir: "
             },
             {
               "type": 1,
@@ -16849,7 +17017,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Odabrano je i ono što je potrebno za vaš odabir: "
+              "value": "Odabrane su i stavke potrebne za vaš odabir: "
             },
             {
               "type": 1,
@@ -16861,21 +17029,19 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "Poništen je i odabir onoga što ovisi o poništenom: "
+              "value": "Poništen je i odabir stavke koja ovisi o onome što ste poništili: "
             },
             {
               "type": 1,
@@ -16887,11 +17053,11 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
-              "value": "Poništen je i odabir onoga što ovisi o poništenom: "
+              "value": "Poništen je i odabir stavki koje ovise o onome što ste poništili: "
             },
             {
               "type": 1,
@@ -16907,7 +17073,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Poništen je i odabir onoga što ovisi o poništenom: "
+              "value": "Poništen je i odabir stavki koje ovise o onome što ste poništili: "
             },
             {
               "type": 1,
@@ -16919,9 +17085,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -18660,6 +18824,12 @@
       "value": "Drugi se račun ovdje prijavljuje istim korisničkim imenom ili e-adresom."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Okruženje ovog poslužitelja postavlja postavke koje se razlikuju ili dio njihove veze pa ovaj poslužitelj zadržava svoje trenutačne vrijednosti."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -19294,6 +19464,166 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Pozadinska slika"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " stavka kolekcije"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " stavke kolekcije"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " stavki kolekcije"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Kolekcija je zamijenjena"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Konfiguracija"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Opis"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Uključeno"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Istaknuto"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Ograničenje broja stavki"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Razvrstavanje stavki"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Medijateke"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Položaj"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Plakat"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Redoslijed"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Izvor"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Raspored sinkronizacije"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Naslov"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Prijevod naslova"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Vrsta"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Vidljivost"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Samo web"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -19894,6 +20224,16 @@
     {
       "type": 0,
       "value": " (zadržano: strože)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (zadržano: okruženje)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -21076,6 +21416,20 @@
       "value": "U vremenskoj zoni poslužitelja."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "U vremenskoj zoni poslužitelja. Po vašem vremenu to je "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -22012,10 +22366,10 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22023,7 +22377,7 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22039,9 +22393,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -22104,20 +22456,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Sakrij račune"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij račun"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij račune"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij račune"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Sakrij datoteke"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij datoteku"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij datoteke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij datoteke"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Sakrij datoteke"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij datoteku"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij datoteke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sakrij datoteke"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -22200,6 +22630,466 @@
     {
       "type": 0,
       "value": "Navedene su u bazi podataka, ali nisu pronađene u spremištu; vraćanja ih izostavljaju."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " element brendiranja"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elementa brendiranja"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " elemenata brendiranja"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pozadina kolekcije"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pozadine kolekcija"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pozadina kolekcija"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " poster kolekcije"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postera kolekcija"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postera kolekcija"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " preuzeti titl"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " preuzeta titla"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " preuzetih titlova"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " poster medijateke"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postera medijateka"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postera medijateka"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " slika za preklapanje"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " slike za preklapanje"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " slika za preklapanje"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " poster osobne kolekcije"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postera osobnih kolekcija"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " postera osobnih kolekcija"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatar profila"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatara profila"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatara profila"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prenesena grafička datoteka"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prenesene grafičke datoteke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prenesenih grafičkih datoteka"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " preneseni titl"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prenesena titla"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " prenesenih titlova"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -22530,10 +23420,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22545,7 +23435,7 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22569,9 +23459,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -22586,8 +23474,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Prikaži račune"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži račun"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži račune"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži račune"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -22650,22 +23564,74 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Prikaži datoteke"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži datoteku"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži datoteke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži datoteke"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Prikaži datoteke"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži datoteku"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži datoteke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Prikaži datoteke"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -22673,7 +23639,7 @@
             }
           ]
         },
-        "few": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -22689,9 +23655,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -25458,6 +26422,12 @@
       "value": "Pružatelj pretvaranja govora u tekst privremeno nije dostupan. Pokušajte ponovno kasnije."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Pružatelj tekstnog AI-ja nema dostupnog kredita ili je dosegnuto ograničenje korištenja ili potrošnje. Provjerite stanje računa i ograničenja kod pružatelja ili postavke korištenja za ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -25468,6 +26438,80 @@
     {
       "type": 0,
       "value": "Veza s tekstnim AI-jem nije uspjela. Provjerite model, razinu zaključivanja, razinu usluge, povezanost računa i ograničenja korištenja kod pružatelja."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Pristup tekstnom AI-ju je odbijen. Provjerite smiju li API ključ ili ChatGPT račun koristiti ovaj model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Krajnja točka ili model tekstnog AI-ja nije dostupan. Provjerite osnovni URL pružatelja i model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Povezani ChatGPT račun ne može dijeliti korištenje svojeg plana. Provjerite postavke korištenja za ChatGPT ili povežite drugi račun."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Pružatelj tekstnog AI-ja ograničava učestalost zahtjeva. Pokušajte ponovno kasnije."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Pružatelj tekstnog AI-ja odbio je zahtjev za provjeru. Provjerite model, razinu zaključivanja i postavke korištenja za račun. Pogreška pružatelja nalazi se u zapisniku poslužitelja."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Pružatelj tekstnog AI-ja odbio je zahtjev za provjeru (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Provjerite model, razinu zaključivanja i razinu usluge. Pogreška pružatelja nalazi se u zapisniku poslužitelja."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Isteklo je vrijeme za provjeru veze s tekstnim AI-jem. Provjerite dostupnost pružatelja i pokušajte ponovno."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Pružatelj tekstnog AI-ja odbio je vjerodajnice. Zamijenite API ključ pružatelja ili se ponovno prijavite ChatGPT računom."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Pružatelj tekstnog AI-ja privremeno nije dostupan. Pokušajte ponovno kasnije."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo se nije mogao povezati s pružateljem tekstnog AI-ja. Provjerite osnovni URL pružatelja i može li se ovaj poslužitelj povezati s njim."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Tekstni model vratio je odgovor koji Silo ne može koristiti. Odaberite drugi model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -25568,6 +26612,12 @@
     {
       "type": 0,
       "value": "Ukloni ograničenje"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "Izravna"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -31384,6 +32434,12 @@
       "value": "neuspjelo"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Zadatak nije uspio. Pojedinosti potražite u administratorskoj dijagnostici."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -33612,7 +34668,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Feed nedavno pokrenutih sesija reprodukcije"
+      "value": "Najnovije reprodukcije na svim računima"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -35420,6 +36476,72 @@
     {
       "type": 0,
       "value": "Učitavanje aktivnosti nije uspjelo."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " – reproducirano: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " – reproducirano: "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -50737,6 +51859,129 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Skeniranja i osvježavanja metapodataka prikazuju se ovdje dok su u tijeku."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Nema aktivnih skeniranja ni osvježavanja"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Sve ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Sakrij red čekanja"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ još "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " medijateka"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ još "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " medijateke"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ još "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " medijateka"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Osvježavanja metapodataka"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Osvježavanje metapodataka"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Prikaži red čekanja"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Visoka"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Niska"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Srednja"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -51247,6 +52492,30 @@
       "value": "Potvrda čišćenja praznih korijena"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Pregledaj"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Nijedna stavka ne čeka u redu čekanja za povezivanje metapodataka."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Nema zabilježenih preskočenih korijena."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Nema zabilježenih zastarjelih vanjskih ID-ova."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -51283,6 +52552,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Uredi"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Još nije konfigurirana nijedna medijateka."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -51346,6 +52627,12 @@
       "value": "Sakrij putanje"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Neaktivno"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -51380,6 +52667,12 @@
       "value": "Djelomično skeniranje"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Dopunite nedostajuće ili zamijenite sve metapodatke"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -51392,6 +52685,12 @@
       "value": "Korijen nedostupan"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Skeniraj"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -51402,6 +52701,12 @@
     {
       "type": 0,
       "value": "Prikaži putanje"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Zaustavi"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -51420,6 +52725,22 @@
     {
       "type": 0,
       "value": "Provjeri točke montiranja"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Provjerite jesu li sve mape medijateke dostupne"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Prikaži aktivna skeniranja za "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -51523,7 +52844,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Upravljajte korijenima medijateka i skeniranjima. Uvoz i izvoz kataloga sada se nalaze u odjeljku Održavanje."
+      "value": "Upravljajte mapama s medijima, pratite skeniranja i rješavajte probleme s povezivanjem."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -52082,6 +53403,67 @@
       "value": "Zastarjeli vanjski ID-ovi"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivan"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivna"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivnih"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Aktivnost skeniranja"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Stanje kataloga"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Medijateke"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -52548,6 +53930,24 @@
     {
       "type": 0,
       "value": "Pretražite zanemarene stavke po naslovu, medijateci ili vrsti…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Nejednoznačno"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Na čekanju"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Nepovezano"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -55335,6 +56735,12 @@
       "value": "Unesite adresu poslužitelja da biste dovršili postavke."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ključ postavlja konfiguracija implementacije poslužitelja"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -56263,6 +57669,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Postavlja ga konfiguracija implementacije poslužitelja. Uklonite ga ondje i ponovno pokrenite API poslužitelje da biste ga izbrisali ovdje."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -58207,6 +59619,68 @@
       "value": "Dodaci"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Primijenjeno"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Zadržano"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Nije moguće učitati status pripreme dodataka."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Upravlja okruženje"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Na čekanju"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Odbijeno"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Izvorom paketa i uklanjanjem upravlja implementacija."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Status pripreme"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Implementacija fiksira ovaj dodatak na verziju "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -58967,6 +60441,130 @@
       "value": "Generiranje je zaustavljeno. Spremljene preporuke ostaju vidljive u odjeljku Otkrij do ponovnog pokretanja poslužitelja."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Rangiranje profila ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Dohvaćanje TMDB popisa ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Pretraživanje naslova i izrada embeddinga ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uklonjen je "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " istekli naslov"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uklonjena su "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " istekla naslova"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uklonjeno je "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " isteklih naslova"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -59011,6 +60609,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Prije izrade preporuka za Otkrij riješite sukob zaključavanja embeddinga u nastavku."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Najprije pokrenite posao Embeddingi kako bi Silo imao vektore medijateke za usporedbu."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Prije izrade preporuka za Otkrij povežite pružatelja embeddinga u odjeljku AI usluge."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Nijedan profil još nema profil ukusa. Pokrenite posao Profili ukusa kad netko pogleda ili ocijeni naslove."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -61221,6 +62843,32 @@
       "value": "Ostaje prazno dok se ne uključe preporuke za Otkrij pod Administracija → Preporuke."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Preporučeni retci ostaju prazni dok se ne uključe preporuke za Otkrij pod "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Administracija → Preporuke"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Isključeno u odjeljku Preporuke"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -62828,6 +64476,12 @@
       "value": "Novi retci dodaju se na dno stranice Otkrij"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Otvori postavke preporuka"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -62840,6 +64494,12 @@
       "value": "MDBList u svom feedu ne prenosi redoslijed spremljen na stranici popisa. Odaberite onaj koji se tamo prikazuje."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Vaš profil još nema preporuka za Otkrij. Pokrenite posao Preporuke za Otkrij ili pogledajte i ocijenite nekoliko naslova kako biste pregledali ovaj redak."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -62850,6 +64510,12 @@
     {
       "type": 0,
       "value": "Odaberite popis ili zalijepite njegovu poveznicu da biste vidjeli njegove naslove."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Uključite preporuke za Otkrij pod Administracija → Preporuke kako biste pregledali ovaj redak."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -63736,6 +65402,12 @@
     {
       "type": 0,
       "value": "Poruka je poslana"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Reproduktor nije potvrdio primitak poruke. Možda će se prikazati sa zakašnjenjem ili se uopće neće prikazati."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -66677,6 +68349,12 @@
       "value": "Provjera veze nije uspjela."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nije moguće provjeriti postavlja li ovo okruženje poslužitelja. Ponovno učitajte stranicu da biste to uredili."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -67247,6 +68925,30 @@
     {
       "type": 0,
       "value": "Ažuriranje kanala nije uspjelo"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Ponovno učitajte da biste vidjeli trenutačne vrijednosti. Ako se nešto na ovoj stranici promijenilo ili ste uredili spremljenu lozinku ili ključ, poništavaju se sve vaše izmjene; u suprotnom se zadržavaju."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Ponovno učitaj"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nije moguće ponovno učitati postavke. Pokušajte ponovno."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Postavke su promijenjene drugdje"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -69309,6 +71011,612 @@
     {
       "type": 0,
       "value": "Sinkroniziraj online oznake"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "Algoritam: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "zatraženo "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; aktivno "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "Dopuštene vrijednosti: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "Kontrola zagušenja: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "Račun"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "Na ovom putu od"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "Uređaj"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "Nijedan uređaj nije izravno povezan."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "Krajnja točka uređaja"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "Povezani uređaji"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "na port "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "Zadano: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "Provjerite je li ovaj poslužitelj spreman za izravne veze."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "Primijenjeno: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "Omogući izravne veze"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Ovlast NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "Mehanizam izravnih veza"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT hairpin"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "NAT mapiranje"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "Rezervni način za PMTU"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "Dostupnost"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "Međuspremnik socketa za primanje"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "Međuspremnik socketa za slanje"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "Podešavanje hosta"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "Prorjeđivanje ACK-ova"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "Pravilo BBR-a za gubitak paketa"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "Rasterećenje UDP segmentacije"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "Prijamni prozor klijenta"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "UDP port izravnih veza"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "TCP kontrola zagušenja"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "TCP međuspremnik za slanje"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "Zadnja provjera: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "Proxy"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "Slušatelji"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "Uočena javna adresa: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "Provjerava podržava li usmjerivač UPnP, NAT-PMP ili PCP."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "Mapiranje portova"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "Provjere spremnosti ne pokreću izravnu reprodukciju."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "Onemogućio administrator"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "Onemogućeno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "Mehanizam izravnih veza nije se mogao pokrenuti"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "Nije moguće povećati međuspremnik"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "Usmjerivač ne podržava mapiranje portova"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "Međuspremnik je manji od zatraženog"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "Pomoćni program za podešavanje mreže nije dostupan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "Nevaljana vrijednost; postavka je isključena"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "Sustav nije mogao primijeniti ili pročitati ovu postavku"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "Nije podržano u ovoj jezgri"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "Dosegnuto ograničenje međuspremnika hosta"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "Nije moguće pročitati ograničenja međuspremnika hosta"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "Javna adresa razlikuje se ovisno o odredištu"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR nije dostupan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR nije učitan ili dopušten"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "Pokrenuto je više API poslužitelja"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "Ovlast NET_ADMIN je odbačena"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Nedostaje ovlast NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "Usmjerivač nije pronađen"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "Nedostaje ovlast NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "Dopuštenje odbijeno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "Nije dostupno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "Nije izmjereno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "Povećanje nije potrebno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "Pravila hosta odabrala su drugi algoritam"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "Provjera nije uspjela"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "Nije moguće provjeriti ima li drugih API poslužitelja"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "Izravne veze pruža drugi API poslužitelj"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "Čeka se preuzimanje uloge hosta izravnih veza"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "Stanje izravnih veza nije dostupno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "Nije moguće otvoriti UDP port"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "UDP port nije valjan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "Nije podržano na ovoj platformi"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "Zatraženo: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "Zatraženo: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; dodijeljeno: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "Pokreni provjeru"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "Međuspremnik za slanje: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "Ograničeno"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "Smanjena kvaliteta"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "Rezervni način"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "Nije potrebno"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "Isključeno"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "Uključeno"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "Nepoznato"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "Zarezima odvojen popis od najviše osam unosa host:port. Ostavite prazno za zadane vrijednosti."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "STUN poslužitelji"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "Izravne veze"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "Dopustite uređajima da pristupe ovom poslužitelju izravnim UDP putem. UDP port određuje "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " i ovdje se može samo čitati."
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -72833,6 +75141,24 @@
       "value": "Prelazak na drugi model zahtijeva ponovno postavljanje embeddinga, čime se svi brišu. Drugi pružatelj koji poslužuje isti model primjenjuje se nakon ponovnog pokretanja."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Dodaj u Otkrij"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Nije moguće dodati preporučene retke na stranicu Otkrij."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Preporučeni retci dodani su na stranicu Otkrij."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -72855,6 +75181,44 @@
     {
       "type": 0,
       "value": "Koliko naslova koji nisu u medijateci poslužitelj čuva za preporuke. Svaki se traži na TMDB-u i pretvara u embedding. Izrada embeddinga obično je jeftina, ali veći broj može koštati više ili trajati dulje, ovisno o vašem pružatelju embeddinga, i zauzima više prostora za pohranu."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Vaša stranica Otkrij još ne prikazuje nijedan redak tipa Preporuke."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Uključite postavku „Omogući preporuke“ iznad i ponovno pokrenite poslužitelj kako bi se preporuke za Otkrij mogle pokrenuti."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Zahtjevi su trenutačno isključeni. Uključite ih u "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Postavkama zahtjeva"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " kako bi gledatelji mogli vidjeti stranicu Otkrij."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Otvori stranicu Otkrij"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -82227,6 +84591,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Pohranu nije moguće premjestiti ovamo dok okruženje postavlja postavke pohrane ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Najprije uklonite te varijable i ponovno pokrenite sve API poslužitelje."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -83421,6 +85799,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Ovaj raspored dolazi iz postavki sigurnosnih kopija. Promijenite ga na stranici "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Poslužitelj › Sigurnosne kopije"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -83739,10 +86137,66 @@
       "value": "Nedavne pogreške"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Osvježavanje nije uspjelo. Pojedinosti potražite u administratorskoj dijagnostici."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Pregledaj trenutačni raspored"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -84187,6 +86641,18 @@
     {
       "type": 0,
       "value": "Ponovni pokušaj Autoscan webhooka"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Ponovno čita zaglavlje MKV datoteka s ASS titlovima skeniranih prije nego što je Silo počeo izostavljati ugrađene fontove iz brzine prijenosa, kako se te datoteke ne bi transkodirale zbog brzine prijenosa koja se zapravo ne streama."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Ispravak brzine prijenosa datoteka s ugrađenim fontovima"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -94660,25 +97126,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Prijava TV-a nije uspjela. Pokušajte ponovno."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Provjerite prikazuje li vaša aplikacija"
+      "value": "Nije moguće odobriti prijavu. Pokušajte ponovno."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Provjerite prikazuje li vaš TV"
+      "value": "Provjerite podudara li se ovaj kôd"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Unesite kod s TV-a ili aplikacije"
+      "value": "Unesite kôd prikazan na vašem uređaju"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -94690,13 +97150,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Prijavite TV ili drugi uređaj svojim računom."
+      "value": "Prijavite TV, aplikaciju ili drugi uređaj."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Prijava TV-a"
+      "value": "Odobrenje prijave"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -94716,13 +97176,13 @@
     },
     {
       "type": 0,
-      "value": " da biste odobrili TV. Samo taj račun može prijaviti TV."
+      "value": " da biste odobrili ovu prijavu. Samo sam vlasnik računa može odobravati uređaje."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Prestanite pregledavati kao ovaj korisnik da biste odobrili TV. Samo taj račun može prijaviti TV."
+      "value": "Prestanite pregledavati kao ovaj korisnik da biste odobrili ovu prijavu. Samo sam vlasnik računa može odobravati uređaje."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -94740,39 +97200,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Nismo pronašli taj kod. Provjerite kod na TV-u."
+      "value": "Nismo pronašli taj kôd. Provjerite kôd i pokušajte ponovno."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Ne sada"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Starije TV aplikacije umjesto toga prikazuju "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Odobrite samo uređaj koji je upravo ispred vas."
+      "value": "Odbij"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Odobrite samo TV koji je upravo ispred vas."
+      "value": "Odobrite ovo samo ako ste sami pokrenuli prijavu."
     }
   ],
   "web.auth.activate.playOn": [
@@ -94798,7 +97238,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Svatko tko koristi ovaj TV može odabrati neki od vaših profila. Profili s PIN-om ostaju zaključani."
+      "value": "Tako uređaj dobiva pristup vašim profilima. Profili s PIN-om ostaju zaključani."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -94845,6 +97285,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Zatraženo "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -94858,7 +97308,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Ovaj TV više ne čeka. Počnite ponovno na TV-u."
+      "value": "Ovaj uređaj više ne čeka. Ponovno pokrenite prijavu na njemu."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -94867,10 +97317,34 @@
       "value": "Ova je prijava odbijena."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Gotovo. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ": prijava je u tijeku."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": ": prijava je dovršena."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Ovaj je kod istekao. Vaš TV prikazuje novi. Upotrijebite taj kod."
+      "value": "Ovaj je kôd istekao. Zatražite novi kôd na uređaju i pokušajte ponovno."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -94954,25 +97428,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Taj je TV već prijavljen."
+      "value": "Ovaj je uređaj već prijavljen."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Ovaj je TV odobren i dovršava prijavu."
+      "value": "Ovaj je uređaj odobren i dovršava prijavu."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Gotovo. Vaš se TV prijavljuje."
+      "value": "Gotovo. Vaš se uređaj prijavljuje."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Vaš je TV prijavljen."
+      "value": "Vaš je uređaj prijavljen."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -95016,7 +97490,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Prijaviti uređaj "
+      "value": "Dopustiti da se "
     },
     {
       "type": 1,
@@ -95024,13 +97498,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " prijavi?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Prijaviti ovaj uređaj?"
+      "value": "Dopustiti prijavu ovog uređaja?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -95050,13 +97524,13 @@
     },
     {
       "type": 0,
-      "value": " da biste odobrili ovaj TV."
+      "value": " da biste odobrili ovu prijavu."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Prijavi TV"
+      "value": "Odobri prijavu"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -96102,7 +98576,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Nije moguće prijaviti uređaj. Pokušajte ponovno."
+      "value": "Nije moguće odobriti prijavu. Pokušajte ponovno."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -110095,6 +112569,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -119305,6 +121793,12 @@
       "value": "Prikazuje"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Njime upravlja ovaj poslužitelj. Ovdje se ne može promijeniti što prikazuje; dodajte vlastiti redak da biste sami odabrali što prikazuje."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -119619,6 +122113,12 @@
       "value": "Prevođenje…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sakrij retke poslužitelja dodane nakon ovog izvoza:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -119637,6 +122137,12 @@
     {
       "type": 0,
       "value": " i zamjenjuju odjeljke koje ste ovdje prethodno dodali. Vaše promjene odjeljaka ovog poslužitelja ostaju."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Retci ovog poslužitelja promijenili su se nakon izvoza ove datoteke pa u nastavku odaberite retke koje želite sakriti."
     }
   ],
   "web.home.layout.checking": [
@@ -119687,6 +122193,26 @@
     {
       "type": 0,
       "value": "Uključuje opciju Sakrij pogledane stavke."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Sakriva odabrane retke na: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " bez mijenjanja vaših ostalih redaka ondje."
     }
   ],
   "web.home.layout.import": [
@@ -119791,6 +122317,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -120010,6 +122554,12 @@
     {
       "type": 0,
       "value": "Odjeljak bez naziva"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sakrij retke poslužitelja kojih nema u ovoj datoteci:"
     }
   ],
   "web.home.page.customize": [
@@ -123205,6 +125755,12 @@
     {
       "type": 0,
       "value": "Glavni banner · Samo web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Poslužitelj"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -137604,6 +140160,16 @@
       "value": "Natrag na stranicu 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Idi na stranicu "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -137694,6 +140260,20 @@
     {
       "type": 0,
       "value": "Stranice odjeljka Zatraži dodavanje"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Stranica "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " je izvan kraja ovih rezultata."
     }
   ],
   "web.requests.toAdd.series": [
@@ -139419,6 +141999,12 @@
     {
       "type": 0,
       "value": "Čitanje obavijesti profila čim stignu i njihovo označavanje kao pročitanih."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Prikaz onoga što se trenutačno reproducira na profilu ili, kada ključ ne navodi nijedan profil, na svim profilima računa: naslov, položaj, stanje pauze, uređaj i način reprodukcije. Bez upravljanja reprodukcijom i bez mrežnih pojedinosti."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

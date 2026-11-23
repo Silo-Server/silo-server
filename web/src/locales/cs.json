@@ -281,6 +281,18 @@
       "value": "Platnost tohoto přihlašovacího kódu vypršela. Začněte znovu."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "Tento účet dosáhl limitu zařízení pro přímá připojení."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "Tento klíč připojení už používá jiné zařízení. Zkuste to znovu."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -338,7 +350,13 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Nastaveno prostředím uzlu. Změňte to tam a restartujte uzel."
+      "value": "Nastaveno prostředím. Změňte to tam a restartujte dotčenou službu."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "Tato hodnota chybí."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +465,12 @@
     {
       "type": 0,
       "value": "Pro pokračování se přihlaste přes přihlašovací službu vaší sítě."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Tento uzel je nastaven konfigurací nasazení serveru. Odeberte ho tam a restartujte servery API, abyste ho mohli spravovat zde."
     }
   ],
   "error.not_acceptable": [
@@ -14702,7 +14726,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — kolekce, kterou zobrazují, není zde ani v záloze"
+              "value": " nelze obnovit — kolekce, kterou zobrazuje, není zde ani v záloze"
             }
           ]
         },
@@ -14726,7 +14750,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — kolekce, kterou zobrazují, není zde ani v záloze"
+              "value": " nelze obnovit — kolekce, kterou zobrazuje, není zde ani v záloze"
             }
           ]
         },
@@ -14760,7 +14784,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich nastavení je zašifrované jiným SECRET_KEY"
+              "value": " nelze obnovit — nastavení je zašifrované jiným SECRET_KEY"
             }
           ]
         },
@@ -14784,7 +14808,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich nastavení je zašifrované jiným SECRET_KEY"
+              "value": " nelze obnovit — nastavení je zašifrované jiným SECRET_KEY"
             }
           ]
         },
@@ -14818,7 +14842,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — tento server je nemůže přijmout"
+              "value": " nelze obnovit — tento server to nemůže přijmout"
             }
           ]
         },
@@ -14842,7 +14866,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — tento server je nemůže přijmout"
+              "value": " nelze obnovit — tento server to nemůže přijmout"
             }
           ]
         },
@@ -14934,7 +14958,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich soubory na tomto serveru chybí"
+              "value": " nelze obnovit — soubory na tomto serveru chybí"
             }
           ]
         },
@@ -14958,7 +14982,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich soubory na tomto serveru chybí"
+              "value": " nelze obnovit — soubory na tomto serveru chybí"
             }
           ]
         },
@@ -14992,7 +15016,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich složky nejsou na tomto serveru"
+              "value": " nelze obnovit — složky nejsou na tomto serveru"
             }
           ]
         },
@@ -15016,7 +15040,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich složky nejsou na tomto serveru"
+              "value": " nelze obnovit — složky nejsou na tomto serveru"
             }
           ]
         },
@@ -15050,7 +15074,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich přístupová skupina není na tomto serveru"
+              "value": " nelze obnovit — přístupová skupina není na tomto serveru"
             }
           ]
         },
@@ -15074,7 +15098,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich přístupová skupina není na tomto serveru"
+              "value": " nelze obnovit — přístupová skupina není na tomto serveru"
             }
           ]
         },
@@ -15108,7 +15132,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich titul není v katalogu tohoto serveru"
+              "value": " nelze obnovit — titul není v katalogu tohoto serveru"
             }
           ]
         },
@@ -15132,7 +15156,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich titul není v katalogu tohoto serveru"
+              "value": " nelze obnovit — titul není v katalogu tohoto serveru"
             }
           ]
         },
@@ -15224,7 +15248,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich knihovna není na tomto serveru"
+              "value": " nelze obnovit — knihovna není na tomto serveru"
             }
           ]
         },
@@ -15248,7 +15272,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich knihovna není na tomto serveru"
+              "value": " nelze obnovit — knihovna není na tomto serveru"
             }
           ]
         },
@@ -15282,7 +15306,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich knihovnu zde nelze obnovit"
+              "value": " nelze obnovit — knihovnu, do které patří, zde nelze obnovit"
             }
           ]
         },
@@ -15306,7 +15330,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich knihovnu zde nelze obnovit"
+              "value": " nelze obnovit — knihovnu, do které patří, zde nelze obnovit"
             }
           ]
         },
@@ -15385,6 +15409,64 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nelze obnovit — rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nelze obnovit — rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nelze obnovit — rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nelze obnovit — rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -15398,7 +15480,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jsou zašifrované jiným SECRET_KEY"
+              "value": " nelze obnovit — k dešifrování je potřeba jiný SECRET_KEY"
             }
           ]
         },
@@ -15422,7 +15504,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jsou zašifrované jiným SECRET_KEY"
+              "value": " nelze obnovit — k dešifrování je potřeba jiný SECRET_KEY"
             }
           ]
         },
@@ -15456,7 +15538,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — nejprve je třeba je nainstalovat z katalogu pluginů"
+              "value": " nelze obnovit — nejprve je nutná instalace z katalogu pluginů"
             }
           ]
         },
@@ -15480,7 +15562,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — nejprve je třeba je nainstalovat z katalogu pluginů"
+              "value": " nelze obnovit — nejprve je nutná instalace z katalogu pluginů"
             }
           ]
         },
@@ -15514,7 +15596,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich hlavní profil je nutné obnovit spolu s nimi"
+              "value": " nelze obnovit — současně je nutné obnovit i hlavní profil"
             }
           ]
         },
@@ -15538,7 +15620,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich hlavní profil je nutné obnovit spolu s nimi"
+              "value": " nelze obnovit — současně je nutné obnovit i hlavní profil"
             }
           ]
         },
@@ -15572,7 +15654,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — záloha je neobsahuje"
+              "value": " nelze obnovit — v záloze chybí"
             }
           ]
         },
@@ -15596,7 +15678,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — záloha je neobsahuje"
+              "value": " nelze obnovit — v záloze chybí"
             }
           ]
         },
@@ -15804,7 +15886,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — tento server by jim dal větší přístup než záloha"
+              "value": " nelze obnovit — tento server by přidělil větší přístup než záloha"
             }
           ]
         },
@@ -15828,7 +15910,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — tento server by jim dal větší přístup než záloha"
+              "value": " nelze obnovit — tento server by přidělil větší přístup než záloha"
             }
           ]
         },
@@ -15920,7 +16002,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — zde už jsou stejné"
+              "value": " nelze obnovit — zde se už neliší"
             }
           ]
         },
@@ -15944,7 +16026,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — zde už jsou stejné"
+              "value": " nelze obnovit — zde se už neliší"
             }
           ]
         },
@@ -16036,7 +16118,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich kopii v záloze nelze přečíst"
+              "value": " nelze obnovit — kopii v záloze nelze přečíst"
             }
           ]
         },
@@ -16060,7 +16142,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — jejich kopii v záloze nelze přečíst"
+              "value": " nelze obnovit — kopii v záloze nelze přečíst"
             }
           ]
         },
@@ -16094,7 +16176,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — připojují se k externím službám a tento server nemůže zálohu ověřit"
+              "value": " nelze obnovit — připojuje se k externím službám a tento server nemůže zálohu ověřit"
             }
           ]
         },
@@ -16118,7 +16200,7 @@
             },
             {
               "type": 0,
-              "value": " nelze obnovit — připojují se k externím službám a tento server nemůže zálohu ověřit"
+              "value": " nelze obnovit — připojuje se k externím službám a tento server nemůže zálohu ověřit"
             }
           ]
         },
@@ -16243,6 +16325,64 @@
     {
       "type": 0,
       "value": "Adresa služby se mění, ale záloha neobsahuje její přihlašovací údaje. Obnovení je proto zde vymaže a službu vypne, dokud je znovu nezadáte."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechá současnou hodnotu, protože ho nebo část jeho připojení nastavuje prostředí tohoto serveru."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechají současné hodnoty, protože je nebo část jejich připojení nastavuje prostředí tohoto serveru."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechá současné hodnoty, protože je nebo část jejich připojení nastavuje prostředí tohoto serveru."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nastavení si ponechá současné hodnoty, protože je nebo část jejich připojení nastavuje prostředí tohoto serveru."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -16921,8 +17061,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Skrýt je"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt je"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt je"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -17143,8 +17309,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Zobrazit je"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit je"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit je"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -18077,10 +18269,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -18096,23 +18288,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Vybráno také: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ". Jsou potřeba pro váš výběr."
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -18144,17 +18320,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -18170,23 +18344,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "Z výběru odebráno také: "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": ". Vyžadují odebrané položky."
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -18218,9 +18376,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -20251,6 +20407,12 @@
       "value": "Jiný účet na tomto serveru se přihlašuje stejným uživatelským jménem nebo e-mailem."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Rozdílná nastavení nebo část jejich připojení nastavuje prostředí tohoto serveru, proto tento server ponechává své současné hodnoty."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -20977,6 +21139,178 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Obrázek pozadí"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položka kolekce"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položky kolekce"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položky kolekce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " položek kolekce"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Kolekce nahrazena"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Konfigurace"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Popis"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Zapnuto"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Doporučeno"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Limit položek"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Řazení položek"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Knihovny"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Umístění"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Plakát"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Pořadí řazení"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Zdroj"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Plán synchronizace"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Název"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Překlad názvu"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Typ"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Viditelnost"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Jen na webu"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -21645,6 +21979,16 @@
     {
       "type": 0,
       "value": " (ponecháno: přísnější)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (ponecháno: prostředí)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -22941,6 +23285,20 @@
       "value": "V časovém pásmu serveru."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "V časovém pásmu serveru. U vás je to "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -23921,10 +24279,10 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -23932,15 +24290,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "jejich data nešlo přečíst"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -23956,9 +24306,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -24037,20 +24385,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Skrýt účty"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt účet"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt účty"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt účty"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Skrýt soubory"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt soubor"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt soubory"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt soubory"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Skrýt soubory"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt soubor"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt soubory"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Skrýt soubory"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -24153,6 +24579,586 @@
     {
       "type": 0,
       "value": "Databáze na ně odkazuje, ale v úložišti nebyly nalezeny; obnovení je vynechá."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " soubor brandingu"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " soubory brandingu"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " souboru brandingu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " souborů brandingu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pozadí kolekce"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pozadí kolekcí"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pozadí kolekce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pozadí kolekcí"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakát kolekce"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakáty kolekcí"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakátu kolekce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakátů kolekcí"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " soubor stažených titulků"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " soubory stažených titulků"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " souboru stažených titulků"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " souborů stažených titulků"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakát knihovny"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakáty knihoven"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakátu knihovny"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakátů knihoven"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " obrázek překryvu"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " obrázky překryvů"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " obrázku překryvu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " obrázků překryvů"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakát osobní kolekce"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakáty osobních kolekcí"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakátu osobní kolekce"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " plakátů osobních kolekcí"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatar profilu"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatary profilů"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avataru profilu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatarů profilů"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nahraný obrázek"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nahrané obrázky"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nahraného obrázku"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " nahraných obrázků"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " soubor nahraných titulků"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " soubory nahraných titulků"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " souboru nahraných titulků"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " souborů nahraných titulků"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -24603,10 +25609,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24618,19 +25624,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "u nich nešlo přečíst: "
-            },
-            {
-              "type": 1,
-              "value": "part"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -24654,9 +25648,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -24671,8 +25663,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Zobrazit účty"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit účet"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit účty"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit účty"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -24751,22 +25769,74 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Zobrazit soubory"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit soubor"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit soubory"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit soubory"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Zobrazit soubory"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit soubor"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit soubory"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Zobrazit soubory"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -24774,15 +25844,7 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "jejich data jsou pro sadu pro obnovení příliš velká"
-            }
-          ]
-        },
-        "many": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -24798,9 +25860,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -27771,6 +28831,12 @@
       "value": "Poskytovatel převodu řeči na text je dočasně nedostupný. Zkuste to znovu později."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Poskytovatel textové AI nemá dostupný kredit nebo byl dosažen limit využití či útraty. Zkontrolujte zůstatek a limity u poskytovatele nebo nastavení využití ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -27781,6 +28847,80 @@
     {
       "type": 0,
       "value": "Připojení k textové AI selhalo. Zkontrolujte model, úroveň uvažování, úroveň služby, připojení účtu a limity využití u poskytovatele."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Přístup k textové AI byl odepřen. Zkontrolujte, zda klíč API nebo účet ChatGPT smí používat tento model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Koncový bod nebo model textové AI není dostupný. Zkontrolujte základní URL poskytovatele a model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Připojený účet ChatGPT nemůže sdílet využití svého tarifu. Zkontrolujte nastavení využití ChatGPT nebo připojte jiný účet."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Poskytovatel textové AI omezuje četnost požadavků. Zkuste to znovu později."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Poskytovatel textové AI odmítl požadavek na ověření. Zkontrolujte model, úroveň uvažování a nastavení využití účtu. Chybu poskytovatele najdete v logu serveru."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Poskytovatel textové AI odmítl požadavek na ověření (stav "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Zkontrolujte model, úroveň uvažování a úroveň služby. Chybu poskytovatele najdete v logu serveru."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Časový limit ověření připojení k textové AI vypršel. Zkontrolujte dostupnost poskytovatele a zkuste to znovu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Poskytovatel textové AI odmítl přihlašovací údaje. Nahraďte klíč API poskytovatele nebo se znovu přihlaste pomocí ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Poskytovatel textové AI je dočasně nedostupný. Zkuste to znovu později."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo se nepodařilo spojit s poskytovatelem textové AI. Zkontrolujte základní URL poskytovatele a to, zda se k němu tento server může připojit."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Textový model vrátil odpověď, kterou Silo nemůže použít. Vyberte jiný model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -27893,6 +29033,12 @@
     {
       "type": 0,
       "value": "Zrušit limit"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "Přímé"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -34365,6 +35511,12 @@
       "value": "selhalo"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Úloha selhala. Podrobnosti najdete v diagnostice pro správce."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -36882,7 +38034,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Přehled nedávno zahájených relací přehrávání"
+      "value": "Nejnovější přehrání ze všech účtů"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -38861,6 +40013,80 @@
     {
       "type": 0,
       "value": "Nepodařilo se načíst aktivitu."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "Uživatel "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " přehrál "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "Uživatel "
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " přehrál "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -56260,6 +57486,144 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Probíhající skenování a obnovení metadat se zobrazí zde."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Žádná aktivní skenování ani obnovení"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Vše ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Skrýt frontu"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " další knihovna"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " další knihovny"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " další knihovny"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " dalších knihoven"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Obnovení metadat"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Obnovování metadat"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Zobrazit frontu"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Vysoká"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Nízká"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Střední"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -56842,6 +58206,30 @@
       "value": "Potvrdit vyčištění prázdných kořenů"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Zkontrolovat"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Ve frontě přiřazování metadat nečekají žádné položky."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Nejsou zaznamenány žádné přeskočené kořeny."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Nejsou zaznamenána žádná zastaralá externí ID."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -56878,6 +58266,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Upravit"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Zatím nejsou nastaveny žádné knihovny."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -56952,6 +58352,12 @@
       "value": "Skrýt cesty"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Nečinná"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -56986,6 +58392,12 @@
       "value": "Částečné skenování"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Doplnit chybějící nebo nahradit všechna metadata"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -56998,6 +58410,12 @@
       "value": "Kořen nedostupný"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Skenovat"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -57008,6 +58426,12 @@
     {
       "type": 0,
       "value": "Zobrazit cesty"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Zastavit"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -57026,6 +58450,22 @@
     {
       "type": 0,
       "value": "Ověřit připojení úložišť"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Zkontrolovat, zda jsou dostupné všechny složky knihovny"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Zobrazit aktivní skenování knihovny "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -57129,7 +58569,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Spravujte kořeny knihoven a skenování. Import a export katalogu jsou nyní v sekci Údržba."
+      "value": "Spravujte složky s médii, sledujte skenování a řešte problémy s přiřazováním."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -57784,6 +59224,78 @@
       "value": "Zastaralá externí ID"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivní"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivní"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivní"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktivních"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Aktivita skenování"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Stav katalogu"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Knihovny"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -58274,6 +59786,24 @@
     {
       "type": 0,
       "value": "Hledat v ignorovaných položkách podle názvu, knihovny nebo typu…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Nejednoznačné"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Čeká na spárování"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Nespárováno"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -61238,6 +62768,12 @@
       "value": "Pro dokončení nastavení zadejte adresu serveru."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Klíč je nastaven konfigurací nasazení serveru"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -62182,6 +63718,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Nastaveno konfigurací nasazení serveru. Odeberte uzel tam a restartujte servery API, abyste ho mohli smazat zde."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -64343,6 +65885,68 @@
       "value": "Pluginy"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Použito"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Pozdrženo"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Nepodařilo se načíst stav zřizování pluginů."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Spravováno prostředím"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Čeká na dokončení"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Odmítnuto"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Zdroj balíčku a jeho odebrání řídí nasazení."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Stav zřizování"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Nasazení tento plugin uzamyká na verzi "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -65103,6 +66707,146 @@
       "value": "Generování bylo zastaveno. Uložená doporučení zůstanou v sekci Objevovat viditelná až do restartu serveru."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Řazení řádků profilů ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Načítání seznamů TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Vyhledávání titulů a tvorba embeddingů ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazán "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titul s prošlou platností"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazány "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tituly s prošlou platností"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazáno "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titulu s prošlou platností"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vymazáno "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " titulů s prošlou platností"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -65159,6 +66903,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Před sestavením doporučení pro Objevovat vyřešte níže uvedený konflikt zámku embeddingů."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Nejprve spusťte úlohu Embeddingy, aby měl server Silo k dispozici vektory knihovny pro porovnání."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Před sestavením doporučení pro Objevovat připojte poskytovatele embeddingů v sekci AI služby."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Žádný profil zatím nemá profil vkusu. Jakmile někdo zhlédne nebo ohodnotí nějaké tituly, spusťte úlohu Profily vkusu."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -67769,6 +69537,32 @@
       "value": "Zůstane prázdný, dokud nezapnete doporučení pro Objevovat v nabídce Správa → Doporučení."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Doporučené řádky zůstanou prázdné, dokud nezapnete doporučení pro Objevovat v nabídce "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Správa → Doporučení"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Vypnuto v sekci Doporučení"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -69481,6 +71275,12 @@
       "value": "Nové řádky se přidají na konec stránky Objevovat"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Otevřít nastavení doporučení"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -69493,6 +71293,12 @@
       "value": "Feed MDBListu nenese řazení uložené na stránce seznamu. Vyberte to, které seznam zobrazuje."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Váš profil zatím nemá žádná doporučení pro Objevovat. Pro náhled tohoto řádku spusťte úlohu Doporučení pro Objevovat nebo zhlédněte a ohodnoťte několik titulů."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -69503,6 +71309,12 @@
     {
       "type": 0,
       "value": "Vyberte seznam nebo vložte jeho odkaz a zobrazí se jeho tituly."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Pro náhled tohoto řádku zapněte doporučení pro Objevovat v nabídce Správa → Doporučení."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -70453,6 +72265,12 @@
     {
       "type": 0,
       "value": "Zpráva odeslána"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Přehrávač nepotvrdil přijetí zprávy. Může se zobrazit se zpožděním, nebo vůbec ne."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -73461,6 +75279,12 @@
       "value": "Kontrola připojení selhala."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Nepodařilo se ověřit, zda tuto možnost nastavuje prostředí serveru. Chcete-li ji upravit, znovu načtěte stránku."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -74047,6 +75871,30 @@
     {
       "type": 0,
       "value": "Kanál se nepodařilo aktualizovat"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Načtením znovu zobrazíte aktuální hodnoty. Pokud se na této stránce něco změnilo nebo se některá z vašich úprav týká uloženého hesla či klíče, všechny vaše úpravy se zruší; jinak zůstanou zachovány."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Načíst znovu"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Nastavení se nepodařilo znovu načíst. Zkuste to znovu."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Nastavení se změnilo jinde"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -76145,6 +77993,612 @@
     {
       "type": 0,
       "value": "Synchronizovat online značky"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "Algoritmus: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "vyžádáno: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; aktivní: "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "Povoleno: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "Řízení zahlcení: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "Účet"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "Na této cestě od"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "Zařízení"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "Žádné zařízení není připojeno přímo."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "Koncový bod protistrany"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "Připojená zařízení"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "na port "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "Výchozí: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "Zkontrolujte připravenost tohoto serveru na přímá připojení."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "Platná hodnota: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "Povolit přímá připojení"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Oprávnění NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "Modul přímého připojení"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT hairpin"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "Mapování NAT"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "Záložní režim PMTU"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "Dosažitelnost"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "Přijímací vyrovnávací paměť soketu"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "Odesílací vyrovnávací paměť soketu"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "Ladění hostitele"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "Decimace ACK"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "Zásada BBR pro ztrátu paketů"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "Přesun segmentace UDP (offload)"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "Přijímací okno klienta"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "Port UDP pro přímé připojení"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "Řízení zahlcení TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "Odesílací vyrovnávací paměť TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "Poslední kontrola: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "Proxy"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "Naslouchající služby"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "Zjištěná veřejná adresa: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "Zkontrolovat, zda router podporuje UPnP, NAT-PMP nebo PCP."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "Mapování portů"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "Kontroly připravenosti nespouštějí přímé přehrávání."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "Vypnuto správcem"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "Vypnuto"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "Modul přímého připojení se nepodařilo spustit"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "Vyrovnávací paměť se nepodařilo zvětšit"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "Router nepodporuje mapování portů"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "Vyrovnávací paměť je menší, než bylo vyžádáno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "Pomocný program pro ladění sítě není dostupný"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "Neplatná hodnota; použito vypnuto"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "Systém toto nastavení nedokázal použít ani přečíst"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "Toto jádro funkci nepodporuje"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "Dosažen limit vyrovnávací paměti hostitele"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "Limity vyrovnávací paměti hostitele se nepodařilo přečíst"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "Veřejná adresa se liší podle cíle"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR není k dispozici"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR není načteno nebo povoleno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "Běží více než jeden server API"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "Oprávnění NET_ADMIN bylo odebráno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Chybí oprávnění NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "Nebyl nalezen žádný router"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "Chybí oprávnění NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "Přístup odepřen"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "Není k dispozici"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "Neměřeno"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "Zvětšení není potřeba"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "Zásady hostitele vybraly jiný algoritmus"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "Kontrola selhala"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "Nepodařilo se zjistit další servery API"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "Přímá připojení obsluhuje jiný server API"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "Čeká se na převzetí obsluhy přímých připojení"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "Stav přímých připojení není dostupný"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "Port UDP se nepodařilo otevřít"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "Port UDP je neplatný"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "Na této platformě není podporováno"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "Vyžádáno: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "Vyžádáno: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; přiděleno: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "Spustit kontrolu"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "Odesílací vyrovnávací paměť: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "Omezeno"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "Zhoršeno"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "Záložní režim"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "Není potřeba"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "Vypnuto"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "Zapnuto"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "Neznámé"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "Čárkami oddělený seznam nejvýše osmi položek host:port. Pokud chcete použít výchozí hodnoty, nechte pole prázdné."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "Servery STUN"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "Přímá připojení"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "Umožní zařízením připojit se k tomuto serveru přímou cestou UDP. Port UDP se nastavuje proměnnou "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " a zde je jen pro čtení."
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -79729,6 +82183,24 @@
       "value": "Přechod na jiný model vyžaduje resetování embeddingů, které je všechny smaže. Jiný poskytovatel téhož modelu se uplatní po restartu."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Přidat na stránku Objevovat"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Doporučené řádky se nepodařilo přidat na stránku Objevovat."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Doporučené řádky byly přidány na stránku Objevovat."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -79751,6 +82223,44 @@
     {
       "type": 0,
       "value": "Kolik titulů, které nejsou v knihovně, server uchovává k doporučování. Každý z nich se vyhledá na TMDB a vytvoří se pro něj embedding. Vytváření embeddingů je obvykle levné, ale vyšší počet může podle vašeho poskytovatele embeddingů stát více nebo trvat déle a zabere více úložiště."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Vaše stránka Objevovat zatím nezobrazuje žádné řádky Doporučení."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Aby bylo možné spustit doporučení pro Objevovat, zapněte výše možnost „Povolit doporučení“ a restartujte server."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Žádosti jsou momentálně vypnuté. Zapněte je v "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "nastavení žádostí"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", aby diváci viděli stránku Objevovat."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Otevřít stránku Objevovat"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -89249,6 +91759,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Úložiště sem nelze přesunout, dokud nastavení úložiště určuje prostředí ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Nejprve tyto proměnné odstraňte a restartujte všechny servery API."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -90509,6 +93033,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Tento plán vychází z nastavení záloh. Změnit ho můžete v části "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Zálohy"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -90843,10 +93387,66 @@
       "value": "Nedávné chyby"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Obnovení selhalo. Podrobnosti najdete v diagnostice pro správce."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Zkontrolovat aktuální plán"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -91291,6 +93891,18 @@
     {
       "type": 0,
       "value": "Opakování webhooků Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Znovu přečte hlavičku souborů MKV s titulky ASS naskenovaných dříve, než se v Silo vložená písma přestala započítávat do datového toku, aby se tyto soubory nepřekódovávaly kvůli datovému toku, který ve skutečnosti nestreamují."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Opravit datový tok souborů s vloženými písmy"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -102674,25 +105286,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Televizi se nepodařilo přihlásit. Zkuste to znovu."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Zkontrolujte, že aplikace zobrazuje"
+      "value": "Přihlášení se nepodařilo schválit. Zkuste to znovu."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Zkontrolujte, že televize zobrazuje"
+      "value": "Zkontrolujte, že se tento kód shoduje"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Zadejte kód z televize nebo aplikace"
+      "value": "Zadejte kód zobrazený na zařízení"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -102704,13 +105310,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Přihlaste televizi nebo jiné zařízení ke svému účtu."
+      "value": "Přihlaste televizi, aplikaci nebo jiné zařízení."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Přihlášení televize"
+      "value": "Schválit přihlášení"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -102722,7 +105328,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "Chcete-li schválit televizi, ukončete zobrazení jako uživatel "
+      "value": "Chcete-li toto přihlášení schválit, ukončete zobrazení jako uživatel "
     },
     {
       "type": 1,
@@ -102730,13 +105336,13 @@
     },
     {
       "type": 0,
-      "value": ". Televizi může přihlásit jen samotný účet."
+      "value": ". Zařízení může schválit jen samotný účet."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Chcete-li schválit televizi, ukončete zobrazení jako tento uživatel. Televizi může přihlásit jen samotný účet."
+      "value": "Chcete-li toto přihlášení schválit, ukončete zobrazení jako tento uživatel. Zařízení může schválit jen samotný účet."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -102754,39 +105360,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Tento kód jsme nenašli. Zkontrolujte kód na televizi."
+      "value": "Tento kód se nepodařilo najít. Zkontrolujte ho a zkuste to znovu."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Teď ne"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Starší aplikace pro televize místo toho zobrazují "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Schvalujte jen zařízení, které máte právě před sebou."
+      "value": "Odmítnout"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Schvalujte jen televizi, kterou máte právě před sebou."
+      "value": "Schvalujte jen přihlášení, které sami zahajujete."
     }
   ],
   "web.auth.activate.playOn": [
@@ -102812,7 +105398,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Kdokoli, kdo tuto televizi používá, si může vybrat z vašich profilů. Profily s PIN zůstanou zamčené."
+      "value": "Zařízení tak získá přístup k vašim profilům. Profily s PIN zůstanou zamčené."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -102859,6 +105445,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Vyžádáno "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -102872,7 +105468,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "Tato televize přestala čekat. Začněte znovu na televizi."
+      "value": "Toto zařízení přestalo čekat. Zahajte na něm přihlášení znovu."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -102881,10 +105477,38 @@
       "value": "Toto přihlášení bylo odmítnuto."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Hotovo. Zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " se přihlašuje."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "Zařízení "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " je přihlášeno."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Platnost tohoto kódu vypršela. Televize zobrazuje nový kód. Použijte ten."
+      "value": "Platnost kódu vypršela. Na zařízení získejte nový kód a zkuste to znovu."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -102968,25 +105592,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "Tato televize už je přihlášená."
+      "value": "Toto zařízení už je přihlášeno."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "Tato televize byla schválena a dokončuje přihlášení."
+      "value": "Toto zařízení bylo schváleno a dokončuje přihlášení."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Hotovo. Televize se přihlašuje."
+      "value": "Hotovo. Zařízení se přihlašuje."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "Televize je přihlášená."
+      "value": "Zařízení je přihlášeno."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -103030,7 +105654,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Přihlásit zařízení "
+      "value": "Povolit přihlášení zařízení "
     },
     {
       "type": 1,
@@ -103044,7 +105668,7 @@
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Přihlásit toto zařízení?"
+      "value": "Povolit přihlášení tohoto zařízení?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -103056,7 +105680,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "Přihlaste se k serveru "
+      "value": "Chcete-li toto přihlášení schválit, přihlaste se k serveru "
     },
     {
       "type": 1,
@@ -103064,13 +105688,13 @@
     },
     {
       "type": 0,
-      "value": " a schvalte tuto televizi."
+      "value": "."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Přihlásit televizi"
+      "value": "Schválit přihlášení"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -104120,7 +106744,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Zařízení se nepodařilo přihlásit. Zkuste to znovu."
+      "value": "Přihlášení se nepodařilo schválit. Zkuste to znovu."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -119568,6 +122192,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -129480,6 +132118,12 @@
       "value": "Zobrazuje"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Spravováno tímto serverem. Co řádek zobrazuje, zde nelze změnit; chcete-li vybrat, co se bude zobrazovat, přidejte vlastní řádek."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -129794,6 +132438,12 @@
       "value": "Překládání…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skrýt řádky serveru přidané od tohoto exportu:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -129812,6 +132462,12 @@
     {
       "type": 0,
       "value": " a nahradí sekce, které sem byly přidány dříve. Vaše změny sekcí tohoto serveru zůstanou zachovány."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Řádky tohoto serveru se od exportu souboru změnily, proto níže vyberte řádky, které chcete skrýt."
     }
   ],
   "web.home.layout.checking": [
@@ -129862,6 +132518,26 @@
     {
       "type": 0,
       "value": "Zapne možnost „Skrýt zhlédnuté položky“."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Skryje vybrané řádky na stránkách: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " beze změny vašich ostatních řádků na nich."
     }
   ],
   "web.home.layout.import": [
@@ -129966,6 +132642,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -130196,6 +132890,12 @@
     {
       "type": 0,
       "value": "Sekce bez názvu"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Skrýt řádky serveru, které nejsou v tomto souboru:"
     }
   ],
   "web.home.page.customize": [
@@ -133621,6 +136321,12 @@
     {
       "type": 0,
       "value": "Hlavní banner · Jen web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Server"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -148951,6 +151657,16 @@
       "value": "Zpět na stránku 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Přejít na stránku "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -149041,6 +151757,20 @@
     {
       "type": 0,
       "value": "Stránky sekce Vyžádat přidání"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Stránka "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " je až za koncem těchto výsledků."
     }
   ],
   "web.requests.toAdd.series": [
@@ -150933,6 +153663,12 @@
     {
       "type": 0,
       "value": "Číst oznámení profilu, jakmile přijdou, a označovat je jako přečtená."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Zjistit, co se právě přehrává v profilu, nebo ve všech profilech účtu, pokud klíč žádný profil neurčuje: titul, pozice, pozastavení, zařízení a způsob přehrávání. Bez ovládání přehrávání a bez podrobností o síti."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

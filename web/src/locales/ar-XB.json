@@ -281,6 +281,18 @@
       "value": "\u200F\u202EThis sign-in code expired. Start again.\u202C"
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis account has reached its limit of devices for direct connections.\u202C"
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAnother device already uses this connection key. Try again.\u202C"
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -338,7 +350,13 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "\u200F\u202ESet by the node’s environment. Change it there and restart the node.\u202C"
+      "value": "\u200F\u202ESet by the environment. Change it there and restart the affected service.\u202C"
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis value is missing.\u202C"
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +465,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ESign in through your network’s sign-in to continue.\u202C"
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis node is set by the server’s deployment configuration. Remove it there and restart the API servers to manage it here.\u202C"
     }
   ],
   "error.not_acceptable": [
@@ -13900,7 +13924,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — the collection they show isn't here or in the backup\u202C"
+              "value": "\u202E can't be restored — the collection it shows isn't here or in the backup\u202C"
             }
           ]
         },
@@ -13942,7 +13966,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their settings are encrypted with a different SECRET_KEY\u202C"
+              "value": "\u202E can't be restored — its settings are encrypted with a different SECRET_KEY\u202C"
             }
           ]
         },
@@ -13984,7 +14008,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — this server can't take them\u202C"
+              "value": "\u202E can't be restored — this server can't take it\u202C"
             }
           ]
         },
@@ -14068,7 +14092,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their files are missing on this server\u202C"
+              "value": "\u202E can't be restored — its files are missing on this server\u202C"
             }
           ]
         },
@@ -14110,7 +14134,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their folders aren't on this server\u202C"
+              "value": "\u202E can't be restored — its folders aren't on this server\u202C"
             }
           ]
         },
@@ -14152,7 +14176,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their access group isn't on this server\u202C"
+              "value": "\u202E can't be restored — its access group isn't on this server\u202C"
             }
           ]
         },
@@ -14194,7 +14218,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their title isn't in this server's catalog\u202C"
+              "value": "\u202E can't be restored — its title isn't in this server's catalog\u202C"
             }
           ]
         },
@@ -14236,7 +14260,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they would widen access, so this server keeps its stricter values\u202C"
+              "value": "\u202E can't be restored — it would widen access, so this server keeps its own stricter values\u202C"
             }
           ]
         },
@@ -14278,7 +14302,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their library isn't on this server\u202C"
+              "value": "\u202E can't be restored — its library isn't on this server\u202C"
             }
           ]
         },
@@ -14320,7 +14344,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their library can't be restored here\u202C"
+              "value": "\u202E can't be restored — its library can't be restored here\u202C"
             }
           ]
         },
@@ -14387,6 +14411,48 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E can't be restored — this server's environment sets the settings that differ, or part of their connection\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E can't be restored — this server's environment sets the settings that differ, or part of their connection\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -14404,7 +14470,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they're encrypted with a different SECRET_KEY\u202C"
+              "value": "\u202E can't be restored — it's encrypted with a different SECRET_KEY\u202C"
             }
           ]
         },
@@ -14446,7 +14512,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they need to be installed from a plugin catalog first\u202C"
+              "value": "\u202E can't be restored — it needs to be installed from a plugin catalog first\u202C"
             }
           ]
         },
@@ -14488,7 +14554,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — their primary profile has to be restored with them\u202C"
+              "value": "\u202E can't be restored — its primary profile has to be restored with it\u202C"
             }
           ]
         },
@@ -14530,7 +14596,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — the backup doesn't have them\u202C"
+              "value": "\u202E can't be restored — the backup doesn't have it\u202C"
             }
           ]
         },
@@ -14698,7 +14764,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — this server would give them more access than the backup did\u202C"
+              "value": "\u202E can't be restored — this server would give it more access than the backup did\u202C"
             }
           ]
         },
@@ -14782,7 +14848,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they're already the same here\u202C"
+              "value": "\u202E can't be restored — it's already the same here\u202C"
             }
           ]
         },
@@ -14866,7 +14932,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — the backup's copy of them can't be read\u202C"
+              "value": "\u202E can't be restored — the backup's copy of it can't be read\u202C"
             }
           ]
         },
@@ -14908,7 +14974,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E can't be restored — they connect to outside services and this server can't verify the backup\u202C"
+              "value": "\u202E can't be restored — it connects to outside services and this server can't verify the backup\u202C"
             }
           ]
         },
@@ -15021,6 +15087,48 @@
     {
       "type": 0,
       "value": "\u200F\u202EA service's address changes without its credentials in the backup, so restoring clears them here and turns the service off until they're entered again.\u202C"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E setting keeps its current value because this server's environment sets it, or part of its connection.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E settings keep their current values because this server's environment sets them, or part of their connection.\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -15536,7 +15644,37 @@
   "web.admin.backups.restore.choose.hideThem": [
     {
       "type": 0,
-      "value": "\u200F\u202EHide them\u202C"
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide it\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide them\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide them\u202C"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -15710,7 +15848,37 @@
   "web.admin.backups.restore.choose.showThem": [
     {
       "type": 0,
-      "value": "\u200F\u202EShow them\u202C"
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow it\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow them\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow them\u202C"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -16503,14 +16671,18 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EAlso chose \u202C"
+              "value": "\u202EAlso chose \u202C"
             },
             {
               "type": 1,
@@ -16522,11 +16694,27 @@
             }
           ]
         },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EAlso chose \u202C"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "\u202E, which are needed by what you chose.\u202C"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EAlso chose \u202C"
+              "value": "\u202EAlso chose \u202C"
             },
             {
               "type": 1,
@@ -16538,21 +16726,23 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EAlso unchose \u202C"
+              "value": "\u202EAlso unchose \u202C"
             },
             {
               "type": 1,
@@ -16564,11 +16754,27 @@
             }
           ]
         },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EAlso unchose \u202C"
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": "\u202E, which need what you unchose.\u202C"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EAlso unchose \u202C"
+              "value": "\u202EAlso unchose \u202C"
             },
             {
               "type": 1,
@@ -16580,9 +16786,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -18073,6 +18277,12 @@
       "value": "\u200F\u202EAnother account here signs in with its username or email.\u202C"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis server's environment sets the settings that differ, or part of their connection, so this server keeps its current values.\u202C"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -18667,6 +18877,162 @@
       "value": "\u202E.\u202C"
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBackdrop\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collection item\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collection items\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECollection replaced\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EConfiguration\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDescription\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnabled\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFeatured\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EItem limit\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EItem sort\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELibraries\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPosition\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPoster\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESort order\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESource\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESync schedule\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETitle\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETitle translation\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EType\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EVisibility\u202C"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWeb only\u202C"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -19243,6 +19609,20 @@
     {
       "type": 0,
       "value": "\u202E (kept: stricter)\u202C"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "\u202E (kept: environment)\u202C"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -20379,6 +20759,20 @@
       "value": "\u200F\u202EIn the server's time zone.\u202C"
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIn the server's time zone. That's \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "\u202E where you are.\u202C"
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -21287,14 +21681,26 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202Eits data couldn't be read\u202C"
+              "value": "\u202Eits data couldn't be read\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202Etheir data couldn't be read\u202C"
             }
           ]
         },
@@ -21302,13 +21708,11 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202Etheir data couldn't be read\u202C"
+              "value": "\u202Etheir data couldn't be read\u202C"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -21364,19 +21768,109 @@
   "web.admin.backups.warnings.hideAccounts": [
     {
       "type": 0,
-      "value": "\u200F\u202EHide the accounts\u202C"
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide the account\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide the accounts\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide the accounts\u202C"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
       "type": 0,
-      "value": "\u200F\u202EHide the files\u202C"
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide the file\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide the files\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide the files\u202C"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
       "type": 0,
-      "value": "\u200F\u202EHide files\u202C"
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide file\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide files\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EHide files\u202C"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -21447,6 +21941,426 @@
     {
       "type": 0,
       "value": "\u200F\u202EThey're referenced in the database but weren't found in storage; restores leave them out.\u202C"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E branding asset\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E branding assets\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collection backdrop\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collection backdrops\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collection poster\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E collection posters\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E downloaded subtitle\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E downloaded subtitles\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E library poster\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E library posters\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E overlay image\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E overlay images\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E personal collection poster\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E personal collection posters\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E profile avatar\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E profile avatars\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E uploaded artwork file\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E uploaded artwork files\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E uploaded subtitle\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E uploaded subtitles\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -21753,14 +22667,34 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202Eits \u202C"
+              "value": "\u202Eits \u202C"
+            },
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": "\u202E couldn't be read\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202Etheir \u202C"
             },
             {
               "type": 1,
@@ -21776,7 +22710,7 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202Etheir \u202C"
+              "value": "\u202Etheir \u202C"
             },
             {
               "type": 1,
@@ -21788,9 +22722,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -21806,7 +22738,37 @@
   "web.admin.backups.warnings.showAccounts": [
     {
       "type": 0,
-      "value": "\u200F\u202EShow the accounts\u202C"
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow the account\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow the accounts\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow the accounts\u202C"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -21846,25 +22808,25 @@
   "web.admin.backups.warnings.showFiles": [
     {
       "type": 0,
-      "value": "\u200F\u202EShow the files\u202C"
-    }
-  ],
-  "web.admin.backups.warnings.showGroupFiles": [
+      "value": "\u200F"
+    },
     {
-      "type": 0,
-      "value": "\u200F\u202EShow files\u202C"
-    }
-  ],
-  "web.admin.backups.warnings.tooLarge": [
-    {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202Eits data is too large for the restore set\u202C"
+              "value": "\u202EShow the file\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow the files\u202C"
             }
           ]
         },
@@ -21872,13 +22834,83 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202Etheir data is too large for the restore set\u202C"
+              "value": "\u202EShow the files\u202C"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    }
+  ],
+  "web.admin.backups.warnings.showGroupFiles": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow file\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow files\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202EShow files\u202C"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.admin.backups.warnings.tooLarge": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202Eits data is too large for the restore set\u202C"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202Etheir data is too large for the restore set\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u202Etheir data is too large for the restore set\u202C"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -24569,6 +25601,12 @@
       "value": "\u200F\u202ESpeech-to-text provider is temporarily unavailable. Try again later.\u202C"
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EText AI provider has no available credit, or a usage or spending limit was reached. Check the provider balance and limits, or ChatGPT usage settings.\u202C"
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24579,6 +25617,80 @@
     {
       "type": 0,
       "value": "\u200F\u202EText AI connection failed. Check the model, reasoning level, service tier, account connection, and provider usage limits.\u202C"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EText AI access was denied. Check that the API key or ChatGPT account may use this model.\u202C"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EText AI endpoint or model is unavailable. Check the provider's base URL and the model.\u202C"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe connected ChatGPT account can't share its plan usage. Check ChatGPT usage settings, or connect another account.\u202C"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EText AI provider is rate limiting requests. Try again later.\u202C"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EText AI provider refused the check request. Check the model, the reasoning level, and the account's usage settings. The server log has the provider's error.\u202C"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EText AI provider rejected the check request (status \u202C"
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "\u202E). Check the model, reasoning level, and service tier. The server log has the provider's error.\u202C"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EText AI connection check timed out. Check provider availability and try again.\u202C"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EText AI provider rejected the credentials. Replace the provider's API key, or sign in with ChatGPT again.\u202C"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EText AI provider is temporarily unavailable. Try again later.\u202C"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESilo could not reach the text AI provider. Check the provider's base URL and that this server can connect to it.\u202C"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EText model returned a response Silo cannot use. Choose another model.\u202C"
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -24675,6 +25787,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EClear limit\u202C"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect\u202C"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -30067,6 +31185,12 @@
       "value": "\u200F\u202Efailed\u202C"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETask failed. Inspect administrator diagnostics for details.\u202C"
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -32222,7 +33346,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EFeed of recently started playback sessions\u202C"
+      "value": "\u200F\u202EMost recent plays across all accounts\u202C"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -33935,6 +35059,80 @@
     {
       "type": 0,
       "value": "\u200F\u202EFailed to load activity.\u202C"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E played \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E played \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -47870,6 +49068,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EScans and metadata refreshes appear here while they run.\u202C"
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo active scans or refreshes\u202C"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide queue\u202C"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202E+ \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E other library\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202E+ \u202C"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E other libraries\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMetadata Refreshes\u202C"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefreshing metadata\u202C"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EView queue\u202C"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHigh\u202C"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELow\u202C"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMedium\u202C"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -48340,6 +49646,30 @@
       "value": "\u200F\u202EConfirm empty root cleanup\u202C"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInspect\u202C"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo items are waiting in the metadata matcher queue.\u202C"
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo skipped roots recorded.\u202C"
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo stale external IDs recorded.\u202C"
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -48376,6 +49706,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEdit\u202C"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo libraries configured yet.\u202C"
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -48436,6 +49778,12 @@
       "value": "\u200F\u202EHide paths\u202C"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EIdle\u202C"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -48470,6 +49818,12 @@
       "value": "\u200F\u202EPartial scan\u202C"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFill missing or replace all metadata\u202C"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -48482,6 +49836,12 @@
       "value": "\u200F\u202ERoot unreachable\u202C"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EScan\u202C"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -48492,6 +49852,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EShow paths\u202C"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStop\u202C"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -48510,6 +49876,22 @@
     {
       "type": 0,
       "value": "\u200F\u202EVerify Mounts\u202C"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECheck that all library folders are reachable\u202C"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EView active scans for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -48621,7 +50003,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EManage library roots and scans. Catalog import/export now lives under Maintenance.\u202C"
+      "value": "\u200F\u202EManage media folders, monitor scans, and resolve matching issues.\u202C"
     }
   ],
   "web.admin.libraries.page.title": [
@@ -49136,6 +50518,64 @@
       "value": "\u200F\u202EStale External IDs\u202C"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E active\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": "\u202E active\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EScan Activity\u202C"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECatalog Health\u202C"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELibraries\u202C"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -49594,6 +51034,24 @@
     {
       "type": 0,
       "value": "\u200F\u202ESearch ignored items by title, library, or type...\u202C"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAmbiguous\u202C"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPending\u202C"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnmatched\u202C"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -52368,6 +53826,12 @@
       "value": "\u200F\u202EEnter the server address to complete the settings.\u202C"
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EKey set by the server’s deployment configuration\u202C"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -53328,6 +54792,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESet by the server’s deployment configuration. Remove it there and restart the API servers to delete it here.\u202C"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -55207,6 +56677,68 @@
       "value": "\u200F\u202EPlugins\u202C"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EApplied\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHeld\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t load plugin provisioning status.\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EManaged by the environment\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPending\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefused\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe deployment controls the package source and removal.\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EProvisioning status\u202C"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe deployment pins this plugin to \u202C"
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -55983,6 +57515,114 @@
       "value": "\u200F\u202EGeneration has stopped. Stored recommendations stay visible in Discover until the server restarts.\u202C"
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERanking profiles (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E / \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFetching TMDB lists (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E / \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELooking up and embedding titles (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E / \u202C"
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ECleared \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E expired title\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202ECleared \u202C"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E expired titles\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -56023,6 +57663,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EResolve the embedding lock conflict below before building Discover recommendations.\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERun the Embeddings job first so Silo has library vectors to compare against.\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EConnect an embedding provider in AI Services before building Discover recommendations.\u202C"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo profiles have taste profiles yet. Run Taste Profiles once someone has watched or rated titles.\u202C"
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -58001,6 +59665,32 @@
       "value": "\u200F\u202EStays empty until Discover recommendations are turned on in Admin → Recommendations.\u202C"
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERecommended rows stay empty until Discover Recommendations are turned on in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202EAdmin → Recommendations\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOff in Recommendations\u202C"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -59527,6 +61217,12 @@
       "value": "\u200F\u202ENew rows go to the bottom of Discover\u202C"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen Recommendations settings\u202C"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -59539,6 +61235,12 @@
       "value": "\u200F\u202EMDBList's feed doesn't carry the sort saved on the list's page. Pick the one it shows.\u202C"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour profile has no Discover recommendations yet. Run Discover Recommendations or watch and rate a few titles to preview this row.\u202C"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -59549,6 +61251,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EPick a list or paste its link to see its titles.\u202C"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETurn on Discover Recommendations in Admin → Recommendations to preview this row.\u202C"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -60379,6 +62087,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EMessage sent\u202C"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe player didn’t confirm the message. It may show up late or not at all.\u202C"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -63341,6 +65055,12 @@
       "value": "\u200F\u202EConnection check failed.\u202C"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t check whether the server’s environment sets this. Reload to edit.\u202C"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -63903,6 +65623,30 @@
     {
       "type": 0,
       "value": "\u200F\u202EFailed to update channel\u202C"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReload to see the current values. If something on this page changed, or you edited a saved password or key, all your edits are undone; otherwise they’re kept.\u202C"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReload\u202C"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECouldn’t reload settings. Try again.\u202C"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESettings changed elsewhere\u202C"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -65957,6 +67701,616 @@
     {
       "type": 0,
       "value": "\u200F\u202ESync online markers\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAlgorithm: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "\u200F\u202Erequested \u202C"
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "\u202E; active \u202C"
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAllowed: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECongestion control: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAccount\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOn this path since\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDevice\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo device is connected directly.\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPeer endpoint\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EConnected devices\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "\u200F\u202Eto port \u202C"
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDefault: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECheck this server’s readiness for direct connections.\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEffective: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnable direct connections\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENET_ADMIN capability\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect connection engine\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENAT hairpin\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENAT mapping\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPMTU fallback\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReachability\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESocket receive buffer\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESocket send buffer\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHost tuning\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EACK decimation\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBBR loss policy\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUDP segmentation offload\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClient receive window\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect connection UDP port\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETCP congestion control\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETCP send buffer\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast checked \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EProxy\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EListeners\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EObserved public address: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECheck the router for UPnP, NAT-PMP, or PCP support.\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPort mapping\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReadiness checks do not start direct playback.\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDisabled by administrator\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDisabled\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThe direct connection engine could not start\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECould not increase buffer\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERouter does not support port mapping\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBuffer is smaller than requested\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENetwork tuning helper unavailable\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInvalid value; using off\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESystem could not apply or read this setting\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENot supported by this kernel\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHost buffer limit reached\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECould not read host buffer limits\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPublic address varies by destination\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBBR is not available\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EBBR is not loaded or allowed\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMore than one API server is running\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENET_ADMIN capability dropped\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENET_ADMIN capability missing\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo router found\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENET_ADMIN capability missing\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPermission denied\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENot available\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENot measured\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo increase needed\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHost policy selected another algorithm\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECheck failed\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECould not check for other API servers\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAnother API server hosts direct connections\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWaiting to become the direct connection host\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect connection state is unavailable\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECould not open the UDP port\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUDP port is invalid\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENot supported on this platform\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": "\u202E (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequested: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequested: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "\u202E; granted: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERun check\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESend buffer: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECapped\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDegraded\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFallback\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENot needed\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOff\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOn\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnknown\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA comma-separated list of up to eight host:port entries. Leave it empty to use the defaults.\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESTUN servers\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDirect connections\u202C"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELet devices reach this server over a direct UDP path. The UDP port comes from \u202C"
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": "\u202E and is read-only here.\u202C"
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -69489,6 +71843,24 @@
       "value": "\u200F\u202ESwitching to another model requires resetting embeddings, which deletes them all. Another provider serving the same model applies after a restart.\u202C"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdd to Discover\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECould not add recommended rows to the Discover page.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAdded recommended rows to the Discover page.\u202C"
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -69511,6 +71883,44 @@
     {
       "type": 0,
       "value": "\u200F\u202EHow many titles that aren't in the library the server keeps to recommend from. Each one is looked up on TMDB and embedded. Embedding is usually cheap, but a higher number can cost more or take longer depending on your embedding provider, and uses more storage.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour Discover page doesn't show any Recommendations rows yet.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETurn on Enable Recommendations above and restart the server before Discover Recommendations can run.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequests are currently off. Turn them on in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202ERequests settings\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E so viewers can see the Discover page.\u202C"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen Discover Page\u202C"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -79073,6 +81483,20 @@
       "value": "\u202E).\u202C"
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EStorage can’t be moved here while the environment sets storage settings (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "\u202E). Unset those variables and restart every API server first.\u202C"
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -80249,6 +82673,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis schedule comes from the backup settings. Change it in \u202C"
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "\u202EServer › Backups\u202C"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E.\u202C"
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -80559,10 +83003,78 @@
       "value": "\u200F\u202ERecent errors\u202C"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERefresh failed. Inspect administrator diagnostics for details.\u202C"
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "\u200F\u202EReview current schedule\u202C"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "\u202E - \u202C"
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": "\u202E - \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -81031,6 +83543,18 @@
     {
       "type": 0,
       "value": "\u200F\u202EAutoscan webhook retry\u202C"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERe-reads the header of MKV files with ASS subtitles scanned before Silo left embedded fonts out of the bitrate, so they are not transcoded for a bitrate they do not stream.\u202C"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ECorrect Bitrate of Files with Embedded Fonts\u202C"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -91050,25 +93574,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "\u200F\u202ECouldn't sign in the TV. Try again.\u202C"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "\u200F\u202ECheck that your app shows\u202C"
+      "value": "\u200F\u202ECouldn't approve sign-in. Try again.\u202C"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "\u200F\u202ECheck that your TV shows\u202C"
+      "value": "\u200F\u202EMake sure this code matches\u202C"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "\u200F\u202EEnter the code on your TV or app\u202C"
+      "value": "\u200F\u202EEnter the code shown on your device\u202C"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -91080,13 +93598,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in a TV or other device with your account.\u202C"
+      "value": "\u200F\u202ESign in a TV, app, or other device.\u202C"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in a TV\u202C"
+      "value": "\u200F\u202EApprove sign-in\u202C"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -91106,13 +93624,13 @@
     },
     {
       "type": 0,
-      "value": "\u202E to approve a TV. Only the account itself can sign in a TV.\u202C"
+      "value": "\u202E to approve this sign-in. Only the account itself can approve devices.\u202C"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "\u200F\u202EStop viewing as this user to approve a TV. Only the account itself can sign in a TV.\u202C"
+      "value": "\u200F\u202EStop viewing as this user to approve this sign-in. Only the account itself can approve devices.\u202C"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -91130,39 +93648,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "\u200F\u202EWe couldn't find that code. Check the code on your TV.\u202C"
+      "value": "\u200F\u202EWe couldn't find that code. Check the code and try again.\u202C"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "\u200F\u202ENot now\u202C"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EOlder TV apps show \u202C"
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": "\u202E instead.\u202C"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "\u200F\u202EOnly approve a device that's in front of you right now.\u202C"
+      "value": "\u200F\u202EDecline\u202C"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "\u200F\u202EOnly approve a TV that's in front of you right now.\u202C"
+      "value": "\u200F\u202EOnly approve this if you started the sign-in yourself.\u202C"
     }
   ],
   "web.auth.activate.playOn": [
@@ -91188,7 +93686,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "\u200F\u202EAnyone using this TV can pick from your profiles. Profiles with a PIN stay locked.\u202C"
+      "value": "\u200F\u202EThis gives it access to your profiles. Profiles with a PIN stay locked.\u202C"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -91235,6 +93733,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequested \u202C"
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -91248,7 +93756,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "\u200F\u202EThis TV stopped waiting. Start again on the TV.\u202C"
+      "value": "\u200F\u202EThis device stopped waiting. Start sign-in again on it.\u202C"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -91257,10 +93765,38 @@
       "value": "\u200F\u202EThis sign-in was declined.\u202C"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDone. \u202C"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E is signing in.\u202C"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "\u202E is signed in.\u202C"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "\u200F\u202EThis code expired. Your TV is showing a new one. Use that code instead.\u202C"
+      "value": "\u200F\u202EThis code expired. Get a new code on the device and try again.\u202C"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -91294,7 +93830,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "\u200F\u202EDone. this device is signing in as \u202C"
+      "value": "\u200F\u202EDone. This device is signing in as \u202C"
     },
     {
       "type": 1,
@@ -91344,25 +93880,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "\u200F\u202EThat TV is already signed in.\u202C"
+      "value": "\u200F\u202EThis device is already signed in.\u202C"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "\u200F\u202EThis TV was approved and is finishing sign-in.\u202C"
+      "value": "\u200F\u202EThis device was approved and is finishing sign-in.\u202C"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "\u200F\u202EDone. Your TV is signing in.\u202C"
+      "value": "\u200F\u202EDone. Your device is signing in.\u202C"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "\u200F\u202EYour TV is signed in.\u202C"
+      "value": "\u200F\u202EYour device is signed in.\u202C"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -91406,7 +93942,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in \u202C"
+      "value": "\u200F\u202EAllow \u202C"
     },
     {
       "type": 1,
@@ -91414,13 +93950,13 @@
     },
     {
       "type": 0,
-      "value": "\u202E?\u202C"
+      "value": "\u202E to sign in?\u202C"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in this device?\u202C"
+      "value": "\u200F\u202EAllow this device to sign in?\u202C"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -91440,13 +93976,13 @@
     },
     {
       "type": 0,
-      "value": "\u202E to approve this TV.\u202C"
+      "value": "\u202E to approve this sign-in.\u202C"
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "\u200F\u202ESign in TV\u202C"
+      "value": "\u200F\u202EApprove sign-in\u202C"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -92500,7 +95036,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "\u200F\u202ECouldn't sign in the device. Try again.\u202C"
+      "value": "\u200F\u202ECouldn't approve sign-in. Try again.\u202C"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -105602,6 +108138,24 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": "\u202E · \u202C"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -114630,6 +117184,12 @@
       "value": "\u200F\u202EShows\u202C"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EManaged by this server. What it shows can’t be changed here; add a row of your own to choose what it shows.\u202C"
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -114956,6 +117516,12 @@
       "value": "\u200F\u202ETranslating…\u202C"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide server rows added since this export:\u202C"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -114974,6 +117540,12 @@
     {
       "type": 0,
       "value": "\u202E, replacing sections you added here before. Your changes to this server's sections stay.\u202C"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis server's rows changed since this file was exported, so choose any rows to hide below.\u202C"
     }
   ],
   "web.home.layout.checking": [
@@ -115024,6 +117596,26 @@
     {
       "type": 0,
       "value": "\u200F\u202ETurns Hide watched items on.\u202C"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHides selected rows on: \u202C"
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "\u202E without changing your other rows there.\u202C"
     }
   ],
   "web.home.layout.import": [
@@ -115132,6 +117724,28 @@
     {
       "type": 0,
       "value": "\u202E.\u202C"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": "\u202E (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -115352,6 +117966,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EUntitled section\u202C"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHide server rows not in this file:\u202C"
     }
   ],
   "web.home.page.customize": [
@@ -118395,6 +121015,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EHero banner · Web only\u202C"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EServer\u202C"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -132663,6 +135289,16 @@
       "value": "\u200F\u202EBack to page 1\u202C"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EGo to page \u202C"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -132753,6 +135389,20 @@
     {
       "type": 0,
       "value": "\u200F\u202ERequest to add pages\u202C"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPage \u202C"
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": "\u202E is past the end of these results.\u202C"
     }
   ],
   "web.requests.toAdd.series": [
@@ -134373,6 +137023,12 @@
     {
       "type": 0,
       "value": "\u200F\u202ERead the profile's notifications as they arrive and mark them read.\u202C"
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESee what is playing right now on the profile, or on every profile of the account when the key names none: title, position, paused state, device and play method. No playback control or network details.\u202C"
     }
   ],
   "web.settings.apiKeys.scope.requests": [

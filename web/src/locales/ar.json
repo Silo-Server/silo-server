@@ -281,6 +281,18 @@
       "value": "انتهت صلاحية رمز تسجيل الدخول هذا. ابدأ من جديد."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "بلغ هذا الحساب الحد الأقصى لعدد الأجهزة المسموح بها للاتصالات المباشرة."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "يستخدم جهاز آخر مفتاح الاتصال هذا بالفعل. حاول مرة أخرى."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -338,7 +350,13 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "يُعيَّن هذا الخيار من بيئة العقدة. غيّره هناك وأعد تشغيل العقدة."
+      "value": "يُعيَّن هذا الخيار من البيئة. غيّره هناك وأعد تشغيل الخدمة المتأثرة."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "هذه القيمة مفقودة."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +465,12 @@
     {
       "type": 0,
       "value": "سجّل الدخول عبر تسجيل الدخول الخاص بشبكتك للمتابعة."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "تُعيَّن هذه العقدة من إعدادات نشر الخادم. أزلها من هناك وأعد تشغيل خوادم API لإدارتها من هنا."
     }
   ],
   "error.not_acceptable": [
@@ -14832,7 +14856,7 @@
   "web.admin.backups.key.explanation": [
     {
       "type": 0,
-      "value": "تتطلب استعادة أي نسخة مفتاح SECRET_KEY الخاص بهذا الخادم. لا يعرض Silo المفتاح أبدًا ولا يحتفظ بنسخة منه في أي مكان آخر. إذا كان المفتاح موجودًا فقط في ملف .env على هذا الخادم وتعطّل القرص، فلن يمكن استعادة هذه النسخ الاحتياطية، ولن يستطيع أحد استردادها."
+      "value": "تتطلب استعادة أي نسخة مفتاح SECRET_KEY الخاص بهذا الخادم. لا يعرض Silo المفتاح أبدًا ولا يحتفظ بنسخة منه في أي مكان آخر. إذا كان المفتاح موجودًا فقط في ملف \u200E.env على هذا الخادم وتعطّل القرص، فلن يمكن استعادة هذه النسخ الاحتياطية، ولن يستطيع أحد استردادها."
     }
   ],
   "web.admin.backups.key.heading": [
@@ -17203,6 +17227,112 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "تتعذّر استعادة "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " — تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -18735,6 +18865,80 @@
       "value": "يتغيّر عنوان إحدى الخدمات دون بيانات اعتمادها في النسخة الاحتياطية، لذا تمسح الاستعادة بيانات الاعتماد هنا وتعطّل الخدمة حتى يُعاد إدخالها."
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " إعداد تحتفظ بقيمها الحالية لأن بيئة هذا الخادم تضبطها، أو تضبط جزءًا من اتصالها."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إعداد واحد يحتفظ بقيمته الحالية لأن بيئة هذا الخادم تضبطه، أو تضبط جزءًا من اتصاله."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إعدادان يحتفظان بقيمتيهما الحاليتين لأن بيئة هذا الخادم تضبطهما، أو تضبط جزءًا من اتصالهما."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " إعدادات تحتفظ بقيمها الحالية لأن بيئة هذا الخادم تضبطها، أو تضبط جزءًا من اتصالها."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " إعدادًا تحتفظ بقيمها الحالية لأن بيئة هذا الخادم تضبطها، أو تضبط جزءًا من اتصالها."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " إعداد تحتفظ بقيمها الحالية لأن بيئة هذا الخادم تضبطها، أو تضبط جزءًا من اتصالها."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -19619,8 +19823,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "إخفاؤها"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاؤه"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاؤهما"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاؤها"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -19897,8 +20127,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "عرضها"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرضه"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرضهما"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرضها"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -21047,26 +21303,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تم أيضًا اختيار "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": "، لأن ما اخترته يحتاج إليها."
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -21082,7 +21322,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -21098,38 +21338,6 @@
             }
           ]
         },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تم أيضًا اختيار "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": "، لأن ما اخترته يحتاج إليها."
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تم أيضًا اختيار "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": "، لأن ما اخترته يحتاج إليها."
-            }
-          ]
-        },
         "other": {
           "value": [
             {
@@ -21146,33 +21354,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تم أيضًا إلغاء اختيار "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": "، لأنها تحتاج إلى ما ألغيت اختياره."
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -21188,7 +21378,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -21201,38 +21391,6 @@
             {
               "type": 0,
               "value": "، لأنهما يحتاجان إلى ما ألغيت اختياره."
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تم أيضًا إلغاء اختيار "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": "، لأنها تحتاج إلى ما ألغيت اختياره."
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تم أيضًا إلغاء اختيار "
-            },
-            {
-              "type": 1,
-              "value": "names"
-            },
-            {
-              "type": 0,
-              "value": "، لأنها تحتاج إلى ما ألغيت اختياره."
             }
           ]
         },
@@ -21252,9 +21410,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -23625,6 +23781,12 @@
       "value": "يسجّل حساب آخر هنا الدخول باسم المستخدم أو البريد الإلكتروني الخاص به."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "تضبط بيئة هذا الخادم الإعدادات المختلفة، أو جزءًا من اتصالها، لذا يحتفظ هذا الخادم بقيمه الحالية."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -24499,6 +24661,194 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "صورة الخلفية"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنصر مجموعة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عنصر مجموعة واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عنصرا مجموعة"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عناصر مجموعة"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنصرًا من المجموعة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنصر مجموعة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "استبدال المجموعة"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "الإعدادات"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "الوصف"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "حالة التفعيل"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "حالة التمييز"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "حد العناصر"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "ترتيب العناصر"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "المكتبات"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "الموضع"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "الملصق"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "ترتيب الفرز"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "المصدر"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "جدولة المزامنة"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "العنوان"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "ترجمة العنوان"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "النوع"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "الظهور"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "الويب فقط"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -25215,6 +25565,16 @@
     {
       "type": 0,
       "value": " (مُبقى: أكثر صرامة)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (دون تغيير: البيئة)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -26703,6 +27063,20 @@
       "value": "بالمنطقة الزمنية للخادم."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "حسب المنطقة الزمنية للخادم. يوافق ذلك الساعة "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " في منطقتك الزمنية."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -27763,18 +28137,10 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تعذّرت قراءة بياناتها"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -27782,27 +28148,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "تعذّرت قراءة بياناتهما"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تعذّرت قراءة بياناتها"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تعذّرت قراءة بياناتها"
             }
           ]
         },
@@ -27814,9 +28164,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -27919,20 +28267,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "إخفاء الحسابات"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاء الحساب"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاء الحسابين"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاء الحسابات"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "إخفاء الملفات"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاء الملف"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاء الملفين"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاء الملفات"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "إخفاء الملفات"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاء الملف"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاء الملفين"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "إخفاء الملفات"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -28043,6 +28469,746 @@
     {
       "type": 0,
       "value": "يُشار إليها في قاعدة البيانات لكن لم يُعثر عليها في مساحة التخزين؛ وتستبعدها عمليات الاستعادة."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنصر علامة تجارية"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عنصر علامة تجارية واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عنصرا علامة تجارية"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عناصر علامة تجارية"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنصرًا للعلامة التجارية"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنصر علامة تجارية"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " خلفية مجموعة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "خلفية مجموعة واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "خلفيتا مجموعة"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " خلفيات مجموعات"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " خلفيةً للمجموعات"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " خلفية مجموعة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصق مجموعة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملصق مجموعة واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملصقا مجموعة"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصقات مجموعات"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصقًا للمجموعات"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصق مجموعة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمة منزّلة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ترجمة منزّلة واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ترجمتان منزّلتان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمات منزّلة"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمةً منزّلة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمة منزّلة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصق مكتبة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملصق مكتبة واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملصقا مكتبة"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصقات مكتبات"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصقًا للمكتبات"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصق مكتبة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صورة تراكب"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "صورة تراكب واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "صورتا تراكب"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صور تراكب"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صورةً للتراكب"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صورة تراكب"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصق مجموعة شخصية"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملصق مجموعة شخصية واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملصقا مجموعة شخصية"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصقات مجموعات شخصية"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصقًا لمجموعات شخصية"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملصق مجموعة شخصية"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صورة رمزية لملفات شخصية"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "صورة رمزية واحدة لملف شخصي"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "صورتان رمزيتان لملفات شخصية"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صور رمزية لملفات شخصية"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صورةً رمزية لملفات شخصية"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " صورة رمزية لملفات شخصية"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملف صور فنية مرفوع"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملف صور فنية مرفوع واحد"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ملفا صور فنية مرفوعان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملفات صور فنية مرفوعة"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملفًا من الصور الفنية المرفوعة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ملف صور فنية مرفوع"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمة مرفوعة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ترجمة مرفوعة واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ترجمتان مرفوعتان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمات مرفوعة"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمةً مرفوعة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ترجمة مرفوعة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -28613,26 +29779,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تعذّرت قراءة "
-            },
-            {
-              "type": 1,
-              "value": "part"
-            },
-            {
-              "type": 0,
-              "value": " لديها"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -28648,7 +29798,7 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
@@ -28661,38 +29811,6 @@
             {
               "type": 0,
               "value": " لديهما"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تعذّرت قراءة "
-            },
-            {
-              "type": 1,
-              "value": "part"
-            },
-            {
-              "type": 0,
-              "value": " لديها"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "تعذّرت قراءة "
-            },
-            {
-              "type": 1,
-              "value": "part"
-            },
-            {
-              "type": 0,
-              "value": " لديها"
             }
           ]
         },
@@ -28712,9 +29830,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -28729,8 +29845,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "عرض الحسابات"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض الحساب"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض الحسابين"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض الحسابات"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -28841,30 +29983,74 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "عرض الملفات"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض الملف"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض الملفين"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض الملفات"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "عرض الملفات"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض الملف"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض الملفين"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "عرض الملفات"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "zero": {
-          "value": [
-            {
-              "type": 0,
-              "value": "بياناتها كبيرة جدًا على مجموعة الاستعادة"
-            }
-          ]
-        },
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -28872,27 +30058,11 @@
             }
           ]
         },
-        "two": {
+        "exactlyTwo": {
           "value": [
             {
               "type": 0,
               "value": "بياناتهما كبيرة جدًا على مجموعة الاستعادة"
-            }
-          ]
-        },
-        "few": {
-          "value": [
-            {
-              "type": 0,
-              "value": "بياناتها كبيرة جدًا على مجموعة الاستعادة"
-            }
-          ]
-        },
-        "many": {
-          "value": [
-            {
-              "type": 0,
-              "value": "بياناتها كبيرة جدًا على مجموعة الاستعادة"
             }
           ]
         },
@@ -28904,9 +30074,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -32046,7 +33214,7 @@
   "web.admin.common.connectionCheck.result.meilisearchRedirected": [
     {
       "type": 0,
-      "value": "أعاد Meilisearch توجيه الفحص إلى عنوان آخر. أدخل العنوان الذي يعيد التوجيه إليه، مثل عنوان URL الذي يبدأ بـ https://، ثم أدخل مفتاح API مرة أخرى."
+      "value": "أعاد Meilisearch توجيه الفحص إلى عنوان آخر. أدخل العنوان الذي يعيد التوجيه إليه، مثل عنوان URL الذي يبدأ بـ https://\u200E، ثم أدخل مفتاح API مرة أخرى."
     }
   ],
   "web.admin.common.connectionCheck.result.redisConnected": [
@@ -32121,6 +33289,12 @@
       "value": "مزود تحويل الكلام إلى نص غير متاح مؤقتًا. حاول مرة أخرى لاحقًا."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "لا يتوفر رصيد لدى مزود الذكاء الاصطناعي النصي، أو بُلغ حد الاستخدام أو الإنفاق. تحقق من رصيدك وحدودك لدى المزود، أو من إعدادات الاستخدام في ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -32131,6 +33305,80 @@
     {
       "type": 0,
       "value": "فشل اتصال الذكاء الاصطناعي النصي. تحقق من النموذج ومستوى الاستدلال وفئة الخدمة واتصال الحساب وحدود الاستخدام لدى المزود."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "رُفض الوصول إلى الذكاء الاصطناعي النصي. تحقق من أن مفتاح API أو حساب ChatGPT مسموح له باستخدام هذا النموذج."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "نقطة نهاية الذكاء الاصطناعي النصي أو النموذج غير متاحة. تحقق من عنوان URL الأساسي للمزود ومن النموذج."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "لا يمكن لحساب ChatGPT المرتبط مشاركة استخدام خطته. تحقق من إعدادات الاستخدام في ChatGPT، أو اربط حسابًا آخر."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "يحدّ مزود الذكاء الاصطناعي النصي من معدل الطلبات. حاول مرة أخرى لاحقًا."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "رفض مزود الذكاء الاصطناعي النصي طلب الفحص. تحقق من النموذج ومستوى الاستدلال وإعدادات الاستخدام في الحساب. يتضمن سجل الخادم الخطأ الذي أرجعه المزود."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "رفض مزود الذكاء الاصطناعي النصي طلب الفحص (الحالة "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). تحقق من النموذج ومستوى الاستدلال وفئة الخدمة. يتضمن سجل الخادم الخطأ الذي أرجعه المزود."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "انتهت مهلة فحص اتصال الذكاء الاصطناعي النصي. تحقق من توفر المزود وحاول مرة أخرى."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "رفض مزود الذكاء الاصطناعي النصي بيانات الاعتماد. استبدل مفتاح API الخاص بالمزود، أو سجّل الدخول باستخدام ChatGPT مرة أخرى."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "مزود الذكاء الاصطناعي النصي غير متاح مؤقتًا. حاول مرة أخرى لاحقًا."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "تعذّر على Silo الوصول إلى مزود الذكاء الاصطناعي النصي. تحقق من عنوان URL الأساسي للمزود ومن قدرة هذا الخادم على الاتصال به."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "أرجع النموذج النصي استجابة لا يمكن لـ Silo استخدامها. اختر نموذجًا آخر."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -32263,6 +33511,12 @@
     {
       "type": 0,
       "value": "مسح الحد"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "مباشر"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -34824,7 +36078,7 @@
   "web.admin.common.libraryEditor.metadata.localMetadataDescription": [
     {
       "type": 0,
-      "value": "يقرأ ملفات .nfo والصور الفنية المحفوظة بجوار الوسائط. يعمل أولًا في كل مستوى، لذا تتقدم قيمه على المزودين البعيدين؛ والحقول التي تقفلها أثناء تعديل عنصر تتقدم على كليهما."
+      "value": "يقرأ ملفات \u200E.nfo والصور الفنية المحفوظة بجوار الوسائط. يعمل أولًا في كل مستوى، لذا تتقدم قيمه على المزودين البعيدين؛ والحقول التي تقفلها أثناء تعديل عنصر تتقدم على كليهما."
     }
   ],
   "web.admin.common.libraryEditor.metadata.noProviders": [
@@ -39835,6 +41089,12 @@
       "value": "فاشلة"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "فشلت المهمة. راجع تشخيصات المسؤول للاطلاع على التفاصيل."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -42773,7 +44033,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "موجز بجلسات التشغيل التي بدأت مؤخرًا"
+      "value": "أحدث عمليات التشغيل في جميع الحسابات"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -45034,6 +46294,72 @@
     {
       "type": 0,
       "value": "تعذّر تحميل النشاط."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " شغّل "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " شغّل "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -66016,6 +67342,160 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "تظهر هنا الفحوصات وعمليات تحديث البيانات الوصفية أثناء تشغيلها."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "لا توجد فحوصات أو عمليات تحديث نشطة"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "الكل ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "إخفاء قائمة الانتظار"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مكتبة أخرى"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ مكتبة أخرى"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ مكتبتان أخريان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مكتبات أخرى"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مكتبة أخرى"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مكتبة أخرى"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "تحديثات البيانات الوصفية"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "جارٍ تحديث البيانات الوصفية"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "عرض قائمة الانتظار"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "عالية"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "منخفضة"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "متوسطة"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -66718,6 +68198,30 @@
       "value": "تأكيد تنظيف الجذور الفارغة"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "فحص"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "لا توجد عناصر في انتظار قائمة مطابقة البيانات الوصفية."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "لم تُسجَّل أي جذور متخطاة."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "لم تُسجَّل أي معرّفات خارجية قديمة."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -66754,6 +68258,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "تعديل"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "لم تُضبط أي مكتبات بعد."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -66841,6 +68357,12 @@
       "value": "إخفاء المسارات"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "خاملة"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -66875,6 +68397,12 @@
       "value": "فحص جزئي"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "إكمال البيانات الوصفية الناقصة أو استبدالها كلها"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -66887,6 +68415,12 @@
       "value": "يتعذّر الوصول إلى الجذر"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "فحص"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -66897,6 +68431,12 @@
     {
       "type": 0,
       "value": "عرض المسارات"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "إيقاف"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -66915,6 +68455,22 @@
     {
       "type": 0,
       "value": "التحقق من نقاط التحميل"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "التحقق من إمكانية الوصول إلى كل مجلدات المكتبة"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "عرض الفحوصات النشطة لـ "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -67018,7 +68574,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "أدر جذور المكتبات وفحوصاتها. أصبح استيراد الكتالوج وتصديره الآن ضمن «الصيانة»."
+      "value": "أدر مجلدات الوسائط، وراقب الفحوصات، وحلّ مشكلات المطابقة."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -67805,6 +69361,91 @@
       "value": "المعرّفات الخارجية القديمة"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لا مهام نشطة"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مهمة نشطة واحدة"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مهمتان نشطتان"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مهام نشطة"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مهمة نشطة"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " مهمة نشطة"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "نشاط الفحص"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "سلامة الكتالوج"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "المكتبات"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -68319,6 +69960,24 @@
     {
       "type": 0,
       "value": "ابحث في العناصر المتجاهلة حسب العنوان أو المكتبة أو النوع..."
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "ملتبس"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "قيد الانتظار"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "غير مطابق"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -71489,6 +73148,12 @@
       "value": "أدخل عنوان الخادم لإكمال الإعدادات."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "المفتاح مُعيَّن من إعدادات نشر الخادم"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -72445,6 +74110,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "تُعيَّن هذه العقدة من إعدادات نشر الخادم. أزلها من هناك وأعد تشغيل خوادم API لحذفها من هنا."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -74907,6 +76578,68 @@
       "value": "المكونات الإضافية"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "مطبَّق"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "معلّق"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "تعذّر تحميل حالة تهيئة المكونات الإضافية."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "تديره البيئة"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "قيد الانتظار"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "مرفوض"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "يتحكم النشر في مصدر الحزمة وإزالتها."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "حالة التهيئة"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "يقيّد النشر هذا المكون الإضافي بالإصدار "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -75663,6 +77396,154 @@
       "value": "توقّف الإنشاء. تبقى التوصيات المخزّنة ظاهرة في «استكشاف» حتى إعادة تشغيل الخادم."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "جارٍ ترتيب الملفات الشخصية ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "جارٍ جلب قوائم TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "جارٍ البحث عن العناوين وتضمينها ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "لم يُمسح أي عنوان منتهي الصلاحية"
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مُسح عنوان واحد منتهي الصلاحية"
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مُسح عنوانان منتهيا الصلاحية"
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مُسحت "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عناوين منتهية الصلاحية"
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مُسح "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنوانًا منتهي الصلاحية"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "مُسح "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " عنوان منتهي الصلاحية"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -75731,6 +77612,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "احلّ تعارض قفل التضمين أدناه قبل إنشاء توصيات الاستكشاف."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "شغّل عملية «التضمينات» أولًا ليتوفر لدى Silo متجهات للمكتبة يقارن بها."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "اربط مزود تضمين في «خدمات الذكاء الاصطناعي» قبل إنشاء توصيات الاستكشاف."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "لا توجد ملفات شخصية لها ملفات ذوق بعد. شغّل «الملفات الشخصية للذوق» بعد أن يشاهد أحد عناوين أو يقيّمها."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -78937,6 +80842,32 @@
       "value": "يبقى فارغًا حتى تفعيل توصيات الاستكشاف من الإدارة ← التوصيات."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "تبقى صفوف التوصيات فارغة حتى تفعيل «توصيات الاستكشاف» من "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "الإدارة ← التوصيات"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "معطّل في «التوصيات»"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -80816,6 +82747,12 @@
       "value": "تُضاف الصفوف الجديدة إلى أسفل استكشاف"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "فتح إعدادات «التوصيات»"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -80828,6 +82765,12 @@
       "value": "لا تتضمن تغذية MDBList الترتيب المحفوظ في صفحة القائمة. اختر الترتيب الذي تعرضه."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "لا توجد توصيات استكشاف لملفك الشخصي بعد. شغّل «توصيات الاستكشاف» أو شاهد بعض العناوين وقيّمها لمعاينة هذا الصف."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -80838,6 +82781,12 @@
     {
       "type": 0,
       "value": "اختر قائمة أو الصق رابطها لرؤية عناوينها."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "فعّل «توصيات الاستكشاف» من الإدارة ← التوصيات لمعاينة هذا الصف."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -81980,6 +83929,12 @@
     {
       "type": 0,
       "value": "تم إرسال الرسالة"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "لم يؤكّد المشغّل استلام الرسالة. قد تظهر متأخرة أو لا تظهر إطلاقًا."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -85122,6 +87077,12 @@
       "value": "فشل التحقق من الاتصال."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "تعذّر التحقق مما إذا كانت بيئة الخادم تضبط هذا الخيار. أعد تحميل الصفحة لتعديله."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -85712,6 +87673,30 @@
     {
       "type": 0,
       "value": "تعذّر تحديث القناة"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "أعد التحميل لعرض القيم الحالية. إذا تغيّر شيء في هذه الصفحة، أو عدّلت كلمة مرور أو مفتاحًا محفوظًا، فستُلغى جميع تعديلاتك؛ وإلا فسيُحتفظ بها."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "إعادة التحميل"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "تعذّرت إعادة تحميل الإعدادات. حاول مرة أخرى."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "تغيّرت الإعدادات في مكان آخر"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -87896,6 +89881,612 @@
       "value": "مزامنة العلامات عبر الإنترنت"
     }
   ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "الخوارزمية: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "المطلوبة "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "؛ النشطة "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "القيم المسموح بها: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "التحكم في الازدحام: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "الحساب"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "على هذا المسار منذ"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "الجهاز"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "لا يوجد جهاز متصل اتصالًا مباشرًا."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "نقطة نهاية النظير"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "الأجهزة المتصلة"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "إلى المنفذ "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "الافتراضي: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "تحقق من جاهزية هذا الخادم للاتصالات المباشرة."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "الفعلي: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "تفعيل الاتصالات المباشرة"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "إمكانية NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "محرك الاتصال المباشر"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "ارتداد NAT (hairpin)"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "تعيين NAT"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "الرجوع الاحتياطي لـ PMTU"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "إمكانية الوصول"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "مخزن الاستقبال المؤقت للمقبس"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "مخزن الإرسال المؤقت للمقبس"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "ضبط المضيف"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "تقليل حزم ACK"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "سياسة الفقد في BBR"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "تفريغ تجزئة UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "نافذة الاستقبال للعميل"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "منفذ UDP للاتصال المباشر"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "التحكم في ازدحام TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "مخزن الإرسال المؤقت لـ TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "آخر فحص "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "الوكيل"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "منافذ الاستماع"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "العنوان العام المرصود: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "تحقق من دعم الموجّه لـ UPnP أو NAT-PMP أو PCP."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "تعيين المنافذ"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "لا تبدأ فحوص الجاهزية التشغيل المباشر."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "عطّله المسؤول"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "معطّل"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "تعذّر بدء محرك الاتصال المباشر"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "تعذّرت زيادة المخزن المؤقت"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "لا يدعم الموجّه تعيين المنافذ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "المخزن المؤقت أصغر من المطلوب"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "أداة ضبط الشبكة المساعدة غير متاحة"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "قيمة غير صالحة؛ يُستخدم «معطّل»"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "تعذّر على النظام تطبيق هذا الإعداد أو قراءته"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "غير مدعوم في هذه النواة"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "بلغ المخزن المؤقت الحد الذي يسمح به المضيف"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "تعذّرت قراءة حدود المخازن المؤقتة للمضيف"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "يختلف العنوان العام حسب الوجهة"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR غير متاح"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR غير محمّل أو غير مسموح به"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "يعمل أكثر من خادم API"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "تم التخلي عن إمكانية NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "إمكانية NET_ADMIN غير موجودة"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "لم يُعثر على موجّه"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "إمكانية NET_ADMIN غير موجودة"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "تم رفض الإذن"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "غير متاح"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "لم يتم القياس"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "لا حاجة إلى الزيادة"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "اختارت سياسة المضيف خوارزمية أخرى"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "فشل الفحص"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "تعذّر التحقق من وجود خوادم API أخرى"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "يستضيف خادم API آخر الاتصالات المباشرة"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "في انتظار أن يصبح مضيف الاتصالات المباشرة"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "حالة الاتصالات المباشرة غير متاحة"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "تعذّر فتح منفذ UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "منفذ UDP غير صالح"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "غير مدعوم على هذا النظام الأساسي"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "المطلوب: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "المطلوب: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "؛ الممنوح: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "تشغيل الفحص"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "مخزن الإرسال المؤقت: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "محدود"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "منخفض الأداء"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "احتياطي"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "غير مطلوب"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "معطّل"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "مفعّل"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "غير معروف"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "قائمة مفصولة بفواصل تضم حتى ثمانية إدخالات host:port. اتركها فارغة لاستخدام القيم الافتراضية."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "خوادم STUN"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "الاتصالات المباشرة"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "اسمح للأجهزة بالوصول إلى هذا الخادم عبر مسار UDP مباشر. يأتي منفذ UDP من "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " وهو للقراءة فقط هنا."
+    }
+  ],
   "web.admin.settings.network.host.apiServer": [
     {
       "type": 0,
@@ -89499,7 +92090,7 @@
   "web.admin.settings.notifications.serverChannels.namePlaceholder": [
     {
       "type": 0,
-      "value": "المجتمع #new-content"
+      "value": "المجتمع \u200E#new-content"
     }
   ],
   "web.admin.settings.notifications.serverChannels.noEvents": [
@@ -91578,6 +94169,24 @@
       "value": "يتطلب التبديل إلى نموذج آخر إعادة تعيين التضمينات، مما يحذفها جميعًا. أما استخدام مزود آخر يقدّم النموذج نفسه فيُطبَّق بعد إعادة التشغيل."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "إضافة إلى «استكشاف»"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "تعذّرت إضافة صفوف التوصيات إلى صفحة «استكشاف»."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "تمت إضافة صفوف التوصيات إلى صفحة «استكشاف»."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -91600,6 +94209,44 @@
     {
       "type": 0,
       "value": "عدد العناوين غير الموجودة في المكتبة التي يحتفظ بها الخادم للتوصية منها. يُبحث عن كل عنوان على TMDB ويُنشأ له تضمين. عادةً ما يكون التضمين منخفض التكلفة، لكن الرقم الأعلى قد يكلّف أكثر أو يستغرق وقتًا أطول حسب مزود التضمين لديك، ويستهلك مساحة تخزين أكبر."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "لا تعرض صفحة «استكشاف» أي صفوف «التوصيات» بعد."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "فعّل «تفعيل التوصيات» أعلاه وأعد تشغيل الخادم قبل أن تتمكن «توصيات الاستكشاف» من العمل."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "الطلبات معطّلة حاليًا. فعّلها في "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "إعدادات الطلبات"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ليتمكن المشاهدون من رؤية صفحة «استكشاف»."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "فتح صفحة «استكشاف»"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -98708,7 +101355,7 @@
   "web.admin.settings.security.localNetwork.description": [
     {
       "type": 0,
-      "value": "يتيح لكل حساب استيراد السجل من خوادم Plex وEmby وJellyfin ومزامنته معها على عناوين الشبكة المحلية مثل 192.168.x.x أو localhost. يستطيع المسؤولون ذلك دائمًا."
+      "value": "يتيح لكل حساب استيراد السجل من خوادم Plex وEmby وJellyfin ومزامنته معها على عناوين الشبكة المحلية مثل \u200E192.168.x.x أو localhost. يستطيع المسؤولون ذلك دائمًا."
     }
   ],
   "web.admin.settings.security.localNetwork.group": [
@@ -101251,6 +103898,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "لا يمكن نقل التخزين إلى هنا ما دامت البيئة تحدد إعدادات التخزين ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). ألغِ تعيين هذه المتغيرات وأعد تشغيل كل خادم API أولًا."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -102650,6 +105311,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "تأتي هذه الجدولة من إعدادات النسخ الاحتياطي. غيّرها في "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "الخادم ← النسخ الاحتياطية"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -103032,10 +105713,66 @@
       "value": "الأخطاء الحديثة"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "فشل التحديث. راجع تشخيصات المسؤول للاطلاع على التفاصيل."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "مراجعة الجدولة الحالية"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -103482,6 +106219,18 @@
       "value": "إعادة محاولة webhook في Autoscan"
     }
   ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "يعيد قراءة ترويسة ملفات MKV ذات ترجمة ASS التي فُحصت قبل أن يستبعد Silo الخطوط المضمّنة من معدل البت، لكي لا يُعاد ترميزها بسبب معدل بت لا تبثّه فعليًا."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "تصحيح معدل البت للملفات ذات الخطوط المضمّنة"
+    }
+  ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
     {
       "type": 0,
@@ -103497,13 +106246,13 @@
   "web.admin.tasks.task.backfill_hdr10_plus.description": [
     {
       "type": 0,
-      "value": "يقرأ الإطار الأول من فيديو HDR الذي فُحص قبل أن يكتشف Silo تنسيق HDR10+، مرة واحدة لكل ملف، لكي تُصنَّف ملفات HDR10+ على أنها HDR10+ بدلًا من HDR10."
+      "value": "يقرأ الإطار الأول من فيديو HDR الذي فُحص قبل أن يكتشف Silo تنسيق HDR10+\u200E، مرة واحدة لكل ملف، لكي تُصنَّف ملفات HDR10+\u200E على أنها HDR10+\u200E بدلًا من HDR10."
     }
   ],
   "web.admin.tasks.task.backfill_hdr10_plus.name": [
     {
       "type": 0,
-      "value": "اكتشاف فيديو HDR10+"
+      "value": "اكتشاف فيديو HDR10+\u200E"
     }
   ],
   "web.admin.tasks.task.backfill_matroska_track_numbers.description": [
@@ -116238,7 +118987,7 @@
   "web.audiobooks.player.speedTitle": [
     {
       "type": 0,
-      "value": "سرعة التشغيل (shift+. / shift+,)"
+      "value": "سرعة التشغيل (shift+\u200E. / shift+\u200E,\u200E)"
     }
   ],
   "web.audiobooks.player.startFailed": [
@@ -116290,25 +119039,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "تعذّر تسجيل الدخول على التلفزيون. حاول مرة أخرى."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "تحقق من أن تطبيقك يعرض"
+      "value": "تعذّرت الموافقة على تسجيل الدخول. حاول مرة أخرى."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "تحقق من أن التلفزيون يعرض"
+      "value": "تأكّد من تطابق هذا الرمز"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "أدخل الرمز الظاهر على التلفزيون أو التطبيق"
+      "value": "أدخل الرمز المعروض على جهازك"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -116320,13 +119063,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "سجل الدخول على تلفزيون أو جهاز آخر باستخدام حسابك."
+      "value": "تسجيل الدخول على تلفزيون أو تطبيق أو جهاز آخر."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "تسجيل الدخول على التلفزيون"
+      "value": "الموافقة على تسجيل الدخول"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -116346,13 +119089,13 @@
     },
     {
       "type": 0,
-      "value": " للموافقة على التلفزيون. لا يمكن تسجيل الدخول على التلفزيون إلا من الحساب نفسه."
+      "value": " للموافقة على تسجيل الدخول هذا. لا يمكن الموافقة على الأجهزة إلا من الحساب نفسه."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "أوقف العرض باسم هذا المستخدم للموافقة على التلفزيون. لا يمكن تسجيل الدخول على التلفزيون إلا من الحساب نفسه."
+      "value": "أوقف العرض باسم هذا المستخدم للموافقة على تسجيل الدخول هذا. لا يمكن الموافقة على الأجهزة إلا من الحساب نفسه."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -116370,39 +119113,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "لم نعثر على هذا الرمز. تحقق من الرمز على التلفزيون."
+      "value": "لم نعثر على هذا الرمز. تحقّق من الرمز وحاول مرة أخرى."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "ليس الآن"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "تعرض تطبيقات التلفزيون الأقدم "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " بدلًا من ذلك."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "لا توافق إلا على جهاز موجود أمامك الآن."
+      "value": "رفض"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "لا توافق إلا على تلفزيون موجود أمامك الآن."
+      "value": "لا توافق على هذا إلا إذا بدأت تسجيل الدخول بنفسك."
     }
   ],
   "web.auth.activate.playOn": [
@@ -116428,7 +119151,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "يمكن لأي شخص يستخدم هذا التلفزيون الاختيار من ملفاتك الشخصية. تبقى الملفات الشخصية المحمية برمز PIN مقفلة."
+      "value": "يمنحه هذا الوصول إلى ملفاتك الشخصية. تبقى الملفات الشخصية المحمية برمز PIN مقفلة."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -116475,6 +119198,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "تم الطلب "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -116488,7 +119221,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "توقف هذا التلفزيون عن الانتظار. ابدأ من جديد على التلفزيون."
+      "value": "توقف هذا الجهاز عن الانتظار. ابدأ تسجيل الدخول مجددًا عليه."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -116497,10 +119230,38 @@
       "value": "تم رفض تسجيل الدخول هذا."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "تم. يسجّل "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " الدخول الآن."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "تم تسجيل دخول "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "انتهت صلاحية هذا الرمز. يعرض التلفزيون رمزًا جديدًا. استخدم ذلك الرمز بدلًا منه."
+      "value": "انتهت صلاحية هذا الرمز. احصل على رمز جديد على الجهاز وحاول مرة أخرى."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -116534,7 +119295,7 @@
   "web.auth.activate.result.quickConnectDoneUnknown": [
     {
       "type": 0,
-      "value": "تم. هذا الجهاز يسجل الدخول باسم "
+      "value": "تم. يسجّل هذا الجهاز الدخول باسم "
     },
     {
       "type": 1,
@@ -116584,25 +119345,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "تم تسجيل الدخول على ذلك التلفزيون بالفعل."
+      "value": "تم تسجيل دخول هذا الجهاز بالفعل."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "تمت الموافقة على هذا التلفزيون وهو يُكمل تسجيل الدخول."
+      "value": "تمت الموافقة على هذا الجهاز وهو يُكمل تسجيل الدخول."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "تم. يجري تسجيل الدخول على التلفزيون."
+      "value": "تم. يسجّل جهازك الدخول الآن."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "تم تسجيل الدخول على التلفزيون."
+      "value": "تم تسجيل دخول جهازك."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -116646,7 +119407,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "تسجيل الدخول على "
+      "value": "هل تسمح لـ "
     },
     {
       "type": 1,
@@ -116654,13 +119415,13 @@
     },
     {
       "type": 0,
-      "value": "؟"
+      "value": " بتسجيل الدخول؟"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "تسجيل الدخول على هذا الجهاز؟"
+      "value": "هل تسمح لهذا الجهاز بتسجيل الدخول؟"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -116672,7 +119433,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "سجل الدخول إلى "
+      "value": "سجّل الدخول إلى "
     },
     {
       "type": 1,
@@ -116680,13 +119441,13 @@
     },
     {
       "type": 0,
-      "value": " للموافقة على هذا التلفزيون."
+      "value": " للموافقة على تسجيل الدخول هذا."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "تسجيل الدخول على التلفزيون"
+      "value": "الموافقة على تسجيل الدخول"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -117736,7 +120497,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "تعذّر تسجيل الدخول على الجهاز. حاول مرة أخرى."
+      "value": "تعذّرت الموافقة على تسجيل الدخول. حاول مرة أخرى."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -127669,7 +130430,7 @@
   "web.collections.copy.mdblistLinkInvalid": [
     {
       "type": 0,
-      "value": "الصق رابط قائمة على mdblist.com، مثل https://mdblist.com/lists/…"
+      "value": "الصق رابط قائمة على mdblist.com، مثل https://mdblist.com/lists/…\u200E"
     }
   ],
   "web.collections.copy.mdblistSearchOffProfile": [
@@ -135963,6 +138724,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [
@@ -146862,6 +149637,12 @@
       "value": "يعرض"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "يديره هذا الخادم. لا يمكن تغيير ما يعرضه من هنا؛ أضف صفًا خاصًا بك لتختار ما يعرضه."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -147176,6 +149957,12 @@
       "value": "جارٍ الترجمة…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "إخفاء صفوف الخادم المضافة منذ هذا التصدير:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -147194,6 +149981,12 @@
     {
       "type": 0,
       "value": "، لتحل محل الأقسام التي أضفتها هنا سابقًا. تبقى تغييراتك على أقسام هذا الخادم كما هي."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "تغيّرت صفوف هذا الخادم منذ تصدير هذا الملف، لذا اختر أدناه الصفوف التي تريد إخفاءها."
     }
   ],
   "web.home.layout.checking": [
@@ -147244,6 +150037,26 @@
     {
       "type": 0,
       "value": "يفعّل خيار إخفاء العناصر المُشاهَدة."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "يخفي الصفوف المحددة في: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " دون تغيير صفوفك الأخرى هناك."
     }
   ],
   "web.home.layout.import": [
@@ -147348,6 +150161,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -147591,6 +150422,12 @@
     {
       "type": 0,
       "value": "قسم بلا عنوان"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "إخفاء صفوف الخادم غير الموجودة في هذا الملف:"
     }
   ],
   "web.home.page.customize": [
@@ -151342,6 +154179,12 @@
       "value": "اللافتة البارزة · الويب فقط"
     }
   ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "الخادم"
+    }
+  ],
   "web.home.rows.line.webOnlyHero": [
     {
       "type": 0,
@@ -152787,7 +155630,7 @@
   "web.home.rows.seasonal.listInvalid": [
     {
       "type": 0,
-      "value": "استخدم رابط قائمة MDBList عامة (https://mdblist.com/lists/…)."
+      "value": "استخدم رابط قائمة MDBList عامة (https://mdblist.com/lists/…\u200E)."
     }
   ],
   "web.home.rows.seasonal.nameMissing": [
@@ -155863,7 +158706,7 @@
   "web.item.split.imdbPlaceholder": [
     {
       "type": 0,
-      "value": "معرّف IMDb \u200F(tt…)"
+      "value": "معرّف IMDb \u200F(tt…\u200E)"
     }
   ],
   "web.item.split.loadingFiles": [
@@ -167943,6 +170786,16 @@
       "value": "العودة إلى الصفحة 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "الانتقال إلى الصفحة "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -168033,6 +170886,20 @@
     {
       "type": 0,
       "value": "صفحات طلب للإضافة"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "الصفحة "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " تتجاوز نهاية هذه النتائج."
     }
   ],
   "web.requests.toAdd.series": [
@@ -170191,6 +173058,12 @@
       "value": "قراءة إشعارات الملف الشخصي فور وصولها وتعليمها كمقروءة."
     }
   ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "معرفة ما يُشغَّل الآن على الملف الشخصي، أو على كل ملف شخصي في الحساب إذا لم يحدد المفتاح ملفًا شخصيًا: العنوان والموضع وحالة الإيقاف المؤقت والجهاز وطريقة التشغيل. دون التحكم في التشغيل أو تفاصيل الشبكة."
+    }
+  ],
   "web.settings.apiKeys.scope.requests": [
     {
       "type": 0,
@@ -170552,7 +173425,7 @@
   "web.settings.connectApps.glance.needsPin": [
     {
       "type": 0,
-      "value": "يتطلب #PIN"
+      "value": "يتطلب \u200E#PIN"
     }
   ],
   "web.settings.connectApps.glance.rename": [
@@ -170878,7 +173751,7 @@
   "web.settings.connectApps.troubleshooting.hashPasswordAnswer": [
     {
       "type": 0,
-      "value": "اكتبها كاملة وأضف #PIN على أي حال. يقسم Silo عند آخر # فقط."
+      "value": "اكتبها كاملة وأضف \u200E#PIN على أي حال. يقسم Silo عند آخر # فقط."
     }
   ],
   "web.settings.connectApps.troubleshooting.hashPasswordQuestion": [
@@ -170906,7 +173779,7 @@
     },
     {
       "type": 0,
-      "value": "»، أو كان ملف شخصي واحد فقط بلا PIN. إضافة #ProfileName تعمل دائمًا."
+      "value": "»، أو كان ملف شخصي واحد فقط بلا PIN. إضافة \u200E#ProfileName تعمل دائمًا."
     }
   ],
   "web.settings.connectApps.troubleshooting.noProfileQuestion": [
@@ -176560,7 +179433,7 @@
   "web.settings.overlays.badge.resolutionHdr.description": [
     {
       "type": 0,
-      "value": "شارة واحدة تجمع الدقة والنطاق الديناميكي (مثل «4K DV»، «4K HDR10+»، «1080p HDR»)"
+      "value": "شارة واحدة تجمع الدقة والنطاق الديناميكي (مثل «4K DV»، «4K HDR10+\u200E»، «1080p HDR»)"
     }
   ],
   "web.settings.overlays.badge.resolutionHdr.label": [
@@ -183145,7 +186018,7 @@
   "web.settings.yourData.import.fileHint": [
     {
       "type": 0,
-      "value": "ملف .json من «تصدير بياناتي»، بحجم أقصاه "
+      "value": "ملف \u200E.json من «تصدير بياناتي»، بحجم أقصاه "
     },
     {
       "type": 1,

@@ -1,9 +1,13 @@
 package catalog
 
 import (
+	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 	"sort"
+	"strings"
+	"sync"
 	"testing"
 )
 
@@ -202,6 +206,11 @@ func TestCatalogSearchIndexerFreezesRuntimeSettings(t *testing.T) {
 	}
 }
 
+// memSettings is an in-memory settings store for indexer runtime tests.
+type memSettings struct{ m map[string]string }
+
+func (s *memSettings) GetAll(context.Context) (map[string]string, error) { return s.m, nil }
+
 func TestCatalogSearchIndexerWaitsForRestartBeforeUsingSavedSchemaSettings(t *testing.T) {
 	startup := DefaultCatalogSearchSettings()
 	startup.Provider = SearchProviderMeilisearch
@@ -289,5 +298,82 @@ func TestRebuildIndexingPercent(t *testing.T) {
 	// Documents created after the total was counted must not push past the band.
 	if got := rebuildIndexingPercent(15, 10); got != 90 {
 		t.Fatalf("overshoot should clamp to 90, got %v", got)
+	}
+}
+
+func TestMeilisearchTwoTermAttributesAreSearchable(t *testing.T) {
+	searchable, _ := catalogSearchMeilisearchSettings(DefaultMeilisearchEmbedder, false, false)["searchableAttributes"].([]string)
+	for _, attribute := range meilisearchTwoTermSearchAttributes {
+		if !slices.Contains(searchable, attribute) {
+			t.Errorf("two-term search attribute %q is not in searchableAttributes %v", attribute, searchable)
+		}
+	}
+}
+
+func TestMeilisearchRankingRulesLeadWithWordsTypoProximity(t *testing.T) {
+	rules, _ := catalogSearchMeilisearchSettings(DefaultMeilisearchEmbedder, false, false)["rankingRules"].([]string)
+	if want := []string{"words", "typo", "proximity"}; len(rules) < len(want) || !slices.Equal(rules[:len(want)], want) {
+		t.Fatalf("rankingRules = %v, want them to begin with %v", rules, want)
+	}
+}
+
+func TestMeilisearchRankingRulesRankEpisodesAfterMediaInOneAttribute(t *testing.T) {
+	rules, _ := catalogSearchMeilisearchSettings(DefaultMeilisearchEmbedder, false, false)["rankingRules"].([]string)
+	want := []string{"attributeRank", "sort", "type_rank:asc", "wordPosition", "exactness", "popularity:desc"}
+	if len(rules) < len(want) || !slices.Equal(rules[len(rules)-len(want):], want) {
+		t.Fatalf("rankingRules = %v, want them to end with %v", rules, want)
+	}
+}
+
+func TestCatalogSearchRebuildRemovesFailedBuildIndexes(t *testing.T) {
+	const leftover = "vio_media_items_rebuild_1"
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	var (
+		mu      sync.Mutex
+		created string
+		deleted []string
+	)
+	client := newMeilisearchTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		mu.Lock()
+		defer mu.Unlock()
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/indexes":
+			_, _ = w.Write([]byte(`{"results":[{"uid":"vio_media_items"},{"uid":"` + leftover + `"},{"uid":"other_app"}],"offset":0,"limit":100,"total":3}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/indexes":
+			var body struct {
+				UID string `json:"uid"`
+			}
+			_ = json.NewDecoder(r.Body).Decode(&body)
+			created = body.UID
+			_, _ = w.Write([]byte(`{"taskUid":1}`))
+		case r.Method == http.MethodDelete && strings.HasPrefix(r.URL.Path, "/indexes/"):
+			deleted = append(deleted, strings.TrimPrefix(r.URL.Path, "/indexes/"))
+			_, _ = w.Write([]byte(`{"taskUid":2}`))
+		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/tasks/"):
+			_, _ = w.Write([]byte(`{"status":"succeeded"}`))
+		case r.Method == http.MethodPatch && strings.HasSuffix(r.URL.Path, "/settings"):
+			// The task running the rebuild is canceled mid-request.
+			cancel()
+			w.WriteHeader(http.StatusServiceUnavailable)
+		default:
+			t.Errorf("unexpected Meilisearch request %s %s", r.Method, r.URL.Path)
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+	})
+	settings := DefaultCatalogSearchSettings()
+	settings.Provider = SearchProviderMeilisearch
+
+	if _, err := NewCatalogSearchIndexer(nil, nil).rebuildLocked(ctx, nil, settings, client); err == nil {
+		t.Fatal("rebuildLocked succeeded, want the settings failure")
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if created == "" || created == leftover {
+		t.Fatalf("created build index %q", created)
+	}
+	if want := []string{leftover, created}; !slices.Equal(deleted, want) {
+		t.Fatalf("deleted indexes = %v, want %v", deleted, want)
 	}
 }

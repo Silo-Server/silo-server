@@ -50,6 +50,7 @@ type AdminPluginAuthBindingWrite struct {
 	DisplayOrder  int    `json:"display_order" minimum:"0" maximum:"100000"`
 	AutoProvision *bool  `json:"auto_provision,omitempty" doc:"Create an account for a person who passes the provider's rules on first sign-in; omitted means true"`
 	DefaultLogin  bool   `json:"default_login"`
+	CallbackMode  string `json:"callback_mode,omitempty" enum:"installation,stable" doc:"OAuth only. Omit to preserve the stored mode or to use installation for a new binding"`
 }
 type AdminPluginAuthBindingInput struct {
 	ID      ID `path:"id" pattern:"^[1-9][0-9]*$"`
@@ -92,6 +93,13 @@ func adminPluginInstallationID(id ID) (int, *Problem) {
 // adminPluginMutationProblem maps the seam's typed errors. Validation detail
 // from the plugin's own schema is the operator's feedback and is kept.
 func adminPluginMutationProblem(err error) error {
+	if errors.Is(err, plugins.ErrManagedByEnvironment) {
+		location := locationBody
+		if locked, ok := errors.AsType[*plugins.ManagedByEnvironmentError](err); ok && locked.Field != "" {
+			location += "." + locked.Field
+		}
+		return validationProblem(location, codeManagedByEnvironment, "Set by the environment. Change it there and restart the affected service.")
+	}
 	// A package the install or update refused (download, checksum, platform,
 	// API version, identity) is the admin's to act on, so say why. An
 	// unreachable catalog or download host may answer a retry.
@@ -108,6 +116,8 @@ func adminPluginMutationProblem(err error) error {
 		return NewProblem(TypeNotFound, "Plugin installation not found.")
 	case errors.Is(err, handlers.ErrPluginBuiltinInstallation):
 		return NewProblem(TypeConflict, "Built-in host providers cannot be modified.")
+	case errors.Is(err, plugins.ErrAuthBindingIneligible):
+		return NewProblem(TypeConflict, "An enabled sign-in binding is incompatible with this plugin release. Disable or update the binding before enabling the plugin or replacing the release.")
 	case errors.Is(err, plugins.ErrAuthProviderAlreadyEnabled):
 		return NewProblem(TypeProviderAlreadyEnabled, "Another sign-in provider is already enabled. Turn it off first: a server has one external sign-in provider.")
 	case errors.As(err, &validation):
@@ -182,7 +192,7 @@ func registerAdminPluginConfiguration(reg *Registry) {
 		}
 		b := in.Body
 		autoProvision := b.AutoProvision == nil || *b.AutoProvision
-		if err := reg.deps.AdminPluginConfiguration.SetAdminPluginAuthBinding(ctx, id, handlers.PluginAuthBindingInput{CapabilityID: b.CapabilityID, Enabled: b.Enabled, DisplayOrder: b.DisplayOrder, AutoProvision: autoProvision, DefaultLogin: b.DefaultLogin}); err != nil {
+		if err := reg.deps.AdminPluginConfiguration.SetAdminPluginAuthBinding(ctx, id, handlers.PluginAuthBindingInput{CapabilityID: b.CapabilityID, Enabled: b.Enabled, DisplayOrder: b.DisplayOrder, AutoProvision: autoProvision, DefaultLogin: b.DefaultLogin, CallbackMode: b.CallbackMode}); err != nil {
 			return nil, adminPluginMutationProblem(err)
 		}
 		return &AdminPluginAuthBindingOutput{RestartRequired: authBindingRestartRequired}, nil

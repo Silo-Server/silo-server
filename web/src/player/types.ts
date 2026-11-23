@@ -3,6 +3,7 @@
  * Zero imports from app-specific code.
  */
 
+import type { PlaybackNetworkTier } from "./bandwidth-probe";
 import type { BufferingMode } from "./buffering-quality";
 
 /** Subtitle display mode. */
@@ -465,6 +466,8 @@ export interface WatchPageProps {
   qualityPreference?: string | null;
   /** Bandwidth cap in kbps from playback.max_bitrate_kbps; null/undefined is uncapped. */
   maxBitrateKbps?: number | null;
+  /** Current network tier (`unmetered`, `metered`, `low_data`) for mid-session cap replans. */
+  networkTier?: PlaybackNetworkTier;
   explicitAudioTrackIndex?: number | null;
   /** True when the initial `fileId` was explicitly chosen by the viewer; the
    * server must not silently substitute another version. */

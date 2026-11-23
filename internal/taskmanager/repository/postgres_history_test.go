@@ -4,10 +4,13 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Silo-Server/silo-server/internal/taskmanager"
 )
 
 // taskHistoryTestPool connects to the migrated test database. Tests here share
@@ -118,4 +121,101 @@ func TestPgExecutionRepositoryPruneReportsBatchLimit(t *testing.T) {
 	if result.Deleted != 2 || result.LimitReached || result.Skipped {
 		t.Fatalf("finishing Prune result = %#v, want 2 deleted", result)
 	}
+}
+
+// A run lease that stops being renewed becomes one interrupted failure that
+// ends at its last heartbeat; a renewed lease is left alone and is recorded,
+// and released, when its run finishes.
+func TestPgExecutionRepositoryRecordsStaleRunLeasesAsInterrupted(t *testing.T) {
+	pool := taskHistoryTestPool(t)
+	repo := NewPgExecutionRepository(pool)
+	key := taskKey(t, pool, "leases")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM task_execution_leases WHERE task_key = $1`, key)
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	liveID, err := repo.StartRun(ctx, key)
+	if err != nil {
+		t.Fatalf("StartRun live: %v", err)
+	}
+	staleID, err := repo.StartRun(ctx, key)
+	if err != nil {
+		t.Fatalf("StartRun stale: %v", err)
+	}
+	var lastBeat time.Time
+	if err := pool.QueryRow(ctx, `
+		UPDATE task_execution_leases
+		SET started_at = now() - interval '20 minutes', heartbeat_at = now() - interval '10 minutes'
+		WHERE id = $1 RETURNING heartbeat_at`, staleID).Scan(&lastBeat); err != nil {
+		t.Fatalf("aging stale lease: %v", err)
+	}
+	if held, err := repo.RenewRun(ctx, liveID); err != nil || !held {
+		t.Fatalf("RenewRun live = (%v, %v), want (true, nil)", held, err)
+	}
+
+	keys, err := repo.ReconcileStaleRuns(ctx, 3*time.Minute)
+	if err != nil {
+		t.Fatalf("ReconcileStaleRuns: %v", err)
+	}
+	// Other tests' stale leases may be reconciled too; this task's is once.
+	if n := countOf(keys, key); n != 1 {
+		t.Fatalf("ReconcileStaleRuns keys = %v, want %s once", keys, key)
+	}
+	latest, err := repo.GetLatest(ctx, key)
+	if err != nil || latest == nil {
+		t.Fatalf("GetLatest = (%#v, %v)", latest, err)
+	}
+	if !latest.IsInterrupted() || !latest.CompletedAt.Equal(lastBeat) || latest.DurationMs != (10*time.Minute).Milliseconds() {
+		t.Fatalf("interrupted run = %#v, want failed %q ending at %v after 10m", latest, taskmanager.InterruptedExecutionMessage, lastBeat)
+	}
+	if held, err := repo.RenewRun(ctx, staleID); err != nil || held {
+		t.Fatalf("RenewRun reconciled = (%v, %v), want (false, nil)", held, err)
+	}
+	if keys, err := repo.ReconcileStaleRuns(ctx, 3*time.Minute); err != nil || slices.Contains(keys, key) {
+		t.Fatalf("second ReconcileStaleRuns = (%v, %v), want %s left alone", keys, err, key)
+	}
+	// A retried FinishRun whose first attempt committed adds no second entry.
+	retried := taskmanager.ExecutionResult{
+		TaskKey: key, StartedAt: time.Now().Add(-time.Second).UTC().Truncate(time.Microsecond),
+		CompletedAt: time.Now().UTC().Truncate(time.Microsecond), Status: "completed", DurationMs: 1000,
+	}
+	retryID, err := repo.StartRun(ctx, key)
+	if err != nil {
+		t.Fatalf("StartRun retried: %v", err)
+	}
+	for range 2 {
+		if err := repo.FinishRun(ctx, retryID, retried); err != nil {
+			t.Fatalf("FinishRun retried: %v", err)
+		}
+	}
+	var copies int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM task_executions WHERE task_key = $1 AND started_at = $2`, key, retried.StartedAt).Scan(&copies); err != nil || copies != 1 {
+		t.Fatalf("retried entries = (%d, %v), want 1", copies, err)
+	}
+
+	finished := taskmanager.ExecutionResult{
+		TaskKey: key, StartedAt: time.Now().Add(-time.Second), CompletedAt: time.Now(), Status: "completed", DurationMs: 1000,
+	}
+	if err := repo.FinishRun(ctx, liveID, finished); err != nil {
+		t.Fatalf("FinishRun: %v", err)
+	}
+	if latest, err := repo.GetLatest(ctx, key); err != nil || latest == nil || latest.Status != "completed" {
+		t.Fatalf("GetLatest after FinishRun = (%#v, %v), want completed", latest, err)
+	}
+	var leases int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM task_execution_leases WHERE task_key = $1`, key).Scan(&leases); err != nil || leases != 0 {
+		t.Fatalf("leases left = (%d, %v), want 0", leases, err)
+	}
+}
+
+func countOf(keys []string, key string) int {
+	n := 0
+	for _, k := range keys {
+		if k == key {
+			n++
+		}
+	}
+	return n
 }

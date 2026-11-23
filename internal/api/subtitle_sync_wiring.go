@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/mediaartifact"
 	"github.com/Silo-Server/silo-server/internal/playback"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/subtitles"
 	"github.com/Silo-Server/silo-server/internal/subtitles/subsync"
 )
@@ -19,7 +19,7 @@ func newSubtitleSyncService(
 	deps *Dependencies,
 	manager *subtitles.Manager,
 	repo *subtitles.PgRepository,
-	settings catalog.SettingsStore,
+	settings serversettings.SettingsStore,
 	notifier *playback.SubtitleReadyNotifier,
 ) *subsync.Service {
 	node, _ := os.Hostname()

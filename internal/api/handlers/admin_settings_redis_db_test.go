@@ -30,6 +30,10 @@ func redisFromEnvironment(settings *fakeServerSettingsStore) *AdminHandler {
 			"redis.url":              "redis://env.example.invalid:6379/1",
 			config.RedisDBSettingKey: "1",
 		},
+		BootstrapEnvVars: map[string]string{
+			"redis.url":              "REDIS_URL",
+			config.RedisDBSettingKey: "REDIS_URL",
+		},
 		RedisBootstrapAvailable: true,
 	}
 }

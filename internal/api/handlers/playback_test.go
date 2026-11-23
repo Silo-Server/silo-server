@@ -1459,7 +1459,7 @@ func TestPersistProgressRecordsEffectiveVirtualCandidate(t *testing.T) {
 		RequestedMediaFileID: requested.ID,
 		VirtualSourceURI:     candidate.FilePath,
 		Position:             240,
-	})
+	}, playback.ProgressSampleV3{Position: 240})
 
 	progress, err := store.GetProgress(context.Background(), "profile-1", "movie-1")
 	if err != nil {
@@ -1493,7 +1493,7 @@ func TestPersistProgressFallsBackWhenVirtualCandidateMissing(t *testing.T) {
 		RequestedMediaFileID: requested.ID,
 		VirtualSourceURI:     candidate.FilePath,
 		Position:             240,
-	})
+	}, playback.ProgressSampleV3{Position: 240})
 
 	progress, err := store.GetProgress(context.Background(), "profile-1", "movie-1")
 	if err != nil {

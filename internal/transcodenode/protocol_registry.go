@@ -30,7 +30,16 @@ func ProtocolReads(schemas huma.Registry) []workerprotocol.Operation {
 		workerprotocol.JSONRead[playback.HWAccelInfo](schemas, "transcode_node", "/hw-capabilities", "(*internal/transcodenode.Server).handleHWCapabilities", 401, 503),
 		workerprotocol.JSONRead[statusResponse](schemas, "transcode_node", "/status", "(*internal/transcodenode.Server).handleStatus", 401, 503),
 		artifactListOperation(schemas),
+		outputBoundOperation(schemas),
 	}
+}
+
+func outputBoundOperation(schemas huma.Registry) workerprotocol.Operation {
+	const pathParameter = "path"
+	op := workerprotocol.JSONRead[outputBoundResponse](schemas, "transcode_node", "/transcode/{session_id}/output-bound", "(*internal/transcodenode.Server).handleOutputBound", 401, 404)
+	op.Description = "Say whether the client of a transport this node runs is waiting on the encoder: output_bound is true while a restart replaces FFmpeg, or while FFmpeg runs (or has failed) and the client has fetched every produced segment but at most the newest. A progressive remux answers false. A transport the node does not run is 404; the read reconstructs nothing and does not count as client activity. The core calls it before it learns a bandwidth limit from a reported stall."
+	op.Parameters = []*huma.Param{{Name: "session_id", In: pathParameter, Required: true, Schema: &huma.Schema{Type: huma.TypeString}, Description: "Transport identifier."}}
+	return op
 }
 
 func artifactListOperation(schemas huma.Registry) workerprotocol.Operation {

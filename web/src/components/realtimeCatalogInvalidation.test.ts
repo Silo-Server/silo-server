@@ -6,15 +6,13 @@ import {
   collectionKeys,
   downloadKeys,
   libraryKeys,
-  mediaSurfaceKeys,
+  profileKeys,
   requestKeys,
   sectionKeys,
 } from "@/hooks/queries/keys";
 import {
   createCatalogInvalidationScheduler,
   invalidateAccessDependentState,
-  PROGRESS_HOME_REFRESH_WINDOW_MS,
-  scheduleProgressHomeRefresh,
   userStateChangeAffectsSectionMembership,
 } from "./realtimeCatalogInvalidation";
 
@@ -51,14 +49,15 @@ describe("createCatalogInvalidationScheduler", () => {
   it("invalidates the first event immediately", async () => {
     const queryClient = new QueryClient();
     seedLibraries(queryClient, [1, 3]);
-    queryClient.setQueryData(sectionKeys.libraryLayout(3), { sections: [] });
+    const sectionKey = sectionKeys.libraryItems(3, "recently-added");
+    queryClient.setQueryData(sectionKey, { section: { id: "recently-added", items: [] } });
     const scheduler = createCatalogInvalidationScheduler(queryClient, WINDOW_MS);
 
     scheduler.schedule({ libraryId: 3, allowDashboardRefetch: false });
     await vi.advanceTimersByTimeAsync(0);
 
     expect(invalidatedLibraries(queryClient, [1, 3])).toEqual([3]);
-    expect(queryClient.getQueryState(sectionKeys.libraryLayout(3))?.isInvalidated).toBe(true);
+    expect(queryClient.getQueryState(sectionKey)?.isInvalidated).toBe(true);
   });
 
   it("coalesces a burst into a single trailing sweep", async () => {
@@ -200,36 +199,6 @@ describe("userStateChangeAffectsSectionMembership", () => {
   });
 });
 
-describe("scheduleProgressHomeRefresh", () => {
-  beforeEach(() => vi.useFakeTimers());
-  afterEach(() => {
-    // Drain any armed trailing refresh so module-level timer state cannot
-    // leak into the next test.
-    vi.runAllTimers();
-    vi.useRealTimers();
-  });
-
-  it("coalesces a stream of progress ticks into one trailing refresh", () => {
-    const queryClient = new QueryClient();
-    const signal = () => queryClient.getQueryData<number>(mediaSurfaceKeys.refreshSignal()) ?? 0;
-
-    for (let i = 0; i < 10; i += 1) {
-      scheduleProgressHomeRefresh(queryClient);
-      vi.advanceTimersByTime(1_000);
-    }
-    // Ticks alone never reset the home load queue…
-    expect(signal()).toBe(0);
-
-    vi.advanceTimersByTime(PROGRESS_HOME_REFRESH_WINDOW_MS);
-    // …but an open home catches the playback within one window.
-    expect(signal()).toBe(1);
-
-    scheduleProgressHomeRefresh(queryClient);
-    vi.advanceTimersByTime(PROGRESS_HOME_REFRESH_WINDOW_MS);
-    expect(signal()).toBe(2);
-  });
-});
-
 describe("invalidateAccessDependentState", () => {
   it("marks every access-dependent surface stale", async () => {
     const queryClient = new QueryClient();
@@ -242,6 +211,7 @@ describe("invalidateAccessDependentState", () => {
       calendarKeys.week("2026-09-28", "all"),
       requestKeys.status(),
       downloadKeys.capability(),
+      profileKeys.list(),
     ];
     for (const key of keys) queryClient.setQueryData(key, {});
 
@@ -249,5 +219,24 @@ describe("invalidateAccessDependentState", () => {
     await Promise.resolve();
 
     expect(keys.filter((key) => !queryClient.getQueryState(key)?.isInvalidated)).toEqual([]);
+  });
+
+  it("refreshes catalog lists while another list page is on its first read", async () => {
+    const queryClient = new QueryClient();
+    queryClient.setQueryData(catalogListKey(1), {});
+    // A page still loading, such as a letter jump's seek, holds a scan's list
+    // refreshes; an access change must not wait for it.
+    const firstRead = new QueryObserver(queryClient, {
+      queryKey: catalogListKey(2),
+      queryFn: () => new Promise<never>(() => undefined),
+    });
+    const unsubscribe = firstRead.subscribe(() => undefined);
+
+    invalidateAccessDependentState(queryClient, { allowDashboardRefetch: false });
+    await Promise.resolve();
+
+    expect(queryClient.getQueryState(catalogListKey(1))?.isInvalidated).toBe(true);
+    unsubscribe();
+    queryClient.clear();
   });
 });

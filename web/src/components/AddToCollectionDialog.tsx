@@ -308,11 +308,13 @@ function ItemChip({ title }: { title: string }) {
     <div className="bg-muted/40 flex items-center gap-3 rounded-xl p-3">
       <span
         aria-hidden
-        className="bg-muted text-muted-foreground grid aspect-[2/3] w-8 place-items-center rounded-md"
+        className="bg-muted text-muted-foreground grid aspect-[2/3] w-8 shrink-0 place-items-center rounded-md"
       >
         <Film className="size-4" />
       </span>
-      <span className="min-w-0 truncate text-sm font-semibold">{title}</span>
+      <span dir="auto" className="bidi-text min-w-0 truncate text-sm font-semibold">
+        {title}
+      </span>
     </div>
   );
 }
@@ -386,7 +388,9 @@ function CollectionChoice({
           </span>
         )}
         <span className="min-w-0">
-          <span className="block truncate text-sm font-semibold">{collection.name}</span>
+          <span dir="auto" className="block w-fit max-w-full truncate text-sm font-semibold">
+            {collection.name}
+          </span>
           <span id={metaId} className="text-muted-foreground flex items-center gap-2 text-[12.5px]">
             <span className="truncate">{manualTitleCount(collection.item_count ?? 0)}</span>
             {collection.is_shared ? (

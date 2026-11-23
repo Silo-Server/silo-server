@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -25,6 +26,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/secret"
 	"github.com/Silo-Server/silo-server/internal/sections"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
@@ -76,7 +78,7 @@ type selectiveSeed struct {
 	secretKey    string
 }
 
-func seedSelective(t *testing.T, pool *pgxpool.Pool, settings *catalog.EncryptedSettingsRepo, store blobstore.Store) selectiveSeed {
+func seedSelective(t *testing.T, pool *pgxpool.Pool, settings *serversettings.EncryptedSettingsRepo, store blobstore.Store) selectiveSeed {
 	t.Helper()
 	ctx := t.Context()
 	suffix := randomHex(t, 4)
@@ -185,7 +187,7 @@ func reportOutcomes(r *SelectiveReport) map[string]string {
 type selectiveFixture struct {
 	pool     *pgxpool.Pool
 	svc      *Service
-	settings *catalog.EncryptedSettingsRepo
+	settings *serversettings.EncryptedSettingsRepo
 	store    blobstore.Store
 	serverID string
 	// calls lists every library follow-up run, created the ones that
@@ -196,6 +198,9 @@ type selectiveFixture struct {
 	failFollowUps bool
 	// beforeSettings runs ahead of each settings write, before its lock.
 	beforeSettings func()
+	// env is what this server's environment sets; the settings write
+	// refuses a batch naming any of it, as the admin write path does.
+	env map[string]string
 }
 
 func newSelectiveFixture(t *testing.T) *selectiveFixture {
@@ -226,7 +231,7 @@ func newSelectiveFixtureOn(t *testing.T, pool *pgxpool.Pool, dsn string) *select
 		t.Fatal(err)
 	}
 	f := &selectiveFixture{pool: pool, store: store, serverID: "selective-" + randomHex(t, 4),
-		settings: catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher)}
+		settings: serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher)}
 	f.svc = New(Options{
 		Pool: pool, DatabaseURL: dsn, Settings: f.settings, Cipher: cipher, KeyCheck: keyCheck, ManifestKey: manifestKey,
 		Stores: blobstore.Stores{Assets: store, Operational: store}, Destination: NewStoreDestination(store),
@@ -241,6 +246,11 @@ func newSelectiveFixtureOn(t *testing.T, pool *pgxpool.Pool, dsn string) *select
 			if f.beforeSettings != nil {
 				f.beforeSettings()
 			}
+			for key := range values {
+				if _, set := f.env[key]; set {
+					return nil, nil, fmt.Errorf("managed_by_environment: %s is managed by an environment variable", key)
+				}
+			}
 			err := f.settings.UpdateAtomicWithTx(ctx, tx, func(stored map[string]string, _ pgx.Tx) (map[string]string, error) {
 				if check != nil {
 					if err := check(stored); err != nil {
@@ -250,6 +260,10 @@ func newSelectiveFixtureOn(t *testing.T, pool *pgxpool.Pool, dsn string) *select
 				return values, nil
 			})
 			return nil, func(context.Context) {}, err
+		},
+		EnvironmentValue: func(key string) (string, bool) {
+			value, ok := f.env[key]
+			return value, ok
 		},
 		LibrarySectionsCreated: func(context.Context, int) error { return nil },
 		LibraryCreated: func(_ context.Context, id int) error {
@@ -616,6 +630,74 @@ func TestRestoreNeverSendsLiveSecretsToARestoredAddressDB(t *testing.T) {
 	}
 	if page := previewItem(t, unverified, SectionSettings, pageEmail); page.Selectable || page.Reason != ReasonUnverifiedBackup {
 		t.Fatalf("email page of an unverified backup = %+v, want unselectable, unverified_backup", page)
+	}
+}
+
+// TestRestoreLeavesOutSettingsTheEnvironmentSetsDB: a setting this server's
+// environment sets keeps the environment's value, and the rest of its page
+// restores, where the write path's refusal of that key used to fail the
+// whole page. The mail connection the environment sets the password of
+// stays whole, and a page with nothing else left is not offered.
+func TestRestoreLeavesOutSettingsTheEnvironmentSetsDB(t *testing.T) {
+	f := newSelectiveFixture(t)
+	ctx := t.Context()
+	const name, subtitle = "branding.server_name", "branding.login_subtitle"
+	setSetting(t, f.pool, f.settings, name, "Backup Name")
+	setSetting(t, f.pool, f.settings, subtitle, "Subtitle from backup")
+	setSetting(t, f.pool, f.settings, settingSMTPHost, "smtp.backup.example")
+	setSetting(t, f.pool, f.settings, settingSMTPPassword, "the backup's password")
+	source, err := backupUnderLock(t, f.svc, KindManual)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The server starts again with SILO_SERVER_NAME and SILO_SMTP_PASSWORD,
+	// which store their values.
+	f.env = map[string]string{name: "Env Name", settingSMTPPassword: "the environment's password"}
+	for key, value := range map[string]string{name: "Env Name", subtitle: "Live subtitle", settingSMTPHost: "mail.example.com",
+		settingSMTPPassword: "the environment's password"} {
+		setSetting(t, f.pool, f.settings, key, value)
+	}
+	preview, err := f.svc.Preview(ctx, source.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := previewItem(t, preview, SectionSettings, "general")
+	statuses := map[string]string{}
+	for _, s := range append(page.Settings, previewItem(t, preview, SectionSettings, pageEmail).Settings...) {
+		statuses[s.Key] = s.Status
+	}
+	if !page.Selectable || statuses[name] != SettingManagedByEnvironment || statuses[subtitle] != ItemDiffers {
+		t.Fatalf("general page = %+v, want selectable with %s managed_by_environment", page, name)
+	}
+	if email := previewItem(t, preview, SectionSettings, pageEmail); email.Selectable || email.Reason != ReasonManagedByEnvironment ||
+		statuses[settingSMTPHost] != SettingManagedByEnvironment {
+		t.Fatalf("email page = %+v, want the connection kept whole", email)
+	}
+	selection := map[string][]string{SectionSettings: {"general"}}
+	report, err := f.restore(t, source.ID, preview.Digest, selection, &testFence{pool: f.pool})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item := reportItem(t, report, SectionSettings, "general"); item.Outcome != OutcomeRestored {
+		t.Fatalf("general page = %+v, want restored", item)
+	}
+	for key, want := range map[string]string{name: "Env Name", subtitle: "Subtitle from backup", settingSMTPHost: "mail.example.com"} {
+		if got, _ := f.settings.Get(ctx, key); got != want {
+			t.Fatalf("%s = %q, want %q", key, got, want)
+		}
+	}
+	// Only the environment's setting differs now.
+	if preview, err = f.svc.Preview(ctx, source.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if page := previewItem(t, preview, SectionSettings, "general"); page.Selectable || page.Reason != ReasonManagedByEnvironment {
+		t.Fatalf("general page = %+v, want unselectable, managed_by_environment", page)
+	}
+	if report, err = f.restore(t, source.ID, preview.Digest, selection, &testFence{pool: f.pool}); err != nil {
+		t.Fatal(err)
+	}
+	if item := reportItem(t, report, SectionSettings, "general"); item.Outcome != OutcomeLeftOut || item.Reason != ReasonManagedByEnvironment {
+		t.Fatalf("general page = %+v, want left out, managed_by_environment", item)
 	}
 }
 
@@ -1068,6 +1150,21 @@ func TestManagedSectionPointedElsewhereIsRestoredDB(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// An item gone from the managed collection here is one the restore adds.
+	dbExec(t, pool, `DELETE FROM library_collection_items WHERE collection_id = $1 AND media_item_id = $2`, s.managedCollection, s.items[0])
+	lacking, err := f.svc.Preview(ctx, source.ID, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := previewItem(t, lacking, SectionHomeSections, homeSectionItemID(s.managed))
+	var wire struct {
+		Changes                []string `json:"changes"`
+		MissingCollectionItems int      `json:"missing_collection_items"`
+	}
+	if raw, err := json.Marshal(got.HomeSection); err != nil || json.Unmarshal(raw, &wire) != nil || got.Status != ItemDiffers ||
+		!slices.Equal(wire.Changes, []string{"collection_items"}) || wire.MissingCollectionItems != 1 {
+		t.Fatalf("section whose collection lacks an item = %+v %+v", got, wire)
+	}
 	repo := catalog.NewLibraryCollectionRepository(pool)
 	ordinary, err := repo.Create(ctx, catalog.CreateLibraryCollectionInput{LibraryID: s.library, Slug: "ordinary-" + s.suffix, Title: "Ordinary " + s.suffix})
 	if err != nil {
@@ -1084,7 +1181,7 @@ func TestManagedSectionPointedElsewhereIsRestoredDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := homeSectionItemID(s.managed)
-	if got := previewItem(t, preview, SectionHomeSections, id); got.Status != ItemDiffers || !slices.Contains(got.HomeSection.Changes, "collection replaced") {
+	if got := previewItem(t, preview, SectionHomeSections, id); got.Status != ItemDiffers || !slices.Equal(got.HomeSection.Changes, []string{"collection_replaced"}) {
 		t.Fatalf("section pointed at an ordinary collection = %+v %+v", got, got.HomeSection)
 	}
 	report := f.restoreRequest(t, RestoreRequest{BackupID: source.ID, Digest: preview.Digest, Selection: map[string][]string{SectionHomeSections: {id}}})
@@ -1560,7 +1657,7 @@ func checkPagesPreview(t *testing.T, p *RestorePreview, s pagesSeed) map[string]
 	}
 	customized := previewItem(t, p, SectionCollections, templateCollectionItemID(s.customized))
 	if !customized.Selectable || customized.Status != ItemNotOnThisServer || !strings.HasPrefix(customized.Label, "Popular Movies in ") ||
-		!slices.Equal(customized.Collection.Changes, []string{"title", "visibility", "featured", "sort order"}) {
+		!slices.Equal(customized.Collection.Changes, []string{"title", "visibility", "featured", "sort_order"}) {
 		t.Fatalf("lost template collection = %+v %+v", customized, customized.Collection)
 	}
 	plain := previewItem(t, p, SectionCollections, templateCollectionItemID(s.plain))
@@ -1571,10 +1668,10 @@ func checkPagesPreview(t *testing.T, p *RestorePreview, s pagesSeed) map[string]
 		!slices.Equal(got.Requires, []string{SectionCollections + ":" + templateCollectionItemID(s.customized)}) {
 		t.Fatalf("section of a lost collection = %+v", got)
 	}
-	if got := previewItem(t, p, SectionHomeSections, homeSectionItemID(s.recent)); got.Status != ItemDiffers || !slices.Equal(got.HomeSection.Changes, []string{"type", "title", "web only"}) {
+	if got := previewItem(t, p, SectionHomeSections, homeSectionItemID(s.recent)); got.Status != ItemDiffers || !slices.Equal(got.HomeSection.Changes, []string{"type", "title", "web_only"}) {
 		t.Fatalf("renamed and retyped library section = %+v %+v", got, got.HomeSection)
 	}
-	if got := previewItem(t, p, SectionHomeSections, homeSectionItemID(s.keyed)); got.Status != ItemDiffers || !slices.Equal(got.HomeSection.Changes, []string{"title translation"}) {
+	if got := previewItem(t, p, SectionHomeSections, homeSectionItemID(s.keyed)); got.Status != ItemDiffers || !slices.Equal(got.HomeSection.Changes, []string{"title_translation"}) {
 		t.Fatalf("section that lost only its title key = %+v %+v", got, got.HomeSection)
 	}
 	return map[string][]string{

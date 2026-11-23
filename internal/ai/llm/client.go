@@ -188,7 +188,7 @@ func (c *Client) Chat(ctx context.Context, messages []Message, jsonObject bool) 
 			if parsed.Error != nil && parsed.Error.Message != "" {
 				// 200 with an upstream error object — transient on gateways,
 				// so it reads as an unavailable upstream once retries run out.
-				return &HTTPError{StatusCode: http.StatusBadGateway, message: "chat API error: " + parsed.Error.Message}
+				return &HTTPError{StatusCode: http.StatusBadGateway, InResponse: true, message: "chat API error: " + parsed.Error.Message}
 			}
 			if len(parsed.Choices) == 0 || parsed.Choices[0].Message.Content == "" {
 				slog.WarnContext(ctx, "AI chat returned no choices, retrying", "component", "ai",
@@ -227,8 +227,12 @@ type HTTPError struct {
 	StatusCode int
 	Code       string
 	// Param is the request field an OpenAI-style error names, if any.
-	Param   string
-	message string
+	Param string
+	// InResponse marks a failure the provider reported inside a successful
+	// response, such as a failed stream event. StatusCode is then the status
+	// Silo files it under, not one the provider sent.
+	InResponse bool
+	message    string
 }
 
 func (e *HTTPError) Error() string { return e.message }

@@ -1,0 +1,461 @@
+package serversettings
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"sort"
+
+	"github.com/jackc/pgx/v5"
+
+	"github.com/Silo-Server/silo-server/internal/settingskeys"
+
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
+	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/secret"
+)
+
+// SettingsStore is the read/write surface over server_settings shared by the
+// raw *ServerSettingsRepo and the *EncryptedSettingsRepo decorator. Consumers
+// depend on this interface (rather than the concrete repo) so they
+// transparently gain at-rest encryption for sensitive keys once the decorator
+// is wired in.
+type SettingsStore interface {
+	Get(ctx context.Context, key string) (string, error)
+	Set(ctx context.Context, key, value string) error
+	GetAll(ctx context.Context) (map[string]string, error)
+}
+
+// SensitiveSettingKeys is the single source of truth for which server_settings
+// keys hold secrets. It drives BOTH at-rest encryption (the decorator encrypts
+// these on write, decrypts them on read) AND admin-API redaction, so the two
+// can never drift apart.
+//
+// It was audited from the config loader's real inputs
+// (internal/config/db_loader.go), the admin redaction map, and the other known
+// server_settings consumers — the Audiobookshelf-compat JWT secret
+// (internal/audiobooks/config.go), the watch-sync OAuth client config
+// (internal/watchsync/service.go), and the legacy single-instance arr keys —
+// including the legacy aliases still read as fallbacks (s3.operational_*,
+// recommendations.openai_api_key) and redis.sentinel_password, which the old
+// redaction map omitted.
+//
+// Adding a key here is only safe when every reader of that key goes through a
+// cipher-aware path (the decorator, or a repo that calls
+// secret.Cipher.DecryptIfEncrypted with secret.SettingsAAD). A raw SQL reader
+// would otherwise see ciphertext after the backfill.
+var SensitiveSettingKeys = map[string]bool{
+	// Core auth signing secret — no longer the encryption root (SECRET_KEY is),
+	// and now itself encrypted at rest under SECRET_KEY.
+	"auth.jwt_secret": true,
+	// Audiobookshelf-compat HMAC signing key (generated + persisted as hex).
+	"audiobooks.abs.jwt_secret": true,
+
+	// S3 — public assets, private internal, user DB, plus the legacy
+	// "operational" aliases db_loader still reads as fallbacks (L155-192;
+	// migration 086 copied but did not delete them).
+	"s3.public_access_key":        true,
+	"s3.public_secret_key":        true,
+	"s3.public_token_secret":      true,
+	"s3.private_access_key":       true,
+	"s3.private_secret_key":       true,
+	"s3.user_db_access_key":       true,
+	"s3.user_db_secret_key":       true,
+	"s3.operational_access_key":   true,
+	"s3.operational_secret_key":   true,
+	"s3.operational_token_secret": true,
+	// The dedicated backup bucket (internal/backup reads it decrypted).
+	"backup.s3.secret_key": true,
+	// A staged storage transition contains a complete target credential bundle.
+	// It is machine-managed and cleared when the transition commits.
+	"storage.transition.target": true,
+
+	// Redis — url may embed credentials (redis://:pass@host). sentinel_password
+	// is no longer read, but rows written by older builds stay encrypted.
+	"redis.url":               true,
+	"redis.sentinel_password": true,
+
+	// Metadata / list-provider API keys.
+	"tmdb.api_key":    true, //nolint:goconst // Keep the audited allowlist readable as a contract.
+	"mdblist.api_key": true,
+	"introdb.api_key": true,
+	// Removed RemuxDB integration (rev 17): the key is deprecated and ignored
+	// at runtime, but stays encrypted/redacted so an old client write of a
+	// credential can never land in plaintext.
+	settingskeys.RemuxdbToken: true,
+
+	// AI provider registry, API keys included. The endpoint keys it replaced
+	// are no longer read, but rows written by older builds stay encrypted
+	// (ciphertext is GCM-bound to its key, so none is ever renamed).
+	config.AIProvidersSettingKey: true,
+	chatgpt.CredentialsKey:       true,
+	"ai.api_key":                 true,
+	"ai.asr_api_key":             true,
+	"subtitle_ai.api_key":        true,
+
+	// Recommendations embedding auth (+ legacy openai alias at db_loader L409).
+	"recommendations.embedding_auth_token": true,
+	"recommendations.openai_api_key":       true,
+
+	// Optional catalog search provider auth. Do not rename this key after
+	// shipping; encrypted values are bound to the setting name.
+	"catalog.search.meilisearch.api_key": true,
+
+	// Watch-sync OAuth client credentials. The client_id entries are low-value
+	// but kept as a harmless safe superset and to match existing redaction.
+	"watchsync.simkl.client_id":     true,
+	"watchsync.simkl.client_secret": true,
+
+	// Legacy single-instance arr keys (superseded by per-integration rows, but
+	// still referenced by older request_integrations rows until backfilled).
+	"requests.radarr.api_key": true,
+	"requests.sonarr.api_key": true,
+
+	// Shared outbound email (internal/mail) SMTP credential.
+	"email.smtp_password": true,
+
+	// Discord notification integration. The client_id is public in Discord's
+	// own UI, so only the secret and bot token are encrypted.
+	"discord.client_secret": true,
+	"discord.bot_token":     true,
+
+	// Web Push VAPID keypair JSON (generated + persisted atomically as one
+	// value by the notifications system; clients receive the public half via
+	// the capability endpoint, never from the settings store).
+	"notifications.web_push.vapid_keypair": true,
+
+	// Silo push relay bearer credential for APNs/FCM delivery.
+	"notifications.push_relay_api_key": true,
+
+	// Virtual library (Stremio streaming) secrets.
+	"virtual_library.indexer_api_key":  true,
+	"virtual_library.altmount_api_key": true,
+}
+
+// EncryptedSettingsRepo decorates a raw settings store, transparently
+// encrypting the SensitiveSettingKeys on write and decrypting them on read.
+// config.LoadFromDB and every other consumer keep seeing plaintext while the
+// values rest as ciphertext in the database, GCM-bound to their key.
+type EncryptedSettingsRepo struct {
+	// inner is the RAW store (no encryption). It must never be another
+	// EncryptedSettingsRepo, or writes would double-encrypt.
+	inner  SettingsStore
+	cipher *secret.Cipher
+}
+
+// NewEncryptedSettingsRepo wraps a raw settings store with the cipher. Pass the
+// concrete *ServerSettingsRepo (or an in-memory fake in tests) as inner.
+func NewEncryptedSettingsRepo(inner SettingsStore, cipher *secret.Cipher) *EncryptedSettingsRepo {
+	return &EncryptedSettingsRepo{inner: inner, cipher: cipher}
+}
+
+var _ SettingsStore = (*EncryptedSettingsRepo)(nil)
+var _ chatgpt.Store = (*EncryptedSettingsRepo)(nil)
+
+// Set encrypts a sensitive, non-empty value (AAD-bound to its key) before
+// delegating to the raw store; non-sensitive keys and empty values delegate
+// unchanged. Encrypting an empty value is a no-op, so an absent secret stays an
+// empty column rather than an envelope.
+func (r *EncryptedSettingsRepo) Set(ctx context.Context, key, value string) error {
+	if SensitiveSettingKeys[key] && value != "" {
+		ct, err := r.cipher.Encrypt(value, secret.SettingsAAD(key))
+		if err != nil {
+			return fmt.Errorf("encrypt setting %q: %w", key, err)
+		}
+		value = ct
+	}
+	return r.inner.Set(ctx, key, value)
+}
+
+// settingsConditionalWriter is the optional conditional-write capability of a
+// raw settings store (satisfied by *ServerSettingsRepo).
+type settingsConditionalWriter interface {
+	SetIfAbsent(ctx context.Context, key, value string) (bool, error)
+}
+
+type settingsBatchWriter interface {
+	SetMany(ctx context.Context, values map[string]string) error
+}
+
+type settingsBatchReader interface {
+	GetMany(ctx context.Context, keys ...string) (map[string]string, error)
+}
+
+type settingsAtomicUpdater interface {
+	UpdateAtomic(
+		ctx context.Context,
+		update func(current map[string]string) (map[string]string, error),
+	) error
+}
+
+// SetMany encrypts every sensitive member before delegating one atomic batch
+// to the raw settings repository.
+func (r *EncryptedSettingsRepo) SetMany(ctx context.Context, values map[string]string) error {
+	inner, ok := r.inner.(settingsBatchWriter)
+	if !ok {
+		return fmt.Errorf("settings store does not support atomic batch writes")
+	}
+	encrypted := make(map[string]string, len(values))
+	for key, value := range values {
+		if SensitiveSettingKeys[key] && value != "" {
+			ct, err := r.cipher.Encrypt(value, secret.SettingsAAD(key))
+			if err != nil {
+				return fmt.Errorf("encrypt setting %q: %w", key, err)
+			}
+			value = ct
+		}
+		encrypted[key] = value
+	}
+	return inner.SetMany(ctx, encrypted)
+}
+
+// UpdateAtomic preserves the raw repository's cross-process serialization
+// while presenting plaintext to the validator and encrypting only the returned
+// writes before they reach server_settings.
+func (r *EncryptedSettingsRepo) UpdateAtomic(
+	ctx context.Context,
+	update func(current map[string]string) (map[string]string, error),
+) error {
+	return r.UpdateAtomicInTransaction(ctx, func(current map[string]string, _ pgx.Tx) (map[string]string, error) {
+		return update(current)
+	})
+}
+
+// UpdateValueAtomic preserves the raw store's key-specific serialization and
+// exposes only this key's plaintext to its owner.
+func (r *EncryptedSettingsRepo) UpdateValueAtomic(ctx context.Context, key string, update func(string) (string, error)) error {
+	inner, ok := r.inner.(interface {
+		UpdateValueAtomic(context.Context, string, func(string) (string, error)) error
+	})
+	if !ok {
+		return errors.New("settings store does not support atomic value updates")
+	}
+	return inner.UpdateValueAtomic(ctx, key, func(raw string) (string, error) {
+		plain, err := r.cipher.DecryptIfEncrypted(raw, secret.SettingsAAD(key))
+		if err != nil {
+			return "", fmt.Errorf("decrypt setting %q: %w", key, err)
+		}
+		value, err := update(plain)
+		if err != nil {
+			return "", err
+		}
+		if SensitiveSettingKeys[key] && value != "" {
+			value, err = r.cipher.Encrypt(value, secret.SettingsAAD(key))
+		}
+		return value, err
+	})
+}
+
+// UpdateAtomicInTransaction preserves the plaintext callback contract and
+// passes through the raw store's transaction when it supports one.
+func (r *EncryptedSettingsRepo) UpdateAtomicInTransaction(
+	ctx context.Context,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
+	encryptedUpdate := r.encryptedUpdate(update)
+	if inner, ok := r.inner.(interface {
+		UpdateAtomicInTransaction(context.Context, func(map[string]string, pgx.Tx) (map[string]string, error)) error
+	}); ok {
+		return inner.UpdateAtomicInTransaction(ctx, encryptedUpdate)
+	}
+	if inner, ok := r.inner.(settingsAtomicUpdater); ok {
+		return inner.UpdateAtomic(ctx, func(current map[string]string) (map[string]string, error) {
+			return encryptedUpdate(current, nil)
+		})
+	}
+	return errors.New("settings store does not support atomic updates")
+}
+
+// UpdateAtomicWithTx applies the plaintext callback contract inside the
+// caller's transaction, which commits the writes.
+func (r *EncryptedSettingsRepo) UpdateAtomicWithTx(
+	ctx context.Context,
+	tx pgx.Tx,
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) error {
+	inner, ok := r.inner.(interface {
+		UpdateAtomicWithTx(context.Context, pgx.Tx, func(map[string]string, pgx.Tx) (map[string]string, error)) error
+	})
+	if !ok {
+		return errors.New("settings store does not support caller transactions")
+	}
+	return inner.UpdateAtomicWithTx(ctx, tx, r.encryptedUpdate(update))
+}
+
+// encryptedUpdate wraps a plaintext update: stored values are decrypted
+// before it runs and its writes encrypted after.
+func (r *EncryptedSettingsRepo) encryptedUpdate(
+	update func(current map[string]string, tx pgx.Tx) (map[string]string, error),
+) func(map[string]string, pgx.Tx) (map[string]string, error) {
+	return func(rawCurrent map[string]string, tx pgx.Tx) (map[string]string, error) {
+		current := make(map[string]string, len(rawCurrent))
+		for key, value := range rawCurrent {
+			plain, err := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
+			if err != nil {
+				return nil, fmt.Errorf("decrypt setting %q: %w", key, err)
+			}
+			current[key] = plain
+		}
+		writes, err := update(current, tx)
+		if err != nil {
+			return nil, err
+		}
+		encrypted := make(map[string]string, len(writes))
+		for key, value := range writes {
+			if SensitiveSettingKeys[key] && value != "" {
+				ciphertext, err := r.cipher.Encrypt(value, secret.SettingsAAD(key))
+				if err != nil {
+					return nil, fmt.Errorf("encrypt setting %q: %w", key, err)
+				}
+				value = ciphertext
+			}
+			encrypted[key] = value
+		}
+		return encrypted, nil
+	}
+}
+
+// SetIfAbsent applies Set's encryption contract to a conditional write: the
+// value lands only when the key currently has no value, so concurrent
+// provisioners of generated secrets cannot overwrite each other.
+func (r *EncryptedSettingsRepo) SetIfAbsent(ctx context.Context, key, value string) (bool, error) {
+	inner, ok := r.inner.(settingsConditionalWriter)
+	if !ok {
+		return false, fmt.Errorf("settings store does not support conditional writes")
+	}
+	if SensitiveSettingKeys[key] && value != "" {
+		ct, err := r.cipher.Encrypt(value, secret.SettingsAAD(key))
+		if err != nil {
+			return false, fmt.Errorf("encrypt setting %q: %w", key, err)
+		}
+		value = ct
+	}
+	return inner.SetIfAbsent(ctx, key, value)
+}
+
+// Get reads a value and applies the read-path contract: legacy plaintext passes
+// through, an enc:v1: value is decrypted, and a corrupt ciphertext errors.
+func (r *EncryptedSettingsRepo) Get(ctx context.Context, key string) (string, error) {
+	value, err := r.inner.Get(ctx, key)
+	if err != nil {
+		return "", err
+	}
+	out, err := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
+	if err != nil {
+		return "", fmt.Errorf("decrypt setting %q: %w", key, err)
+	}
+	return out, nil
+}
+
+// GetMany reads keys from the raw store in one snapshot and decrypts each
+// value as Get does. Keys without a value are absent from the map.
+func (r *EncryptedSettingsRepo) GetMany(ctx context.Context, keys ...string) (map[string]string, error) {
+	inner, ok := r.inner.(settingsBatchReader)
+	if !ok {
+		return nil, fmt.Errorf("settings store does not support batch reads")
+	}
+	values, err := inner.GetMany(ctx, keys...)
+	if err != nil {
+		return nil, err
+	}
+	for key, value := range values {
+		out, err := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
+		if err != nil {
+			return nil, fmt.Errorf("decrypt setting %q: %w", key, err)
+		}
+		values[key] = out
+	}
+	return values, nil
+}
+
+// GetAll reads every setting and decrypts any enc:v1: value in place. An
+// unreadable transition receipt is omitted from configuration snapshots so
+// startup can reach blocked recovery. Its owner still receives the error from
+// Get; unreadable active settings remain fatal.
+func (r *EncryptedSettingsRepo) GetAll(ctx context.Context) (map[string]string, error) {
+	all, err := r.inner.GetAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+	authenticated := false
+	for key, value := range all {
+		out, derr := r.cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key))
+		if derr != nil {
+			if key == config.StorageTransitionTargetKey {
+				delete(all, key)
+				continue
+			}
+			return nil, r.decryptAllError(all, key, derr, authenticated)
+		}
+		authenticated = authenticated || secret.IsEncrypted(value)
+		all[key] = out
+	}
+	return all, nil
+}
+
+// ErrSecretKeyMismatch marks a settings read where no encrypted setting
+// authenticates under this server's SECRET_KEY: the key is not the one the
+// database was encrypted with, as opposed to one damaged or renamed row.
+var ErrSecretKeyMismatch = errors.New("SECRET_KEY does not match the key these settings were encrypted with")
+
+// decryptAllError builds GetAll's error for key. When the failure is an
+// authentication failure and no encrypted row authenticates (authenticated
+// covers rows GetAll already decrypted in place), it reports a SECRET_KEY
+// mismatch, which the raw GCM error does not say.
+func (r *EncryptedSettingsRepo) decryptAllError(all map[string]string, key string, derr error, authenticated bool) error {
+	base := fmt.Errorf("decrypt setting %q: %w", key, derr)
+	if authenticated || !errors.Is(derr, secret.ErrAuthFailed) {
+		return base
+	}
+	encrypted := 0
+	for k, v := range all {
+		if !secret.IsEncrypted(v) {
+			continue
+		}
+		encrypted++
+		if _, err := r.cipher.Decrypt(v, secret.SettingsAAD(k)); err == nil {
+			return base
+		}
+	}
+	return fmt.Errorf("%w: none of the %d encrypted settings decrypt under it (first failure: %w)",
+		ErrSecretKeyMismatch, encrypted, base)
+}
+
+// BackfillSensitiveSettings encrypts any plaintext value currently stored under
+// a sensitive key. It is idempotent (already-encrypted and empty values are
+// skipped) and best-effort: per-key failures are collected and returned but do
+// not abort the sweep, so one unreadable row cannot block startup. Returns the
+// number of keys newly encrypted.
+func (r *EncryptedSettingsRepo) BackfillSensitiveSettings(ctx context.Context) (int, error) {
+	keys := make([]string, 0, len(SensitiveSettingKeys))
+	for key := range SensitiveSettingKeys {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys) // deterministic order for logs and tests
+
+	encrypted := 0
+	var errs []error
+	for _, key := range keys {
+		// Read the RAW inner value (not through this decorator) so we can tell
+		// plaintext from an already-encrypted envelope.
+		raw, err := r.inner.Get(ctx, key)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("read %q: %w", key, err))
+			continue
+		}
+		if raw == "" || secret.IsEncrypted(raw) {
+			continue
+		}
+		ct, err := r.cipher.Encrypt(raw, secret.SettingsAAD(key))
+		if err != nil {
+			errs = append(errs, fmt.Errorf("encrypt %q: %w", key, err))
+			continue
+		}
+		if err := r.inner.Set(ctx, key, ct); err != nil {
+			errs = append(errs, fmt.Errorf("write %q: %w", key, err))
+			continue
+		}
+		encrypted++
+	}
+	return encrypted, errors.Join(errs...)
+}

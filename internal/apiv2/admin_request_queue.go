@@ -43,12 +43,15 @@ func (in *AdminMediaRequestListInput) filterKey() string {
 	return strings.Join([]string{in.Status, in.Outcome, in.View, in.Q, in.MediaType, in.RequestedByUserID}, "|")
 }
 
-// AdminRequestCounts counts the requests in each queue view.
+// AdminRequestCounts counts the requests in each queue view and says whether
+// requests are switched on, so a monitoring key can tell an empty queue from a
+// disabled feature without reading the request settings.
 type AdminRequestCounts struct {
-	NeedsApproval int `json:"needs_approval" doc:"Pending requests waiting for an admin" example:"3"`
-	InProgress    int `json:"in_progress" doc:"Approved requests on their way to the library" example:"5"`
-	Failed        int `json:"failed" doc:"Failed requests; Retry sends them again" example:"1"`
-	Done          int `json:"done" doc:"Completed requests, and those closed by a decline or cancellation" example:"42"`
+	RequestsEnabled bool `json:"requests_enabled" doc:"Whether the server-wide requests switch is on; the queue still answers while it is off" example:"true"`
+	NeedsApproval   int  `json:"needs_approval" doc:"Pending requests waiting for an admin" example:"3"`
+	InProgress      int  `json:"in_progress" doc:"Approved requests on their way to the library" example:"5"`
+	Failed          int  `json:"failed" doc:"Failed requests; Retry sends them again" example:"1"`
+	Done            int  `json:"done" doc:"Completed requests, and those closed by a decline or cancellation" example:"42"`
 }
 
 type AdminRequestCountsOutput struct {
@@ -61,7 +64,7 @@ type AdminRequestEvent struct {
 	Type          string  `json:"type" doc:"What happened: created, approved, retried, submit_deferred, available_in_library, status_<status> or outcome_<outcome>; clients show unknown types as they are" example:"approved"`
 	ActorUserID   ID      `json:"actor_user_id,omitempty" doc:"The account that acted; absent for the server itself" example:"1"`
 	ActorUsername string  `json:"actor_username,omitempty" doc:"The acting account's username, while the account exists" example:"admin"`
-	Message       string  `json:"message,omitempty" doc:"A reason or error that came with the event" example:"auto approved"`
+	Message       string  `json:"message,omitempty" doc:"A reason or error that came with the event. Withheld from API keys with scopes" example:"auto approved"`
 	CreatedAt     Instant `json:"created_at"`
 }
 
@@ -96,11 +99,16 @@ func (reg *Registry) getAdminRequestCounts(ctx context.Context, _ *struct{}) (*A
 	if p != nil {
 		return nil, p
 	}
-	c, err := s.CountAdminViews(ctx, adminRequestViewer(ctx))
+	viewer := adminRequestViewer(ctx)
+	c, err := s.CountAdminViews(ctx, viewer)
 	if err != nil {
 		return nil, requestProblem(ctx, err)
 	}
-	return &AdminRequestCountsOutput{Body: AdminRequestCounts{NeedsApproval: c.NeedsApproval, InProgress: c.InProgress, Failed: c.Failed, Done: c.Done}}, nil
+	settings, err := reg.deps.AdminRequests.GetSettings(ctx, viewer)
+	if err != nil {
+		return nil, requestProblem(ctx, err)
+	}
+	return &AdminRequestCountsOutput{Body: AdminRequestCounts{RequestsEnabled: settings.RequestsEnabled, NeedsApproval: c.NeedsApproval, InProgress: c.InProgress, Failed: c.Failed, Done: c.Done}}, nil
 }
 
 func (reg *Registry) listAdminRequestEvents(ctx context.Context, in *MediaRequestGetInput) (*AdminRequestEventsOutput, error) {
@@ -113,8 +121,12 @@ func (reg *Registry) listAdminRequestEvents(ctx context.Context, in *MediaReques
 		return nil, requestProblem(ctx, err)
 	}
 	items := make([]AdminRequestEvent, 0, len(events))
+	withhold := scopedAPIKey(ctx)
 	for _, e := range events {
 		item := AdminRequestEvent{ID: IDFromInt(e.ID), Type: e.EventType, ActorUsername: e.ActorUsername, Message: e.Message, CreatedAt: NewInstant(e.CreatedAt)}
+		if withhold {
+			item.Message = ""
+		}
 		if e.ActorUserID != nil {
 			item.ActorUserID = IDFromInt(int64(*e.ActorUserID))
 		}

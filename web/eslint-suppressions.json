@@ -56,11 +56,6 @@
       "count": 3
     }
   },
-  "src/components/RequestSeasonsDialog.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 16
-    }
-  },
   "src/components/ServerActivity.tsx": {
     "react-hooks/set-state-in-effect": {
       "count": 1
@@ -212,7 +207,7 @@
       "count": 46
     },
     "silo/no-physical-direction": {
-      "count": 3
+      "count": 2
     }
   },
   "src/pages/ItemDetail/components/AudioTracksPopover.tsx": {
@@ -272,17 +267,6 @@
       "count": 3
     }
   },
-  "src/pages/admin-settings/StorageSettings.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 114
-    },
-    "no-restricted-syntax": {
-      "count": 9
-    },
-    "silo/no-physical-direction": {
-      "count": 1
-    }
-  },
   "src/pages/admin-settings/StreamingSettings.tsx": {
     "formatjs/no-literal-string-in-jsx": {
       "count": 62
@@ -311,11 +295,6 @@
       "count": 1
     }
   },
-  "src/pages/setup-wizard/StepFrame.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 2
-    }
-  },
   "src/pages/setup-wizard/StepRail.tsx": {
     "formatjs/no-literal-string-in-jsx": {
       "count": 1
@@ -326,22 +305,12 @@
       "count": 14
     }
   },
-  "src/pages/setup-wizard/steps/ConnectStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 8
-    }
-  },
   "src/pages/setup-wizard/steps/DoneStep.tsx": {
     "formatjs/no-literal-string-in-jsx": {
       "count": 6
     },
     "silo/no-physical-direction": {
       "count": 1
-    }
-  },
-  "src/pages/setup-wizard/steps/FeaturesStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 28
     }
   },
   "src/pages/setup-wizard/steps/LibraryStep.tsx": {
@@ -373,13 +342,7 @@
     }
   },
   "src/pages/setup-wizard/steps/SubtitlesStep.tsx": {
-    "formatjs/no-literal-string-in-jsx": {
-      "count": 16
-    },
     "react-hooks/set-state-in-effect": {
-      "count": 1
-    },
-    "silo/no-physical-direction": {
       "count": 1
     }
   },

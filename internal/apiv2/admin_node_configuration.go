@@ -136,6 +136,8 @@ func registerAdminNodeConfiguration(reg *Registry) {
 		return adminNodeConfigurationOutput(ctx, node, err)
 	})
 	remove := Operation{Operation: humaOp("DELETE", Prefix+"/admin/nodes/{id}", "deleteAdminNode", "admin-nodes", "Delete the original If-Match configuration and atomically persist pool invalidation for replica reconciliation. No worker teardown, session completion or all-replica acknowledgement. A subsequent 404 is not proof of this caller's outcome."), Class: ClassActingAdmin, DemoRestricted: true, ServiceBacked: true, Guarded: true, RetrySafety: RetrySafetyDurableDispatch}
+	// A node the deployment configuration owns is not deleted here.
+	remove.Errors = []int{http.StatusConflict}
 	Register(reg, remove, func(ctx context.Context, in *AdminNodeDeleteInput) (*struct{}, error) {
 		id, err := adminNodeCommandID(&AdminNodeCommandInput{ID: in.ID})
 		if err != nil {

@@ -59,7 +59,7 @@ func TestAdminRequestQueueFiltersCountsAndHistory(t *testing.T) {
 	var counts AdminRequestCounts
 	rec := do(t, h, http.MethodGet, Prefix+"/admin/requests/counts", "", actingRequestAdmin)
 	decodeBody(t, rec.Body, &counts)
-	if rec.Code != 200 || counts != (AdminRequestCounts{NeedsApproval: 3, InProgress: 2, Failed: 1, Done: 9}) {
+	if rec.Code != 200 || counts != (AdminRequestCounts{RequestsEnabled: true, NeedsApproval: 3, InProgress: 2, Failed: 1, Done: 9}) {
 		t.Fatalf("%d %s", rec.Code, rec.Body.String())
 	}
 

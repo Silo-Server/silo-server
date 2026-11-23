@@ -950,9 +950,6 @@ func (s *Scanner) scanPaths(
 	); err != nil {
 		return nil, fmt.Errorf("reconciling scanned roots: %w", err)
 	}
-	if _, err := s.clearLegacyLinksForUnmatchableRoots(ctx, folder.ID, result.RootObservations); err != nil {
-		return nil, fmt.Errorf("clearing legacy links for unmatchable roots: %w", err)
-	}
 
 	allowEmptyCleanup := false
 	if allowEmptyRootGuard && len(filePaths) == 0 && len(existingFiles) > 0 {
@@ -1816,9 +1813,6 @@ func (s *Scanner) scanScope(
 	}
 	rootInference, groupInference := run.inference()
 	result.RootObservations = append(result.RootObservations, rootInference.Observations...)
-	if _, err := s.clearLegacyLinksForUnmatchableRoots(ctx, folder.ID, result.RootObservations); err != nil {
-		return nil, fmt.Errorf("clearing legacy links for unmatchable roots: %w", err)
-	}
 
 	result.New = int(run.newCount.Load())
 	result.Updated = int(run.updatedCount.Load())
@@ -2816,22 +2810,6 @@ func (s *Scanner) ScanFile(ctx context.Context, filePath string, folder *models.
 	existingContentStatuses, err := s.itemRepo.GetStatusByIDs(ctx, collectScanStateContentIDs([]*scanStateFile{existingByPath[filePath]}))
 	if err != nil {
 		return fmt.Errorf("loading item statuses for file: %w", err)
-	}
-	observation, ok := ObserveRoot(filePath, folder.Type, folder.Paths...)
-	if ok {
-		cleared, clearErr := s.clearLegacyLinksForUnmatchableRoots(ctx, folder.ID, []RootObservation{observation})
-		if clearErr != nil {
-			return clearErr
-		}
-		if cleared > 0 {
-			protectedRoots, protErr := s.protectedConfiguredRoots(ctx, folder)
-			if protErr != nil {
-				return protErr
-			}
-			if _, _, _, reconcileErr := s.reconcileLibraryMemberships(ctx, folder.ID, true, protectedRoots); reconcileErr != nil {
-				return fmt.Errorf("reconciling folder membership after clearing legacy links: %w", reconcileErr)
-			}
-		}
 	}
 
 	rootOverrides, err := s.loadRootOverrides(ctx, folder.ID, []string{filepath.Dir(filePath)})
@@ -4456,15 +4434,6 @@ func applyProbeData(mf *models.MediaFile, probe *ProbeData, probeSource string) 
 		}
 	}
 	mf.Chapters = chapters
-}
-
-// clearLegacyLinksForUnmatchableRoots was previously used to clear content
-// links for files under roots without embedded folder IDs. With the library
-// matching redesign, roots without folder IDs are now valid and create
-// pending items, so this function is a no-op.
-// TODO: remove callers and delete this function
-func (s *Scanner) clearLegacyLinksForUnmatchableRoots(_ context.Context, _ int, _ []RootObservation) (int, error) {
-	return 0, nil
 }
 
 // gatherHints computes the OSHash for a media file.

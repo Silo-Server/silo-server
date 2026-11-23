@@ -9,7 +9,7 @@ import {
   captureAdminUserAuthority,
   requireAdminUserAuthority,
 } from "@/api/v2/adminUsers";
-import { v2 } from "@/api/v2/request";
+import { v2, v2ErrorText } from "@/api/v2/request";
 import { adminKeys, profileKeys } from "@/hooks/queries/keys";
 import { profileFromV2, type ProfileCreate, type ProfileUpdate } from "@/hooks/queries/profiles";
 
@@ -64,8 +64,7 @@ function invalidateAccountProfiles(
 }
 
 function failed(fallback: MessageKey) {
-  return (err: unknown) =>
-    toast.error(err instanceof Error && err.message ? err.message : t(fallback));
+  return (err: unknown) => toast.error(v2ErrorText(err, t(fallback)));
 }
 
 export function useCreateAdminUserProfile(userId: number) {
@@ -95,6 +94,12 @@ export function useUpdateAdminUserProfile(userId: number) {
   const client = useQueryClient();
   const context = captureProfileRequestContext();
   return useMutation({
+    // Sent even offline, so it fails at once. The body carries every field in
+    // the editor and the PATCH has no revision check, so an edit held until
+    // reconnect would replace whatever the household changed in the meantime,
+    // parental limits included. The authority check only confirms the account
+    // and server are unchanged.
+    networkMode: "always",
     retry: false,
     mutationFn: async ({ id, body }: { id: string; body: ProfileUpdate }): Promise<Profile> => {
       const authority = context ?? captureAdminUserAuthority();

@@ -281,6 +281,18 @@
       "value": "Mã đăng nhập này đã hết hạn. Bắt đầu lại."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "Tài khoản này đã đạt giới hạn số thiết bị dùng kết nối trực tiếp."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "Một thiết bị khác đã dùng khóa kết nối này. Vui lòng thử lại."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -338,7 +350,13 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Được đặt bởi môi trường của node. Thay đổi giá trị ở đó rồi khởi động lại node."
+      "value": "Được đặt bởi môi trường. Thay đổi giá trị ở đó rồi khởi động lại dịch vụ liên quan."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "Thiếu giá trị này."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +465,12 @@
     {
       "type": 0,
       "value": "Đăng nhập qua hệ thống đăng nhập của mạng bạn để tiếp tục."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Node này được đặt bởi cấu hình triển khai của máy chủ. Gỡ node khỏi cấu hình đó rồi khởi động lại các máy chủ API để quản lý node tại đây."
     }
   ],
   "error.not_acceptable": [
@@ -13400,7 +13424,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — bộ sưu tập mà chúng hiển thị không có ở đây hoặc trong bản sao lưu"
+              "value": " mục không thể khôi phục — bộ sưu tập mà mục này hiển thị không có ở đây hoặc trong bản sao lưu"
             }
           ]
         },
@@ -13412,7 +13436,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — bộ sưu tập mà chúng hiển thị không có ở đây hoặc trong bản sao lưu"
+              "value": " mục không thể khôi phục — bộ sưu tập mà các mục này hiển thị không có ở đây hoặc trong bản sao lưu"
             }
           ]
         }
@@ -13434,7 +13458,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — cài đặt của chúng được mã hóa bằng SECRET_KEY khác"
+              "value": " mục không thể khôi phục — cài đặt của mục này được mã hóa bằng một SECRET_KEY khác"
             }
           ]
         },
@@ -13446,7 +13470,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — cài đặt của chúng được mã hóa bằng SECRET_KEY khác"
+              "value": " mục không thể khôi phục — cài đặt của các mục này được mã hóa bằng một SECRET_KEY khác"
             }
           ]
         }
@@ -13468,7 +13492,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — máy chủ này không thể nhận chúng"
+              "value": " mục không thể khôi phục — máy chủ này không thể nhận mục này"
             }
           ]
         },
@@ -13480,7 +13504,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — máy chủ này không thể nhận chúng"
+              "value": " mục không thể khôi phục — máy chủ này không thể nhận các mục này"
             }
           ]
         }
@@ -13536,7 +13560,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — tệp của chúng bị thiếu trên máy chủ này"
+              "value": " mục không thể khôi phục — tệp của mục này bị thiếu trên máy chủ này"
             }
           ]
         },
@@ -13548,7 +13572,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — tệp của chúng bị thiếu trên máy chủ này"
+              "value": " mục không thể khôi phục — tệp của các mục này bị thiếu trên máy chủ này"
             }
           ]
         }
@@ -13570,7 +13594,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — thư mục của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — thư mục của mục này không có trên máy chủ này"
             }
           ]
         },
@@ -13582,7 +13606,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — thư mục của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — thư mục của các mục này không có trên máy chủ này"
             }
           ]
         }
@@ -13604,7 +13628,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — nhóm quyền truy cập của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — nhóm quyền truy cập của mục này không có trên máy chủ này"
             }
           ]
         },
@@ -13616,7 +13640,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — nhóm quyền truy cập của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — nhóm quyền truy cập của các mục này không có trên máy chủ này"
             }
           ]
         }
@@ -13638,7 +13662,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — nội dung của chúng không có trong danh mục của máy chủ này"
+              "value": " mục không thể khôi phục — nội dung của mục này không có trong danh mục của máy chủ này"
             }
           ]
         },
@@ -13650,7 +13674,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — nội dung của chúng không có trong danh mục của máy chủ này"
+              "value": " mục không thể khôi phục — nội dung của các mục này không có trong danh mục của máy chủ này"
             }
           ]
         }
@@ -13672,7 +13696,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng sẽ mở rộng quyền truy cập, nên máy chủ này giữ các giá trị chặt chẽ hơn của mình"
+              "value": " mục không thể khôi phục — mục này sẽ mở rộng quyền truy cập, nên máy chủ này giữ các giá trị chặt chẽ hơn của mình"
             }
           ]
         },
@@ -13684,7 +13708,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng sẽ mở rộng quyền truy cập, nên máy chủ này giữ các giá trị chặt chẽ hơn của mình"
+              "value": " mục không thể khôi phục — các mục này sẽ mở rộng quyền truy cập, nên máy chủ này giữ các giá trị chặt chẽ hơn của mình"
             }
           ]
         }
@@ -13706,7 +13730,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — thư viện của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — thư viện của mục này không có trên máy chủ này"
             }
           ]
         },
@@ -13718,7 +13742,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — thư viện của chúng không có trên máy chủ này"
+              "value": " mục không thể khôi phục — thư viện của các mục này không có trên máy chủ này"
             }
           ]
         }
@@ -13740,7 +13764,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — không thể khôi phục thư viện của chúng ở đây"
+              "value": " mục không thể khôi phục — không thể khôi phục thư viện của mục này ở đây"
             }
           ]
         },
@@ -13752,7 +13776,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — không thể khôi phục thư viện của chúng ở đây"
+              "value": " mục không thể khôi phục — không thể khôi phục thư viện của các mục này ở đây"
             }
           ]
         }
@@ -13795,6 +13819,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " mục không thể khôi phục — môi trường của máy chủ này đặt các cài đặt khác biệt, hoặc một phần kết nối của chúng"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " mục không thể khôi phục — môi trường của máy chủ này đặt các cài đặt khác biệt, hoặc một phần kết nối của chúng"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13808,7 +13866,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng được mã hóa bằng SECRET_KEY khác"
+              "value": " mục không thể khôi phục — mục này được mã hóa bằng một SECRET_KEY khác"
             }
           ]
         },
@@ -13820,7 +13878,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng được mã hóa bằng SECRET_KEY khác"
+              "value": " mục không thể khôi phục — các mục này được mã hóa bằng một SECRET_KEY khác"
             }
           ]
         }
@@ -13842,7 +13900,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — cần cài đặt chúng từ danh mục plugin trước"
+              "value": " mục không thể khôi phục — cần cài đặt mục này từ danh mục plugin trước"
             }
           ]
         },
@@ -13854,7 +13912,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — cần cài đặt chúng từ danh mục plugin trước"
+              "value": " mục không thể khôi phục — cần cài đặt các mục này từ danh mục plugin trước"
             }
           ]
         }
@@ -13876,7 +13934,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — phải khôi phục hồ sơ chính của chúng cùng lúc"
+              "value": " mục không thể khôi phục — phải khôi phục hồ sơ chính của mục này cùng lúc"
             }
           ]
         },
@@ -13888,7 +13946,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — phải khôi phục hồ sơ chính của chúng cùng lúc"
+              "value": " mục không thể khôi phục — phải khôi phục hồ sơ chính của các mục này cùng lúc"
             }
           ]
         }
@@ -13910,7 +13968,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — bản sao lưu không có chúng"
+              "value": " mục không thể khôi phục — bản sao lưu không có mục này"
             }
           ]
         },
@@ -13922,7 +13980,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — bản sao lưu không có chúng"
+              "value": " mục không thể khôi phục — bản sao lưu không có các mục này"
             }
           ]
         }
@@ -14046,7 +14104,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — máy chủ này sẽ cấp cho chúng nhiều quyền truy cập hơn bản sao lưu"
+              "value": " mục không thể khôi phục — máy chủ này sẽ cấp cho mục này nhiều quyền truy cập hơn bản sao lưu"
             }
           ]
         },
@@ -14058,7 +14116,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — máy chủ này sẽ cấp cho chúng nhiều quyền truy cập hơn bản sao lưu"
+              "value": " mục không thể khôi phục — máy chủ này sẽ cấp cho các mục này nhiều quyền truy cập hơn bản sao lưu"
             }
           ]
         }
@@ -14114,7 +14172,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng đã giống hệt ở đây"
+              "value": " mục không thể khôi phục — mục này ở đây đã giống hệt"
             }
           ]
         },
@@ -14126,7 +14184,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng đã giống hệt ở đây"
+              "value": " mục không thể khôi phục — các mục này ở đây đã giống hệt"
             }
           ]
         }
@@ -14182,7 +14240,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — không thể đọc bản sao của chúng trong bản sao lưu"
+              "value": " mục không thể khôi phục — không thể đọc bản sao của mục này trong bản sao lưu"
             }
           ]
         },
@@ -14194,7 +14252,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — không thể đọc bản sao của chúng trong bản sao lưu"
+              "value": " mục không thể khôi phục — không thể đọc bản sao của các mục này trong bản sao lưu"
             }
           ]
         }
@@ -14216,7 +14274,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng kết nối với dịch vụ bên ngoài và máy chủ này không thể xác minh bản sao lưu"
+              "value": " mục không thể khôi phục — mục này kết nối với dịch vụ bên ngoài và máy chủ này không thể xác minh bản sao lưu"
             }
           ]
         },
@@ -14228,7 +14286,7 @@
             },
             {
               "type": 0,
-              "value": " mục không thể khôi phục — chúng kết nối với dịch vụ bên ngoài và máy chủ này không thể xác minh bản sao lưu"
+              "value": " mục không thể khôi phục — các mục này kết nối với dịch vụ bên ngoài và máy chủ này không thể xác minh bản sao lưu"
             }
           ]
         }
@@ -14317,6 +14375,40 @@
     {
       "type": 0,
       "value": "Địa chỉ của một dịch vụ thay đổi nhưng bản sao lưu không có thông tin xác thực đi kèm, nên khi khôi phục, thông tin xác thực ở đây sẽ bị xóa và dịch vụ sẽ tắt cho đến khi nhập lại."
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " cài đặt giữ giá trị hiện tại vì môi trường của máy chủ này đặt cài đặt đó, hoặc một phần kết nối của cài đặt đó."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " cài đặt giữ giá trị hiện tại vì môi trường của máy chủ này đặt các cài đặt đó, hoặc một phần kết nối của chúng."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14763,8 +14855,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Ẩn các mục này"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn mục này"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn các mục này"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn các mục này"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14913,8 +15031,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Hiển thị các mục này"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị mục này"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị các mục này"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị các mục này"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15631,10 +15775,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -15647,6 +15791,22 @@
             {
               "type": 0,
               "value": ", vì những gì bạn chọn cần đến mục này."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Cũng đã chọn "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", vì những gì bạn chọn cần đến các mục này."
             }
           ]
         },
@@ -15666,17 +15826,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -15689,6 +15847,22 @@
             {
               "type": 0,
               "value": ", vì mục này cần những gì bạn đã bỏ chọn."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Cũng đã bỏ chọn "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", vì các mục này cần những gì bạn đã bỏ chọn."
             }
           ]
         },
@@ -15708,9 +15882,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -17161,6 +17333,12 @@
       "value": "Một tài khoản khác tại đây đăng nhập bằng tên người dùng hoặc email này."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Môi trường của máy chủ này đặt các cài đặt khác biệt, hoặc một phần kết nối của chúng, nên máy chủ này giữ các giá trị hiện tại."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -17707,6 +17885,154 @@
       "value": "."
     }
   ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Ảnh nền"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " mục trong bộ sưu tập"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " mục trong bộ sưu tập"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Bộ sưu tập được thay thế"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Cấu hình"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Mô tả"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Trạng thái bật"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Nổi bật"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Giới hạn số mục"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Sắp xếp mục"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Thư viện"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Vị trí"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Áp phích"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Thứ tự sắp xếp"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Nguồn"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Lịch đồng bộ hóa"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Tiêu đề"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Bản dịch tiêu đề"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Loại"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Chế độ hiển thị"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Chỉ trên web"
+    }
+  ],
   "web.admin.backups.restore.rows.changes": [
     {
       "type": 0,
@@ -18247,6 +18573,16 @@
     {
       "type": 0,
       "value": " (giữ lại: chặt chẽ hơn)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (giữ nguyên: môi trường)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -19323,6 +19659,20 @@
       "value": "Theo múi giờ của máy chủ."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Theo múi giờ của máy chủ. Tức là "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " theo giờ của bạn."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -20215,14 +20565,22 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "không thể đọc dữ liệu"
+              "value": "không thể đọc dữ liệu của tài khoản này"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "không thể đọc dữ liệu của các tài khoản này"
             }
           ]
         },
@@ -20230,13 +20588,11 @@
           "value": [
             {
               "type": 0,
-              "value": "không thể đọc dữ liệu"
+              "value": "không thể đọc dữ liệu của các tài khoản này"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -20283,20 +20639,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Ẩn các tài khoản"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn tài khoản"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn các tài khoản"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn các tài khoản"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Ẩn các tệp"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn tệp"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn các tệp"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn các tệp"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Ẩn tệp"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn tệp"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn tệp"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Ẩn tệp"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20351,6 +20785,346 @@
     {
       "type": 0,
       "value": "Các tệp này được tham chiếu trong cơ sở dữ liệu nhưng không tìm thấy trong nơi lưu trữ; các lần khôi phục sẽ bỏ qua chúng."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tệp thương hiệu"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tệp thương hiệu"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ảnh nền bộ sưu tập"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ảnh nền bộ sưu tập"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " áp phích bộ sưu tập"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " áp phích bộ sưu tập"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " phụ đề đã tải xuống"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " phụ đề đã tải xuống"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " áp phích thư viện"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " áp phích thư viện"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ảnh lớp phủ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ảnh lớp phủ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " áp phích bộ sưu tập cá nhân"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " áp phích bộ sưu tập cá nhân"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ảnh đại diện hồ sơ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ảnh đại diện hồ sơ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tệp ảnh minh họa đã tải lên"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tệp ảnh minh họa đã tải lên"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " phụ đề đã tải lên"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " phụ đề đã tải lên"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -20601,10 +21375,10 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
@@ -20613,6 +21387,26 @@
             {
               "type": 1,
               "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " của tài khoản này"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "không thể đọc "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " của các tài khoản này"
             }
           ]
         },
@@ -20625,12 +21419,14 @@
             {
               "type": 1,
               "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " của các tài khoản này"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -20645,8 +21441,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Hiển thị các tài khoản"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị tài khoản"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị các tài khoản"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị các tài khoản"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20685,26 +21507,22 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Hiển thị các tệp"
-    }
-  ],
-  "web.admin.backups.warnings.showGroupFiles": [
-    {
-      "type": 0,
-      "value": "Hiển thị tệp"
-    }
-  ],
-  "web.admin.backups.warnings.tooLarge": [
-    {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
-              "value": "dữ liệu quá lớn đối với bộ khôi phục"
+              "value": "Hiển thị tệp"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị các tệp"
             }
           ]
         },
@@ -20712,13 +21530,75 @@
           "value": [
             {
               "type": 0,
-              "value": "dữ liệu quá lớn đối với bộ khôi phục"
+              "value": "Hiển thị các tệp"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
+    }
+  ],
+  "web.admin.backups.warnings.showGroupFiles": [
+    {
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị tệp"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị tệp"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Hiển thị tệp"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.admin.backups.warnings.tooLarge": [
+    {
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "dữ liệu của tài khoản này quá lớn đối với bộ khôi phục"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "dữ liệu của các tài khoản này quá lớn đối với bộ khôi phục"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "dữ liệu của các tài khoản này quá lớn đối với bộ khôi phục"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -23329,6 +24209,12 @@
       "value": "Nhà cung cấp chuyển giọng nói thành văn bản tạm thời không khả dụng. Thử lại sau."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản không còn tín dụng khả dụng, hoặc đã đạt giới hạn sử dụng hay hạn mức chi tiêu. Kiểm tra số dư và hạn mức tại nhà cung cấp, hoặc cài đặt sử dụng ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -23339,6 +24225,80 @@
     {
       "type": 0,
       "value": "Kết nối AI văn bản không thành công. Kiểm tra mô hình, mức suy luận, cấp dịch vụ, kết nối tài khoản và giới hạn sử dụng của nhà cung cấp."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Quyền truy cập AI văn bản bị từ chối. Kiểm tra xem khóa API hoặc tài khoản ChatGPT có được phép dùng mô hình này không."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Không có sẵn endpoint hoặc mô hình AI văn bản. Kiểm tra URL cơ sở của nhà cung cấp và mô hình."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Tài khoản ChatGPT đã kết nối không thể chia sẻ mức sử dụng của gói. Kiểm tra cài đặt sử dụng ChatGPT, hoặc kết nối tài khoản khác."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản đang giới hạn tần suất yêu cầu. Thử lại sau."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản đã từ chối yêu cầu kiểm tra. Kiểm tra mô hình, mức suy luận và cài đặt sử dụng của tài khoản. Nhật ký máy chủ có lỗi từ nhà cung cấp."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản đã từ chối yêu cầu kiểm tra (trạng thái "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Kiểm tra mô hình, mức suy luận và cấp dịch vụ. Nhật ký máy chủ có lỗi từ nhà cung cấp."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Hết thời gian kiểm tra kết nối AI văn bản. Kiểm tra tình trạng hoạt động của nhà cung cấp và thử lại."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản đã từ chối thông tin xác thực. Thay khóa API của nhà cung cấp, hoặc đăng nhập lại bằng ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Nhà cung cấp AI văn bản tạm thời không khả dụng. Thử lại sau."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo không thể kết nối với nhà cung cấp AI văn bản. Kiểm tra URL cơ sở của nhà cung cấp và xem máy chủ này có thể kết nối với nhà cung cấp không."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Mô hình văn bản đã trả về phản hồi mà Silo không thể sử dụng. Chọn mô hình khác."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -23427,6 +24387,12 @@
     {
       "type": 0,
       "value": "Xóa giới hạn"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "Trực tiếp"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -28567,6 +29533,12 @@
       "value": "không thành công"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Tác vụ không thành công. Xem thông tin chẩn đoán dành cho quản trị viên để biết chi tiết."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -30594,7 +31566,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Danh sách các phiên phát mới bắt đầu gần đây"
+      "value": "Lượt phát gần đây nhất trên tất cả tài khoản"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -32223,6 +33195,72 @@
     {
       "type": 0,
       "value": "Không thể tải hoạt động."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " đã phát "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " đã phát "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -45346,6 +46384,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Các lượt quét và làm mới siêu dữ liệu sẽ hiển thị ở đây khi đang chạy."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Không có lượt quét hoặc làm mới nào đang chạy"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Tất cả ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Ẩn hàng đợi"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " thư viện khác"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " thư viện khác"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Làm mới siêu dữ liệu"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Đang làm mới siêu dữ liệu…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Xem hàng đợi"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Cao"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Thấp"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Trung bình"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -45784,6 +46930,30 @@
       "value": "Xác nhận dọn dẹp thư mục gốc trống"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Kiểm tra"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Không có mục nào đang chờ trong hàng đợi của bộ khớp siêu dữ liệu."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Chưa ghi nhận thư mục gốc nào bị bỏ qua."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Chưa ghi nhận ID bên ngoài lỗi thời nào."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -45820,6 +46990,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Sửa"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Chưa cấu hình thư viện nào."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -45872,6 +47054,12 @@
       "value": "Ẩn đường dẫn"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Không hoạt động"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -45906,6 +47094,12 @@
       "value": "Quét một phần"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Bổ sung siêu dữ liệu còn thiếu hoặc thay thế toàn bộ"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -45918,6 +47112,12 @@
       "value": "Không truy cập được thư mục gốc"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Quét"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -45928,6 +47128,12 @@
     {
       "type": 0,
       "value": "Hiển thị đường dẫn"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Dừng"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -45946,6 +47152,22 @@
     {
       "type": 0,
       "value": "Kiểm tra điểm gắn kết"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Kiểm tra xem mọi thư mục của thư viện có truy cập được không"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Xem các lượt quét đang chạy của "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -46049,7 +47271,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Quản lý thư mục gốc và các lượt quét thư viện. Nhập/xuất danh mục hiện nằm trong Bảo trì."
+      "value": "Quản lý thư mục phương tiện, theo dõi lượt quét và xử lý sự cố khớp."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -46536,6 +47758,56 @@
       "value": "ID bên ngoài lỗi thời"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " đang chạy"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " đang chạy"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Hoạt động quét"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Tình trạng danh mục"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Thư viện"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -46978,6 +48250,24 @@
     {
       "type": 0,
       "value": "Tìm mục đã bỏ qua theo tiêu đề, thư viện hoặc loại…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Không rõ ràng"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Đang chờ"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Chưa khớp"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -49616,6 +50906,12 @@
       "value": "Nhập địa chỉ máy chủ để hoàn tất cài đặt."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Khóa được đặt bởi cấu hình triển khai của máy chủ"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -50532,6 +51828,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Được đặt bởi cấu hình triển khai của máy chủ. Gỡ node khỏi cấu hình đó và khởi động lại các máy chủ API để xóa node tại đây."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -52315,6 +53617,68 @@
       "value": "Plugin"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Đã áp dụng"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Đang tạm giữ"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Không thể tải trạng thái cấp phát plugin."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Do môi trường quản lý"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Đang chờ"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Đã từ chối"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Bản triển khai kiểm soát nguồn gói và việc gỡ cài đặt."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Trạng thái cấp phát"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Bản triển khai cố định plugin này ở phiên bản "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -53071,6 +54435,114 @@
       "value": "Đã dừng tạo đề xuất. Các đề xuất đã lưu vẫn hiển thị trong Khám phá cho đến khi máy chủ khởi động lại."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Đang xếp hạng cho hồ sơ… ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Đang tải danh sách TMDB… ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Đang tra cứu và tạo embedding cho tựa… ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Đã xóa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tựa hết hạn"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Đã xóa "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tựa hết hạn"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -53111,6 +54583,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Giải quyết xung đột khóa embedding bên dưới trước khi tạo đề xuất Khám phá."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Chạy công việc Embedding trước để Silo có vector thư viện dùng để so sánh."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Kết nối một nhà cung cấp embedding trong Dịch vụ AI trước khi tạo đề xuất Khám phá."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Chưa có hồ sơ nào có hồ sơ sở thích. Chạy Hồ sơ sở thích khi đã có người xem hoặc đánh giá tựa phim."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -54969,6 +56465,32 @@
       "value": "Sẽ trống cho đến khi bật đề xuất Khám phá trong Quản trị → Đề xuất."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Các hàng đề xuất sẽ trống cho đến khi bật Đề xuất Khám phá trong "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Quản trị → Đề xuất"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Đã tắt trong Đề xuất"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -56447,6 +57969,12 @@
       "value": "Hàng mới được thêm vào cuối Khám phá"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Mở cài đặt Đề xuất"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -56459,6 +57987,12 @@
       "value": "Nguồn cấp của MDBList không mang theo cách sắp xếp đã lưu trên trang danh sách. Hãy chọn cách sắp xếp mà trang đó hiển thị."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Hồ sơ của bạn chưa có đề xuất Khám phá nào. Chạy Đề xuất Khám phá hoặc xem và đánh giá vài tựa phim để xem trước hàng này."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -56469,6 +58003,12 @@
     {
       "type": 0,
       "value": "Chọn một danh sách hoặc dán liên kết của nó để xem các nội dung trong đó."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Bật Đề xuất Khám phá trong Quản trị → Đề xuất để xem trước hàng này."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -57323,6 +58863,12 @@
     {
       "type": 0,
       "value": "Đã gửi tin nhắn"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Trình phát không xác nhận đã nhận tin nhắn. Tin nhắn có thể hiển thị muộn hoặc hoàn toàn không hiển thị."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -60197,6 +61743,12 @@
       "value": "Kiểm tra kết nối không thành công."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Không thể kiểm tra xem môi trường của máy chủ có thiết lập cài đặt này không. Tải lại trang để chỉnh sửa."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -60751,6 +62303,30 @@
     {
       "type": 0,
       "value": "Không thể cập nhật kênh"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Tải lại để xem các giá trị hiện tại. Nếu có nội dung nào trên trang này đã thay đổi, hoặc bạn đã chỉnh sửa một mật khẩu hay khóa đã lưu, tất cả chỉnh sửa của bạn sẽ bị hoàn tác; nếu không, các chỉnh sửa vẫn được giữ."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Tải lại"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Không thể tải lại cài đặt. Vui lòng thử lại."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Cài đặt đã thay đổi ở nơi khác"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -62753,6 +64329,612 @@
     {
       "type": 0,
       "value": "Đồng bộ điểm đánh dấu trực tuyến"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "Thuật toán: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "đã yêu cầu "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; đang dùng "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "Giá trị cho phép: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "Kiểm soát tắc nghẽn: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "Tài khoản"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "Dùng đường này từ"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "Thiết bị"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "Không có thiết bị nào kết nối trực tiếp."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "Endpoint thiết bị"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "Thiết bị đã kết nối"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "tới cổng "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "Mặc định: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "Kiểm tra mức độ sẵn sàng của máy chủ này cho kết nối trực tiếp."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "Đang áp dụng: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "Bật kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Quyền NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "Bộ máy kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT hairpin"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "Ánh xạ NAT"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "Dự phòng PMTU"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "Khả năng truy cập"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "Bộ đệm nhận của socket"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "Bộ đệm gửi của socket"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "Tinh chỉnh máy chủ"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "Giảm tần suất ACK"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "Chính sách mất gói BBR"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "Giảm tải phân đoạn UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "Cửa sổ nhận của máy khách"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "Cổng UDP kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "Kiểm soát tắc nghẽn TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "Bộ đệm gửi TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "Kiểm tra gần nhất lúc "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "Proxy"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "Trình lắng nghe"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "Địa chỉ công khai ghi nhận được: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "Kiểm tra xem bộ định tuyến có hỗ trợ UPnP, NAT-PMP hoặc PCP không."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "Ánh xạ cổng"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "Lượt kiểm tra mức độ sẵn sàng không bắt đầu phát trực tiếp."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "Quản trị viên đã tắt"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "Đã tắt"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "Không thể khởi động bộ máy kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "Không thể tăng bộ đệm"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "Bộ định tuyến không hỗ trợ ánh xạ cổng"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "Bộ đệm nhỏ hơn mức yêu cầu"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "Trình hỗ trợ tinh chỉnh mạng không khả dụng"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "Giá trị không hợp lệ; đang dùng Tắt"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "Hệ thống không thể áp dụng hoặc đọc cài đặt này"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "Kernel này không hỗ trợ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "Đã đạt giới hạn bộ đệm của máy chủ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "Không thể đọc giới hạn bộ đệm của máy chủ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "Địa chỉ công khai thay đổi theo đích đến"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR không khả dụng"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR chưa được tải hoặc không được cho phép"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "Có nhiều hơn một máy chủ API đang chạy"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "Đã bỏ quyền NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Thiếu quyền NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "Không tìm thấy bộ định tuyến"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "Thiếu quyền NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "Không có quyền"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "Không khả dụng"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "Chưa đo"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "Không cần tăng"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "Chính sách của máy chủ đã chọn thuật toán khác"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "Kiểm tra không thành công"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "Không thể kiểm tra các máy chủ API khác"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "Một máy chủ API khác đang đảm nhận kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "Đang chờ trở thành máy chủ đảm nhận kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "Trạng thái kết nối trực tiếp không khả dụng"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "Không thể mở cổng UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "Cổng UDP không hợp lệ"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "Nền tảng này không hỗ trợ"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "Giá trị yêu cầu: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "Yêu cầu: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; được cấp: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "Chạy kiểm tra"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "Bộ đệm gửi: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "Bị giới hạn"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "Suy giảm"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "Dự phòng"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "Không cần"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "Tắt"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "Bật"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "Không rõ"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "Danh sách tối đa tám mục host:port, phân tách bằng dấu phẩy. Để trống để dùng giá trị mặc định."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "Máy chủ STUN"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "Kết nối trực tiếp"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "Cho phép thiết bị kết nối với máy chủ này qua đường UDP trực tiếp. Cổng UDP lấy từ "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " và chỉ đọc tại đây."
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -66221,6 +68403,24 @@
       "value": "Chuyển sang mô hình khác cần đặt lại embedding, thao tác này sẽ xóa toàn bộ embedding. Nhà cung cấp khác phục vụ cùng mô hình sẽ được áp dụng sau khi khởi động lại."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Thêm vào Khám phá"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Không thể thêm các hàng đề xuất vào trang Khám phá."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Đã thêm các hàng đề xuất vào trang Khám phá."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -66243,6 +68443,44 @@
     {
       "type": 0,
       "value": "Số tựa chưa có trong thư viện mà máy chủ lưu giữ để đề xuất. Mỗi tựa được tra cứu trên TMDB và tạo embedding. Việc tạo embedding thường rẻ, nhưng con số cao hơn có thể tốn kém hơn hoặc mất nhiều thời gian hơn tùy theo nhà cung cấp embedding của bạn, và dùng nhiều dung lượng lưu trữ hơn."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Trang Khám phá của bạn chưa hiển thị hàng Đề xuất nào."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Bật Bật đề xuất ở trên và khởi động lại máy chủ trước khi Đề xuất Khám phá có thể chạy."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Yêu cầu hiện đang tắt. Bật trong "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Cài đặt yêu cầu"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " để người xem có thể thấy trang Khám phá."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Mở trang Khám phá"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -75561,6 +77799,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Không thể chuyển bộ nhớ đến đây khi môi trường đang đặt cài đặt bộ nhớ ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Hãy bỏ đặt các biến đó và khởi động lại mọi máy chủ API trước."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -76705,6 +78957,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Lịch này lấy từ cài đặt sao lưu. Thay đổi lịch trong "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Máy chủ › Sao lưu"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -77015,10 +79287,66 @@
       "value": "Lỗi gần đây"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Làm mới không thành công. Xem thông tin chẩn đoán dành cho quản trị viên để biết chi tiết."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Xem lại lịch hiện tại"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -77463,6 +79791,18 @@
     {
       "type": 0,
       "value": "Thử lại webhook Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Đọc lại phần đầu của các tệp MKV có phụ đề ASS được quét trước khi Silo loại phông chữ nhúng ra khỏi tốc độ bit, để các tệp này không bị chuyển mã vì một tốc độ bit mà chúng không thực sự phát trực tuyến."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Sửa tốc độ bit của tệp có phông chữ nhúng"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -86990,25 +89330,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Không thể đăng nhập TV. Vui lòng thử lại."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Kiểm tra xem ứng dụng của bạn có hiển thị"
+      "value": "Không thể phê duyệt đăng nhập. Vui lòng thử lại."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Kiểm tra xem TV của bạn có hiển thị"
+      "value": "Đảm bảo mã này khớp"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Nhập mã trên TV hoặc ứng dụng của bạn"
+      "value": "Nhập mã hiển thị trên thiết bị của bạn"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -87020,13 +89354,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Đăng nhập TV hoặc thiết bị khác bằng tài khoản của bạn."
+      "value": "Đăng nhập TV, ứng dụng hoặc thiết bị khác."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Đăng nhập TV"
+      "value": "Phê duyệt đăng nhập"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -87046,13 +89380,13 @@
     },
     {
       "type": 0,
-      "value": " để phê duyệt TV. Chỉ chính tài khoản đó mới có thể đăng nhập TV."
+      "value": " để phê duyệt lần đăng nhập này. Chỉ chính tài khoản đó mới có thể phê duyệt thiết bị."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Dừng xem với tư cách người dùng này để phê duyệt TV. Chỉ chính tài khoản đó mới có thể đăng nhập TV."
+      "value": "Dừng xem với tư cách người dùng này để phê duyệt lần đăng nhập này. Chỉ chính tài khoản đó mới có thể phê duyệt thiết bị."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -87070,39 +89404,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Không tìm thấy mã đó. Kiểm tra mã trên TV của bạn."
+      "value": "Không tìm thấy mã đó. Kiểm tra mã và thử lại."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Để sau"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Ứng dụng TV cũ hơn hiển thị "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " thay vào đó."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Chỉ phê duyệt thiết bị đang ở ngay trước mặt bạn."
+      "value": "Từ chối"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Chỉ phê duyệt TV đang ở ngay trước mặt bạn."
+      "value": "Chỉ phê duyệt nếu chính bạn đã bắt đầu đăng nhập."
     }
   ],
   "web.auth.activate.playOn": [
@@ -87128,7 +89442,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Bất kỳ ai dùng TV này đều có thể chọn trong các hồ sơ của bạn. Hồ sơ có PIN vẫn được khóa."
+      "value": "Thao tác này cho phép thiết bị truy cập các hồ sơ của bạn. Hồ sơ có PIN vẫn được khóa."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -87175,6 +89489,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Đã yêu cầu "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -87188,7 +89512,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "TV này đã ngừng chờ. Bắt đầu lại trên TV."
+      "value": "Thiết bị này đã ngừng chờ. Bắt đầu đăng nhập lại trên thiết bị đó."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -87197,10 +89521,34 @@
       "value": "Đã từ chối lần đăng nhập này."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Xong. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " đang đăng nhập."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " đã đăng nhập."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Mã này đã hết hạn. TV của bạn đang hiển thị mã mới. Dùng mã đó thay thế."
+      "value": "Mã này đã hết hạn. Lấy mã mới trên thiết bị rồi thử lại."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -87284,25 +89632,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "TV đó đã đăng nhập rồi."
+      "value": "Thiết bị này đã được đăng nhập."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "TV này đã được phê duyệt và đang hoàn tất đăng nhập."
+      "value": "Thiết bị này đã được phê duyệt và đang hoàn tất đăng nhập."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Xong. TV của bạn đang đăng nhập."
+      "value": "Xong. Thiết bị của bạn đang đăng nhập."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV của bạn đã đăng nhập."
+      "value": "Thiết bị của bạn đã đăng nhập."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -87346,7 +89694,7 @@
   "web.auth.activate.signInDevice": [
     {
       "type": 0,
-      "value": "Đăng nhập "
+      "value": "Cho phép "
     },
     {
       "type": 1,
@@ -87354,13 +89702,13 @@
     },
     {
       "type": 0,
-      "value": "?"
+      "value": " đăng nhập?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "Đăng nhập thiết bị này?"
+      "value": "Cho phép thiết bị này đăng nhập?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -87372,7 +89720,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "Đăng nhập vào "
+      "value": "Đăng nhập vào máy chủ "
     },
     {
       "type": 1,
@@ -87380,13 +89728,13 @@
     },
     {
       "type": 0,
-      "value": " để phê duyệt TV này."
+      "value": " để phê duyệt lần đăng nhập này."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Đăng nhập TV"
+      "value": "Phê duyệt đăng nhập"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -88432,7 +90780,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Không thể đăng nhập thiết bị. Vui lòng thử lại."
+      "value": "Không thể phê duyệt đăng nhập. Vui lòng thử lại."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -100940,6 +103288,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -109480,6 +111842,12 @@
       "value": "Hiển thị"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Do máy chủ này quản lý. Không thể thay đổi nội dung hàng này hiển thị tại đây; thêm hàng riêng của bạn để chọn nội dung hiển thị."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -109794,6 +112162,12 @@
       "value": "Đang dịch…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ẩn các hàng của máy chủ được thêm sau lần xuất này:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -109812,6 +112186,12 @@
     {
       "type": 0,
       "value": ", thay thế các phần bạn đã thêm ở đây trước đó. Các thay đổi của bạn đối với các phần của máy chủ này vẫn được giữ nguyên."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Các hàng của máy chủ này đã thay đổi kể từ khi tệp này được xuất, vì vậy hãy chọn bên dưới những hàng cần ẩn."
     }
   ],
   "web.home.layout.checking": [
@@ -109862,6 +112242,26 @@
     {
       "type": 0,
       "value": "Bật Ẩn mục đã xem."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Ẩn các hàng đã chọn trên: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " mà không thay đổi các hàng khác của bạn ở đó."
     }
   ],
   "web.home.layout.import": [
@@ -109966,6 +112366,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -110174,6 +112592,12 @@
     {
       "type": 0,
       "value": "Phần chưa đặt tên"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Ẩn các hàng của máy chủ không có trong tệp này:"
     }
   ],
   "web.home.page.customize": [
@@ -113141,6 +115565,12 @@
     {
       "type": 0,
       "value": "Banner nổi bật · Chỉ trên web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Máy chủ"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -126781,6 +129211,16 @@
       "value": "Quay lại trang 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Đến trang "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -126871,6 +129311,20 @@
     {
       "type": 0,
       "value": "Các trang Yêu cầu thêm"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Trang "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " nằm ngoài phạm vi các kết quả này."
     }
   ],
   "web.requests.toAdd.series": [
@@ -128451,6 +130905,12 @@
     {
       "type": 0,
       "value": "Đọc thông báo của hồ sơ ngay khi đến và đánh dấu đã đọc."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Xem nội dung đang phát ngay lúc này trên hồ sơ, hoặc trên mọi hồ sơ của tài khoản khi khóa không chỉ định hồ sơ nào: tiêu đề, vị trí phát, trạng thái tạm dừng, thiết bị và phương thức phát. Không có quyền điều khiển phát hay thông tin chi tiết về mạng."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

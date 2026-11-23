@@ -281,6 +281,18 @@
       "value": "Kode masuk ini sudah kedaluwarsa. Mulai lagi."
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "Akun ini telah mencapai batas perangkat untuk koneksi langsung."
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "Perangkat lain sudah menggunakan kunci koneksi ini. Coba lagi."
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
@@ -338,7 +350,13 @@
   "error.field.managed_by_environment": [
     {
       "type": 0,
-      "value": "Ditetapkan oleh lingkungan node. Ubah di sana, lalu mulai ulang node."
+      "value": "Ditetapkan oleh lingkungan. Ubah di sana, lalu mulai ulang layanan yang terdampak."
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "Nilai ini tidak ada."
     }
   ],
   "error.field.out_of_range": [
@@ -447,6 +465,12 @@
     {
       "type": 0,
       "value": "Masuk melalui halaman masuk jaringan Anda untuk melanjutkan."
+    }
+  ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "Node ini ditetapkan oleh konfigurasi deployment server. Hapus node ini di sana, lalu mulai ulang server API agar dapat mengelolanya di sini."
     }
   ],
   "error.not_acceptable": [
@@ -12697,7 +12721,7 @@
             },
             {
               "type": 0,
-              "value": " tidak dapat dipulihkan — koleksi yang ditampilkan tidak ada di sini maupun di cadangan"
+              "value": " tidak dapat dipulihkan — koleksi yang ditampilkannya tidak ada di sini maupun di cadangan"
             }
           ]
         }
@@ -12873,7 +12897,7 @@
             },
             {
               "type": 0,
-              "value": " tidak dapat dipulihkan — item ini akan memperluas akses, jadi server ini mempertahankan nilainya yang lebih ketat"
+              "value": " tidak dapat dipulihkan — item ini akan memperluas akses, jadi server ini mempertahankan nilainya sendiri yang lebih ketat"
             }
           ]
         }
@@ -12940,6 +12964,28 @@
             {
               "type": 0,
               "value": " tidak dapat dipulihkan — akun lain di sini masuk dengan nama pengguna atau email tersebut"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " tidak dapat dipulihkan — environment server ini mengatur pengaturan yang berbeda, atau sebagian koneksi tempat pengaturan itu berada"
             }
           ]
         }
@@ -13304,6 +13350,28 @@
       "value": "Alamat layanan berubah tanpa kredensialnya di cadangan, jadi pemulihan akan menghapus kredensial itu di sini dan menonaktifkan layanan hingga kredensial dimasukkan lagi."
     }
   ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " pengaturan tetap memakai nilai saat ini karena environment server ini mengaturnya, atau mengatur sebagian koneksi tempat pengaturan itu berada."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.caveat.filesMissing": [
     {
       "type": 6,
@@ -13640,8 +13708,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "Sembunyikan"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -13754,8 +13848,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "Tampilkan"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -14356,9 +14476,41 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Juga memilih "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", yang diperlukan oleh pilihan Anda."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Juga memilih "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", yang diperlukan oleh pilihan Anda."
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14375,16 +14527,46 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Juga membatalkan pilihan "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", yang memerlukan item yang pilihannya Anda batalkan."
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Juga membatalkan pilihan "
+            },
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": ", yang memerlukan item yang pilihannya Anda batalkan."
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -14401,9 +14583,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -15566,6 +15746,12 @@
       "value": "Akun lain di sini masuk dengan nama pengguna atau email yang sama."
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "Environment server ini mengatur pengaturan yang berbeda, atau sebagian koneksi tempat pengaturan itu berada, jadi server ini mempertahankan nilainya saat ini."
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -16010,6 +16196,142 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "Gambar latar"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " item koleksi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "Koleksi diganti"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "Konfigurasi"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "Deskripsi"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "Aktif"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "Unggulan"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "Batas item"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "Urutan item"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "Perpustakaan"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "Posisi"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "Poster"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "Urutan sortir"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "Sumber"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "Jadwal sinkronisasi"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "Judul"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "Terjemahan judul"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "Jenis"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "Visibilitas"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "Hanya web"
     }
   ],
   "web.admin.backups.restore.rows.changes": [
@@ -16500,6 +16822,16 @@
     {
       "type": 0,
       "value": " (dipertahankan: lebih ketat)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (dipertahankan: environment)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -17474,6 +17806,20 @@
       "value": "Dalam zona waktu server."
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "Menurut zona waktu server. Di zona waktu Anda, itu pukul "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -18326,9 +18672,25 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "datanya tidak dapat dibaca"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "datanya tidak dapat dibaca"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18337,9 +18699,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -18370,20 +18730,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "Sembunyikan akun"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan akun"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan akun"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan akun"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "Sembunyikan file"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan file"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan file"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan file"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "Sembunyikan file"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan file"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan file"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sembunyikan file"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -18422,6 +18860,226 @@
     {
       "type": 0,
       "value": "File ini dirujuk di database tetapi tidak ditemukan di penyimpanan; pemulihan tidak menyertakannya."
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " aset branding"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " backdrop koleksi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " poster koleksi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " subtitel yang diunduh"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " poster perpustakaan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " gambar overlay"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " poster koleksi pribadi"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " avatar profil"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " file artwork yang diunggah"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " subtitel yang diunggah"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -18588,9 +19246,33 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " akun tersebut tidak dapat dibaca"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " akun tersebut tidak dapat dibaca"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18599,13 +19281,11 @@
             },
             {
               "type": 0,
-              "value": " tidak dapat dibaca"
+              "value": " akun tersebut tidak dapat dibaca"
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -18620,8 +19300,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "Tampilkan akun"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan akun"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan akun"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan akun"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -18648,21 +19354,89 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "Tampilkan file"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan file"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan file"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan file"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "Tampilkan file"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan file"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan file"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tampilkan file"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "datanya terlalu besar untuk set pemulihan"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "datanya terlalu besar untuk set pemulihan"
+            }
+          ]
+        },
         "other": {
           "value": [
             {
@@ -18671,9 +19445,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -21104,6 +21876,12 @@
       "value": "Penyedia ucapan-ke-teks sementara tidak tersedia. Coba lagi nanti."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Penyedia AI teks tidak memiliki kredit yang tersedia, atau batas penggunaan atau pengeluaran telah tercapai. Periksa saldo dan batas penyedia, atau pengaturan penggunaan ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -21114,6 +21892,80 @@
     {
       "type": 0,
       "value": "Koneksi AI teks gagal. Periksa model, tingkat penalaran, tingkat layanan, koneksi akun, dan batas penggunaan penyedia."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Akses AI teks ditolak. Pastikan kunci API atau akun ChatGPT diizinkan menggunakan model ini."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Endpoint atau model AI teks tidak tersedia. Periksa URL dasar penyedia dan model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Akun ChatGPT yang terhubung tidak dapat membagikan penggunaan paketnya. Periksa pengaturan penggunaan ChatGPT, atau hubungkan akun lain."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Penyedia AI teks membatasi laju permintaan. Coba lagi nanti."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Penyedia AI teks menolak permintaan pemeriksaan. Periksa model, tingkat penalaran, dan pengaturan penggunaan akun. Log server berisi kesalahan dari penyedia."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Penyedia AI teks menolak permintaan pemeriksaan (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Periksa model, tingkat penalaran, dan tingkat layanan. Log server berisi kesalahan dari penyedia."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Waktu pemeriksaan koneksi AI teks habis. Periksa ketersediaan penyedia, lalu coba lagi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Penyedia AI teks menolak kredensial. Ganti kunci API penyedia, atau masuk dengan ChatGPT lagi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Penyedia AI teks sementara tidak tersedia. Coba lagi nanti."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo tidak dapat menjangkau penyedia AI teks. Periksa URL dasar penyedia dan pastikan server ini dapat terhubung ke penyedia tersebut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Model teks mengembalikan respons yang tidak dapat digunakan Silo. Pilih model lain."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -21194,6 +22046,12 @@
     {
       "type": 0,
       "value": "Hapus batas"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "Langsung"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -25686,6 +26544,12 @@
       "value": "gagal"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "Tugas gagal. Periksa diagnostik administrator untuk melihat detailnya."
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -27460,7 +28324,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "Daftar sesi pemutaran yang baru dimulai"
+      "value": "Pemutaran terbaru di semua akun"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -28918,6 +29782,72 @@
     {
       "type": 0,
       "value": "Tidak dapat memuat aktivitas."
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " memutar "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " memutar "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -39910,6 +40840,99 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "Pemindaian dan penyegaran metadata muncul di sini saat sedang berjalan."
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "Tidak ada pemindaian atau penyegaran aktif"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "Semua ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "Sembunyikan antrean"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " perpustakaan lainnya"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "Penyegaran metadata"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "Menyegarkan metadata"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "Lihat antrean"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "Tinggi"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "Rendah"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "Sedang"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -40276,6 +41299,30 @@
       "value": "Konfirmasi pembersihan root kosong"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "Periksa"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "Tidak ada item yang menunggu di antrean pencocok metadata."
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "Tidak ada root yang dilewati tercatat."
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "Tidak ada ID eksternal kedaluwarsa yang tercatat."
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -40312,6 +41359,18 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "Edit"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "Belum ada perpustakaan yang dikonfigurasi."
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -40353,6 +41412,12 @@
       "value": "Sembunyikan jalur"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "Siaga"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 0,
@@ -40387,6 +41452,12 @@
       "value": "Pemindaian sebagian"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "Lengkapi metadata yang hilang atau ganti semua metadata"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -40399,6 +41470,12 @@
       "value": "Root tidak terjangkau"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "Pindai"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -40409,6 +41486,12 @@
     {
       "type": 0,
       "value": "Tampilkan jalur"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "Hentikan"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -40427,6 +41510,22 @@
     {
       "type": 0,
       "value": "Verifikasi mount"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "Periksa apakah semua folder perpustakaan dapat dijangkau"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "Lihat pemindaian aktif untuk "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -40530,7 +41629,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "Kelola root dan pemindaian perpustakaan. Impor/ekspor katalog kini ada di Pemeliharaan."
+      "value": "Kelola folder media, pantau pemindaian, dan selesaikan masalah pencocokan."
     }
   ],
   "web.admin.libraries.page.title": [
@@ -40931,6 +42030,45 @@
     {
       "type": 0,
       "value": "ID eksternal kedaluwarsa"
+    }
+  ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " aktif"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "Aktivitas pemindaian"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "Kesehatan katalog"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "Perpustakaan"
     }
   ],
   "web.admin.libraries.toast.cancelJobFailed": [
@@ -41351,6 +42489,24 @@
     {
       "type": 0,
       "value": "Cari item diabaikan menurut judul, perpustakaan, atau jenis…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "Ambigu"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "Menunggu"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "Tidak cocok"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -43820,6 +44976,12 @@
       "value": "Masukkan alamat server untuk melengkapi pengaturan."
     }
   ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "Kunci ditetapkan oleh konfigurasi deployment server"
+    }
+  ],
   "web.admin.nodes.key.dialogTitle": [
     {
       "type": 0,
@@ -44716,6 +45878,12 @@
     {
       "type": 1,
       "value": "name"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "Ditetapkan oleh konfigurasi deployment server. Hapus di sana, lalu mulai ulang server API agar dapat menghapusnya di sini."
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -46318,6 +47486,68 @@
       "value": "Plugin"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "Diterapkan"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "Ditahan"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat status penyediaan plugin."
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "Dikelola oleh lingkungan"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "Tertunda"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "Ditolak"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "Deployment mengontrol sumber paket dan penghapusan."
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "Status penyediaan"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "Deployment mengunci plugin ini ke versi "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -47078,6 +48308,94 @@
       "value": "Pembuatan rekomendasi telah dihentikan. Rekomendasi yang tersimpan tetap terlihat di Jelajahi hingga server dimulai ulang."
     }
   ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "Memeringkat profil ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "Mengambil daftar TMDB ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "Mencari dan membuat embedding judul ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " judul kedaluwarsa dibersihkan"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.recommendations.external.rowsBuilt": [
     {
       "type": 6,
@@ -47098,6 +48416,30 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "Selesaikan konflik kunci embedding di bawah sebelum membuat rekomendasi Jelajahi."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "Jalankan pekerjaan Embedding terlebih dahulu agar Silo memiliki vektor perpustakaan sebagai pembanding."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "Hubungkan penyedia embedding di Layanan AI sebelum membuat rekomendasi Jelajahi."
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "Belum ada profil yang memiliki profil selera. Jalankan Profil Selera setelah seseorang menonton atau memberi rating judul."
     }
   ],
   "web.admin.recommendations.external.titlesStored": [
@@ -48572,6 +49914,32 @@
       "value": "Tetap kosong sampai rekomendasi Jelajahi diaktifkan di Admin → Rekomendasi."
     }
   ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "Baris rekomendasi tetap kosong sampai Rekomendasi Jelajahi diaktifkan di "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Admin → Rekomendasi"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "Nonaktif di Rekomendasi"
+    }
+  ],
   "web.admin.requests.discover.sort.highestGrossing": [
     {
       "type": 0,
@@ -49933,6 +51301,12 @@
       "value": "Baris baru ditempatkan di bagian bawah Jelajahi"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "Buka pengaturan Rekomendasi"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -49945,6 +51319,12 @@
       "value": "Feed MDBList tidak membawa urutan yang disimpan di halaman daftar. Pilih urutan yang ditampilkan di sana."
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "Profil Anda belum memiliki rekomendasi Jelajahi. Jalankan Rekomendasi Jelajahi atau tonton dan beri rating beberapa judul untuk melihat pratinjau baris ini."
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -49955,6 +51335,12 @@
     {
       "type": 0,
       "value": "Pilih daftar atau tempel tautannya untuk melihat judulnya."
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "Aktifkan Rekomendasi Jelajahi di Admin → Rekomendasi untuk melihat pratinjau baris ini."
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -50673,6 +52059,12 @@
     {
       "type": 0,
       "value": "Pesan dikirim"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "Pemutar tidak mengonfirmasi pesan. Pesan mungkin muncul terlambat atau tidak muncul sama sekali."
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -53468,6 +54860,12 @@
       "value": "Pemeriksaan koneksi gagal."
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memeriksa apakah lingkungan server mengatur opsi ini. Muat ulang halaman untuk mengeditnya."
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -54006,6 +55404,30 @@
     {
       "type": 0,
       "value": "Gagal memperbarui saluran"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "Muat ulang untuk melihat nilai saat ini. Jika ada yang berubah di halaman ini, atau Anda mengedit kata sandi atau kunci yang disimpan, semua perubahan Anda dibatalkan; jika tidak, perubahan Anda dipertahankan."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "Muat ulang"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memuat ulang pengaturan. Coba lagi."
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "Pengaturan diubah di tempat lain"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -55960,6 +57382,612 @@
     {
       "type": 0,
       "value": "Sinkronkan penanda online"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "Algoritma: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "diminta "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; aktif "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "Diizinkan: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "Kontrol kemacetan: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "Akun"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "Di jalur ini sejak"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "Perangkat"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "Tidak ada perangkat yang terhubung langsung."
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "Endpoint peer"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "Perangkat terhubung"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "ke port "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "Default: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "Periksa kesiapan server ini untuk koneksi langsung."
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "Berlaku: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "Aktifkan koneksi langsung"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Kapabilitas NET_ADMIN"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "Mesin koneksi langsung"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT hairpin"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "Pemetaan NAT"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "Fallback PMTU"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "Keterjangkauan"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "Buffer penerimaan socket"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "Buffer pengiriman socket"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "Penyesuaian host"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "Desimasi ACK"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "Kebijakan kehilangan paket BBR"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "Offload segmentasi UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "Jendela penerimaan klien"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "Port UDP koneksi langsung"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "Kontrol kemacetan TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "Buffer pengiriman TCP"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "Terakhir diperiksa "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "Proxy"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "Listener"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "Alamat publik yang terdeteksi: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "Periksa dukungan UPnP, NAT-PMP, atau PCP di router."
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "Pemetaan port"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "Pemeriksaan kesiapan tidak memulai pemutaran langsung."
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "Dinonaktifkan oleh administrator"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "Dinonaktifkan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "Mesin koneksi langsung tidak dapat dimulai"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memperbesar buffer"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "Router tidak mendukung pemetaan port"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "Buffer lebih kecil dari yang diminta"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "Program bantu penyesuaian jaringan tidak tersedia"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "Nilai tidak valid; dinonaktifkan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "Sistem tidak dapat menerapkan atau membaca pengaturan ini"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "Tidak didukung oleh kernel ini"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "Batas buffer host tercapai"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "Tidak dapat membaca batas buffer host"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "Alamat publik bervariasi menurut tujuan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR tidak tersedia"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR tidak dimuat atau tidak diizinkan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "Lebih dari satu server API sedang berjalan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "Kapabilitas NET_ADMIN dilepaskan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "Kapabilitas NET_ADMIN tidak ada"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "Router tidak ditemukan"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "Kapabilitas NET_ADMIN tidak ada"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "Izin ditolak"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "Tidak tersedia"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "Belum diukur"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "Tidak perlu diperbesar"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "Kebijakan host memilih algoritma lain"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "Pemeriksaan gagal"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "Tidak dapat memeriksa server API lain"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "Server API lain menjadi host koneksi langsung"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "Menunggu menjadi host koneksi langsung"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "Status koneksi langsung tidak tersedia"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat membuka port UDP"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "Port UDP tidak valid"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "Tidak didukung di platform ini"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "Diminta: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "Diminta: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; diberikan: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "Jalankan pemeriksaan"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "Buffer pengiriman: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "Dibatasi"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "Menurun"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "Fallback"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "Tidak diperlukan"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "Nonaktif"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "Aktif"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "Tidak diketahui"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "Daftar berisi hingga delapan entri host:port yang dipisahkan koma. Biarkan kosong untuk menggunakan default."
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "Server STUN"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "Koneksi langsung"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "Izinkan perangkat menjangkau server ini melalui jalur UDP langsung. Port UDP berasal dari "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " dan hanya dapat dibaca di sini."
     }
   ],
   "web.admin.settings.network.host.apiServer": [
@@ -59356,6 +61384,24 @@
       "value": "Beralih ke model lain memerlukan reset embedding, yang menghapus semuanya. Penyedia lain yang melayani model yang sama berlaku setelah mulai ulang."
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "Tambahkan ke Jelajahi"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "Tidak dapat menambahkan baris rekomendasi ke halaman Jelajahi."
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "Baris rekomendasi ditambahkan ke halaman Jelajahi."
+    }
+  ],
   "web.admin.settings.recommendations.external.enabled": [
     {
       "type": 0,
@@ -59378,6 +61424,44 @@
     {
       "type": 0,
       "value": "Jumlah judul yang belum ada di perpustakaan yang disimpan server untuk direkomendasikan. Setiap judul dicari di TMDB dan dibuatkan embedding. Pembuatan embedding biasanya murah, tetapi angka yang lebih tinggi dapat menambah biaya atau waktu proses, tergantung penyedia embedding Anda, dan menggunakan lebih banyak penyimpanan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "Halaman Jelajahi Anda belum menampilkan baris Rekomendasi apa pun."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "Aktifkan opsi “Aktifkan Rekomendasi” di atas dan mulai ulang server sebelum Rekomendasi Jelajahi dapat berjalan."
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "Permintaan saat ini nonaktif. Aktifkan di "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Pengaturan permintaan"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " agar penonton dapat melihat halaman Jelajahi."
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "Buka Halaman Jelajahi"
     }
   ],
   "web.admin.settings.recommendations.external.title": [
@@ -68506,6 +70590,20 @@
       "value": ")."
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "Penyimpanan tidak dapat dipindahkan ke sini selama environment menetapkan pengaturan penyimpanan ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": "). Hapus variabel tersebut dan mulai ulang setiap server API terlebih dahulu."
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -69572,6 +71670,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "Jadwal ini berasal dari pengaturan cadangan. Ubah di "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "Server › Cadangan"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -69858,10 +71976,66 @@
       "value": "Kesalahan terbaru"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "Pembaruan gagal. Periksa diagnostik administrator untuk melihat detailnya."
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "Tinjau jadwal saat ini"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -70306,6 +72480,18 @@
     {
       "type": 0,
       "value": "Coba ulang webhook Autoscan"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Membaca ulang header file MKV dengan subtitel ASS yang dipindai sebelum Silo mengecualikan font tersemat dari bitrate, agar file tersebut tidak ditranskode karena bitrate yang sebenarnya tidak dikirim saat streaming."
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "Perbaiki bitrate file dengan font tersemat"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -78903,25 +81089,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "Tidak dapat mengizinkan TV masuk. Coba lagi."
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "Pastikan aplikasi Anda menampilkan"
+      "value": "Tidak dapat menyetujui proses masuk. Coba lagi."
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "Pastikan TV Anda menampilkan"
+      "value": "Pastikan kode ini cocok"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "Masukkan kode yang tampil di TV atau aplikasi Anda"
+      "value": "Masukkan kode yang ditampilkan di perangkat Anda"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -78933,13 +81113,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "Izinkan TV atau perangkat lain masuk dengan akun Anda."
+      "value": "Masuk di TV, aplikasi, atau perangkat lain."
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "Izinkan TV masuk"
+      "value": "Setujui proses masuk"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -78959,13 +81139,13 @@
     },
     {
       "type": 0,
-      "value": " untuk menyetujui TV. Hanya pemilik akun itu sendiri yang dapat mengizinkan TV masuk."
+      "value": " untuk menyetujui proses masuk ini. Hanya pemilik akun itu sendiri yang dapat menyetujui perangkat."
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "Berhenti melihat sebagai pengguna ini untuk menyetujui TV. Hanya pemilik akun itu sendiri yang dapat mengizinkan TV masuk."
+      "value": "Berhenti melihat sebagai pengguna ini untuk menyetujui proses masuk ini. Hanya pemilik akun itu sendiri yang dapat menyetujui perangkat."
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -78983,39 +81163,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "Kode itu tidak ditemukan. Periksa kode di TV Anda."
+      "value": "Kode itu tidak ditemukan. Periksa kode, lalu coba lagi."
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "Lain kali"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "Aplikasi TV versi lama menampilkan "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " sebagai gantinya."
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "Hanya setujui perangkat yang ada di depan Anda saat ini."
+      "value": "Tolak"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "Hanya setujui TV yang ada di depan Anda saat ini."
+      "value": "Setujui hanya jika Anda sendiri yang memulai proses masuk ini."
     }
   ],
   "web.auth.activate.playOn": [
@@ -79041,7 +81201,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "Siapa pun yang menggunakan TV ini dapat memilih dari profil Anda. Profil dengan PIN tetap terkunci."
+      "value": "Ini memberinya akses ke profil Anda. Profil dengan PIN tetap terkunci."
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -79088,6 +81248,16 @@
       "value": "time"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "Diminta "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 0,
@@ -79101,7 +81271,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "TV ini berhenti menunggu. Mulai lagi di TV."
+      "value": "Perangkat ini berhenti menunggu. Mulai proses masuk lagi di perangkat itu."
     }
   ],
   "web.auth.activate.result.declined": [
@@ -79110,10 +81280,34 @@
       "value": "Permintaan masuk ini ditolak."
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "Selesai. "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sedang masuk."
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " sudah masuk."
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "Kode ini kedaluwarsa. TV Anda menampilkan kode baru. Gunakan kode itu."
+      "value": "Kode ini kedaluwarsa. Dapatkan kode baru di perangkat, lalu coba lagi."
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -79197,25 +81391,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "TV itu sudah masuk."
+      "value": "Perangkat ini sudah masuk."
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "TV ini telah disetujui dan sedang menyelesaikan proses masuk."
+      "value": "Perangkat ini telah disetujui dan sedang menyelesaikan proses masuk."
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "Selesai. TV Anda sedang masuk."
+      "value": "Selesai. Perangkat Anda sedang masuk."
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "TV Anda sudah masuk."
+      "value": "Perangkat Anda sudah masuk."
     }
   ],
   "web.auth.activate.signInAs": [
@@ -79293,13 +81487,13 @@
     },
     {
       "type": 0,
-      "value": " untuk menyetujui TV ini."
+      "value": " untuk menyetujui proses masuk ini."
     }
   ],
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "Izinkan TV masuk"
+      "value": "Setujui proses masuk"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -80345,7 +82539,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "Perangkat tidak dapat masuk. Coba lagi."
+      "value": "Tidak dapat menyetujui proses masuk. Coba lagi."
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -91345,6 +93539,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -99207,6 +101415,12 @@
       "value": "Menampilkan"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "Dikelola oleh server ini. Isi baris ini tidak dapat diubah di sini; tambahkan baris Anda sendiri untuk memilih isinya."
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -99517,6 +101731,12 @@
       "value": "Menerjemahkan…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris server yang ditambahkan sejak ekspor ini:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -99535,6 +101755,12 @@
     {
       "type": 0,
       "value": ", menggantikan bagian yang sebelumnya Anda tambahkan di sini. Perubahan Anda pada bagian server ini tetap dipertahankan."
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "Baris server ini berubah sejak file ini diekspor, jadi pilih baris yang ingin disembunyikan di bawah."
     }
   ],
   "web.home.layout.checking": [
@@ -99585,6 +101811,26 @@
     {
       "type": 0,
       "value": "Mengaktifkan Sembunyikan item yang sudah ditonton."
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "Menyembunyikan baris yang dipilih di: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " tanpa mengubah baris Anda yang lain di sana."
     }
   ],
   "web.home.layout.import": [
@@ -99689,6 +101935,24 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -99886,6 +102150,12 @@
     {
       "type": 0,
       "value": "Bagian tanpa judul"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "Sembunyikan baris server yang tidak ada di file ini:"
     }
   ],
   "web.home.page.customize": [
@@ -102610,6 +104880,12 @@
     {
       "type": 0,
       "value": "Banner utama · Hanya web"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "Server"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -115391,6 +117667,16 @@
       "value": "Kembali ke halaman 1"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "Buka halaman "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -115481,6 +117767,20 @@
     {
       "type": 0,
       "value": "Halaman minta untuk ditambahkan"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "Halaman "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " melewati akhir hasil ini."
     }
   ],
   "web.requests.toAdd.series": [
@@ -116934,6 +119234,12 @@
     {
       "type": 0,
       "value": "Baca notifikasi profil saat tiba dan tandai sebagai sudah dibaca."
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "Lihat apa yang sedang diputar saat ini di profil, atau di setiap profil di akun jika kunci tidak menyebutkan profil: judul, posisi pemutaran, status jeda, perangkat, dan metode pemutaran. Tanpa kontrol pemutaran atau detail jaringan."
     }
   ],
   "web.settings.apiKeys.scope.requests": [

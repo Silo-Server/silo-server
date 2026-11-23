@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // Environment variables that set the catalog search connection. While one is
@@ -47,7 +48,7 @@ func SearchSettingsFromEnv(getenv func(string) string) (map[string]string, error
 // StoreSearchSettings writes the values that differ from stored, the settings
 // just read from store, in one batch, so readers see all of them or none. It
 // takes the encrypting store so the API key is never written in plaintext.
-func StoreSearchSettings(ctx context.Context, store *EncryptedSettingsRepo, stored, values map[string]string) error {
+func StoreSearchSettings(ctx context.Context, store *serversettings.EncryptedSettingsRepo, stored, values map[string]string) error {
 	changed := map[string]string{}
 	for key, value := range values {
 		if stored[key] != value {
