@@ -270,35 +270,57 @@ func recommendationItemEligibilityWhereClause(alias string) string {
 	return embeddingvectors.ItemEligibilityWhereClause(alias)
 }
 
+// EmbeddingWrite is one item's vector for UpsertEmbeddings.
+type EmbeddingWrite struct {
+	ItemID        string
+	Embedding     []float32
+	CanonicalText string
+}
+
 // UpsertEmbedding stores or updates an embedding for a media item.
 func (r *Repo) UpsertEmbedding(ctx context.Context, itemID string, embedding []float32, model, canonicalText string) error {
-	padded, err := ensureCanonicalDimensions(embedding)
-	if err != nil {
-		return fmt.Errorf("upsert embedding for item %s: %w", itemID, err)
+	return r.UpsertEmbeddings(ctx, model, []EmbeddingWrite{{ItemID: itemID, Embedding: embedding, CanonicalText: canonicalText}})
+}
+
+// UpsertEmbeddings stores or updates the items' embeddings, all from model,
+// and queues their search index updates, in one transaction: every write is
+// stored, or none is. The statements go to the server in one round trip.
+func (r *Repo) UpsertEmbeddings(ctx context.Context, model string, writes []EmbeddingWrite) error {
+	if len(writes) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	ids := make([]string, 0, len(writes))
+	for _, w := range writes {
+		padded, err := ensureCanonicalDimensions(w.Embedding)
+		if err != nil {
+			return fmt.Errorf("upsert embedding for item %s: %w", w.ItemID, err)
+		}
+		batch.Queue(`
+			INSERT INTO media_item_embeddings (media_item_id, embedding, model, canonical_text)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (media_item_id) DO UPDATE
+				SET embedding      = EXCLUDED.embedding,
+				    model          = EXCLUDED.model,
+				    canonical_text = EXCLUDED.canonical_text,
+				    updated_at     = NOW()
+		`, w.ItemID, pgvector.NewVector(padded), model, w.CanonicalText)
+		ids = append(ids, w.ItemID)
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin upsert embedding for item %s: %w", itemID, err)
+		return fmt.Errorf("begin upsert of %d embeddings: %w", len(writes), err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, `
-		INSERT INTO media_item_embeddings (media_item_id, embedding, model, canonical_text)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (media_item_id) DO UPDATE
-			SET embedding      = EXCLUDED.embedding,
-			    model          = EXCLUDED.model,
-			    canonical_text = EXCLUDED.canonical_text,
-			    updated_at     = NOW()
-	`, itemID, pgvector.NewVector(padded), model, canonicalText)
-	if err != nil {
-		return fmt.Errorf("upsert embedding for item %s: %w", itemID, err)
+	if err := tx.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("upsert %d embeddings: %w", len(writes), err)
 	}
-	if err := catalog.EnqueueSearchIndexUpsert(ctx, tx, itemID); err != nil {
-		return fmt.Errorf("enqueue catalog search embedding update for item %s: %w", itemID, err)
+	if err := catalog.EnqueueSearchIndexUpserts(ctx, tx, ids); err != nil {
+		return fmt.Errorf("enqueue catalog search embedding updates for %d items: %w", len(writes), err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit upsert embedding for item %s: %w", itemID, err)
+		return fmt.Errorf("commit upsert of %d embeddings: %w", len(writes), err)
 	}
 	return nil
 }
@@ -1719,6 +1741,18 @@ func (r *Repo) MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) 
 type StaleProfile struct {
 	UserID    int
 	ProfileID string
+	// StaleAt is the profile's stale mark.
+	StaleAt time.Time
+}
+
+// StaleProfilesPage selects one page of GetStaleProfiles.
+type StaleProfilesPage struct {
+	// After, when set, starts the page after this profile in mark order, so
+	// a caller can step past profiles it left marked.
+	After *StaleProfile
+	// MarkedBy, when set, leaves out marks newer than it.
+	MarkedBy time.Time
+	Limit    int
 }
 
 // GetStaleProfiles returns profiles with a stale mark, oldest mark first. A
@@ -1727,13 +1761,24 @@ type StaleProfile struct {
 // refresh clears a mark (ClearStaleAt): the nightly taste job stores the
 // taste vector as of its start but does not rebuild cached rows, so a mark it
 // passed over stays pending although it is older than updated_at.
-func (r *Repo) GetStaleProfiles(ctx context.Context, limit int) ([]StaleProfile, error) {
+func (r *Repo) GetStaleProfiles(ctx context.Context, page StaleProfilesPage) ([]StaleProfile, error) {
+	var markedBy, afterAt *time.Time
+	var afterUser int
+	var afterProfile string
+	if !page.MarkedBy.IsZero() {
+		markedBy = &page.MarkedBy
+	}
+	if page.After != nil {
+		afterAt, afterUser, afterProfile = &page.After.StaleAt, page.After.UserID, page.After.ProfileID
+	}
 	rows, err := r.pool.Query(ctx, `
-		SELECT user_id, profile_id
+		SELECT user_id, profile_id, stale_at
 		FROM   user_taste_profiles
 		WHERE  stale_at IS NOT NULL
+		  AND  ($1::timestamptz IS NULL OR stale_at <= $1)
+		  AND  ($2::timestamptz IS NULL OR (stale_at, user_id, profile_id) > ($2, $3, $4))
 		ORDER  BY stale_at, user_id, profile_id
-		LIMIT  $1`, limit)
+		LIMIT  $5`, markedBy, afterAt, afterUser, afterProfile, page.Limit)
 	if err != nil {
 		return nil, fmt.Errorf("get stale profiles: %w", err)
 	}
@@ -1742,7 +1787,7 @@ func (r *Repo) GetStaleProfiles(ctx context.Context, limit int) ([]StaleProfile,
 	var profiles []StaleProfile
 	for rows.Next() {
 		var p StaleProfile
-		if err := rows.Scan(&p.UserID, &p.ProfileID); err != nil {
+		if err := rows.Scan(&p.UserID, &p.ProfileID, &p.StaleAt); err != nil {
 			return nil, fmt.Errorf("scan stale profile: %w", err)
 		}
 		profiles = append(profiles, p)
