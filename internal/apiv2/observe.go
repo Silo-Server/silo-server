@@ -245,11 +245,15 @@ type statusRecorder struct {
 	bytes    int64
 }
 
+// WriteHeader records the first final status the writer below accepted. An
+// informational 1xx (other than 101) commits nothing, and net/http panics on an
+// invalid code before sending any header; neither may make a panic that
+// follows look like it broke a committed response.
 func (s *statusRecorder) WriteHeader(status int) {
-	if s.status == 0 {
+	s.ResponseWriter.WriteHeader(status)
+	if s.status == 0 && (status >= 200 || status == http.StatusSwitchingProtocols) {
 		s.status = status
 	}
-	s.ResponseWriter.WriteHeader(status)
 }
 
 func (s *statusRecorder) Write(p []byte) (int, error) {

@@ -303,16 +303,19 @@ func TestObservedAbortIsRecordedAndRepanics(t *testing.T) {
 // A panic that reaches no Huma operation (a raw registration, or a v2 chi
 // middleware) is answered with the internal_error problem and recorded as that
 // 500. Once the handler has committed its response, the panic breaks the
-// connection instead and the request is recorded as aborted.
+// connection instead and the request is recorded as aborted. A status the
+// writer refused commits nothing.
 func TestObservedRawPanicIsAnsweredAndRecorded(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
+		status    int
 		write     bool
 		wantClass string
 		wantCode  string
 	}{
-		{"nothing written", false, "5xx", TypeInternalError.ID},
-		{"response committed", true, "aborted", labelNone},
+		{"nothing written", 0, false, "5xx", TypeInternalError.ID},
+		{"status rejected", 1000, false, "5xx", TypeInternalError.ID},
+		{"response committed", 0, true, "aborted", labelNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			buf := captureLogs(t)
@@ -321,6 +324,9 @@ func TestObservedRawPanicIsAnsweredAndRecorded(t *testing.T) {
 			h := observe(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				w.Header().Set("Content-Length", "99")
 				w.Header().Set("Access-Control-Allow-Origin", "*")
+				if tc.status != 0 {
+					w.WriteHeader(tc.status)
+				}
 				if tc.write {
 					_, _ = w.Write([]byte("partial"))
 				}
