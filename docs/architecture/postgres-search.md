@@ -167,7 +167,9 @@ scoring and admission.
 Catalog and section badges select a file winner in SQL and decode only that
 file's track metadata. Their historical tie orders differ and remain distinct.
 SQL resolution and HDR ordering must match `internal/overlays`, including Go's
-Unicode whitespace rules.
+Unicode whitespace rules. The HDR rank runs its regex tests only for tracks
+that pass a regex-free check, so that check must hold for every track those
+tests can rank as HDR or Dolby Vision.
 
 For a PostgreSQL progress store sharing the catalog pool and account, series
 and season play targets select the validated anchor, newest visible resumable
