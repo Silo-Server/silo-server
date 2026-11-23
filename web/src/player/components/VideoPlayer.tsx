@@ -2241,7 +2241,8 @@ export function VideoPlayer({
   // The server ended the session for good (an administrator stopped it while
   // this player could not be told directly, or it stayed paused too long):
   // leave instead of reconnecting.
-  const sessionEndedHandledRef = useRef(false);
+  const sessionEndNoticeShownRef = useRef(false);
+  const sessionEndExitStartedRef = useRef(false);
   // Set when an administrator's stop or terminate already showed the notice,
   // with its reason; the exit below must still run.
   const adminEndNoticeShownRef = useRef(false);
@@ -2250,17 +2251,25 @@ export function VideoPlayer({
       progressSessionEnded ??
       (connectionStatus === "ended" ? (connectionEndReason ?? "ended") : null);
     if (!endReason) return;
-    if (sessionEndedHandledRef.current) return;
-    sessionEndedHandledRef.current = true;
-    if (endReason === "paused_timeout") {
-      toast.info(tRef.current("web.player.session.endedPausedTimeout"), {
-        id: SESSION_ENDED_TOAST_ID,
-      });
-    } else if (!adminEndNoticeShownRef.current) {
-      toast.info(tRef.current("web.player.session.endedByAdmin"), { id: SESSION_ENDED_TOAST_ID });
+    if (!sessionEndNoticeShownRef.current) {
+      sessionEndNoticeShownRef.current = true;
+      if (endReason === "paused_timeout") {
+        toast.info(tRef.current("web.player.session.endedPausedTimeout"), {
+          id: SESSION_ENDED_TOAST_ID,
+        });
+      } else if (!adminEndNoticeShownRef.current) {
+        toast.info(tRef.current("web.player.session.endedByAdmin"), {
+          id: SESSION_ENDED_TOAST_ID,
+        });
+      }
     }
+    // A leave under way holds the guard handleExit checks. An exit needs
+    // nothing more; a minimize lets go when it finishes, isLeaving clears,
+    // and this runs again to leave the minimized player.
+    if (sessionEndExitStartedRef.current || isLeaving || leaveInProgressRef.current) return;
+    sessionEndExitStartedRef.current = true;
     void handleExit();
-  }, [connectionEndReason, connectionStatus, handleExit, progressSessionEnded]);
+  }, [connectionEndReason, connectionStatus, handleExit, isLeaving, progressSessionEnded]);
 
   const handleMinimize = useCallback(async () => {
     await handleLeave("minimize");
