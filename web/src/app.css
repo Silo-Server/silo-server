@@ -955,11 +955,13 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      the borders on bordered variants) grows a text button only when its label
      no longer fits: at normal settings it is shorter than every size. It lives
      in the base layer so a caller's min-h-* and the components layer's touch
-     targets still win over it. Icon sizes are left alone. */
-  [data-slot="button"]:not([data-size^="icon"]) {
+     targets still win over it. Icon sizes are left alone. Only Button carries
+     both data-variant and data-size; data-slot is not used because a Radix
+     trigger rendered asChild replaces it. */
+  [data-variant][data-size]:not([data-size^="icon"]) {
     min-height: 1lh;
   }
-  [data-slot="button"]:is([data-variant="outline"], [data-variant="glass"]):not(
+  [data-variant][data-size]:is([data-variant="outline"], [data-variant="glass"]):not(
       [data-size^="icon"]
     ) {
     min-height: calc(1lh + 2px);
@@ -2517,7 +2519,7 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
 
     .admin-shell .page-header [data-slot="button"] {
-      min-height: 2.75rem;
+      min-height: max(2.75rem, calc(1lh + 2px));
     }
   }
 

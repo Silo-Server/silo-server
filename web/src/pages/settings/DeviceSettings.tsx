@@ -413,7 +413,7 @@ function DeviceDetail({
           {canRename && !renaming ? (
             <Button
               variant="outline"
-              className="min-h-11 w-full sm:h-8 sm:min-h-0 sm:w-auto sm:px-3 sm:text-sm"
+              className="min-h-11 w-full sm:h-8 sm:min-h-[calc(1lh+2px)] sm:w-auto sm:px-3 sm:text-sm"
               onClick={() => setRenaming(true)}
             >
               <Pencil className="h-3.5 w-3.5" />
@@ -423,7 +423,7 @@ function DeviceDetail({
           {changedCount > 0 ? (
             <Button
               variant="outline"
-              className="min-h-11 w-full sm:h-8 sm:min-h-0 sm:w-auto sm:px-3 sm:text-sm"
+              className="min-h-11 w-full sm:h-8 sm:min-h-[calc(1lh+2px)] sm:w-auto sm:px-3 sm:text-sm"
               disabled={clearDevice.isPending}
               onClick={() => {
                 if (
@@ -461,7 +461,7 @@ function DeviceDetail({
           {!device.is_current_device ? (
             <Button
               variant="ghost"
-              className="text-muted-foreground hover:text-destructive min-h-11 self-start px-0 text-[0.8125rem] sm:h-8 sm:min-h-0 sm:px-3 sm:text-sm"
+              className="text-muted-foreground hover:text-destructive min-h-11 self-start px-0 text-[0.8125rem] sm:h-8 sm:min-h-[calc(1lh+2px)] sm:px-3 sm:text-sm"
               disabled={forgetDevice.isPending}
               onClick={() => {
                 if (
@@ -699,13 +699,17 @@ function DeviceNameEditor({
         className="h-11 sm:h-8 sm:max-w-xs"
       />
       <div className="flex gap-2">
-        <Button type="submit" className="min-h-11 sm:h-8 sm:min-h-0" disabled={rename.isPending}>
+        <Button
+          type="submit"
+          className="min-h-11 sm:h-8 sm:min-h-[calc(1lh+2px)]"
+          disabled={rename.isPending}
+        >
           {rename.isPending ? t("web.settings.device.saving") : t("common.save")}
         </Button>
         <Button
           type="button"
           variant="ghost"
-          className="min-h-11 sm:h-8 sm:min-h-0"
+          className="min-h-11 sm:h-8 sm:min-h-[calc(1lh+2px)]"
           disabled={rename.isPending}
           onClick={onDone}
         >
