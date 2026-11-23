@@ -13,8 +13,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 // rotatedSettings are the signing keys Silo generates for the tokens it
@@ -38,7 +38,7 @@ const (
 )
 
 // restoredSecretSettings are the other sensitive settings
-// (catalog.SensitiveSettingKeys): credentials an operator entered for other
+// (serversettings.SensitiveSettingKeys): credentials an operator entered for other
 // services, or keys other services hold the other half of. A restore brings
 // them back with the rest of the settings; rotating them would break what
 // they connect to. TestSensitiveSettingsAreClassified fails on a sensitive
@@ -80,7 +80,7 @@ func (l PGLoader) RotateSigningSecrets(ctx context.Context, dbURL string, cipher
 		}
 		values[key] = rotatedSettings[key](b)
 	}
-	return true, catalog.NewEncryptedSettingsRepo(catalog.NewServerSettingsRepo(pool), cipher).SetMany(ctx, values)
+	return true, serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(pool), cipher).SetMany(ctx, values)
 }
 
 func rotatedSettingKeys() []string {

@@ -281,10 +281,28 @@
       "value": "इस साइन इन कोड की समय-सीमा खत्म हो गई है। फिर से शुरू करें।"
     }
   ],
+  "error.direct_device_limit": [
+    {
+      "type": 0,
+      "value": "यह खाता डायरेक्ट कनेक्शन के लिए डिवाइसों की सीमा तक पहुँच गया है।"
+    }
+  ],
+  "error.direct_node_key_conflict": [
+    {
+      "type": 0,
+      "value": "कोई दूसरा डिवाइस पहले से यह कनेक्शन कुंजी इस्तेमाल कर रहा है। फिर से कोशिश करें।"
+    }
+  ],
   "error.email_in_use": [
     {
       "type": 0,
       "value": "यह ईमेल पता पहले से इस्तेमाल में है।"
+    }
+  ],
+  "error.field.duplicate": [
+    {
+      "type": 0,
+      "value": "यह पहले से इस्तेमाल में है।"
     }
   ],
   "error.field.invalid": [
@@ -327,6 +345,18 @@
     {
       "type": 0,
       "value": "अनुरोध को पढ़ा नहीं जा सका।"
+    }
+  ],
+  "error.field.managed_by_environment": [
+    {
+      "type": 0,
+      "value": "यह एनवायरनमेंट में सेट है। इसे वहीं बदलें और प्रभावित सेवा रीस्टार्ट करें।"
+    }
+  ],
+  "error.field.missing": [
+    {
+      "type": 0,
+      "value": "यह वैल्यू मौजूद नहीं है।"
     }
   ],
   "error.field.out_of_range": [
@@ -437,6 +467,12 @@
       "value": "जारी रखने के लिए अपने नेटवर्क के साइन इन से साइन इन करें।"
     }
   ],
+  "error.node_deployment_managed": [
+    {
+      "type": 0,
+      "value": "यह नोड सर्वर के डिप्लॉयमेंट कॉन्फ़िगरेशन में सेट है। इसे यहाँ मैनेज करने के लिए इसे वहाँ से हटाएँ और API सर्वर रीस्टार्ट करें।"
+    }
+  ],
   "error.not_acceptable": [
     {
       "type": 0,
@@ -483,6 +519,12 @@
     {
       "type": 0,
       "value": "यह प्लेबैक सेशन खत्म हो गया है। फिर से चलाना शुरू करें।"
+    }
+  ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "इस स्ट्रीम की जगह एक नई स्ट्रीम ने ले ली है। प्लेबैक मौजूदा स्ट्रीम पर जारी है।"
     }
   ],
   "error.precondition_failed": [
@@ -1265,6 +1307,18 @@
       "value": "लोकप्रिय सीरीज़"
     }
   ],
+  "home.section.discoverRecommendedMovies": [
+    {
+      "type": 0,
+      "value": "आपके लिए सुझाई गई फ़िल्में"
+    }
+  ],
+  "home.section.discoverRecommendedSeries": [
+    {
+      "type": 0,
+      "value": "आपके लिए सुझाई गई सीरीज़"
+    }
+  ],
   "home.section.discoverStudios": [
     {
       "type": 0,
@@ -2005,6 +2059,104 @@
     {
       "type": 0,
       "value": "ऐप की भाषा"
+    }
+  ],
+  "settings.nextUp.atEnd": [
+    {
+      "type": 0,
+      "value": "आखिर में"
+    }
+  ],
+  "settings.nextUp.minutesBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खत्म होने से "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " मिनट पहले"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खत्म होने से "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " मिनट पहले"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.secondsBeforeEnd": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खत्म होने से "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " सेकंड पहले"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खत्म होने से "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " सेकंड पहले"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "settings.nextUp.title": [
+    {
+      "type": 0,
+      "value": "अगले एपिसोड दिखाना"
+    }
+  ],
+  "settings.off": [
+    {
+      "type": 0,
+      "value": "बंद"
     }
   ],
   "settingsManifest.catalog.hide_unwatched_episode_images.description": [
@@ -13629,6 +13781,40 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.backups.restore.blocked.managedByEnvironment": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " रीस्टोर नहीं किया जा सकता — जो सेटिंग अलग हैं उन्हें, या उनके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " रीस्टोर नहीं किए जा सकते — जो सेटिंग अलग हैं उन्हें, या उनके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.backups.restore.blocked.needsAnotherKey": [
     {
       "type": 6,
@@ -13642,7 +13828,7 @@
             },
             {
               "type": 0,
-              "value": " रीस्टोर नहीं किया जा सकता — यह किसी दूसरी SECRET_KEY से एन्क्रिप्ट किया गया है"
+              "value": " रीस्टोर नहीं किया जा सकता — इसे किसी दूसरी SECRET_KEY से एन्क्रिप्ट किया गया है"
             }
           ]
         },
@@ -13654,7 +13840,7 @@
             },
             {
               "type": 0,
-              "value": " रीस्टोर नहीं किए जा सकते — ये किसी दूसरी SECRET_KEY से एन्क्रिप्ट किए गए हैं"
+              "value": " रीस्टोर नहीं किए जा सकते — इन्हें किसी दूसरी SECRET_KEY से एन्क्रिप्ट किया गया है"
             }
           ]
         }
@@ -13948,7 +14134,7 @@
             },
             {
               "type": 0,
-              "value": " रीस्टोर नहीं किया जा सकता — यह यहाँ पहले से एक जैसा है"
+              "value": " रीस्टोर नहीं किया जा सकता — यहाँ इसमें और बैकअप में कोई अंतर नहीं है"
             }
           ]
         },
@@ -13960,7 +14146,7 @@
             },
             {
               "type": 0,
-              "value": " रीस्टोर नहीं किए जा सकते — ये यहाँ पहले से एक जैसे हैं"
+              "value": " रीस्टोर नहीं किए जा सकते — यहाँ इनमें और बैकअप में कोई अंतर नहीं है"
             }
           ]
         }
@@ -14151,6 +14337,40 @@
     {
       "type": 0,
       "value": "बैकअप में एक सेवा का पता उसके क्रेडेंशियल के बिना बदलता है, इसलिए रीस्टोर करने पर यहाँ वे क्रेडेंशियल साफ़ हो जाते हैं और उन्हें फिर से डालने तक सेवा बंद रहती है।"
+    }
+  ],
+  "web.admin.backups.restore.caveat.environmentSettings": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " सेटिंग अपनी मौजूदा वैल्यू रखती है, क्योंकि इसे, या इसके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है।"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " सेटिंग अपनी मौजूदा वैल्यू रखती हैं, क्योंकि इन्हें, या इनके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है।"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.restore.caveat.filesMissing": [
@@ -14621,8 +14841,34 @@
   ],
   "web.admin.backups.restore.choose.hideThem": [
     {
-      "type": 0,
-      "value": "इन्हें छिपाएँ"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इसे छिपाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इन्हें छिपाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इन्हें छिपाएँ"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.missingFiles": [
@@ -14779,8 +15025,34 @@
   ],
   "web.admin.backups.restore.choose.showThem": [
     {
-      "type": 0,
-      "value": "इन्हें दिखाएँ"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इसे दिखाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इन्हें दिखाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इन्हें दिखाएँ"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.restore.choose.summaryHeading": [
@@ -15501,10 +15773,10 @@
   ],
   "web.admin.backups.restore.notice.alsoChose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 1,
@@ -15513,6 +15785,18 @@
             {
               "type": 0,
               "value": " को भी चुना गया, क्योंकि आपने जो चुना है उसे इसकी ज़रूरत है।"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " को भी चुना गया, क्योंकि आपने जो चुना है उसे इनकी ज़रूरत है।"
             }
           ]
         },
@@ -15528,17 +15812,15 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.alsoUnchose": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 1,
@@ -15547,6 +15829,18 @@
             {
               "type": 0,
               "value": " का चुनाव भी हटा दिया गया, क्योंकि इसे उसकी ज़रूरत है जिसका चुनाव आपने हटाया।"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 1,
+              "value": "names"
+            },
+            {
+              "type": 0,
+              "value": " का चुनाव भी हटा दिया गया, क्योंकि इन्हें उसकी ज़रूरत है जिसका चुनाव आपने हटाया।"
             }
           ]
         },
@@ -15562,9 +15856,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.restore.notice.itemCount": [
@@ -17003,6 +17295,12 @@
       "value": "यहाँ एक दूसरा खाता इसी यूज़रनेम या ईमेल से साइन इन करता है।"
     }
   ],
+  "web.admin.backups.restore.reason.managedByEnvironment": [
+    {
+      "type": 0,
+      "value": "जो सेटिंग अलग हैं उन्हें, या उनके कनेक्शन के किसी हिस्से को, इस सर्वर का एनवायरनमेंट सेट करता है, इसलिए यह सर्वर अपनी मौजूदा वैल्यू रखता है।"
+    }
+  ],
   "web.admin.backups.restore.reason.needsAnotherKey": [
     {
       "type": 0,
@@ -17531,6 +17829,154 @@
     {
       "type": 0,
       "value": " नहीं खोल सकता।"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.backdrop": [
+    {
+      "type": 0,
+      "value": "बैकड्रॉप"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionItems": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " कलेक्शन आइटम"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " कलेक्शन आइटम"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.collectionReplaced": [
+    {
+      "type": 0,
+      "value": "कलेक्शन बदला गया"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.configuration": [
+    {
+      "type": 0,
+      "value": "कॉन्फ़िगरेशन"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.description": [
+    {
+      "type": 0,
+      "value": "विवरण"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.enabled": [
+    {
+      "type": 0,
+      "value": "चालू"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.featured": [
+    {
+      "type": 0,
+      "value": "फ़ीचर्ड"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemLimit": [
+    {
+      "type": 0,
+      "value": "आइटम की सीमा"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.itemSort": [
+    {
+      "type": 0,
+      "value": "आइटम का क्रम"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.libraries": [
+    {
+      "type": 0,
+      "value": "लाइब्रेरी"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.position": [
+    {
+      "type": 0,
+      "value": "जगह"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.poster": [
+    {
+      "type": 0,
+      "value": "पोस्टर"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.sortOrder": [
+    {
+      "type": 0,
+      "value": "सॉर्ट क्रम"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.source": [
+    {
+      "type": 0,
+      "value": "सोर्स"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.syncSchedule": [
+    {
+      "type": 0,
+      "value": "सिंक शेड्यूल"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.title": [
+    {
+      "type": 0,
+      "value": "टाइटल"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.titleTranslation": [
+    {
+      "type": 0,
+      "value": "टाइटल का अनुवाद"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.type": [
+    {
+      "type": 0,
+      "value": "प्रकार"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.visibility": [
+    {
+      "type": 0,
+      "value": "दृश्यता"
+    }
+  ],
+  "web.admin.backups.restore.rows.change.webOnly": [
+    {
+      "type": 0,
+      "value": "सिर्फ़ वेब"
     }
   ],
   "web.admin.backups.restore.rows.changes": [
@@ -18077,6 +18523,16 @@
     {
       "type": 0,
       "value": " (रखा गया: ज़्यादा सख़्त)"
+    }
+  ],
+  "web.admin.backups.restore.setting.managedByEnvironment": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " (बरकरार: एनवायरनमेंट)"
     }
   ],
   "web.admin.backups.restore.setting.now": [
@@ -19169,6 +19625,20 @@
       "value": "सर्वर के टाइम ज़ोन में।"
     }
   ],
+  "web.admin.backups.schedule.timeDescriptionLocal": [
+    {
+      "type": 0,
+      "value": "सर्वर के टाइम ज़ोन में। आपके टाइम ज़ोन में यह "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    },
+    {
+      "type": 0,
+      "value": " है।"
+    }
+  ],
   "web.admin.backups.schedule.unknown": [
     {
       "type": 0,
@@ -20057,14 +20527,22 @@
   ],
   "web.admin.backups.warnings.dataUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "इसका डेटा पढ़ा नहीं जा सका"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इनका डेटा पढ़ा नहीं जा सका"
             }
           ]
         },
@@ -20076,9 +20554,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.groupTitle": [
@@ -20125,20 +20601,98 @@
   ],
   "web.admin.backups.warnings.hideAccounts": [
     {
-      "type": 0,
-      "value": "खाते छिपाएँ"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खाता छिपाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खाते छिपाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खाते छिपाएँ"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideFiles": [
     {
-      "type": 0,
-      "value": "फ़ाइलें छिपाएँ"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइल छिपाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें छिपाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें छिपाएँ"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideGroupFiles": [
     {
-      "type": 0,
-      "value": "फ़ाइलें छिपाएँ"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइल छिपाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें छिपाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें छिपाएँ"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.hideNames": [
@@ -20201,6 +20755,346 @@
     {
       "type": 0,
       "value": "डेटाबेस में इनका उल्लेख है, लेकिन ये स्टोरेज में नहीं मिलीं; रीस्टोर में इन्हें छोड़ दिया जाता है।"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.brandingAsset": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ब्रैंडिंग ऐसेट"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ब्रैंडिंग ऐसेट"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionBackdrop": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " कलेक्शन बैकड्रॉप"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " कलेक्शन बैकड्रॉप"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.collectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " कलेक्शन पोस्टर"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " कलेक्शन पोस्टर"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.downloadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डाउनलोड किया गया सबटाइटल"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डाउनलोड किए गए सबटाइटल"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.libraryPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " लाइब्रेरी पोस्टर"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " लाइब्रेरी पोस्टर"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.overlayImage": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ओवरले इमेज"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ओवरले इमेज"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.personalCollectionPoster": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " निजी कलेक्शन पोस्टर"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " निजी कलेक्शन पोस्टर"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.profileAvatar": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " प्रोफ़ाइल अवतार"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " प्रोफ़ाइल अवतार"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedArtwork": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " अपलोड की गई आर्टवर्क फ़ाइल"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " अपलोड की गई आर्टवर्क फ़ाइलें"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.backups.warnings.missingFiles.uploadedSubtitle": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " अपलोड किया गया सबटाइटल"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " अपलोड किए गए सबटाइटल"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.backups.warnings.missingGroup": [
@@ -20467,14 +21361,30 @@
   ],
   "web.admin.backups.warnings.partUnreadable": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "इसके "
+            },
+            {
+              "type": 1,
+              "value": "part"
+            },
+            {
+              "type": 0,
+              "value": " को पढ़ा नहीं जा सका"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इनके "
             },
             {
               "type": 1,
@@ -20502,9 +21412,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.backups.warnings.reportBackup": [
@@ -20519,8 +21427,34 @@
   ],
   "web.admin.backups.warnings.showAccounts": [
     {
-      "type": 0,
-      "value": "खाते दिखाएँ"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खाता दिखाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खाते दिखाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "खाते दिखाएँ"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showAllNames": [
@@ -20567,26 +21501,86 @@
   ],
   "web.admin.backups.warnings.showFiles": [
     {
-      "type": 0,
-      "value": "फ़ाइलें दिखाएँ"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइल दिखाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें दिखाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें दिखाएँ"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.showGroupFiles": [
     {
-      "type": 0,
-      "value": "फ़ाइलें दिखाएँ"
+      "type": 5,
+      "value": "amount",
+      "options": {
+        "exactlyOne": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइल दिखाएँ"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें दिखाएँ"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "फ़ाइलें दिखाएँ"
+            }
+          ]
+        }
+      }
     }
   ],
   "web.admin.backups.warnings.tooLarge": [
     {
-      "type": 6,
-      "value": "count",
+      "type": 5,
+      "value": "amount",
       "options": {
-        "one": {
+        "exactlyOne": {
           "value": [
             {
               "type": 0,
               "value": "इसका डेटा रीस्टोर सेट के लिए बहुत बड़ा है"
+            }
+          ]
+        },
+        "exactlyTwo": {
+          "value": [
+            {
+              "type": 0,
+              "value": "इनका डेटा रीस्टोर सेट के लिए बहुत बड़ा है"
             }
           ]
         },
@@ -20598,9 +21592,7 @@
             }
           ]
         }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
+      }
     }
   ],
   "web.admin.catalogMaintenance.count.files": [
@@ -23147,6 +24139,12 @@
       "value": "स्पीच-टू-टेक्स्ट प्रोवाइडर कुछ समय के लिए उपलब्ध नहीं है। बाद में फिर से कोशिश करें।"
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI प्रोवाइडर के पास कोई क्रेडिट उपलब्ध नहीं है, या इस्तेमाल या खर्च की कोई सीमा पूरी हो गई है। प्रोवाइडर पर बैलेंस और सीमाएँ जाँचें, या ChatGPT की इस्तेमाल सेटिंग जाँचें।"
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -23157,6 +24155,80 @@
     {
       "type": 0,
       "value": "टेक्स्ट AI कनेक्शन विफल रहा। मॉडल, रीज़निंग लेवल, सर्विस टियर, खाता कनेक्शन और प्रोवाइडर की इस्तेमाल सीमाएँ जाँचें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI ऐक्सेस नहीं दिया गया। जाँचें कि API कुंजी या ChatGPT खाते से यह मॉडल इस्तेमाल किया जा सकता है।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI एंडपॉइंट या मॉडल उपलब्ध नहीं है। प्रोवाइडर का बेस URL और मॉडल जाँचें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "कनेक्ट किया गया ChatGPT खाता अपने प्लान का इस्तेमाल शेयर नहीं कर सकता। ChatGPT की इस्तेमाल सेटिंग जाँचें, या कोई दूसरा खाता कनेक्ट करें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI प्रोवाइडर अनुरोधों की दर सीमित कर रहा है। बाद में फिर से कोशिश करें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI प्रोवाइडर ने जाँच का अनुरोध अस्वीकार कर दिया। मॉडल, रीज़निंग लेवल और खाते की इस्तेमाल सेटिंग जाँचें। प्रोवाइडर की गड़बड़ी सर्वर लॉग में है।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI प्रोवाइडर ने जाँच का अनुरोध अस्वीकार कर दिया (स्टेटस "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": ")। मॉडल, रीज़निंग लेवल और सर्विस टियर जाँचें। प्रोवाइडर की गड़बड़ी सर्वर लॉग में है।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI कनेक्शन की जाँच का समय खत्म हो गया। प्रोवाइडर की उपलब्धता जाँचें और फिर से कोशिश करें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI प्रोवाइडर ने क्रेडेंशियल अस्वीकार कर दिए। प्रोवाइडर की API कुंजी बदलें, या ChatGPT से फिर से साइन इन करें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट AI प्रोवाइडर कुछ समय के लिए उपलब्ध नहीं है। बाद में फिर से कोशिश करें।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo टेक्स्ट AI प्रोवाइडर तक नहीं पहुँच सका। प्रोवाइडर का बेस URL जाँचें, और यह भी कि यह सर्वर उससे कनेक्ट हो सकता है।"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "टेक्स्ट मॉडल ने ऐसा जवाब लौटाया जिसे Silo इस्तेमाल नहीं कर सकता। कोई दूसरा मॉडल चुनें।"
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -23245,6 +24317,12 @@
     {
       "type": 0,
       "value": "सीमा साफ़ करें"
+    }
+  ],
+  "web.admin.common.deviceConnections.direct": [
+    {
+      "type": 0,
+      "value": "डायरेक्ट"
     }
   ],
   "web.admin.common.deviceConnections.latestPlayback": [
@@ -28301,6 +29379,12 @@
       "value": "विफल रहा"
     }
   ],
+  "web.admin.common.taskStatus.failedDetails": [
+    {
+      "type": 0,
+      "value": "टास्क विफल रहा। जानकारी के लिए एडमिन डायग्नोस्टिक्स देखें।"
+    }
+  ],
   "web.admin.common.taskStatus.queued": [
     {
       "type": 0,
@@ -30284,7 +31368,7 @@
   "web.admin.dashboard.widgetCatalog.recentActivity.description": [
     {
       "type": 0,
-      "value": "हाल ही में शुरू हुए प्लेबैक सेशन की फ़ीड"
+      "value": "सभी खातों के सबसे हाल के प्ले"
     }
   ],
   "web.admin.dashboard.widgetCatalog.recentActivity.title": [
@@ -31913,6 +32997,80 @@
     {
       "type": 0,
       "value": "गतिविधि लोड नहीं की जा सकी।"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.played": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ने "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " को चलाया"
+    }
+  ],
+  "web.admin.dashboard.widgets.recentActivity.playedWithProfile": [
+    {
+      "type": 8,
+      "value": "user",
+      "children": [
+        {
+          "type": 1,
+          "value": "username"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 8,
+      "value": "pill",
+      "children": [
+        {
+          "type": 1,
+          "value": "profile"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " ने "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 1,
+          "value": "title"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " को चलाया"
     }
   ],
   "web.admin.dashboard.widgets.recentActivity.startedWatching": [
@@ -44772,6 +45930,114 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.libraries.activity.emptyDescription": [
+    {
+      "type": 0,
+      "value": "स्कैन और मेटाडेटा रीफ़्रेश चलते समय यहाँ दिखाई देते हैं।"
+    }
+  ],
+  "web.admin.libraries.activity.emptyTitle": [
+    {
+      "type": 0,
+      "value": "कोई स्कैन या रीफ़्रेश जारी नहीं है"
+    }
+  ],
+  "web.admin.libraries.activity.filterAll": [
+    {
+      "type": 0,
+      "value": "सभी ("
+    },
+    {
+      "type": 1,
+      "value": "count"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.libraries.activity.hideQueue": [
+    {
+      "type": 0,
+      "value": "कतार छिपाएँ"
+    }
+  ],
+  "web.admin.libraries.activity.moreLibraries": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " और लाइब्रेरी"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "+ "
+            },
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " और लाइब्रेरी"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.activity.refreshSectionTitle": [
+    {
+      "type": 0,
+      "value": "मेटाडेटा रीफ़्रेश"
+    }
+  ],
+  "web.admin.libraries.activity.refreshingMetadata": [
+    {
+      "type": 0,
+      "value": "मेटाडेटा रीफ़्रेश हो रहा है…"
+    }
+  ],
+  "web.admin.libraries.activity.viewQueue": [
+    {
+      "type": 0,
+      "value": "कतार देखें"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.high": [
+    {
+      "type": 0,
+      "value": "ज़्यादा"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.low": [
+    {
+      "type": 0,
+      "value": "कम"
+    }
+  ],
+  "web.admin.libraries.ambiguousRoots.confidence.medium": [
+    {
+      "type": 0,
+      "value": "मध्यम"
+    }
+  ],
   "web.admin.libraries.ambiguousRoots.description": [
     {
       "type": 0,
@@ -45202,6 +46468,30 @@
       "value": "खाली रूट की सफ़ाई की पुष्टि करें"
     }
   ],
+  "web.admin.libraries.health.inspect": [
+    {
+      "type": 0,
+      "value": "जाँचें"
+    }
+  ],
+  "web.admin.libraries.health.matcherEmpty": [
+    {
+      "type": 0,
+      "value": "मेटाडेटा मैचर कतार में कोई आइटम इंतज़ार में नहीं है।"
+    }
+  ],
+  "web.admin.libraries.health.skippedEmpty": [
+    {
+      "type": 0,
+      "value": "छोड़ा गया कोई रूट दर्ज नहीं है।"
+    }
+  ],
+  "web.admin.libraries.health.staleEmpty": [
+    {
+      "type": 0,
+      "value": "कोई पुराना एक्सटर्नल ID दर्ज नहीं है।"
+    }
+  ],
   "web.admin.libraries.list.confirmCleanupTitle": [
     {
       "type": 0,
@@ -45238,6 +46528,18 @@
     {
       "type": 0,
       "value": " में बदलाव करें"
+    }
+  ],
+  "web.admin.libraries.list.editAction": [
+    {
+      "type": 0,
+      "value": "बदलाव करें"
+    }
+  ],
+  "web.admin.libraries.list.empty": [
+    {
+      "type": 0,
+      "value": "अभी तक कोई लाइब्रेरी सेट अप नहीं की गई है।"
     }
   ],
   "web.admin.libraries.list.emptyRootGuarded": [
@@ -45290,6 +46592,12 @@
       "value": "पाथ छिपाएँ"
     }
   ],
+  "web.admin.libraries.list.idle": [
+    {
+      "type": 0,
+      "value": "निष्क्रिय"
+    }
+  ],
   "web.admin.libraries.list.moreActions": [
     {
       "type": 1,
@@ -45324,6 +46632,12 @@
       "value": "आंशिक स्कैन"
     }
   ],
+  "web.admin.libraries.list.refreshMetadataDescription": [
+    {
+      "type": 0,
+      "value": "गायब मेटाडेटा भरें या पूरा मेटाडेटा बदलें"
+    }
+  ],
   "web.admin.libraries.list.rescanMetadata": [
     {
       "type": 0,
@@ -45336,6 +46650,12 @@
       "value": "रूट तक पहुँच नहीं"
     }
   ],
+  "web.admin.libraries.list.scanAction": [
+    {
+      "type": 0,
+      "value": "स्कैन करें"
+    }
+  ],
   "web.admin.libraries.list.scanLibrary": [
     {
       "type": 0,
@@ -45346,6 +46666,12 @@
     {
       "type": 0,
       "value": "पाथ दिखाएँ"
+    }
+  ],
+  "web.admin.libraries.list.stopAction": [
+    {
+      "type": 0,
+      "value": "रोकें"
     }
   ],
   "web.admin.libraries.list.stopRefresh": [
@@ -45364,6 +46690,26 @@
     {
       "type": 0,
       "value": "माउंट जाँचें"
+    }
+  ],
+  "web.admin.libraries.list.verifyMountsDescription": [
+    {
+      "type": 0,
+      "value": "जाँचें कि लाइब्रेरी के सभी फ़ोल्डरों तक पहुँचा जा सकता है"
+    }
+  ],
+  "web.admin.libraries.list.viewScansFor": [
+    {
+      "type": 0,
+      "value": "लाइब्रेरी "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": " के जारी स्कैन देखें"
     }
   ],
   "web.admin.libraries.list.warningAt": [
@@ -45467,7 +46813,7 @@
   "web.admin.libraries.page.subtitle": [
     {
       "type": 0,
-      "value": "लाइब्रेरी रूट और स्कैन प्रबंधित करें। कैटलॉग इंपोर्ट/एक्सपोर्ट अब रखरखाव में है।"
+      "value": "मीडिया फ़ोल्डर प्रबंधित करें, स्कैन पर नज़र रखें और मैचिंग की समस्याएँ हल करें।"
     }
   ],
   "web.admin.libraries.page.title": [
@@ -45942,6 +47288,56 @@
       "value": "पुराने एक्सटर्नल ID"
     }
   ],
+  "web.admin.libraries.tabs.activeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " जारी"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 7
+            },
+            {
+              "type": 0,
+              "value": " जारी"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.libraries.tabs.activity": [
+    {
+      "type": 0,
+      "value": "स्कैन गतिविधि"
+    }
+  ],
+  "web.admin.libraries.tabs.health": [
+    {
+      "type": 0,
+      "value": "कैटलॉग की स्थिति"
+    }
+  ],
+  "web.admin.libraries.tabs.libraries": [
+    {
+      "type": 0,
+      "value": "लाइब्रेरी"
+    }
+  ],
   "web.admin.libraries.toast.cancelJobFailed": [
     {
       "type": 0,
@@ -46384,6 +47780,24 @@
     {
       "type": 0,
       "value": "अनदेखा किए गए आइटम टाइटल, लाइब्रेरी या प्रकार से खोजें…"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.ambiguous": [
+    {
+      "type": 0,
+      "value": "अस्पष्ट"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.pending": [
+    {
+      "type": 0,
+      "value": "लंबित"
+    }
+  ],
+  "web.admin.libraries.unmatched.status.unmatched": [
+    {
+      "type": 0,
+      "value": "मैच नहीं हुआ"
     }
   ],
   "web.admin.libraries.unmatched.title": [
@@ -48218,6 +49632,12 @@
       "value": " रेंडर पाथ से नहीं, इसलिए डिवाइस पिकर इस पर लागू नहीं होता। इसे खाली छोड़ने पर क्लस्टर-व्यापी डिवाइस सेटिंग ली जाती है, जिसका NVENC के इस्तेमाल के लिए खुद CUDA पहचान होना ज़रूरी है — जब क्लस्टर रेंडर पाथ से कॉन्फ़िगर हो, तब यहाँ कोई पहचान सेट करें।"
     }
   ],
+  "web.admin.nodes.form.envManaged": [
+    {
+      "type": 0,
+      "value": "यह इस नोड के एनवायरनमेंट में सेट है। इसे वहीं बदलें और नोड रीस्टार्ट करें।"
+    }
+  ],
   "web.admin.nodes.form.gpuDevices": [
     {
       "type": 0,
@@ -48998,6 +50418,12 @@
     {
       "type": 0,
       "value": "सेटिंग पूरी करने के लिए सर्वर का पता डालें।"
+    }
+  ],
+  "web.admin.nodes.key.deploymentManaged": [
+    {
+      "type": 0,
+      "value": "कुंजी सर्वर के डिप्लॉयमेंट कॉन्फ़िगरेशन में सेट है"
     }
   ],
   "web.admin.nodes.key.dialogTitle": [
@@ -49904,6 +51330,12 @@
     {
       "type": 0,
       "value": " मिटाएँ"
+    }
+  ],
+  "web.admin.nodes.unit.deleteDeploymentManaged": [
+    {
+      "type": 0,
+      "value": "यह सर्वर के डिप्लॉयमेंट कॉन्फ़िगरेशन में सेट है। इसे यहाँ मिटाने के लिए वहाँ से हटाएँ और API सर्वर रीस्टार्ट करें।"
     }
   ],
   "web.admin.nodes.unit.disabledNote": [
@@ -51703,6 +53135,68 @@
       "value": "प्लगइन"
     }
   ],
+  "web.admin.plugins.provisioning.applied": [
+    {
+      "type": 0,
+      "value": "लागू"
+    }
+  ],
+  "web.admin.plugins.provisioning.held": [
+    {
+      "type": 0,
+      "value": "रोका गया"
+    }
+  ],
+  "web.admin.plugins.provisioning.loadError": [
+    {
+      "type": 0,
+      "value": "प्लगइन प्रोविज़निंग की स्थिति लोड नहीं की जा सकी।"
+    }
+  ],
+  "web.admin.plugins.provisioning.managed": [
+    {
+      "type": 0,
+      "value": "एनवायरनमेंट द्वारा नियंत्रित"
+    }
+  ],
+  "web.admin.plugins.provisioning.pending": [
+    {
+      "type": 0,
+      "value": "लंबित"
+    }
+  ],
+  "web.admin.plugins.provisioning.refused": [
+    {
+      "type": 0,
+      "value": "अस्वीकृत"
+    }
+  ],
+  "web.admin.plugins.provisioning.sourceManaged": [
+    {
+      "type": 0,
+      "value": "पैकेज सोर्स और हटाने का नियंत्रण डिप्लॉयमेंट के पास है।"
+    }
+  ],
+  "web.admin.plugins.provisioning.title": [
+    {
+      "type": 0,
+      "value": "प्रोविज़निंग की स्थिति"
+    }
+  ],
+  "web.admin.plugins.provisioning.versionPinned": [
+    {
+      "type": 0,
+      "value": "डिप्लॉयमेंट ने इस प्लगइन को वर्शन "
+    },
+    {
+      "type": 1,
+      "value": "version"
+    },
+    {
+      "type": 0,
+      "value": " पर पिन किया है।"
+    }
+  ],
   "web.admin.plugins.rail.about": [
     {
       "type": 0,
@@ -52002,7 +53496,7 @@
   "web.admin.plugins.settings.tasksDescription": [
     {
       "type": 0,
-      "value": "टास्क सर्वर शुरू होने पर रजिस्टर होते हैं, इसलिए किसी टास्क को चालू या बंद करने का असर रीस्टार्ट के बाद होता है। टास्क बन जाने के बाद, उसका शेड्यूल उसके टास्क पेज पर बदलें।"
+      "value": "किसी टास्क को चालू या बंद करना बिना रीस्टार्ट के लागू हो जाता है, हालाँकि दूसरे सर्वरों तक यह बदलाव पहुँचने में थोड़ा समय लग सकता है। टास्क चालू हो जाने के बाद, उसका शेड्यूल उसके टास्क पेज पर बदलें।"
     }
   ],
   "web.admin.plugins.settings.tasksTitle": [
@@ -52407,6 +53901,260 @@
       "value": "मॉडल"
     }
   ],
+  "web.admin.recommendations.external.budgetExhausted": [
+    {
+      "type": 0,
+      "value": "एक रन की सीमा पूरी हो गई। अगले रन में काम जारी रहेगा।"
+    }
+  ],
+  "web.admin.recommendations.external.lastRunCounts": [
+    {
+      "type": 0,
+      "value": "जाँचे गए टाइटल: "
+    },
+    {
+      "type": 1,
+      "value": "details"
+    },
+    {
+      "type": 0,
+      "value": " · एम्बेड किए गए: "
+    },
+    {
+      "type": 1,
+      "value": "vectors"
+    },
+    {
+      "type": 0,
+      "value": " · TMDB अनुरोध: "
+    },
+    {
+      "type": 1,
+      "value": "requests"
+    }
+  ],
+  "web.admin.recommendations.external.off": [
+    {
+      "type": 0,
+      "value": "बंद। रन सिर्फ़ पुराने टाइटल हटाते हैं।"
+    }
+  ],
+  "web.admin.recommendations.external.pendingRestart": [
+    {
+      "type": 0,
+      "value": "सुझाव बनना बंद हो गया है। सर्वर के रीस्टार्ट होने तक स्टोर किए गए सुझाव डिस्कवर में दिखते रहेंगे।"
+    }
+  ],
+  "web.admin.recommendations.external.phaseRows": [
+    {
+      "type": 0,
+      "value": "प्रोफ़ाइलों की रैंकिंग हो रही है ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseSources": [
+    {
+      "type": 0,
+      "value": "TMDB सूचियाँ फ़ेच हो रही हैं ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.phaseTitles": [
+    {
+      "type": 0,
+      "value": "टाइटल जाँचे और एम्बेड किए जा रहे हैं ("
+    },
+    {
+      "type": 1,
+      "value": "done_text"
+    },
+    {
+      "type": 0,
+      "value": " / "
+    },
+    {
+      "type": 1,
+      "value": "total_text"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.recommendations.external.prunedCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " एक्सपायर हुआ टाइटल हटाया गया"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " एक्सपायर हुए टाइटल हटाए गए"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.rowsBuilt": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " पंक्ति बनाई गई"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " पंक्तियाँ बनाई गईं"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.skipLockConflict": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव बनाने से पहले नीचे दिया गया एम्बेडिंग लॉक कॉन्फ़्लिक्ट हल करें।"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoLock": [
+    {
+      "type": 0,
+      "value": "पहले एम्बेडिंग जॉब चलाएँ, ताकि Silo के पास तुलना के लिए लाइब्रेरी वेक्टर हों।"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoProvider": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव बनाने से पहले AI सेवाएँ में कोई एम्बेडिंग प्रोवाइडर कनेक्ट करें।"
+    }
+  ],
+  "web.admin.recommendations.external.skipNoTasteProfiles": [
+    {
+      "type": 0,
+      "value": "अभी किसी भी प्रोफ़ाइल की रुचि प्रोफ़ाइल नहीं है। जब किसी ने टाइटल देखे हों या उन्हें रेटिंग दी हो, तब रुचि प्रोफ़ाइलें जॉब चलाएँ।"
+    }
+  ],
+  "web.admin.recommendations.external.titlesStored": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "सुझाव देने के लिए "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " टाइटल"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "सुझाव देने के लिए "
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " टाइटल"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.external.vectorsSkipped": [
+    {
+      "type": 0,
+      "value": "कुछ भी एम्बेड नहीं किया गया: "
+    },
+    {
+      "type": 1,
+      "value": "reason"
+    }
+  ],
   "web.admin.recommendations.jobs.cacheRefreshed": [
     {
       "type": 0,
@@ -52465,6 +54213,12 @@
       },
       "offset": 0,
       "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.jobs.external": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव"
     }
   ],
   "web.admin.recommendations.jobs.itemsProgress": [
@@ -52753,6 +54507,12 @@
       "value": "एम्बेडिंग जॉब शुरू नहीं की जा सकी"
     }
   ],
+  "web.admin.recommendations.jobs.triggerExternalFailed": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव शुरू नहीं किए जा सके"
+    }
+  ],
   "web.admin.recommendations.jobs.triggerRecommendationsFailed": [
     {
       "type": 0,
@@ -52871,6 +54631,44 @@
       "value": " को साफ़ किया गया।"
     }
   ],
+  "web.admin.recommendations.reset.doneWithExternal": [
+    {
+      "type": 0,
+      "value": "एम्बेडिंग रीसेट की गईं: "
+    },
+    {
+      "type": 1,
+      "value": "embeddings"
+    },
+    {
+      "type": 0,
+      "value": ", "
+    },
+    {
+      "type": 1,
+      "value": "external_embeddings"
+    },
+    {
+      "type": 0,
+      "value": " और "
+    },
+    {
+      "type": 1,
+      "value": "external_rows"
+    },
+    {
+      "type": 0,
+      "value": " को मिटाया गया, और "
+    },
+    {
+      "type": 1,
+      "value": "profiles"
+    },
+    {
+      "type": 0,
+      "value": " को साफ़ किया गया।"
+    }
+  ],
   "web.admin.recommendations.reset.embeddingCount": [
     {
       "type": 6,
@@ -52897,6 +54695,74 @@
             {
               "type": 0,
               "value": " एम्बेडिंग"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalEmbeddingCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डिस्कवर एम्बेडिंग"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डिस्कवर एम्बेडिंग"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.admin.recommendations.reset.externalRowCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डिस्कवर पंक्ति"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डिस्कवर पंक्तियाँ"
             }
           ]
         }
@@ -53715,6 +55581,30 @@
       "value": ":"
     }
   ],
+  "web.admin.requests.discover.describe.recommended": [
+    {
+      "type": 5,
+      "value": "media",
+      "options": {
+        "series": {
+          "value": [
+            {
+              "type": 0,
+              "value": "हर दर्शक के लिए सुझाई गई सीरीज़"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "हर दर्शक के लिए सुझाई गई फ़िल्में"
+            }
+          ]
+        }
+      }
+    }
+  ],
   "web.admin.requests.discover.fieldError": [
     {
       "type": 1,
@@ -53763,6 +55653,18 @@
     {
       "type": 0,
       "value": "नेटवर्क कार्ड, हर कार्ड उस नेटवर्क की सीरीज़ खोलता है।"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.label": [
+    {
+      "type": 0,
+      "value": "सुझाव"
+    }
+  ],
+  "web.admin.requests.discover.kind.recommended.sentence": [
+    {
+      "type": 0,
+      "value": "ऐसे टाइटल जो अभी लाइब्रेरी में नहीं हैं, हर दर्शक के लिए उनके देखे गए टाइटल के आधार पर चुने गए।"
     }
   ],
   "web.admin.requests.discover.kind.studios.label": [
@@ -54077,6 +55979,38 @@
     {
       "type": 0,
       "value": "वह क्षेत्र चुनें जिसमें स्ट्रीमिंग सेवाएँ उपलब्ध हैं।"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOff": [
+    {
+      "type": 0,
+      "value": "जब तक एडमिन → सुझाव में डिस्कवर सुझाव चालू नहीं किए जाते, यह खाली रहेगी।"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffBanner": [
+    {
+      "type": 0,
+      "value": "जब तक "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "एडमिन → सुझाव"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " में डिस्कवर सुझाव चालू नहीं किए जाते, सुझाव वाली पंक्तियाँ खाली रहेंगी।"
+    }
+  ],
+  "web.admin.requests.discover.recommendedOffShort": [
+    {
+      "type": 0,
+      "value": "सुझाव में बंद"
     }
   ],
   "web.admin.requests.discover.sort.highestGrossing": [
@@ -55481,6 +57415,12 @@
       "value": "सूची का लाइव प्रीव्यू"
     }
   ],
+  "web.admin.requests.rowDialog.livePreviewRecommended": [
+    {
+      "type": 0,
+      "value": "आपके अपने सुझावों का प्रीव्यू"
+    }
+  ],
   "web.admin.requests.rowDialog.livePreviewTmdb": [
     {
       "type": 0,
@@ -55543,6 +57483,12 @@
       "value": "नई पंक्तियाँ डिस्कवर में सबसे नीचे जुड़ती हैं"
     }
   ],
+  "web.admin.requests.rowDialog.openRecommendations": [
+    {
+      "type": 0,
+      "value": "सुझाव सेटिंग खोलें"
+    }
+  ],
   "web.admin.requests.rowDialog.order": [
     {
       "type": 0,
@@ -55555,6 +57501,12 @@
       "value": "MDBList की फ़ीड में सूची के पेज पर सेव किया गया क्रम नहीं आता। वह क्रम चुनें जो वहाँ दिखता है।"
     }
   ],
+  "web.admin.requests.rowDialog.previewEmptyRecommended": [
+    {
+      "type": 0,
+      "value": "आपकी प्रोफ़ाइल के लिए अभी कोई डिस्कवर सुझाव नहीं हैं। इस पंक्ति का प्रीव्यू देखने के लिए डिस्कवर सुझाव चलाएँ या कुछ टाइटल देखें और उन्हें रेटिंग दें।"
+    }
+  ],
   "web.admin.requests.rowDialog.previewOff.chart": [
     {
       "type": 0,
@@ -55565,6 +57517,12 @@
     {
       "type": 0,
       "value": "टाइटल देखने के लिए कोई सूची चुनें या उसका लिंक पेस्ट करें।"
+    }
+  ],
+  "web.admin.requests.rowDialog.previewOff.recommended": [
+    {
+      "type": 0,
+      "value": "इस पंक्ति का प्रीव्यू देखने के लिए एडमिन → सुझाव में डिस्कवर सुझाव चालू करें।"
     }
   ],
   "web.admin.requests.rowDialog.previewOff.region": [
@@ -56383,6 +58341,12 @@
     {
       "type": 0,
       "value": "मैसेज भेजा गया"
+    }
+  ],
+  "web.admin.sessions.playback.toast.messageUnconfirmed": [
+    {
+      "type": 0,
+      "value": "प्लेयर ने मैसेज मिलने की पुष्टि नहीं की। हो सकता है कि यह देर से दिखे या बिल्कुल न दिखे।"
     }
   ],
   "web.admin.sessions.playback.toast.pauseFallback": [
@@ -59261,6 +61225,12 @@
       "value": "कनेक्शन की जाँच विफल रही।"
     }
   ],
+  "web.admin.settings.fields.envStatusUnknown": [
+    {
+      "type": 0,
+      "value": "यह जाँचा नहीं जा सका कि सर्वर का एनवायरनमेंट इसे सेट करता है या नहीं। इसे बदलने के लिए पेज फिर से लोड करें।"
+    }
+  ],
   "web.admin.settings.fields.groupUnsavedChanges": [
     {
       "type": 0,
@@ -59271,6 +61241,20 @@
     {
       "type": 0,
       "value": "सेटिंग लोड हो रही हैं…"
+    }
+  ],
+  "web.admin.settings.fields.managedByEnv": [
+    {
+      "type": 0,
+      "value": "सर्वर के एनवायरनमेंट में "
+    },
+    {
+      "type": 1,
+      "value": "env"
+    },
+    {
+      "type": 0,
+      "value": " से सेट किया गया।"
     }
   ],
   "web.admin.settings.fields.passwordConfigured": [
@@ -59407,12 +61391,6 @@
     {
       "type": 0,
       "value": "भरोसेमंद प्रॉक्सी"
-    }
-  ],
-  "web.admin.settings.general.network.trustedProxies.managed": [
-    {
-      "type": 0,
-      "value": "SILO_TRUSTED_PROXIES से मैनेज किया जाता है।"
     }
   ],
   "web.admin.settings.general.title": [
@@ -59807,6 +61785,30 @@
     {
       "type": 0,
       "value": "चैनल अपडेट नहीं किया जा सका"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.description": [
+    {
+      "type": 0,
+      "value": "मौजूदा वैल्यू देखने के लिए फिर से लोड करें। अगर इस पेज पर कुछ बदला है, या आपने किसी सेव किए गए पासवर्ड या कुंजी में बदलाव किया है, तो आपके सभी बदलाव वापस ले लिए जाएँगे; नहीं तो वे बने रहेंगे।"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reload": [
+    {
+      "type": 0,
+      "value": "फिर से लोड करें"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.reloadFailed": [
+    {
+      "type": 0,
+      "value": "सेटिंग फिर से लोड नहीं की जा सकी। फिर से कोशिश करें।"
+    }
+  ],
+  "web.admin.settings.hooks.settings.conflict.title": [
+    {
+      "type": 0,
+      "value": "सेटिंग कहीं और बदली गई हैं"
     }
   ],
   "web.admin.settings.hooks.settings.jellyfinCompat.updateFailed": [
@@ -61811,6 +63813,616 @@
       "value": "ऑनलाइन मार्कर सिंक करें"
     }
   ],
+  "web.admin.settings.network.direct.algorithm": [
+    {
+      "type": 0,
+      "value": "एल्गोरिदम: "
+    },
+    {
+      "type": 1,
+      "value": "algorithm"
+    }
+  ],
+  "web.admin.settings.network.direct.algorithmRequestedActive": [
+    {
+      "type": 0,
+      "value": "अनुरोध किया गया: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; सक्रिय: "
+    },
+    {
+      "type": 1,
+      "value": "active"
+    }
+  ],
+  "web.admin.settings.network.direct.allowed": [
+    {
+      "type": 0,
+      "value": "अनुमत: "
+    },
+    {
+      "type": 1,
+      "value": "values"
+    }
+  ],
+  "web.admin.settings.network.direct.congestionControl": [
+    {
+      "type": 0,
+      "value": "कंजेशन कंट्रोल: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.account": [
+    {
+      "type": 0,
+      "value": "खाता"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.connectedSince": [
+    {
+      "type": 0,
+      "value": "इस पाथ पर कब से"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.device": [
+    {
+      "type": 0,
+      "value": "डिवाइस"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.empty": [
+    {
+      "type": 0,
+      "value": "कोई डिवाइस सीधे कनेक्ट नहीं है।"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.peerEndpoint": [
+    {
+      "type": 0,
+      "value": "पीयर एंडपॉइंट"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.title": [
+    {
+      "type": 0,
+      "value": "कनेक्ट किए गए डिवाइस"
+    }
+  ],
+  "web.admin.settings.network.direct.connected.toPort": [
+    {
+      "type": 0,
+      "value": "पोर्ट "
+    },
+    {
+      "type": 1,
+      "value": "port"
+    },
+    {
+      "type": 0,
+      "value": " पर"
+    }
+  ],
+  "web.admin.settings.network.direct.defaultValue": [
+    {
+      "type": 0,
+      "value": "डिफ़ॉल्ट: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.description": [
+    {
+      "type": 0,
+      "value": "डायरेक्ट कनेक्शन के लिए इस सर्वर की तैयारी जाँचें।"
+    }
+  ],
+  "web.admin.settings.network.direct.effective": [
+    {
+      "type": 0,
+      "value": "लागू: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.enable": [
+    {
+      "type": 0,
+      "value": "डायरेक्ट कनेक्शन चालू करें"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.cap_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN क्षमता"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.engine": [
+    {
+      "type": 0,
+      "value": "डायरेक्ट कनेक्शन इंजन"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_hairpin": [
+    {
+      "type": 0,
+      "value": "NAT हेयरपिन"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.nat_mapping": [
+    {
+      "type": 0,
+      "value": "NAT मैपिंग"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.pmtu_fallback": [
+    {
+      "type": 0,
+      "value": "PMTU फ़ॉलबैक"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.reachability": [
+    {
+      "type": 0,
+      "value": "पहुँच-योग्यता"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_receive_buffer": [
+    {
+      "type": 0,
+      "value": "सॉकेट रिसीव बफ़र"
+    }
+  ],
+  "web.admin.settings.network.direct.feature.socket_send_buffer": [
+    {
+      "type": 0,
+      "value": "सॉकेट सेंड बफ़र"
+    }
+  ],
+  "web.admin.settings.network.direct.hostTuning": [
+    {
+      "type": 0,
+      "value": "होस्ट ट्यूनिंग"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directAckDecimation": [
+    {
+      "type": 0,
+      "value": "ACK डेसिमेशन"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directBbrLoss": [
+    {
+      "type": 0,
+      "value": "BBR लॉस पॉलिसी"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directGso": [
+    {
+      "type": 0,
+      "value": "UDP सेगमेंटेशन ऑफ़लोड"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directReceiveWindow": [
+    {
+      "type": 0,
+      "value": "क्लाइंट रिसीव विंडो"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.directUdpPort": [
+    {
+      "type": 0,
+      "value": "डायरेक्ट कनेक्शन UDP पोर्ट"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpCongestion": [
+    {
+      "type": 0,
+      "value": "TCP कंजेशन कंट्रोल"
+    }
+  ],
+  "web.admin.settings.network.direct.knob.tcpSendBuffer": [
+    {
+      "type": 0,
+      "value": "TCP सेंड बफ़र"
+    }
+  ],
+  "web.admin.settings.network.direct.lastChecked": [
+    {
+      "type": 0,
+      "value": "पिछली जाँच: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
+  "web.admin.settings.network.direct.listener.proxy": [
+    {
+      "type": 0,
+      "value": "प्रॉक्सी"
+    }
+  ],
+  "web.admin.settings.network.direct.listeners": [
+    {
+      "type": 0,
+      "value": "लिसनर"
+    }
+  ],
+  "web.admin.settings.network.direct.observedAddress": [
+    {
+      "type": 0,
+      "value": "देखा गया पब्लिक पता: "
+    },
+    {
+      "type": 1,
+      "value": "address"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.description": [
+    {
+      "type": 0,
+      "value": "राउटर में UPnP, NAT-PMP या PCP का समर्थन जाँचें।"
+    }
+  ],
+  "web.admin.settings.network.direct.portMapping.label": [
+    {
+      "type": 0,
+      "value": "पोर्ट मैपिंग"
+    }
+  ],
+  "web.admin.settings.network.direct.readinessNote": [
+    {
+      "type": 0,
+      "value": "तैयारी की जाँच से डायरेक्ट प्लेबैक शुरू नहीं होता।"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.admin_off": [
+    {
+      "type": 0,
+      "value": "एडमिनिस्ट्रेटर द्वारा बंद किया गया"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.disabled": [
+    {
+      "type": 0,
+      "value": "बंद"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.engine_start_failed": [
+    {
+      "type": 0,
+      "value": "डायरेक्ट कनेक्शन इंजन शुरू नहीं हो सका"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.force_failed": [
+    {
+      "type": 0,
+      "value": "बफ़र बढ़ाया नहीं जा सका"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.gateway_unsupported": [
+    {
+      "type": 0,
+      "value": "राउटर पोर्ट मैपिंग का समर्थन नहीं करता"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.granted_below_request": [
+    {
+      "type": 0,
+      "value": "बफ़र अनुरोध से छोटा है"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.helper_unavailable": [
+    {
+      "type": 0,
+      "value": "नेटवर्क ट्यूनिंग हेल्पर उपलब्ध नहीं है"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.invalid": [
+    {
+      "type": 0,
+      "value": "अमान्य वैल्यू; बंद किया गया"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_error": [
+    {
+      "type": 0,
+      "value": "सिस्टम यह सेटिंग लागू नहीं कर सका या पढ़ नहीं सका"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.kernel_unsupported": [
+    {
+      "type": 0,
+      "value": "यह कर्नेल इसका समर्थन नहीं करता"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limit": [
+    {
+      "type": 0,
+      "value": "होस्ट की बफ़र सीमा पूरी हो गई"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.limits_unknown": [
+    {
+      "type": 0,
+      "value": "होस्ट की बफ़र सीमाएँ पढ़ी नहीं जा सकीं"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.mapping_varies": [
+    {
+      "type": 0,
+      "value": "पब्लिक पता डेस्टिनेशन के हिसाब से बदलता है"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_missing": [
+    {
+      "type": 0,
+      "value": "BBR उपलब्ध नहीं है"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.module_not_loaded": [
+    {
+      "type": 0,
+      "value": "BBR लोड नहीं है या इसकी अनुमति नहीं है"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.multiple_api_replicas": [
+    {
+      "type": 0,
+      "value": "एक से ज़्यादा API सर्वर चल रहे हैं"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.net_admin_dropped": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN क्षमता छोड़ दी गई"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_cap_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN क्षमता मौजूद नहीं है"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_gateway": [
+    {
+      "type": 0,
+      "value": "कोई राउटर नहीं मिला"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.no_net_admin": [
+    {
+      "type": 0,
+      "value": "NET_ADMIN क्षमता मौजूद नहीं है"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_allowed": [
+    {
+      "type": 0,
+      "value": "अनुमति नहीं मिली"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_available": [
+    {
+      "type": 0,
+      "value": "उपलब्ध नहीं है"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_measured": [
+    {
+      "type": 0,
+      "value": "मापा नहीं गया"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.not_needed": [
+    {
+      "type": 0,
+      "value": "बढ़ाने की ज़रूरत नहीं"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.overridden": [
+    {
+      "type": 0,
+      "value": "होस्ट की पॉलिसी ने दूसरा एल्गोरिदम चुना"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.probe_failed": [
+    {
+      "type": 0,
+      "value": "जाँच विफल रही"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_census_unavailable": [
+    {
+      "type": 0,
+      "value": "दूसरे API सर्वरों की जाँच नहीं की जा सकी"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_held": [
+    {
+      "type": 0,
+      "value": "दूसरा API सर्वर डायरेक्ट कनेक्शन होस्ट करता है"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.replica_lease_pending": [
+    {
+      "type": 0,
+      "value": "डायरेक्ट कनेक्शन होस्ट बनने का इंतज़ार है"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.state_store_unavailable": [
+    {
+      "type": 0,
+      "value": "डायरेक्ट कनेक्शन की स्थिति उपलब्ध नहीं है"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_bind_failed": [
+    {
+      "type": 0,
+      "value": "UDP पोर्ट खोला नहीं जा सका"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.udp_port_invalid": [
+    {
+      "type": 0,
+      "value": "UDP पोर्ट अमान्य है"
+    }
+  ],
+  "web.admin.settings.network.direct.reason.unsupported_platform": [
+    {
+      "type": 0,
+      "value": "इस प्लेटफ़ॉर्म पर समर्थित नहीं है"
+    }
+  ],
+  "web.admin.settings.network.direct.reasonWithErrno": [
+    {
+      "type": 1,
+      "value": "reason"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "errno"
+    },
+    {
+      "type": 0,
+      "value": ")"
+    }
+  ],
+  "web.admin.settings.network.direct.requested": [
+    {
+      "type": 0,
+      "value": "अनुरोध किया गया: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.admin.settings.network.direct.requestedGranted": [
+    {
+      "type": 0,
+      "value": "अनुरोध किया गया: "
+    },
+    {
+      "type": 1,
+      "value": "requested"
+    },
+    {
+      "type": 0,
+      "value": "; मिला: "
+    },
+    {
+      "type": 1,
+      "value": "granted"
+    }
+  ],
+  "web.admin.settings.network.direct.runCheck": [
+    {
+      "type": 0,
+      "value": "जाँच चलाएँ"
+    }
+  ],
+  "web.admin.settings.network.direct.sendBuffer": [
+    {
+      "type": 0,
+      "value": "सेंड बफ़र: "
+    },
+    {
+      "type": 1,
+      "value": "state"
+    }
+  ],
+  "web.admin.settings.network.direct.state.capped": [
+    {
+      "type": 0,
+      "value": "सीमित"
+    }
+  ],
+  "web.admin.settings.network.direct.state.degraded": [
+    {
+      "type": 0,
+      "value": "कम क्वालिटी पर"
+    }
+  ],
+  "web.admin.settings.network.direct.state.fallback": [
+    {
+      "type": 0,
+      "value": "फ़ॉलबैक"
+    }
+  ],
+  "web.admin.settings.network.direct.state.notNeeded": [
+    {
+      "type": 0,
+      "value": "ज़रूरत नहीं"
+    }
+  ],
+  "web.admin.settings.network.direct.state.off": [
+    {
+      "type": 0,
+      "value": "बंद"
+    }
+  ],
+  "web.admin.settings.network.direct.state.on": [
+    {
+      "type": 0,
+      "value": "चालू"
+    }
+  ],
+  "web.admin.settings.network.direct.state.unknown": [
+    {
+      "type": 0,
+      "value": "अज्ञात"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.description": [
+    {
+      "type": 0,
+      "value": "ज़्यादा से ज़्यादा आठ host:port एंट्री की कॉमा से अलग की गई सूची। डिफ़ॉल्ट इस्तेमाल करने के लिए इसे खाली छोड़ें।"
+    }
+  ],
+  "web.admin.settings.network.direct.stunServers.label": [
+    {
+      "type": 0,
+      "value": "STUN सर्वर"
+    }
+  ],
+  "web.admin.settings.network.direct.title": [
+    {
+      "type": 0,
+      "value": "डायरेक्ट कनेक्शन"
+    }
+  ],
+  "web.admin.settings.network.direct.udpDescription": [
+    {
+      "type": 0,
+      "value": "डिवाइसों को डायरेक्ट UDP पाथ से इस सर्वर तक पहुँचने दें। UDP पोर्ट "
+    },
+    {
+      "type": 1,
+      "value": "variable"
+    },
+    {
+      "type": 0,
+      "value": " से आता है और यहाँ सिर्फ़ पढ़ा जा सकता है।"
+    }
+  ],
   "web.admin.settings.network.host.apiServer": [
     {
       "type": 0,
@@ -62877,136 +65489,10 @@
       "value": "सूचना सेटिंग लोड नहीं की जा सकी"
     }
   ],
-  "web.admin.settings.notifications.pausedRecording": [
-    {
-      "type": 0,
-      "value": "नया कंटेंट रिकॉर्ड नहीं हो रहा है, इसलिए कुछ भी भेजा नहीं जा सकता। इसे प्रोसेसिंग में फिर से चालू करें।"
-    }
-  ],
-  "web.admin.settings.notifications.pausedSending": [
-    {
-      "type": 0,
-      "value": "भेजना रुका हुआ है; नया कंटेंट कतार में इंतज़ार कर रहा है। इसे प्रोसेसिंग में फिर से चालू करें।"
-    }
-  ],
   "web.admin.settings.notifications.perEpisodeOffDescription": [
     {
       "type": 0,
       "value": "बंद होने पर उन्हें इसकी जगह रोज़ का सारांश भेजा जाता है।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.description": [
-    {
-      "type": 0,
-      "value": "Silo नया कंटेंट कैसे पहचानता है, उसे मैसेज में कैसे ग्रुप करता है, और उन्हें कितने समय तक रखता है।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanout": [
-    {
-      "type": 0,
-      "value": "पता करें कि इसे कौन चाहता है"
-    }
-  ],
-  "web.admin.settings.notifications.processing.fanoutDescription": [
-    {
-      "type": 0,
-      "value": "हर आइटम को सभी की पसंद से मिलाएँ।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.grouping": [
-    {
-      "type": 0,
-      "value": "ग्रुपिंग और फ़्लड कंट्रोल"
-    }
-  ],
-  "web.admin.settings.notifications.processing.label": [
-    {
-      "type": 0,
-      "value": "प्रोसेसिंग"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAge": [
-    {
-      "type": 0,
-      "value": "कंटेंट की अधिकतम उम्र"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxAgeDescription": [
-    {
-      "type": 0,
-      "value": "पुराने आइटम बासी खबर बनकर पहुँचने के बजाय हटा दिए जाते हैं।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShow": [
-    {
-      "type": 0,
-      "value": "हर सीरीज़ के लिए अधिकतम मैसेज"
-    }
-  ],
-  "web.admin.settings.notifications.processing.maxPerShowDescription": [
-    {
-      "type": 0,
-      "value": "इससे ज़्यादा जो भी हो, उसे उस बैच में छोड़ दिया जाता है।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNew": [
-    {
-      "type": 0,
-      "value": "नया कंटेंट पहचानें"
-    }
-  ],
-  "web.admin.settings.notifications.processing.noticeNewDescription": [
-    {
-      "type": 0,
-      "value": "लाइब्रेरी स्कैन के दौरान नए आइटम रिकॉर्ड करें।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.pipeline": [
-    {
-      "type": 0,
-      "value": "पाइपलाइन"
-    }
-  ],
-  "web.admin.settings.notifications.processing.readNotifications": [
-    {
-      "type": 0,
-      "value": "पढ़ी गई सूचनाएँ"
-    }
-  ],
-  "web.admin.settings.notifications.processing.retention": [
-    {
-      "type": 0,
-      "value": "रिटेंशन"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistory": [
-    {
-      "type": 0,
-      "value": "भेजी गई सूचनाओं का इतिहास"
-    }
-  ],
-  "web.admin.settings.notifications.processing.sentHistoryDescription": [
-    {
-      "type": 0,
-      "value": "Silo किन चीज़ों के बारे में पहले ही सूचना दे चुका है, इसका रिकॉर्ड।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settle": [
-    {
-      "type": 0,
-      "value": "सेटल विंडो"
-    }
-  ],
-  "web.admin.settings.notifications.processing.settleDescription": [
-    {
-      "type": 0,
-      "value": "जो आइटम एक साथ स्कैन होकर पूरे होते हैं, वे एक ही सूचना में आते हैं।"
-    }
-  ],
-  "web.admin.settings.notifications.processing.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "बिना पढ़ी सूचनाएँ"
     }
   ],
   "web.admin.settings.notifications.relay.applyUrl": [
@@ -63915,18 +66401,6 @@
     {
       "type": 0,
       "value": "सूचनाएँ"
-    }
-  ],
-  "web.admin.settings.notifications.unit.days": [
-    {
-      "type": 0,
-      "value": "दिन"
-    }
-  ],
-  "web.admin.settings.notifications.unit.hours": [
-    {
-      "type": 0,
-      "value": "घंटे"
     }
   ],
   "web.admin.settings.notifications.unit.seconds": [
@@ -64929,6 +67403,12 @@
       "value": "इतने पर देखा गया मार्क करें"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "क्रेडिट मार्कर वाले टाइटल तब भी देखे गए माने जाते हैं, जब प्लेबैक क्रेडिट तक पहुँच जाए।"
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -65391,6 +67871,92 @@
       "value": "किसी दूसरे मॉडल पर जाने के लिए एम्बेडिंग रीसेट करनी होंगी, जिससे वे सभी मिट जाती हैं। उसी मॉडल वाला कोई दूसरा प्रोवाइडर रीस्टार्ट के बाद लागू होता है।"
     }
   ],
+  "web.admin.settings.recommendations.external.addToDiscover": [
+    {
+      "type": 0,
+      "value": "डिस्कवर में जोड़ें"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addToDiscoverFailed": [
+    {
+      "type": 0,
+      "value": "सुझाव वाली पंक्तियाँ डिस्कवर पेज में नहीं जोड़ी जा सकीं।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.addedToDiscover": [
+    {
+      "type": 0,
+      "value": "सुझाव वाली पंक्तियाँ डिस्कवर पेज में जोड़ी गईं।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabled": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव चालू करें"
+    }
+  ],
+  "web.admin.settings.recommendations.external.enabledHint": [
+    {
+      "type": 0,
+      "value": "अनुरोध → डिस्कवर में निजी पंक्तियाँ जोड़ता है, जिनमें ऐसे टाइटल होते हैं जो अभी लाइब्रेरी में नहीं हैं। इसके लिए एम्बेडिंग प्रोवाइडर और TMDB का इस्तेमाल होता है।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitles": [
+    {
+      "type": 0,
+      "value": "सुझाव के लिए अधिकतम टाइटल"
+    }
+  ],
+  "web.admin.settings.recommendations.external.maxTitlesHint": [
+    {
+      "type": 0,
+      "value": "सर्वर सुझाव देने के लिए ऐसे कितने टाइटल रखे जो लाइब्रेरी में नहीं हैं। हर टाइटल की जानकारी TMDB से ली जाती है और उसे एम्बेड किया जाता है। एम्बेडिंग आम तौर पर सस्ती होती है, लेकिन ज़्यादा संख्या रखने पर आपके एम्बेडिंग प्रोवाइडर के हिसाब से खर्च बढ़ सकता है या ज़्यादा समय लग सकता है, और स्टोरेज भी ज़्यादा लगता है।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.missingFromDiscover": [
+    {
+      "type": 0,
+      "value": "आपके डिस्कवर पेज पर अभी कोई सुझाव पंक्ति नहीं दिखती।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRecommendations": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव चलाने से पहले ऊपर दी गई सेटिंग “सुझाव चालू करें” को चालू करें और सर्वर रीस्टार्ट करें।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.needsRequests": [
+    {
+      "type": 0,
+      "value": "अनुरोध अभी बंद हैं। "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "अनुरोध सेटिंग"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " में इन्हें चालू करें, ताकि दर्शक डिस्कवर पेज देख सकें।"
+    }
+  ],
+  "web.admin.settings.recommendations.external.openDiscoverPage": [
+    {
+      "type": 0,
+      "value": "डिस्कवर पेज खोलें"
+    }
+  ],
+  "web.admin.settings.recommendations.external.title": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव"
+    }
+  ],
   "web.admin.settings.recommendations.general.enabled": [
     {
       "type": 0,
@@ -65419,6 +67985,12 @@
     {
       "type": 0,
       "value": "एम्बेडिंग Cron"
+    }
+  ],
+  "web.admin.settings.recommendations.schedule.externalCron": [
+    {
+      "type": 0,
+      "value": "डिस्कवर सुझाव का Cron"
     }
   ],
   "web.admin.settings.recommendations.schedule.recommendationsCron": [
@@ -65463,12 +68035,6 @@
       "value": "Redis इस्तेमाल करें"
     }
   ],
-  "web.admin.settings.redis.setByEnv": [
-    {
-      "type": 0,
-      "value": "REDIS_URL से सेट है"
-    }
-  ],
   "web.admin.settings.redis.unavailable.description": [
     {
       "type": 0,
@@ -65485,12 +68051,6 @@
     {
       "type": 0,
       "value": "कनेक्शन URL"
-    }
-  ],
-  "web.admin.settings.redis.url.managed": [
-    {
-      "type": 0,
-      "value": "वैल्यू REDIS_URL से मिली है"
     }
   ],
   "web.admin.settings.requests.conditions.accountFallback": [
@@ -70403,16 +72963,6 @@
       "value": "सर्वर लॉग"
     }
   ],
-  "web.admin.settings.search.managedByEnv": [
-    {
-      "type": 1,
-      "value": "env"
-    },
-    {
-      "type": 0,
-      "value": " से मैनेज किया जाता है।"
-    }
-  ],
   "web.admin.settings.search.meili.apiKey.hint": [
     {
       "type": 0,
@@ -70530,7 +73080,7 @@
   "web.admin.settings.search.notifications.description": [
     {
       "type": 0,
-      "value": "डिलीवरी चैनल, सर्वर चैनल, और नया कॉन्टेंट सूचनाओं में कैसे बदलता है।"
+      "value": "डिलीवरी चैनल और सर्वर चैनल।"
     }
   ],
   "web.admin.settings.search.notifications.label": [
@@ -70629,12 +73179,6 @@
       "value": "ईमेल"
     }
   ],
-  "web.admin.settings.search.notifications.setting.groupingAndFloodControl": [
-    {
-      "type": 0,
-      "value": "ग्रुपिंग और फ़्लड कंट्रोल"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.inApp": [
     {
       "type": 0,
@@ -70653,28 +73197,10 @@
       "value": "लोगों को हर एपिसोड के लिए ईमेल चुनने दें"
     }
   ],
-  "web.admin.settings.search.notifications.setting.maxContentAge": [
-    {
-      "type": 0,
-      "value": "कॉन्टेंट की ज़्यादा से ज़्यादा उम्र"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.maxMessagesPerShow": [
-    {
-      "type": 0,
-      "value": "हर सीरीज़ के लिए ज़्यादा से ज़्यादा मैसेज"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.mentionTheRequesterOnDiscord": [
     {
       "type": 0,
       "value": "Discord पर अनुरोध करने वाले को मेंशन करें"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.noticeNewContent": [
-    {
-      "type": 0,
-      "value": "नए कॉन्टेंट का पता लगाएँ"
     }
   ],
   "web.admin.settings.search.notifications.setting.personalWebhooks": [
@@ -70683,46 +73209,16 @@
       "value": "निजी वेबहुक"
     }
   ],
-  "web.admin.settings.search.notifications.setting.processing": [
-    {
-      "type": 0,
-      "value": "प्रोसेसिंग"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.readNotifications": [
-    {
-      "type": 0,
-      "value": "पढ़ी गई सूचनाएँ"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.relayUrl": [
     {
       "type": 0,
       "value": "रिले URL"
     }
   ],
-  "web.admin.settings.search.notifications.setting.retention": [
-    {
-      "type": 0,
-      "value": "कितने समय तक रखें"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.sentHistory": [
-    {
-      "type": 0,
-      "value": "भेजे गए का इतिहास"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.serverChannels": [
     {
       "type": 0,
       "value": "सर्वर चैनल"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.settleWindow": [
-    {
-      "type": 0,
-      "value": "स्थिर होने की अवधि"
     }
   ],
   "web.admin.settings.search.notifications.setting.setupGuide": [
@@ -70737,12 +73233,6 @@
       "value": "Silo पुश रिले"
     }
   ],
-  "web.admin.settings.search.notifications.setting.unreadNotifications": [
-    {
-      "type": 0,
-      "value": "न पढ़ी गई सूचनाएँ"
-    }
-  ],
   "web.admin.settings.search.notifications.setting.webPush": [
     {
       "type": 0,
@@ -70753,12 +73243,6 @@
     {
       "type": 0,
       "value": "हर व्यक्ति के लिए वेबहुक"
-    }
-  ],
-  "web.admin.settings.search.notifications.setting.workOutWhoWantsIt": [
-    {
-      "type": 0,
-      "value": "पता लगाएँ कि इसे कौन चाहता है"
     }
   ],
   "web.admin.settings.search.playback.description": [
@@ -72169,6 +74653,12 @@
     {
       "type": 0,
       "value": "टीवी साइन इन: शुरुआत"
+    }
+  ],
+  "web.admin.settings.security.endpoint.itemPoster": [
+    {
+      "type": 0,
+      "value": "पोस्टर के अनुरोध"
     }
   ],
   "web.admin.settings.security.endpoint.login": [
@@ -74617,6 +77107,20 @@
       "value": ")।"
     }
   ],
+  "web.admin.settings.storage.transitionsEnvManaged": [
+    {
+      "type": 0,
+      "value": "जब तक एनवायरनमेंट स्टोरेज की सेटिंग ("
+    },
+    {
+      "type": 1,
+      "value": "variables"
+    },
+    {
+      "type": 0,
+      "value": ") सेट करता है, तब तक स्टोरेज को यहाँ नहीं ले जाया जा सकता। पहले इन वेरिएबल को अनसेट करें और हर API सर्वर को रीस्टार्ट करें।"
+    }
+  ],
   "web.admin.settings.storage.transitionsUnavailable": [
     {
       "type": 0,
@@ -75757,6 +78261,26 @@
       "value": "range"
     }
   ],
+  "web.admin.tasks.detail.backupSchedule": [
+    {
+      "type": 0,
+      "value": "यह शेड्यूल बैकअप सेटिंग से आता है। इसे "
+    },
+    {
+      "type": 8,
+      "value": "link",
+      "children": [
+        {
+          "type": 0,
+          "value": "सर्वर › बैकअप"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": " में बदलें।"
+    }
+  ],
   "web.admin.tasks.detail.breadcrumb.admin": [
     {
       "type": 0,
@@ -76059,10 +78583,66 @@
       "value": "हाल की गड़बड़ियाँ"
     }
   ],
+  "web.admin.tasks.detail.refreshFailed": [
+    {
+      "type": 0,
+      "value": "रीफ़्रेश विफल रहा। जानकारी के लिए एडमिन डायग्नोस्टिक्स देखें।"
+    }
+  ],
   "web.admin.tasks.detail.reviewSchedule": [
     {
       "type": 0,
       "value": "मौजूदा शेड्यूल देखें"
+    }
+  ],
+  "web.admin.tasks.detail.sampleEpisode": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleSeriesEpisode": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
+  "web.admin.tasks.detail.sampleTitle": [
+    {
+      "type": 1,
+      "value": "series"
+    },
+    {
+      "type": 0,
+      "value": " - "
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.tasks.detail.scanLibrariesNote": [
@@ -76495,6 +79075,18 @@
     {
       "type": 0,
       "value": "Autoscan वेबहुक रीट्राई"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.description": [
+    {
+      "type": 0,
+      "value": "Silo के बिटरेट से एम्बेड किए गए फ़ॉन्ट बाहर रखने से पहले स्कैन की गई, ASS सबटाइटल वाली MKV फ़ाइलों का हेडर फिर से पढ़ता है, ताकि उन्हें ऐसे बिटरेट के लिए ट्रांसकोड न किया जाए जिस पर वे स्ट्रीम ही नहीं होतीं।"
+    }
+  ],
+  "web.admin.tasks.task.backfill_attachment_bitrate.name": [
+    {
+      "type": 0,
+      "value": "एम्बेड किए गए फ़ॉन्ट वाली फ़ाइलों का बिटरेट ठीक करना"
     }
   ],
   "web.admin.tasks.task.backfill_ebook_metadata.description": [
@@ -85962,25 +88554,19 @@
   "web.auth.activate.approveFailed": [
     {
       "type": 0,
-      "value": "टीवी में साइन इन नहीं किया जा सका। फिर से कोशिश करें।"
-    }
-  ],
-  "web.auth.activate.checkApp": [
-    {
-      "type": 0,
-      "value": "जाँच लें कि आपके ऐप पर यह दिख रहा है"
+      "value": "साइन-इन को मंज़ूरी नहीं दी जा सकी। फिर से कोशिश करें।"
     }
   ],
   "web.auth.activate.checkTv": [
     {
       "type": 0,
-      "value": "जाँच लें कि आपके टीवी पर यह दिख रहा है"
+      "value": "पक्का करें कि यह कोड मेल खाता है"
     }
   ],
   "web.auth.activate.codeLabel": [
     {
       "type": 0,
-      "value": "अपने टीवी या ऐप पर दिख रहा कोड डालें"
+      "value": "अपने डिवाइस पर दिख रहा कोड डालें"
     }
   ],
   "web.auth.activate.declineFailed": [
@@ -85992,13 +88578,13 @@
   "web.auth.activate.description": [
     {
       "type": 0,
-      "value": "अपने खाते से किसी टीवी या दूसरे डिवाइस में साइन इन करें।"
+      "value": "किसी टीवी, ऐप या दूसरे डिवाइस में साइन इन करें।"
     }
   ],
   "web.auth.activate.documentTitle": [
     {
       "type": 0,
-      "value": "टीवी में साइन इन करें"
+      "value": "साइन-इन को मंज़ूरी दें"
     }
   ],
   "web.auth.activate.enterAnotherCode": [
@@ -86010,7 +88596,7 @@
   "web.auth.activate.impersonating": [
     {
       "type": 0,
-      "value": "टीवी को मंज़ूरी देने के लिए "
+      "value": "इस साइन-इन को मंज़ूरी देने के लिए "
     },
     {
       "type": 1,
@@ -86018,13 +88604,13 @@
     },
     {
       "type": 0,
-      "value": " के रूप में देखना बंद करें। सिर्फ़ वही खाता खुद टीवी में साइन इन कर सकता है।"
+      "value": " के रूप में देखना बंद करें। डिवाइसों को सिर्फ़ वही खाता खुद मंज़ूरी दे सकता है।"
     }
   ],
   "web.auth.activate.impersonatingUnknown": [
     {
       "type": 0,
-      "value": "टीवी को मंज़ूरी देने के लिए इस उपयोगकर्ता के रूप में देखना बंद करें। सिर्फ़ वही खाता खुद टीवी में साइन इन कर सकता है।"
+      "value": "इस साइन-इन को मंज़ूरी देने के लिए इस उपयोगकर्ता के रूप में देखना बंद करें। डिवाइसों को सिर्फ़ वही खाता खुद मंज़ूरी दे सकता है।"
     }
   ],
   "web.auth.activate.lookingUp": [
@@ -86042,39 +88628,19 @@
   "web.auth.activate.notFound": [
     {
       "type": 0,
-      "value": "वह कोड नहीं मिला। अपने टीवी पर कोड जाँच लें।"
+      "value": "वह कोड नहीं मिला। कोड जाँचें और फिर से कोशिश करें।"
     }
   ],
   "web.auth.activate.notNow": [
     {
       "type": 0,
-      "value": "अभी नहीं"
-    }
-  ],
-  "web.auth.activate.olderTvApps": [
-    {
-      "type": 0,
-      "value": "पुराने टीवी ऐप इसके बजाय "
-    },
-    {
-      "type": 1,
-      "value": "words"
-    },
-    {
-      "type": 0,
-      "value": " दिखाते हैं।"
-    }
-  ],
-  "web.auth.activate.onlyApproveDevice": [
-    {
-      "type": 0,
-      "value": "सिर्फ़ उसी डिवाइस को मंज़ूरी दें जो इस समय आपके सामने है।"
+      "value": "अस्वीकार करें"
     }
   ],
   "web.auth.activate.onlyApproveTv": [
     {
       "type": 0,
-      "value": "सिर्फ़ उसी टीवी को मंज़ूरी दें जो इस समय आपके सामने है।"
+      "value": "इसे सिर्फ़ तभी मंज़ूरी दें, जब साइन-इन आपने खुद शुरू किया हो।"
     }
   ],
   "web.auth.activate.playOn": [
@@ -86096,7 +88662,7 @@
   "web.auth.activate.profilesShared": [
     {
       "type": 0,
-      "value": "इस टीवी का इस्तेमाल करने वाला कोई भी व्यक्ति आपकी प्रोफ़ाइलों में से चुन सकता है। PIN वाली प्रोफ़ाइलें लॉक रहती हैं।"
+      "value": "इससे उसे आपकी प्रोफ़ाइलों का ऐक्सेस मिल जाता है। PIN वाली प्रोफ़ाइलें लॉक रहती हैं।"
     }
   ],
   "web.auth.activate.quickConnectSignIn": [
@@ -86143,6 +88709,16 @@
       "value": " अनुरोध किया गया"
     }
   ],
+  "web.auth.activate.requestedAgoStandalone": [
+    {
+      "type": 0,
+      "value": "अनुरोध किया गया: "
+    },
+    {
+      "type": 1,
+      "value": "time"
+    }
+  ],
   "web.auth.activate.requestedFrom": [
     {
       "type": 1,
@@ -86156,7 +88732,7 @@
   "web.auth.activate.result.canceled": [
     {
       "type": 0,
-      "value": "इस टीवी ने इंतज़ार करना बंद कर दिया। टीवी पर फिर से शुरू करें।"
+      "value": "इस डिवाइस ने इंतज़ार करना बंद कर दिया। उस पर फिर से साइन इन शुरू करें।"
     }
   ],
   "web.auth.activate.result.declined": [
@@ -86165,10 +88741,38 @@
       "value": "यह साइन-इन अस्वीकार कर दिया गया।"
     }
   ],
+  "web.auth.activate.result.deviceDone": [
+    {
+      "type": 0,
+      "value": "हो गया। डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " में साइन इन हो रहा है।"
+    }
+  ],
+  "web.auth.activate.result.deviceSignedIn": [
+    {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
+      "type": 1,
+      "value": "device"
+    },
+    {
+      "type": 0,
+      "value": " में साइन इन हो गया है।"
+    }
+  ],
   "web.auth.activate.result.expired": [
     {
       "type": 0,
-      "value": "इस कोड की समय-सीमा खत्म हो गई। आपका टीवी नया कोड दिखा रहा है। इसके बजाय वह कोड इस्तेमाल करें।"
+      "value": "इस कोड की समय-सीमा खत्म हो गई। डिवाइस पर नया कोड पाएँ और फिर से कोशिश करें।"
     }
   ],
   "web.auth.activate.result.quickConnectApproved": [
@@ -86252,25 +88856,25 @@
   "web.auth.activate.result.tvAlreadySignedIn": [
     {
       "type": 0,
-      "value": "उस टीवी में पहले से साइन इन है।"
+      "value": "इस डिवाइस में पहले से साइन इन है।"
     }
   ],
   "web.auth.activate.result.tvApproved": [
     {
       "type": 0,
-      "value": "इस टीवी को मंज़ूरी मिल गई है और यह साइन-इन पूरा कर रहा है।"
+      "value": "इस डिवाइस को मंज़ूरी मिल गई है और यह साइन-इन पूरा कर रहा है।"
     }
   ],
   "web.auth.activate.result.tvDone": [
     {
       "type": 0,
-      "value": "हो गया। आपके टीवी में साइन इन हो रहा है।"
+      "value": "हो गया। आपके डिवाइस में साइन इन हो रहा है।"
     }
   ],
   "web.auth.activate.result.tvSignedIn": [
     {
       "type": 0,
-      "value": "आपके टीवी में साइन इन हो गया है।"
+      "value": "आपके डिवाइस में साइन इन हो गया है।"
     }
   ],
   "web.auth.activate.signInAs": [
@@ -86313,18 +88917,22 @@
   ],
   "web.auth.activate.signInDevice": [
     {
+      "type": 0,
+      "value": "डिवाइस "
+    },
+    {
       "type": 1,
       "value": "device"
     },
     {
       "type": 0,
-      "value": " में साइन इन करें?"
+      "value": " को साइन इन करने दें?"
     }
   ],
   "web.auth.activate.signInDeviceUnknown": [
     {
       "type": 0,
-      "value": "इस डिवाइस में साइन इन करें?"
+      "value": "इस डिवाइस को साइन इन करने दें?"
     }
   ],
   "web.auth.activate.signInToApprove": [
@@ -86336,7 +88944,7 @@
   "web.auth.activate.signInToApproveTv": [
     {
       "type": 0,
-      "value": "इस टीवी को मंज़ूरी देने के लिए "
+      "value": "इस साइन-इन को मंज़ूरी देने के लिए "
     },
     {
       "type": 1,
@@ -86350,7 +88958,7 @@
   "web.auth.activate.signInTv": [
     {
       "type": 0,
-      "value": "टीवी में साइन इन करें"
+      "value": "साइन-इन को मंज़ूरी दें"
     }
   ],
   "web.auth.card.rememberedIt": [
@@ -87388,7 +89996,7 @@
   "web.auth.quickConnect.approveFailed": [
     {
       "type": 0,
-      "value": "डिवाइस में साइन इन नहीं किया जा सका। फिर से कोशिश करें।"
+      "value": "साइन-इन को मंज़ूरी नहीं दी जा सकी। फिर से कोशिश करें।"
     }
   ],
   "web.auth.quickConnect.impersonating": [
@@ -94470,6 +97078,12 @@
       "value": "आपकी लाइब्रेरी"
     }
   ],
+  "web.collections.count.unavailable": [
+    {
+      "type": 0,
+      "value": "गिनती उपलब्ध नहीं है"
+    }
+  ],
   "web.collections.deleteDialog.also": [
     {
       "type": 0,
@@ -96478,6 +99092,24 @@
       "value": "जोड़ें"
     }
   ],
+  "web.collections.manual.addCheckFailed": [
+    {
+      "type": 0,
+      "value": "यह जाँचा नहीं जा सका कि टाइटल जोड़े जा सकते हैं या नहीं।"
+    }
+  ],
+  "web.collections.manual.addCheckRetry": [
+    {
+      "type": 0,
+      "value": "फिर से लोड करने की कोशिश करें"
+    }
+  ],
+  "web.collections.manual.addChecking": [
+    {
+      "type": 0,
+      "value": "जाँच हो रही है कि टाइटल जोड़े जा सकते हैं या नहीं…"
+    }
+  ],
   "web.collections.manual.addFailed": [
     {
       "type": 1,
@@ -96490,6 +99122,18 @@
     {
       "type": 1,
       "value": "detail"
+    }
+  ],
+  "web.collections.manual.addNeedsFullList": [
+    {
+      "type": 0,
+      "value": "जब कलेक्शन का केवल कुछ हिस्सा लोड हुआ हो, तब यह सर्वर सुरक्षित रूप से टाइटल नहीं जोड़ सकता। टाइटल अब भी हटाए जा सकते हैं और कलेक्शन में बदलाव किया जा सकता है।"
+    }
+  ],
+  "web.collections.manual.addNeedsReload": [
+    {
+      "type": 0,
+      "value": "और टाइटल जोड़ने से पहले टाइटल फिर से लोड करें।"
     }
   ],
   "web.collections.manual.addTitle": [
@@ -96506,6 +99150,12 @@
     {
       "type": 0,
       "value": " से कोई टाइटल जोड़ें"
+    }
+  ],
+  "web.collections.manual.addWaitsForTitles": [
+    {
+      "type": 0,
+      "value": "और टाइटल जोड़ने से पहले टाइटल लोड हो रहे हैं…"
     }
   ],
   "web.collections.manual.couldntAdd": [
@@ -99626,6 +102276,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [
@@ -105140,6 +107804,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.detail.sections.alsoIn": [
+    {
+      "type": 0,
+      "value": "इन कलेक्शन में भी"
+    }
+  ],
   "web.detail.sections.cast": [
     {
       "type": 0,
@@ -108070,6 +110740,12 @@
       "value": "पंक्ति का प्रकार"
     }
   ],
+  "web.home.addRow.shows.serverNote": [
+    {
+      "type": 0,
+      "value": "इस पंक्ति को यह सर्वर मैनेज करता है। इसमें क्या दिखता है, यह यहाँ नहीं बदला जा सकता; क्या दिखे, यह चुनने के लिए अपनी खुद की एक पंक्ति जोड़ें।"
+    }
+  ],
   "web.home.continueWatching.episodeLabel": [
     {
       "type": 0,
@@ -108376,6 +111052,12 @@
       "value": "अनुवाद हो रहा है…"
     }
   ],
+  "web.home.layout.addedRowsHeading": [
+    {
+      "type": 0,
+      "value": "इस एक्सपोर्ट के बाद जोड़ी गई सर्वर पंक्तियाँ छिपाएँ:"
+    }
+  ],
   "web.home.layout.addsFromOtherServer": [
     {
       "type": 0,
@@ -108394,6 +111076,12 @@
     {
       "type": 0,
       "value": ", और ये उन सेक्शन की जगह ले लेते हैं जो आपने यहाँ पहले जोड़े थे। इस सर्वर के सेक्शन में आपके बदलाव बने रहते हैं।"
+    }
+  ],
+  "web.home.layout.baselineUnmatched": [
+    {
+      "type": 0,
+      "value": "यह फ़ाइल एक्सपोर्ट होने के बाद इस सर्वर की पंक्तियाँ बदल गई हैं, इसलिए छिपाने के लिए नीचे से पंक्तियाँ चुनें।"
     }
   ],
   "web.home.layout.checking": [
@@ -108444,6 +111132,26 @@
     {
       "type": 0,
       "value": "“देखे गए आइटम छिपाएँ” चालू करता है।"
+    }
+  ],
+  "web.home.layout.hidesOnlyOn": [
+    {
+      "type": 0,
+      "value": "इन पर चुनी गई पंक्तियाँ छिपाता है: "
+    },
+    {
+      "type": 8,
+      "value": "strong",
+      "children": [
+        {
+          "type": 1,
+          "value": "pages"
+        }
+      ]
+    },
+    {
+      "type": 0,
+      "value": ", और वहाँ आपकी दूसरी पंक्तियों को नहीं बदलता।"
     }
   ],
   "web.home.layout.import": [
@@ -108548,6 +111256,24 @@
     {
       "type": 0,
       "value": "।"
+    }
+  ],
+  "web.home.layout.rowWithPage": [
+    {
+      "type": 1,
+      "value": "section"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.home.layout.serverDetailsFailed": [
@@ -108764,6 +111490,12 @@
     {
       "type": 0,
       "value": "बिना नाम का सेक्शन"
+    }
+  ],
+  "web.home.layout.unlistedRowsHeading": [
+    {
+      "type": 0,
+      "value": "वे सर्वर पंक्तियाँ छिपाएँ जो इस फ़ाइल में नहीं हैं:"
     }
   ],
   "web.home.page.customize": [
@@ -111168,13 +113900,13 @@
   "web.home.rows.groups.collections": [
     {
       "type": 0,
-      "value": "कलेक्शन और नियम"
+      "value": "कलेक्शन और स्मार्ट पंक्तियाँ"
     }
   ],
   "web.home.rows.groups.collectionsBlurb": [
     {
       "type": 0,
-      "value": "आपके कलेक्शन, या नियमों से बनी पंक्तियाँ"
+      "value": "आपके कलेक्शन, या नियमों से बनी स्मार्ट पंक्तियाँ"
     }
   ],
   "web.home.rows.groups.keep": [
@@ -111288,7 +114020,7 @@
   "web.home.rows.kindSentences.customFilter": [
     {
       "type": 0,
-      "value": "शैली और दशक जैसे नियमों से पंक्ति बनाएँ।"
+      "value": "स्मार्ट कलेक्शन जैसी, लेकिन सिर्फ़ एक पंक्ति। शैली और दशक जैसे नियमों से टाइटल चुनें।"
     }
   ],
   "web.home.rows.kindSentences.editorialSpotlight": [
@@ -111498,7 +114230,7 @@
   "web.home.rows.kinds.customFilter": [
     {
       "type": 0,
-      "value": "नियमों से मेल खाते टाइटल"
+      "value": "स्मार्ट पंक्ति"
     }
   ],
   "web.home.rows.kinds.editorialSpotlight": [
@@ -111707,6 +114439,12 @@
     {
       "type": 0,
       "value": "हीरो बैनर · सिर्फ़ वेब"
+    }
+  ],
+  "web.home.rows.line.server": [
+    {
+      "type": 0,
+      "value": "सर्वर"
     }
   ],
   "web.home.rows.line.webOnlyHero": [
@@ -117133,6 +119871,12 @@
       "value": " दिन पहले"
     }
   ],
+  "web.notifications.inbox.destinationStopped": [
+    {
+      "type": 0,
+      "value": "एक सूचना डेस्टिनेशन ने काम करना बंद कर दिया"
+    }
+  ],
   "web.notifications.inbox.emptyAll": [
     {
       "type": 0,
@@ -117275,6 +120019,12 @@
     {
       "type": 0,
       "value": ")"
+    }
+  ],
+  "web.notifications.inbox.fixInSettings": [
+    {
+      "type": 0,
+      "value": "इसे ठीक करने के लिए सूचना सेटिंग खोलें।"
     }
   ],
   "web.notifications.inbox.followedMovieAvailable": [
@@ -117565,6 +120315,12 @@
     {
       "type": 0,
       "value": "आपकी वॉचलिस्ट का एक टाइटल अब उपलब्ध है"
+    }
+  ],
+  "web.notifications.inbox.webhookStopped": [
+    {
+      "type": 0,
+      "value": "एक वेबहुक ने काम करना बंद कर दिया"
     }
   ],
   "web.notifications.preferences.continueWatching": [
@@ -124369,6 +127125,34 @@
       "value": " के लिए अनुरोध भेजा जा रहा है…"
     }
   ],
+  "web.requests.card.similarTo": [
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " की तरह"
+    }
+  ],
+  "web.requests.card.similarToTwo": [
+    {
+      "type": 1,
+      "value": "first"
+    },
+    {
+      "type": 0,
+      "value": " और "
+    },
+    {
+      "type": 1,
+      "value": "second"
+    },
+    {
+      "type": 0,
+      "value": " की तरह"
+    }
+  ],
   "web.requests.discoverSection.empty": [
     {
       "type": 0,
@@ -125189,6 +127973,20 @@
       "value": "पेज 1 पर वापस जाएँ"
     }
   ],
+  "web.requests.toAdd.goToPage": [
+    {
+      "type": 0,
+      "value": "पेज "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " पर जाएँ"
+    }
+  ],
   "web.requests.toAdd.headerHits": [
     {
       "type": 0,
@@ -125275,6 +128073,20 @@
     {
       "type": 0,
       "value": "जोड़ने के अनुरोध के पेज"
+    }
+  ],
+  "web.requests.toAdd.pastEnd": [
+    {
+      "type": 0,
+      "value": "पेज "
+    },
+    {
+      "type": 1,
+      "value": "page"
+    },
+    {
+      "type": 0,
+      "value": " इन नतीजों के आख़िरी पेज के बाद आता है।"
     }
   ],
   "web.requests.toAdd.series": [
@@ -126855,6 +129667,12 @@
     {
       "type": 0,
       "value": "प्रोफ़ाइल की सूचनाएँ आते ही पढ़ें और उन्हें पढ़ी गई के रूप में मार्क करें।"
+    }
+  ],
+  "web.settings.apiKeys.scope.nowPlayingRead": [
+    {
+      "type": 0,
+      "value": "देखें कि प्रोफ़ाइल पर अभी क्या चल रहा है, या जब कुंजी में कोई प्रोफ़ाइल न दी गई हो, तो खाते की हर प्रोफ़ाइल पर: टाइटल, पोज़िशन, रोका गया है या नहीं, डिवाइस और प्लेबैक का तरीका। प्लेबैक कंट्रोल या नेटवर्क की जानकारी शामिल नहीं है।"
     }
   ],
   "web.settings.apiKeys.scope.requests": [
@@ -130691,6 +133509,290 @@
       "value": "दिलचस्पी नहीं"
     }
   ],
+  "web.settings.notifications.destinations.add": [
+    {
+      "type": 0,
+      "value": "डेस्टिनेशन जोड़ें"
+    }
+  ],
+  "web.settings.notifications.destinations.addSubmit": [
+    {
+      "type": 0,
+      "value": "जोड़ें"
+    }
+  ],
+  "web.settings.notifications.destinations.addTitle": [
+    {
+      "type": 0,
+      "value": "सूचना डेस्टिनेशन जोड़ें"
+    }
+  ],
+  "web.settings.notifications.destinations.added": [
+    {
+      "type": 0,
+      "value": "“"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "” को जोड़ दिया गया"
+    }
+  ],
+  "web.settings.notifications.destinations.clearSecret": [
+    {
+      "type": 0,
+      "value": "सेव किया गया सीक्रेट साफ़ करें"
+    }
+  ],
+  "web.settings.notifications.destinations.createInProgress": [
+    {
+      "type": 0,
+      "value": "डेस्टिनेशन जोड़ने का काम पहले से जारी है।"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteDescription": [
+    {
+      "type": 0,
+      "value": "इस डेस्टिनेशन पर सूचनाएँ भेजना बंद हो जाएगा। इसे पहले जैसा नहीं किया जा सकता।"
+    }
+  ],
+  "web.settings.notifications.destinations.deleteFailed": [
+    {
+      "type": 0,
+      "value": "डेस्टिनेशन को मिटाया नहीं जा सका"
+    }
+  ],
+  "web.settings.notifications.destinations.deleted": [
+    {
+      "type": 0,
+      "value": "डेस्टिनेशन को मिटा दिया गया"
+    }
+  ],
+  "web.settings.notifications.destinations.description": [
+    {
+      "type": 0,
+      "value": "इस प्रोफ़ाइल की सूचनाएँ उन सेवाओं पर भेजें जिन्हें आपके सर्वर के प्लगइन सपोर्ट करते हैं।"
+    }
+  ],
+  "web.settings.notifications.destinations.dialogDescription": [
+    {
+      "type": 0,
+      "value": "चुनें कि इस प्रोफ़ाइल की सूचनाएँ कहाँ भेजी जाएँ।"
+    }
+  ],
+  "web.settings.notifications.destinations.empty": [
+    {
+      "type": 0,
+      "value": "अभी तक कोई डेस्टिनेशन नहीं है।"
+    }
+  ],
+  "web.settings.notifications.destinations.keepSecret": [
+    {
+      "type": 0,
+      "value": "सेव किया गया सीक्रेट रखें"
+    }
+  ],
+  "web.settings.notifications.destinations.kind": [
+    {
+      "type": 0,
+      "value": "प्रकार"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailure": [
+    {
+      "type": 0,
+      "value": "आख़िरी विफलता: "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAt": [
+    {
+      "type": 0,
+      "value": "आख़िरी विफलता "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": "
+    },
+    {
+      "type": 1,
+      "value": "message"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureAtUnknown": [
+    {
+      "type": 0,
+      "value": "आख़िरी विफलता "
+    },
+    {
+      "type": 1,
+      "value": "when"
+    },
+    {
+      "type": 0,
+      "value": ": प्लगइन सूचना नहीं भेज सका"
+    }
+  ],
+  "web.settings.notifications.destinations.lastFailureUnknown": [
+    {
+      "type": 0,
+      "value": "आख़िरी विफलता: प्लगइन सूचना नहीं भेज सका"
+    }
+  ],
+  "web.settings.notifications.destinations.limit": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डेस्टिनेशन की सीमा पूरी हो गई"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " डेस्टिनेशन की सीमा पूरी हो गई"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeDelete": [
+    {
+      "type": 0,
+      "value": "इस डेस्टिनेशन को मिटाने से पहले डेस्टिनेशन की सूची फिर से लोड करें।"
+    }
+  ],
+  "web.settings.notifications.destinations.reloadBeforeEdit": [
+    {
+      "type": 0,
+      "value": "इस डेस्टिनेशन को बदलने से पहले डेस्टिनेशन की सूची फिर से लोड करें।"
+    }
+  ],
+  "web.settings.notifications.destinations.saveFailed": [
+    {
+      "type": 0,
+      "value": "डेस्टिनेशन को सेव नहीं किया जा सका"
+    }
+  ],
+  "web.settings.notifications.destinations.secretsKept": [
+    {
+      "type": 0,
+      "value": "खाली छोड़ी गई गुप्त फ़ील्ड में पहले से सेव की गई वैल्यू बनी रहेगी।"
+    }
+  ],
+  "web.settings.notifications.destinations.testInProgress": [
+    {
+      "type": 0,
+      "value": "टेस्ट मैसेज पहले से भेजा जा रहा है।"
+    }
+  ],
+  "web.settings.notifications.destinations.testResult": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "टेस्ट भेजा गया"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "टेस्ट विफल रहा"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.testResultDetail": [
+    {
+      "type": 5,
+      "value": "outcome",
+      "options": {
+        "ok": {
+          "value": [
+            {
+              "type": 0,
+              "value": "टेस्ट भेजा गया: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "टेस्ट विफल रहा: "
+            },
+            {
+              "type": 1,
+              "value": "message"
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "web.settings.notifications.destinations.title": [
+    {
+      "type": 0,
+      "value": "दूसरे डेस्टिनेशन"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailable": [
+    {
+      "type": 0,
+      "value": "उपलब्ध नहीं"
+    }
+  ],
+  "web.settings.notifications.destinations.unavailableNote": [
+    {
+      "type": 0,
+      "value": "यह डेस्टिनेशन देने वाला प्लगइन बंद है या हटा दिया गया है, इसलिए कुछ नहीं भेजा जाता।"
+    }
+  ],
+  "web.settings.notifications.destinations.updateFailed": [
+    {
+      "type": 0,
+      "value": "अपडेट नहीं किया जा सका"
+    }
+  ],
   "web.settings.notifications.discord.description": [
     {
       "type": 0,
@@ -131631,6 +134733,12 @@
     {
       "type": 0,
       "value": "वेबहुक URL ज़रूरी है"
+    }
+  ],
+  "web.settings.offlineChangeNotSaved": [
+    {
+      "type": 0,
+      "value": "आप ऑफ़लाइन हैं, इसलिए यह बदलाव सेव नहीं हुआ"
     }
   ],
   "web.settings.overlays.accent.amber": [
@@ -138533,12 +141641,6 @@
       "value": "भरोसेमंद प्रॉक्सी"
     }
   ],
-  "web.setup.server.trustedProxiesManaged": [
-    {
-      "type": 0,
-      "value": "एनवायरनमेंट में SILO_TRUSTED_PROXIES से सेट किया गया है।"
-    }
-  ],
   "web.setup.storage.accessKeyLabel": [
     {
       "type": 0,
@@ -138789,12 +141891,6 @@
     {
       "type": 0,
       "value": "डेटाबेस नंबर"
-    }
-  ],
-  "web.setup.storage.redisDbManaged": [
-    {
-      "type": 0,
-      "value": "REDIS_URL से सेट किया गया"
     }
   ],
   "web.setup.storage.redisDescription": [

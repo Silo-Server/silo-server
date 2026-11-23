@@ -162,7 +162,7 @@ Canonical component values (usually the first path segment under `internal/`; `a
 
 `access`, `activitylog`, `adminjob`, `ai`, `api`, `apiv2`, `app`, `audiobooks`, `auth`,
 `autoscan`, `boxsets`, `catalog`, `chapterthumbs`, `collections`, `config`, `dashmetrics`,
-`database`, `diagnostics`, `downloads`, `ebooks`, `extrastills`, `historyimport`,
+`database`, `diagnostics`, `directconn`, `downloads`, `ebooks`, `extrastills`, `historyimport`,
 `jellycompat`, `keptsub`, `libraryingest`, `librarymonitor`, `logstream`, `manga`, `metadata`,
 `netadmin`, `nodeauth`, `nodeconfig`, `nodemetrics`, `nodepool`, `noderecipe`, `noderouting`,
 `nodesessions`, `notifications`, `opslog`, `passwordreset`, `playback`, `plugins`, `policy`,

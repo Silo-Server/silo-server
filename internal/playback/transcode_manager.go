@@ -1,11 +1,15 @@
 package playback
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -92,6 +96,11 @@ type TranscodeManager struct {
 	// handler stored for the session, so a session rebuilt after a restart
 	// keeps its client. No-op when nil.
 	RestoreReconstructedClient func(ctx context.Context, card *RecipeCard)
+	// RestoreReconstructedWatch returns the watch-time measurement the
+	// embedding handler saved for a session, so a session rebuilt after a
+	// restart or on another server keeps measuring the same play. ok is false
+	// when none was saved. No-op when nil.
+	RestoreReconstructedWatch func(ctx context.Context, sessionID string) (watch WatchTime, ok bool)
 
 	// Package-private execution seams keep reconstruction lifecycle tests
 	// deterministic without invoking a host FFmpeg binary. Production always
@@ -356,7 +365,7 @@ func (m *TranscodeManager) StopRemoteTranscode(sessionID, transcodeNodeURL strin
 		return
 	}
 	m.deleteNodeRecipeUnlessMoved(sessionID, transcodeNodeURL)
-	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL, true); err != nil {
+	if err := m.deleteRemoteTranscode(context.Background(), sessionID, transcodeNodeURL, true, ""); err != nil {
 		slog.Warn("remote transcode delete failed", "error", err, "session", sessionID, "node", transcodeNodeURL, "playback_session_id", sessionID)
 	}
 }
@@ -398,20 +407,26 @@ func (m *TranscodeManager) StopRemoteTranscodeAfterFailure(sessionID, transcodeN
 // exists. User-visible stop paths use this before removing the playback session
 // so a node partition leaves a live session the caller can retry stopping.
 func (m *TranscodeManager) CancelRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
-	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL, true)
+	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL, true, "")
 }
 
 // TranscodeStopFenceQueryParam set to "0" on a node stop asks the node not to
 // fence the transport against reconstruction.
 const TranscodeStopFenceQueryParam = "fence"
 
+// TranscodeStopStartIDQueryParam on a release names the start it releases;
+// the node leaves a job another start published under the same id.
+const TranscodeStopStartIDQueryParam = "start_id"
+
 // ReleaseRemoteTranscode stops a remote job whose transport id lives on: the
 // API is moving it between nodes. The node does not fence the id, so a replica
 // or a stream token whose route still names that node can rebuild it there,
 // and a release that lands late cannot lock out a successor started under the
-// same id.
-func (m *TranscodeManager) ReleaseRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string) error {
-	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL, false)
+// same id. startID names the start being released; the node then leaves a job
+// any other start published. Without one the node ends only the job it holds
+// when the release arrives.
+func (m *TranscodeManager) ReleaseRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL, startID string) error {
+	return m.deleteRemoteTranscode(ctx, sessionID, transcodeNodeURL, false, startID)
 }
 
 // LockSessionLifecycle acquires the per-session lifecycle mutex and returns a
@@ -872,6 +887,7 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		IsJellyfinCompat: card.IsJellyfinCompat,
 		// So do the reasons the admin views give for the adaptation.
 		AdaptationReasons: NormalizeAdaptationReasons(card.AdaptationReasons),
+		Subtitle:          card.Subtitle,
 		// The card carries no address; the media request rebuilding the
 		// session comes from the viewer's player.
 		ClientIP: clientip.FromContext(ctx),
@@ -896,6 +912,11 @@ func (m *TranscodeManager) reconstructSession(ctx context.Context, sessionID str
 		s.OutputProtocol = OutputProtocolHLS
 	} else if method == PlayRemux {
 		s.OutputContainer, s.OutputProtocol = OutputContainerFMP4, OutputProtocolHTTP
+	}
+	if m.RestoreReconstructedWatch != nil {
+		if watch, ok := m.RestoreReconstructedWatch(ctx, sessionID); ok {
+			s.Watch = watch
+		}
 	}
 	session, err := m.registerReconstructedSession(ctx, s)
 	if err != nil {
@@ -1434,10 +1455,48 @@ var remoteTranscodeControlClient = func() *http.Client {
 	return &http.Client{Transport: transport, CheckRedirect: nodepool.RefuseRedirects}
 }()
 
+// remoteOutputBoundTimeout bounds the output-bound read a replan makes. The
+// replan waits on it, and a node that cannot answer this quickly is no
+// evidence for either cause of a stall.
+const remoteOutputBoundTimeout = 2 * time.Second
+
+// RemoteOutputBound asks the transcode node at transcodeNodeURL whether the
+// client of transportID has fetched every segment the node produced but at
+// most the newest, so the node's encoder paces playback
+// (TranscodeSession.OutputBoundsClient on the node). Any failure, including a
+// node that does not run the transport (404), is an error: the caller decides
+// what an unknown answer means.
+func (m *TranscodeManager) RemoteOutputBound(ctx context.Context, transportID, transcodeNodeURL string) (bool, error) {
+	readCtx, cancel := context.WithTimeout(ctx, remoteOutputBoundTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(readCtx, http.MethodGet, transcodeNodeURL+"/transcode/"+url.PathEscape(transportID)+"/output-bound", nil)
+	if err != nil {
+		return false, fmt.Errorf("build output-bound read: %w", err)
+	}
+	if err := nodeauth.SignTranscode(req, transcodeNodeURL, m.nodeKeys()); err != nil {
+		return false, fmt.Errorf("sign output-bound read: %w", err)
+	}
+	resp, err := telemetry.DoTrustedNode(remoteTranscodeControlClient, req, "output_bound")
+	if err != nil {
+		return false, fmt.Errorf("send output-bound read: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("output-bound read returned status %d", resp.StatusCode)
+	}
+	var answer struct {
+		OutputBound *bool `json:"output_bound"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<10)).Decode(&answer); err != nil || answer.OutputBound == nil {
+		return false, fmt.Errorf("decode output-bound answer: %w", cmp.Or(err, errors.New("output_bound missing")))
+	}
+	return *answer.OutputBound, nil
+}
+
 // deleteRemoteTranscode sends DELETE to the assigned transcode node with a
 // bounded timeout. A missing process is already canceled and therefore
 // succeeds; other transport and HTTP failures remain retryable by the caller.
-func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string, fence bool) error {
+func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID, transcodeNodeURL string, fence bool, startID string) error {
 	if transcodeNodeURL == "" {
 		return nil
 	}
@@ -1449,7 +1508,11 @@ func (m *TranscodeManager) deleteRemoteTranscode(ctx context.Context, sessionID,
 
 	deleteURL := transcodeNodeURL + "/transcode/" + sessionID
 	if !fence {
-		deleteURL += "?" + TranscodeStopFenceQueryParam + "=0"
+		query := url.Values{TranscodeStopFenceQueryParam: {"0"}}
+		if startID != "" {
+			query.Set(TranscodeStopStartIDQueryParam, startID)
+		}
+		deleteURL += "?" + query.Encode()
 	}
 	req, err := http.NewRequestWithContext(deleteCtx, http.MethodDelete, deleteURL, nil)
 	if err != nil {

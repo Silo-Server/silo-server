@@ -142,10 +142,13 @@ export function DeleteCollectionDialog({
           </p>
         ) : null}
         <AlertDialogFooter className="items-center sm:justify-between">
-          <p className="text-muted-foreground text-sm">
+          <p className="text-muted-foreground text-sm sm:grow sm:basis-32">
             {t("web.collections.deleteDialog.footer")}
           </p>
-          <div className="flex gap-2">
+          {/* The buttons stack below sm, and from sm up move below the note when
+              they don't fit beside it and wrap when they don't fit side by side,
+              as in ConfirmDialog. */}
+          <div className="flex w-full flex-col-reverse gap-2 sm:ms-auto sm:w-auto sm:flex-row sm:flex-wrap sm:justify-end">
             <AlertDialogCancel disabled={isPending}>{t("common.cancel")}</AlertDialogCancel>
             <Button
               variant="destructive"
@@ -155,7 +158,7 @@ export function DeleteCollectionDialog({
               {isPending ? (
                 <span
                   aria-hidden
-                  className="me-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+                  className="me-2 inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
                 />
               ) : null}
               {rows.status !== "ready"

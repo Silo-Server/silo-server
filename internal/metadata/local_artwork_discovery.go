@@ -179,7 +179,7 @@ func (s *MetadataService) saveProvisionalLocalArtwork(ctx context.Context, conte
 		return
 	}
 	item := *existing
-	fallback := s.configuredFallbackLanguage()
+	fallback := s.FallbackLanguage()
 	applyBestImages(&item, images, MergeFillEmpty, language, fallback)
 	// Local artwork is only found with image caching on, so stored copies keep
 	// serving until the new copy lands.

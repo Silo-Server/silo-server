@@ -102,7 +102,10 @@ export default function RequestBrowse({ kind }: RequestBrowseProps) {
         <div className="flex min-w-0 items-center gap-4">
           <BrowseHeaderTile browse={firstPage} kind={kind} fallback={title} />
           <div className="min-w-0">
-            <h1 className="text-foreground truncate text-2xl font-bold tracking-tight sm:text-3xl">
+            <h1
+              dir="auto"
+              className="bidi-text text-foreground truncate text-2xl font-bold tracking-tight sm:text-3xl"
+            >
               {title}
             </h1>
             <p className="text-muted-foreground mt-1 text-sm">

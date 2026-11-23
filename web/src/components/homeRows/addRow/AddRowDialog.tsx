@@ -487,6 +487,12 @@ export function AddRowDialog({
                 ? {
                     label: showsLabel(draft.sectionType, draft.config),
                     sentence: sentenceWithoutStop(rowKindSentence(draft.sectionType)),
+                    origin:
+                      adapter.surface === "profile" && session
+                        ? session.row.own
+                          ? "yours"
+                          : "server"
+                        : undefined,
                     onChange: session?.kindLocked ? undefined : () => setStep("pick"),
                   }
                 : undefined

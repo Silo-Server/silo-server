@@ -105,6 +105,7 @@ function TextField({
   placeholder,
   type = "text",
   mono = false,
+  dir,
 }: {
   label: string;
   value: string;
@@ -112,6 +113,8 @@ function TextField({
   placeholder?: string;
   type?: "text" | "password";
   mono?: boolean;
+  /** Pass `"ltr"` for a URL, which reads left to right in every language. */
+  dir?: "ltr";
 }) {
   const id = useId();
   return (
@@ -120,6 +123,7 @@ function TextField({
       <Input
         id={id}
         type={type}
+        dir={dir}
         value={value}
         placeholder={placeholder}
         onChange={(event) => onChange(event.target.value)}
@@ -217,6 +221,7 @@ function S3SetupForm({
               onChange={set("endpoint")}
               placeholder={ENDPOINT_EXAMPLE}
               mono
+              dir="ltr"
             />
           </div>
           <TextField

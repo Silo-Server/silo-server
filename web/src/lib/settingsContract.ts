@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 30;
+export const SETTINGS_REVISION = 31;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -731,7 +731,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopes: ["profile", "profile_device"],
     scopeIntroducedIn: [20, 20],
     resolutionOrder: ["profile_device", "profile", "default"],
-    defaultValue: 2000,
+    defaultValue: 10000,
     label: "Cellular maximum bitrate",
     description: "Cap how much data playback may use on mobile data or another metered connection.",
     category: "playback",
@@ -750,7 +750,7 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     scopes: ["profile", "profile_device"],
     scopeIntroducedIn: [20, 20],
     resolutionOrder: ["profile_device", "profile", "default"],
-    defaultValue: "720p",
+    defaultValue: "auto",
     label: "Cellular quality",
     description: "The resolution to play at on mobile data or another metered connection.",
     category: "playback",
@@ -811,9 +811,9 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     type: "boolean",
     nullable: false,
     persistence: "remote",
-    introducedIn: 30,
+    introducedIn: 31,
     scopes: ["profile", "profile_device"],
-    scopeIntroducedIn: [30, 30],
+    scopeIntroducedIn: [31, 31],
     resolutionOrder: ["profile_device", "profile", "default"],
     defaultValue: true,
     label: "Show Next Up",

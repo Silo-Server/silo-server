@@ -76,7 +76,7 @@ function playRow(t: Translate, play: AdminUserPlay): HistoryRow {
     code: play.series_title ? episode : "",
     profile: play.profile_name || play.profile_id,
     method: play.play_method,
-    watched: watchedFraction(play.watched_seconds, play.duration_seconds, play.completed),
+    watched: watchedFraction(play.end_position_seconds, play.duration_seconds, play.completed),
     endedAt: play.ended_at,
   };
 }
@@ -85,10 +85,12 @@ function liveRow(t: Translate, session: AdminSession): HistoryRow {
   return {
     key: `live:${session.session_id}`,
     live: true,
-    itemId: session.content_id ?? "",
+    itemId: session.media_item_id ?? "",
     title:
-      session.series_name || session.media_title || t("web.admin.users.detail.common.unknownTitle"),
-    code: session.series_name ? episodeCode(session.season_number, session.episode_number) : "",
+      session.series_title ||
+      session.media_title ||
+      t("web.admin.users.detail.common.unknownTitle"),
+    code: session.series_title ? episodeCode(session.season_number, session.episode_number) : "",
     profile: session.profile_name || session.profile_id,
     method: session.effective_play_method || session.play_method,
     watched: watchedFraction(session.position_seconds, session.file_duration, false),

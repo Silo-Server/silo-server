@@ -171,3 +171,51 @@ func TestNestedPublicSourceCannotAliasPrivateArtifactPrefix(t *testing.T) {
 		t.Fatalf("ambiguous public source prefix error = %v", err)
 	}
 }
+
+// The environment would put its storage settings back on the next start, so
+// a transition cannot be staged while it sets any, and one staged before the
+// variable was added does not run.
+func TestStorageSetByTheEnvironmentRefusesTransitions(t *testing.T) {
+	settings := &memorySettings{values: map[string]string{settingArtworkBackend: blobstore.BackendLocal, settingArtworkLocalPath: t.TempDir()}}
+	service := New(nil, settings, memoryJobs{}, &memoryStore{identity: "local|source", objects: map[string][]byte{}}, nil)
+	service.SetEnvironmentManaged(map[string]string{settingArtworkLocalPath: "SILO_ARTWORK_PATH", "server.log_level": "SILO_LOG_LEVEL"})
+	_, _, err := service.Start(t.Context(), 1, StartRequest{Policy: PolicyFresh, Values: map[string]string{settingArtworkLocalPath: t.TempDir()}})
+	if _, ok := errors.AsType[*ValidationError](err); !ok || !strings.Contains(err.Error(), "SILO_ARTWORK_PATH") || strings.Contains(err.Error(), "SILO_LOG_LEVEL") {
+		t.Fatalf("Start = %v, want a validation error naming SILO_ARTWORK_PATH only", err)
+	}
+	if settings.values[StagedTargetSettingKey] != "" {
+		t.Error("a refused transition was staged")
+	}
+	// A transition staged before the variable was added does not copy, but
+	// one that already committed still settles instead of failing.
+	service.SetEnvironmentManaged(nil)
+	if _, _, err := service.Start(t.Context(), 1, StartRequest{Policy: PolicyFresh, Values: map[string]string{settingArtworkLocalPath: t.TempDir()}}); err != nil {
+		t.Fatal(err)
+	}
+	service.SetEnvironmentManaged(map[string]string{settingArtworkLocalPath: "SILO_ARTWORK_PATH"})
+	setPhase := func(phase string) string {
+		t.Helper()
+		var staged stagedTarget
+		if err := json.Unmarshal([]byte(settings.values[StagedTargetSettingKey]), &staged); err != nil {
+			t.Fatal(err)
+		}
+		staged.Phase = phase
+		raw, err := json.Marshal(staged)
+		if err != nil {
+			t.Fatal(err)
+		}
+		settings.values[StagedTargetSettingKey] = string(raw)
+		return staged.ID
+	}
+	run := func(id string) error {
+		_, err := service.ExecuteStorageTransition(t.Context(), adminjob.StorageTransitionRequest{TransitionID: id, Policy: PolicyFresh}, func(adminjob.StorageTransitionProgress) {})
+		return err
+	}
+	if err := run(setPhase(transitionPhaseRestartPending)); !errors.Is(err, adminjob.ErrStorageTransitionAlreadyCommitted) {
+		t.Fatalf("a committed transition = %v, want ErrStorageTransitionAlreadyCommitted", err)
+	}
+	err = run(setPhase(transitionPhaseStaged))
+	if _, ok := errors.AsType[*ValidationError](err); !ok || !strings.Contains(err.Error(), "SILO_ARTWORK_PATH") {
+		t.Fatalf("a staged transition = %v, want a validation error naming SILO_ARTWORK_PATH", err)
+	}
+}

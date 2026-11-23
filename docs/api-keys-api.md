@@ -56,8 +56,7 @@ credential: provisioning and managing ordinary accounts is in scope.
 | `POST` with `password` and a non-admin `role` | allowed |
 | `PUT` with `password` when the target account is not an admin | allowed |
 
-The frozen v1 routes refuse the same writes with `403 insufficient_scope`; v1 has no
-`break_glass` member. Unscoped keys and JWT sessions are unaffected.
+Unscoped keys and JWT sessions are unaffected.
 
 Each scope has an `audience`. An `admin` scope names operations that need an
 administrator account. A `user` scope acts as a profile and needs no role; the
@@ -216,7 +215,7 @@ a stream, a download, a setting, a credential, or household management, and
 
 ## Restricted discovery scopes
 
-The scope catalog includes two additional native v2 read permissions:
+The scope catalog includes two additional native read permissions:
 
 | Scope | Allowed reads |
 |---|---|
@@ -229,8 +228,7 @@ account filter. Neither scope grants diagnostic session details, playback contro
 media playback, account editing, filesystem paths or API-key management.
 
 These additions do not change existing unscoped credentials or add client-specific
-permission rules. Existing native clients need no migration; scope catalogs and
-capability documents remain additive.
+permission rules. Scope catalogs and capability documents remain additive.
 
 ## Monitoring and session control scopes
 
@@ -248,19 +246,29 @@ answers any owner.
 | History and stats | `/admin/playback-history`, `/admin/playback-history/capabilities`, `/admin/stats/timeseries`, `/admin/stats/playback-activity`, `/admin/stats/top-activity`, `/admin/stats/downloads` |
 | Accounts | `/admin/users`, `/admin/users/capabilities`, `/admin/users/{id}`, and `/admin/users/{id}/` `profiles`, `devices`, `ips`, `downloads`, `downloads/summary`, `watch-summary` |
 | Devices and addresses | `/admin/devices`, `/admin/devices/capabilities`, `/admin/ips` |
-| Downloads | `/admin/downloads/entries`, `/admin/downloads/devices`, `/admin/downloads/preparations`, `/admin/downloads/preparations/capabilities` |
+| Downloads | `/admin/downloads/entries`, `/admin/downloads/devices`, `/admin/downloads/storage/capabilities`, `/admin/downloads/preparations`, `/admin/downloads/preparations/capabilities` |
 | Hosts and nodes | `/admin/system/resources`, `/admin/system/resources/capabilities`, `/admin/nodes/summary`, `/admin/nodes/capabilities`, `/admin/server/status` |
 | Catalog | `/admin/catalog/items`, `/admin/catalog/capabilities` |
+| Media requests | `/admin/requests`, `/admin/requests/counts`, `/admin/requests/capabilities`, `/admin/requests/{id}/events`, `/admin/requests/{id}/poster` |
 
 The scope never returns filesystem paths, node addresses, storage keys, setting
 values or credentials. Operations that carry them stay outside it: item files, download
-storage, settings, logs, API keys, audit, per-device setting values and node
-sessions. Four monitored reads withhold details from scoped keys:
+storage other than its capabilities, settings, logs, API keys, audit, per-device setting values, node
+sessions, and the request integrations, settings and routes. The one setting value
+it returns is `requests_enabled` on `/admin/requests/counts`, the server-wide
+requests switch, so a monitor can tell a disabled feature from an empty queue. Five monitored
+reads withhold details from scoped keys:
 
 - `/admin/system/resources` omits each disk's `path`.
 - `/admin/catalog/items` refuses `include_file_paths` with `403` unless the key
   also holds `admin:catalog:paths`.
 - `/admin/downloads/preparations` omits each job's `error`.
+- `/admin/requests` omits `last_error` on each request and its targets, and
+  `/admin/requests/{id}/events` omits each event's `message`. Both are free
+  text that can name download servers, their addresses and routing rules.
+  `/admin/requests` also omits each target's `instance_name` and `route_name`,
+  the names the administrator gave a download server and a routing rule;
+  `integration_kind` still says what kind of server took the target.
 - Nodes are read through `/admin/nodes/summary`, which has no addresses, paths,
   overrides or capability documents. `/admin/nodes` stays outside the scope.
 
@@ -270,7 +278,7 @@ cached aggregate, so a polling tool cannot force the aggregate queries.
 Unscoped keys and login sessions keep the full documents.
 
 The scope also admits one write, `POST /api/v2/events/ws-ticket`, which opens
-the realtime events socket for the `sessions` and `catalog` channels for up to
+the realtime events socket for the `sessions`, `catalog` and `downloads` channels for up to
 four hours. The key's revision and scope are rechecked every 15 seconds; see
 [API-key handshake](realtime-api.md#api-key-handshake).
 

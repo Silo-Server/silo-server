@@ -3,17 +3,21 @@ import { useT } from "@/i18n";
 import { rowKindGroup } from "@/lib/homeRows/catalog";
 import { cn } from "@/lib/utils";
 import { GROUP_ICONS, GROUP_TINTS, KIND_ICONS } from "../rowIcons";
+import { RowOriginBadge, type RowOrigin } from "../RowOriginBadge";
 
 /** Edit row's "Shows" line: what the row is, with Change when it may change. */
 export function ShowsSummary({
   sectionType,
   label,
   sentence,
+  origin,
   onChange,
 }: {
   sectionType: string;
   label: string;
   sentence: string;
+  /** Profile surface only: whether the row belongs to the server or this profile. */
+  origin?: RowOrigin;
   /** Omitted when the kind cannot change (a server row on Settings > Home Screen). */
   onChange?: () => void;
 }) {
@@ -22,7 +26,10 @@ export function ShowsSummary({
   const Icon = KIND_ICONS[sectionType] ?? GROUP_ICONS[group];
   return (
     <div className="grid grid-cols-[minmax(0,1fr)] gap-2">
-      <span className="text-sm font-medium">{t("web.home.addRow.shows.label")}</span>
+      <div className="flex items-center gap-2">
+        <span className="text-sm font-medium">{t("web.home.addRow.shows.label")}</span>
+        {origin ? <RowOriginBadge origin={origin} /> : null}
+      </div>
       <div className="border-border flex items-center gap-3 rounded-xl border py-2.5 ps-2.5 pe-3">
         <span
           aria-hidden
@@ -49,6 +56,9 @@ export function ShowsSummary({
           </Button>
         ) : null}
       </div>
+      {origin === "server" && !onChange ? (
+        <p className="text-muted-foreground text-[13px]">{t("web.home.addRow.shows.serverNote")}</p>
+      ) : null}
     </div>
   );
 }

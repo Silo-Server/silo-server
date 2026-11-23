@@ -67,8 +67,11 @@ type Remote struct {
 	cfg         *config.Config
 	doc         *nodecontrol.NodeConfig
 	normalizers []func(*config.Config)
-	onChange    []func(old, updated *config.Config)
-	onDrain     []func(requested bool)
+	// declared is what the node declares from its environment; see
+	// SetDeclared. Set before Load and read-only after.
+	declared nodecontrol.Registration
+	onChange []func(old, updated *config.Config)
+	onDrain  []func(requested bool)
 
 	reloadCh chan struct{}
 
@@ -296,6 +299,7 @@ func (r *Remote) build(doc *nodecontrol.NodeConfig) (*config.Config, error) {
 		cfg.Server.Listen = r.listen
 	}
 	doc.ApplyTo(cfg)
+	r.applyDeclared(cfg)
 	for _, normalize := range r.normalizers {
 		normalize(cfg)
 	}
@@ -349,12 +353,20 @@ func (r *Remote) CaptureLevel() string {
 	return ""
 }
 
-// SourceAccess is how the node reads its job sources, as of the last read:
-// nodesource.ModeCore through the core, otherwise nodesource.ModeLocal. The
+// SourceAccess is how the node reads its job sources: the mode it declares
+// (SILO_NODE_SOURCE_ACCESS) when it declares one, otherwise the document's as
+// of the last read: nodesource.ModeCore through the core, otherwise
+// nodesource.ModeLocal. The
 // source opener reads it at each open, so a change applies to jobs started
 // after it while running jobs keep theirs. It is not part of the Config, so
 // a change alone keeps the Config pointer and refuses no work.
 func (r *Remote) SourceAccess() string {
+	if declared := r.declared.SourceAccess; declared != nil {
+		if *declared == nodesource.ModeCore {
+			return nodesource.ModeCore
+		}
+		return nodesource.ModeLocal
+	}
 	if doc := r.document(); doc != nil && doc.SourceAccess == nodesource.ModeCore {
 		return nodesource.ModeCore
 	}

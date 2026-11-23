@@ -72,7 +72,9 @@ export default function MediaInfoDialog({
       <DialogContent className="flex max-w-2xl flex-col overflow-hidden sm:max-w-2xl">
         <DialogHeader className="min-w-0">
           <DialogTitle>{t("web.detail.mediaInfo.title")}</DialogTitle>
-          <DialogDescription className="truncate">{title}</DialogDescription>
+          <DialogDescription dir="auto" className="bidi-text truncate">
+            {title}
+          </DialogDescription>
         </DialogHeader>
 
         <div className="overlay-scroll min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pe-1">

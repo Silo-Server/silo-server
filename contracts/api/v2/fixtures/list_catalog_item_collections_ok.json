@@ -1,0 +1,23 @@
+{
+  "items": [
+    {
+      "id": "01J9Z8C3W4R5T6Y7U8I9O0P1Q2",
+      "source": "library",
+      "title": "Crime classics",
+      "poster_url": "/api/v2/images/collections/01J9Z8C3W4R5T6Y7U8I9O0P1Q2/poster",
+      "poster_is_collage": false,
+      "item_count": 24,
+      "library_id": "1"
+    },
+    {
+      "id": "c1",
+      "source": "user",
+      "title": "Favorites",
+      "poster_url": "/api/v2/images/user-collections/c1/collage",
+      "poster_is_collage": true,
+      "item_count": 7,
+      "creator_profile_id": "p-owner"
+    }
+  ],
+  "preview_items": []
+}

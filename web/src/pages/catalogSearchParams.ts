@@ -339,6 +339,17 @@ export function buildUserCollectionCatalogHref(collectionId: string, title?: str
   });
 }
 
+/** The catalog page of a personal collection, or of a server collection in libraryId. */
+export function buildCollectionCatalogHref(
+  collection: { id: string; title?: string },
+  personal: boolean,
+  libraryId?: number,
+): string {
+  return personal
+    ? buildUserCollectionCatalogHref(collection.id, collection.title)
+    : buildLibraryCollectionCatalogHref(collection.id, collection.title, libraryId);
+}
+
 export function buildLegacyBrowseCatalogHref(searchParams: URLSearchParams): string | null {
   const source = searchParams.get("source");
 

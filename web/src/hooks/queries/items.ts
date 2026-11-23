@@ -12,7 +12,7 @@ import {
   useQueryClient,
   type QueryClient,
 } from "@tanstack/react-query";
-import { useRealtimeEvents } from "@/components/realtimeEventsContext";
+import { useRealtimeEventsActions } from "@/components/realtimeEventsContext";
 import type {
   ApplyItemImageRequest,
   ItemDetail,
@@ -119,7 +119,7 @@ const itemMetadataRefreshKey = ["items", "metadata-refresh"] as const;
 
 export function useRefreshItemMetadata() {
   const queryClient = useQueryClient();
-  const { awaitAdminJob } = useRealtimeEvents();
+  const { awaitAdminJob } = useRealtimeEventsActions();
   return useMutation({
     mutationKey: itemMetadataRefreshKey,
     retry: false,

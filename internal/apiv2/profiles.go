@@ -385,11 +385,10 @@ type PlaybackSession struct {
 	ProfileName              string  `json:"profile_name" doc:"Empty when unknown" example:"Laura"`
 	MediaFileID              ID      `json:"media_file_id" example:"42"`
 	RequestedMediaFileID     ID      `json:"requested_media_file_id" doc:"The file the client asked for before any version substitution" example:"42"`
-	ContentID                string  `json:"content_id" doc:"Catalog content id of the playing item; empty when unknown" example:"tt0111161"`
-	MediaTitle               string  `json:"media_title" example:"The Shawshank Redemption"`
-	MediaType                string  `json:"media_type" doc:"Catalog item type; empty when unknown" example:"movie"`
-	SeriesName               string  `json:"series_name" doc:"Empty unless an episode" example:""`
-	EpisodeName              string  `json:"episode_name" doc:"Empty unless an episode" example:""`
+	MediaItemID              string  `json:"media_item_id" doc:"Catalog content id of what is playing: the episode for an episode; empty when unknown" example:"tt0111161"`
+	MediaTitle               string  `json:"media_title" doc:"Episode or item title; empty when unknown" example:"The Shawshank Redemption"`
+	MediaType                string  `json:"media_type" doc:"episode, or the catalog item type; empty when unknown" example:"movie"`
+	SeriesTitle              string  `json:"series_title" doc:"Series title for an episode; empty otherwise" example:""`
 	SeasonNumber             *int    `json:"season_number" nullable:"true" doc:"null unless an episode" example:"1"`
 	EpisodeNumber            *int    `json:"episode_number" nullable:"true" doc:"null unless an episode" example:"1"`
 	PosterURL                string  `json:"poster_url" format:"uri-reference" doc:"Where to fetch the poster; empty when there is none" example:"https://media.example/poster.jpg"`
@@ -495,8 +494,8 @@ func playbackSessionOf(v handlers.PlaybackSessionView) PlaybackSession {
 		ID: ID(v.SessionID), UserID: IDFromInt(int64(v.UserID)), Username: v.Username,
 		ProfileID: optionalID(v.ProfileID), ProfileName: v.ProfileName,
 		MediaFileID: IDFromInt(int64(v.MediaFileID)), RequestedMediaFileID: IDFromInt(int64(v.RequestedMediaFileID)),
-		ContentID: v.ContentID, MediaTitle: v.MediaTitle, MediaType: v.MediaType,
-		SeriesName: v.SeriesName, EpisodeName: v.EpisodeName, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
+		MediaItemID: v.MediaItemID, MediaTitle: v.MediaTitle, MediaType: v.MediaType,
+		SeriesTitle: v.SeriesTitle, SeasonNumber: v.SeasonNumber, EpisodeNumber: v.EpisodeNumber,
 		PosterURL: v.PosterURL, PlayMethod: v.PlayMethod, ReportingNode: v.ReportingNode, NodeDisplayName: v.NodeDisplayName,
 		FileDuration: v.MeasuredDuration(), StartedAt: NewInstant(v.StartedAt), UpdatedAt: NewInstant(v.UpdatedAt),
 		PositionSeconds: v.PositionSeconds, IsPaused: v.IsPaused, HasPlaybackControl: v.HasPlaybackControl,

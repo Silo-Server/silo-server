@@ -1,4 +1,4 @@
-import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
+import { v2, V2ProblemError, V2TransportError, type V2Result } from "@/api/v2/request";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback, useState } from "react";
 import { toast } from "sonner";
@@ -45,6 +45,7 @@ function invalidatePluginQueries(queryClient: ReturnType<typeof useQueryClient>)
     queryClient.invalidateQueries({ queryKey: adminKeys.pluginRepositories() }),
     queryClient.invalidateQueries({ queryKey: adminKeys.pluginCatalog() }),
     queryClient.invalidateQueries({ queryKey: adminKeys.pluginInstallations() }),
+    queryClient.invalidateQueries({ queryKey: adminKeys.pluginProvisioningStatus() }),
     queryClient.invalidateQueries({ queryKey: adminKeys.pluginCatalogSettings() }),
   ]);
 }
@@ -57,6 +58,41 @@ export function useAdminPluginInstallations() {
   return useQuery({
     queryKey: [...adminKeys.pluginInstallations(), ...profileScopeKey(profileContext)],
     queryFn: () => fetchPluginInstallations(profileContext),
+    staleTime: ADMIN_STALE_TIME,
+    enabled: profileContext !== null,
+  });
+}
+
+export type PluginProvisionStatus =
+  V2Result<"GET /api/v2/admin/plugins/provisioning-status">["items"][number];
+
+export function useAdminPluginProvisioningStatus() {
+  const profileContext = captureProfileRequestContext();
+  return useQuery({
+    queryKey: [...adminKeys.pluginProvisioningStatus(), ...profileScopeKey(profileContext)],
+    queryFn: async () => {
+      if (!profileContext || !isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      const capability = await v2("GET /api/v2/admin/plugins/capabilities", {
+        profileContext,
+      }).catch((error: unknown) => {
+        if (
+          (error instanceof V2ProblemError || error instanceof V2TransportError) &&
+          error.status === 404
+        )
+          return undefined;
+        throw error;
+      });
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      if (!capability?.env_declarations) return [];
+      const response = await v2("GET /api/v2/admin/plugins/provisioning-status", {
+        profileContext,
+      });
+      if (!isCapturedProfileAuthorityActive(profileContext))
+        throw new StaleApiRequestContextError();
+      return response.items;
+    },
     staleTime: ADMIN_STALE_TIME,
     enabled: profileContext !== null,
   });
@@ -541,6 +577,13 @@ function lifecycleFailure(error: unknown, fallback: string): string {
     ? error.message
     : fallback;
 }
+// A 409 means the installation is no longer what the page shows: another
+// install replaced it, or the update no longer applies. Refresh the lists so
+// the admin sees the installed version the message asks them to check.
+function refreshAfterConflict(error: unknown, queryClient: ReturnType<typeof useQueryClient>) {
+  if (error instanceof V2ProblemError && error.status === 409)
+    void invalidatePluginQueries(queryClient);
+}
 
 export function useInstallPlugin() {
   const queryClient = useQueryClient();
@@ -570,6 +613,7 @@ export function useInstallPlugin() {
     },
     onError: (error, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
+      refreshAfterConflict(error, queryClient);
       toast.error(
         lifecycleFailure(error, t("web.admin.plugins.hooks.plugins.install.unconfirmed")),
       );
@@ -609,6 +653,7 @@ export function useUploadPlugin() {
     },
     onError: (error, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
+      refreshAfterConflict(error, queryClient);
       toast.error(lifecycleFailure(error, t("web.admin.plugins.hooks.plugins.upload.unconfirmed")));
     },
   });
@@ -727,6 +772,7 @@ export function useApplyPluginUpdate() {
     },
     onError: (error, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
+      refreshAfterConflict(error, queryClient);
       toast.error(
         lifecycleFailure(error, t("web.admin.plugins.hooks.plugins.applyUpdate.unconfirmed")),
       );

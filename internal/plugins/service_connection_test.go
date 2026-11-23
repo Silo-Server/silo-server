@@ -8,9 +8,15 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+	sdkmanifest "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginsdk/manifest"
+
+	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
 type fakeServiceConfigStore struct {
@@ -850,6 +856,167 @@ func TestServiceTestGlobalConfigReturnsUnsupportedWithoutStartingPlugin(t *testi
 	if len(host.stopped) != 0 {
 		t.Fatalf("stop calls = %d, want 0", len(host.stopped))
 	}
+}
+
+func TestSupportsConnectionCheck(t *testing.T) {
+	seriesOnly, err := structpb.NewStruct(map[string]any{"default_priority": map[string]any{"series": 2, "episode": 2}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name         string
+		capabilities []string
+		metadata     *structpb.Struct
+		want         bool
+	}{
+		{name: "metadata provider", capabilities: []string{"metadata_provider.v1", "image_resolver.v1"}, want: true},
+		{name: "metadata provider without movie priority", capabilities: []string{"metadata_provider.v1"}, metadata: seriesOnly},
+		{name: "marker provider", capabilities: []string{"marker_provider.v1"}, want: true},
+		{name: "sign-in provider", capabilities: []string{"auth_provider.v1", "http_routes.v1"}},
+		{name: "scan source", capabilities: []string{"scan_source.v1"}},
+		{name: "no capabilities"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			manifest := &pluginv1.PluginManifest{}
+			for _, capabilityType := range tt.capabilities {
+				manifest.Capabilities = append(manifest.Capabilities, &pluginv1.CapabilityDescriptor{Type: capabilityType, Id: capabilityType, Metadata: tt.metadata})
+			}
+			if got := SupportsConnectionCheck(manifest); got != tt.want {
+				t.Fatalf("SupportsConnectionCheck(%v) = %v, want %v", tt.capabilities, got, tt.want)
+			}
+		})
+	}
+	if SupportsConnectionCheck(nil) {
+		t.Fatal("SupportsConnectionCheck(nil) = true, want false")
+	}
+
+	declaredMeta, err := structpb.NewStruct(map[string]any{sdkmanifest.ConfigurationCheckKey: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !SupportsConnectionCheck(&pluginv1.PluginManifest{
+		Capabilities: []*pluginv1.CapabilityDescriptor{{Type: "watch_sync_provider.v1", Id: "sync"}},
+		Metadata:     declaredMeta,
+	}) {
+		t.Fatal("SupportsConnectionCheck with configuration_check=true = false, want true")
+	}
+	falseMeta, err := structpb.NewStruct(map[string]any{sdkmanifest.ConfigurationCheckKey: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if SupportsConnectionCheck(&pluginv1.PluginManifest{
+		Capabilities: []*pluginv1.CapabilityDescriptor{{Type: "watch_sync_provider.v1", Id: "sync"}},
+		Metadata:     falseMeta,
+	}) {
+		t.Fatal("SupportsConnectionCheck with configuration_check=false = true, want false")
+	}
+}
+
+type fakeConfigurationChecksClient struct {
+	lastReq *pluginv1.TestConfigurationRequest
+	resp    *pluginv1.TestConfigurationResponse
+	err     error
+}
+
+func (f *fakeConfigurationChecksClient) TestConfiguration(
+	_ context.Context,
+	in *pluginv1.TestConfigurationRequest,
+	_ ...grpc.CallOption,
+) (*pluginv1.TestConfigurationResponse, error) {
+	f.lastReq = in
+	return f.resp, f.err
+}
+
+func TestServiceTestGlobalConfigUsesGenericConfigurationChecks(t *testing.T) {
+	declaredMeta, err := structpb.NewStruct(map[string]any{sdkmanifest.ConfigurationCheckKey: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	setup := func(
+		t *testing.T,
+		id int,
+		capDesc *pluginv1.CapabilityDescriptor,
+		rpc *fakeConfigurationChecksClient,
+		stored []*RuntimeConfig,
+	) (*Service, *fakePluginClient) {
+		t.Helper()
+		manifest := connectionTestManifest(t, "silo.watchsync.example", "0.1.0")
+		manifest.Metadata = declaredMeta
+		manifest.Capabilities = []*pluginv1.CapabilityDescriptor{capDesc}
+		manifest.GlobalConfigSchema[0].JsonSchema = `{"type":"object","properties":{"api_key":{"type":"string","format":"password"}},"required":["api_key"],"additionalProperties":false}`
+		installPath := writeInstalledPluginManifest(t, manifest)
+		client := &fakePluginClient{
+			manifest:            manifest,
+			configurationChecks: pluginhost.NewConfigurationChecksClient(rpc),
+		}
+		var cfgByID map[int][]*RuntimeConfig
+		if len(stored) > 0 {
+			cfgByID = map[int][]*RuntimeConfig{id: stored}
+		}
+		service := &Service{
+			installations: newFakeServiceInstallationStore(&Installation{
+				ID: id, PluginID: manifest.GetPluginId(), Version: manifest.GetVersion(), InstallPath: installPath,
+			}),
+			configs: &fakeServiceConfigStore{configsByInstallation: cfgByID},
+			host:    &fakeServiceHost{startResult: client},
+		}
+		return service, client
+	}
+
+	t.Run("passes staged merged config and succeeds when ok is true", func(t *testing.T) {
+		rpc := &fakeConfigurationChecksClient{resp: &pluginv1.TestConfigurationResponse{Ok: true}}
+		service, client := setup(
+			t, 12,
+			&pluginv1.CapabilityDescriptor{Type: "metadata_provider.v1", Id: "meta", DisplayName: "Meta"},
+			rpc,
+			[]*RuntimeConfig{{InstallationID: 12, Key: "connection", Value: map[string]any{"api_key": "stored-secret"}}},
+		)
+
+		if err := service.TestGlobalConfig(context.Background(), 12, "connection", map[string]any{"api_key": ""}); err != nil {
+			t.Fatalf("TestGlobalConfig() = %v, want nil", err)
+		}
+		if client.metadataProviderCalls != 0 {
+			t.Fatalf("metadata provider probe ran (%d calls) instead of generic ConfigurationChecks", client.metadataProviderCalls)
+		}
+		if rpc.lastReq == nil || len(rpc.lastReq.GetConfig()) != 1 {
+			t.Fatalf("TestConfiguration request = %#v, want 1 config entry", rpc.lastReq)
+		}
+		if got := rpc.lastReq.GetConfig()[0].GetValue().AsMap()["api_key"]; got != "stored-secret" {
+			t.Fatalf("staged api_key = %#v, want stored-secret", got)
+		}
+	})
+
+	t.Run("returns plugin failure message when ok is false", func(t *testing.T) {
+		rpc := &fakeConfigurationChecksClient{
+			resp: &pluginv1.TestConfigurationResponse{Ok: false, Message: "invalid client secret"},
+		}
+		service, _ := setup(
+			t, 13,
+			&pluginv1.CapabilityDescriptor{Type: "scheduled_task.v1", Id: "refresh", DisplayName: "Refresh"},
+			rpc, nil,
+		)
+
+		err := service.TestGlobalConfig(context.Background(), 13, "connection", map[string]any{"api_key": "bad"})
+		var connErr *ConnectionTestError
+		if !errors.As(err, &connErr) || connErr.Message != "invalid client secret" {
+			t.Fatalf("err = %v, want ConnectionTestError(%q)", err, "invalid client secret")
+		}
+	})
+
+	t.Run("maps Unimplemented to ErrConnectionTestUnsupported", func(t *testing.T) {
+		rpc := &fakeConfigurationChecksClient{err: status.Error(codes.Unimplemented, "not implemented")}
+		service, _ := setup(
+			t, 14,
+			&pluginv1.CapabilityDescriptor{Type: "scheduled_task.v1", Id: "refresh", DisplayName: "Refresh"},
+			rpc, nil,
+		)
+
+		err := service.TestGlobalConfig(context.Background(), 14, "connection", map[string]any{"api_key": "draft"})
+		if !errors.Is(err, ErrConnectionTestUnsupported) {
+			t.Fatalf("err = %v, want ErrConnectionTestUnsupported", err)
+		}
+	})
 }
 
 // connectionConfigService serves manifest as installation 7 with stored saved

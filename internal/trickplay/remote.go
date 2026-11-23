@@ -260,6 +260,9 @@ func (e *NodeExtractor) remote(ctx context.Context, node *nodepool.Node, job *Jo
 	defer func() { _ = resp.Body.Close() }()
 	limited := io.LimitReader(resp.Body, maxRemoteResultBytes)
 	if resp.StatusCode != http.StatusOK {
+		if nodepool.RefusedAtCapacity(resp) {
+			nodepool.ReportAtCapacity(e.planner, node.URL)
+		}
 		failure := &ExtractError{Reason: NodeUnavailableReason, Message: fmt.Sprintf("node answered %d", resp.StatusCode)}
 		var payload ExtractError
 		if json.NewDecoder(limited).Decode(&payload) == nil && strings.TrimSpace(payload.Reason) != "" {

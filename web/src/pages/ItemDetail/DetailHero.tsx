@@ -31,7 +31,7 @@ interface DetailHeroProps {
    */
   genreHref?: (genre: string) => string;
   overview?: string;
-  /** Pulses the overview while an on-view AI translation is in flight. */
+  /** Shows the translating status while an on-view AI translation is in flight. */
   overviewTranslating?: boolean;
   /** When set, renders a small "Translate" chip under the overview. */
   onTranslateOverview?: () => void;
@@ -272,7 +272,7 @@ export default function DetailHero({
                   <DetailTitle
                     title={title}
                     bounded={isViewportBounded}
-                    className={`bidi-text text-foreground mb-3 font-extrabold tracking-tight ${
+                    className={`text-foreground mb-3 font-extrabold tracking-tight ${
                       isCompact
                         ? "font-display text-3xl leading-[1.1] sm:text-4xl"
                         : "font-display text-4xl leading-[0.98] tracking-[-0.05em] sm:text-5xl lg:text-7xl"

@@ -39,5 +39,5 @@ func ProtocolTranscodeStart(schemas huma.Registry) workerprotocol.Operation {
 	for _, status := range []string{"422", "503"} {
 		op.Responses[status].Headers = map[string]*huma.Param{ToneMapExecutionErrorHeader: {Description: "Existing tone-map refusal code when available.", Schema: &huma.Schema{Type: huma.TypeString}}}
 	}
-	return op
+	return withJobCapRefusal(op, "a same-id replacement, or a start for a playback_session_id the node already runs a session or progressive remux for")
 }

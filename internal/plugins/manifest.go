@@ -70,6 +70,11 @@ func isReservedPluginID(pluginID string) bool {
 }
 
 func validateManifestShared(manifest *pluginv1.PluginManifest) error {
+	for i, capability := range manifest.GetCapabilities() {
+		if capability == nil {
+			return fmt.Errorf("plugin manifest capability at index %d is null", i)
+		}
+	}
 	if err := publicmanifest.Validate(manifest); err != nil {
 		return err
 	}

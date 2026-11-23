@@ -120,3 +120,24 @@ func TestLatin1EditionKeyMatchesUTF8(t *testing.T) {
 		t.Fatalf("edition = %q (%q), want %q (%q)", encoded.EditionKey, encoded.EditionRaw, utf8Hints.EditionKey, "Bård")
 	}
 }
+
+func TestEditionAliasFamilyRecognizesWholeKeys(t *testing.T) {
+	for key, want := range map[string]string{
+		"THEATRICAL-RELEASE":              "theatrical",
+		"extended_version":                "extended",
+		"unrated_cut":                     "unrated",
+		"uncut_edition":                   "uncut",
+		"uncensored_version":              "uncensored",
+		"director’s_cut":                  "director_cut",
+		"editors-cut":                     "editor_cut",
+		"extended_directors_cut":          "extended_director_cut",
+		"extended_directors_cut_fan_edit": "",
+		"unrated_directors_cut":           "",
+		"theatrical_cut_open_matte":       "",
+		"":                                "",
+	} {
+		if got := EditionAliasFamily(key); got != want {
+			t.Errorf("EditionAliasFamily(%q) = %q, want %q", key, got, want)
+		}
+	}
+}

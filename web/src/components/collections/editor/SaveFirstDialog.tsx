@@ -68,7 +68,9 @@ export function SaveFirstDialog({
           <AlertDialogCancel variant="ghost" disabled={isSaving}>
             {t("common.cancel")}
           </AlertDialogCancel>
-          <div className="flex flex-col-reverse gap-2 sm:flex-row">
+          {/* From sm up the two actions wrap when they don't fit one line, and
+              stay at the end when they move below Cancel. */}
+          <div className="flex flex-col-reverse gap-2 sm:ms-auto sm:flex-row sm:flex-wrap sm:justify-end">
             <Button
               variant="outline"
               disabled={isSaving || Boolean(discardBlockedReason)}
@@ -85,7 +87,7 @@ export function SaveFirstDialog({
               {isSaving ? (
                 <span
                   aria-hidden
-                  className="me-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+                  className="me-2 inline-block h-3 w-3 shrink-0 animate-spin rounded-full border-2 border-current border-t-transparent"
                 />
               ) : null}
               {t("web.collections.saveFirst.saveAndContinue")}

@@ -468,13 +468,13 @@ func checkPushInstallationOwner(ctx context.Context, tx pgx.Tx, deviceID, platfo
 	return nil
 }
 
-// DeleteAllForProfile removes push registrations for a deleted account profile.
+// DeleteAllForProfile removes push registrations for a deleted account
+// profile (see deleteProfileTargetsInOrder for the locking).
 func (r *PushDeviceRepository) DeleteAllForProfile(ctx context.Context, userID int, profileID string) error {
 	if r == nil || r.pool == nil {
 		return nil
 	}
-	_, err := r.pool.Exec(ctx, `DELETE FROM push_devices WHERE user_id = $1 AND profile_id = $2`, userID, profileID)
-	return err
+	return deleteProfileTargetsInOrder(ctx, r.pool, "push_devices", userID, profileID)
 }
 
 // DeleteByProfileDevice removes one install's registrations for an account
