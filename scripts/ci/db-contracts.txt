@@ -753,6 +753,7 @@
 ./internal/api/handlers TestPausedTimeoutSweepEndsPausedSessionsDB
 ./internal/api/handlers TestPausedTimeoutSweepDropsCopyItCannotFinishDB
 ./internal/api/handlers TestPausedTimeoutSweepDropsCopiesStoppedElsewhereDB
+./internal/api/handlers TestPausedTimeoutSweepDropsCopiesFinalizedElsewhereDB
 ./internal/api/handlers TestPausedTimeoutSweepPagesPastSkippedRowsDB
 ./internal/api/handlers TestLifecycleSweepKeepsARecordedSubtitleDB
 ./internal/api/handlers TestLifecycleSweepTakesALaterSyncedSubtitleDB

@@ -3,8 +3,6 @@ package handlers
 import (
 	"context"
 	"log/slog"
-	"maps"
-	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -75,8 +73,12 @@ func (h *PlaybackHandler) pausedSessionTimeout(ctx context.Context) time.Duratio
 
 // sweepPausedTimeouts drops the copies this server holds of sessions another
 // server's paused timeout ended, then ends the sessions paused past the
-// timeout that this server holds, or that no server holds.
+// timeout that this server holds, or that no server holds. The copies go
+// even while the timeout is off: another server may have stopped them before
+// the change reached it.
 func (h *PlaybackHandler) sweepPausedTimeouts(ctx context.Context, pool *pgxpool.Pool) {
+	heldIDs := h.heldNativeSessionIDs()
+	h.dropCopiesPausedOutElsewhere(ctx, pool, heldIDs)
 	timeout := h.pausedSessionTimeout(ctx)
 	if timeout <= 0 {
 		return
@@ -85,9 +87,6 @@ func (h *PlaybackHandler) sweepPausedTimeouts(ctx context.Context, pool *pgxpool
 	if !ok {
 		return
 	}
-	held := h.heldNativeSessions()
-	heldIDs := slices.Collect(maps.Keys(held))
-	h.dropCopiesPausedOutElsewhere(ctx, pool, held, heldIDs)
 	h.pausedTimeoutCursorMu.Lock()
 	defer h.pausedTimeoutCursorMu.Unlock()
 	for range pausedTimeoutPagesPerSweep {
@@ -97,44 +96,48 @@ func (h *PlaybackHandler) sweepPausedTimeouts(ctx context.Context, pool *pgxpool
 			return
 		}
 		for _, c := range candidates {
+			if ctx.Err() != nil {
+				// The sweep ran out of time: the next one resumes at this
+				// candidate, not past the rest of the page.
+				return
+			}
 			h.endPausedTimeout(ctx, expirer, c, timeout)
+			h.pausedTimeoutCursor = &pausedTimeoutCursor{pausedSince: c.pausedSince, sessionID: c.sessionID}
 		}
 		if len(candidates) < lifecycleSweepBatch {
 			// The end of the list: the next sweep starts from the oldest.
 			h.pausedTimeoutCursor = nil
 			return
 		}
-		last := candidates[len(candidates)-1]
-		h.pausedTimeoutCursor = &pausedTimeoutCursor{pausedSince: last.pausedSince, sessionID: last.sessionID}
 	}
 }
 
-// heldNativeSessions is this server's live copies that can have an attempt
-// row, by session id.
-func (h *PlaybackHandler) heldNativeSessions() map[string]*playback.Session {
+// heldNativeSessionIDs is the ids of this server's live copies that can
+// have an attempt row.
+func (h *PlaybackHandler) heldNativeSessionIDs() []string {
 	lister, ok := h.sessionMgr.(interface{ AllSessions() []*playback.Session })
 	if !ok {
 		return nil
 	}
-	held := make(map[string]*playback.Session)
+	var ids []string
 	for _, s := range lister.AllSessions() {
 		if s == nil || s.IsJellyfinCompat {
 			continue
 		}
 		if _, err := uuid.Parse(s.ID); err == nil {
-			held[s.ID] = s
+			ids = append(ids, s.ID)
 		}
 	}
-	return held
+	return ids
 }
 
-// dropCopiesPausedOutElsewhere finishes this server's copies of sessions
-// whose attempt another server stopped under pausedTimeoutStopID. That server
+// dropCopiesPausedOutElsewhere drops this server's copies of sessions whose
+// attempt another server stopped under pausedTimeoutStopID. That server
 // claims only a session nobody synced lately, so a holder whose sync stalled
-// can still hold a copy, with its transcode, until its own reaper; the
-// stale-copy path drops it now, or finishes the end from it when the stop
-// was left unfinalized.
-func (h *PlaybackHandler) dropCopiesPausedOutElsewhere(ctx context.Context, pool *pgxpool.Pool, held map[string]*playback.Session, ids []string) {
+// can still hold a copy, with its transcode and its slots, until its own
+// reaper. The end is finished from this copy first when nobody has (under the
+// finalization lease, so its writers run once), then the copy goes.
+func (h *PlaybackHandler) dropCopiesPausedOutElsewhere(ctx context.Context, pool *pgxpool.Pool, ids []string) {
 	if len(ids) == 0 {
 		return
 	}
@@ -159,9 +162,8 @@ func (h *PlaybackHandler) dropCopiesPausedOutElsewhere(ctx context.Context, pool
 		if s.stopID != pausedTimeoutStopID(s.sessionID) {
 			continue // other ends reach this copy through their own paths
 		}
-		if session := held[s.sessionID]; session != nil {
-			h.expireSessionCopy(ctx, session)
-		}
+		h.finishInterruptedNativeEnd(ctx, s.sessionID)
+		h.dropUnfinishedPausedCopy(ctx, s.sessionID)
 	}
 }
 

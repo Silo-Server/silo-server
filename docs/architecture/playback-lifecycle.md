@@ -168,10 +168,17 @@ before the attempt expires, and the existing expiry then ends the session.
 - **Stale copies.** Another server claims a session only once no server has
   synced it for 45 seconds, so a holder whose sync stalled can still hold a
   paused copy. Each sweep, a server reads the attempts of the native sessions
-  it holds in one query, and runs the stale-copy path (`expireSessionCopy`)
-  for each one stopped under `pausedTimeoutStopID`: the copy is dropped, or
-  finishes the end itself when the stop was left unfinalized and its lease is
-  free. Copies stopped by other ends keep their own paths.
+  it holds in one query and, for each one stopped under `pausedTimeoutStopID`,
+  first finishes the end from its copy when nobody has
+  (`finishInterruptedNativeEnd`, so the writers run only under the
+  finalization lease), then drops the copy and its live row. This runs even
+  while the timeout reads zero, since another server may have claimed before
+  the setting changed. Copies stopped by other ends keep their own paths.
+- **Resume race.** A resume reaches the server with the client's next report.
+  The web player reports on its video element's `play` and `pause` events;
+  the native clients report every 10 seconds, so a viewer who resumes within
+  one report interval of the timeout can still be ended and sees the
+  paused-timeout notice, with the position kept.
 - **Answers.** Progress, replan and the control-ticket mint answer `410`:
   `playback_session_paused_timeout` when the attempt's durable client features
   list `paused_timeout_v1` (attempt-sticky), `playback_session_ended`

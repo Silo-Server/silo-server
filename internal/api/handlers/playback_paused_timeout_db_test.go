@@ -275,6 +275,35 @@ func TestPausedTimeoutSweepDropsCopiesStoppedElsewhereDB(t *testing.T) {
 	}
 }
 
+// TestPausedTimeoutSweepDropsCopiesFinalizedElsewhereDB pins the usual case
+// of a copy another server's paused timeout stopped: that server already
+// finished the end, so this one drops its copy and live row without writing
+// history, and does so even while its own timeout reads zero (the setting
+// changed after the other server's claim).
+func TestPausedTimeoutSweepDropsCopiesFinalizedElsewhereDB(t *testing.T) {
+	for _, minutes := range []int{playback.DefaultPausedSessionTimeoutMinutes, 0} {
+		t.Run("timeout_"+strconv.Itoa(minutes), func(t *testing.T) {
+			f := newPausedTimeoutSweepFixture(t)
+			session := f.pausedSession(t, f.video, 10*time.Second, `{}`)
+			f.hold(t, session)
+			f.exec(t, `UPDATE playback_sessions_sync SET last_sync_at = NOW() - interval '1 minute' WHERE session_id = $1`, session)
+			f.exec(t, `UPDATE playback_v3_attempts SET stopped_at = NOW(), stop_id = $2::uuid,
+				stop_receipt = jsonb_build_object('stop_id', $2::text, 'accepted', last_sample, 'finalized', true)
+				WHERE session_id = $1`, session, pausedTimeoutStopID(session))
+			f.exec(t, `UPDATE playback_session_lifecycle SET state = 'stopped', end_reason = 'expired',
+				seq = nextval('playback_session_lifecycle_seq'), updated_at = NOW() WHERE session_id = $1`, session)
+
+			f.sweep(t, minutes)
+			if copyHeld, rowKept := f.held(t, session); copyHeld || rowKept {
+				t.Fatalf("copy kept = %v, live row kept = %v; want both gone", copyHeld, rowKept)
+			}
+			if rows, _ := f.history(t, session); rows != 0 {
+				t.Fatalf("dropping a copy finalized elsewhere wrote %d history rows, want none", rows)
+			}
+		})
+	}
+}
+
 // TestPausedTimeoutSweepPagesPastSkippedRowsDB pins that sessions the sweep
 // reads and leaves (audio-only files here) cannot hold an eligible session
 // behind them, even when they fill a whole candidate batch.
