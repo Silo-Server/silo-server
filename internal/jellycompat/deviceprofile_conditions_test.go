@@ -665,6 +665,9 @@ func TestCompatDOVIVariantEligibleCodecProfiles(t *testing.T) {
 		// 10.1 keeps the dav1 variant: Silo has no av01 CODECS entry for
 		// HDR AV1 to carry Jellyfin's SUPPLEMENTAL-CODECS instead.
 		{"av1", 10, 1, true},
+		{"av1", 10, 4, true},
+		// Jellyfin gives an SDR base layer no Dolby Vision signaling.
+		{"av1", 10, 2, false},
 		{"h264", 9, 0, false},
 		{"hevc", 10, 0, false},
 		{"av1", 5, 0, false},

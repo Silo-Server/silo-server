@@ -662,11 +662,12 @@ writes a partial list or a short form. For Dolby Vision without a compatible
 base layer (HEVC profile 5, AV1 profile 10.0) and with a known level, a client
 whose device profile lists `DOVI` in a `VideoRangeType` condition also gets
 Jellyfin 12's `dvh1`/`dav1` variant, listed before the fallback variant, unless
-the copied audio has no entry. AV1 profile 10 with a compatible base layer
-gets the `dav1` variant on the same terms, with its base layer's
-`VIDEO-RANGE`. For 10.1 and 10.4 Jellyfin adds `SUPPLEMENTAL-CODECS` to the
-`av01` variant instead, which Silo cannot do because HDR AV1 has no `CODECS`
-entry. MPEG-TS remuxes keep the single variant. Audio and subtitle streams
+the copied audio has no entry. AV1 profile 10.1 and 10.4 get the `dav1`
+variant on the same terms, with their base layer's `VIDEO-RANGE`. Jellyfin
+adds `SUPPLEMENTAL-CODECS` to the `av01` variant for them instead, which Silo
+cannot do because HDR AV1 has no `CODECS` entry. As in Jellyfin, AV1 profile
+10.2, whose base layer is SDR, gets no Dolby Vision variant or
+`SUPPLEMENTAL-CODECS`. MPEG-TS remuxes keep the single variant. Audio and subtitle streams
 carry `LocalizedLanguage`, and audio streams carry `LocalizedOriginal`, in
 English. `LocalizedLanguage` and `DisplayTitle` name a tag with a region or
 script by its CLDR name, such as "Brazilian Portuguese" for `pt-BR` or
