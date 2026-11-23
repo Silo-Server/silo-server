@@ -187,9 +187,6 @@ func observe(next http.Handler) http.Handler {
 // as a handler that aborts itself is. That sentinel passes through untouched.
 func recoverRaw(next http.Handler, sw *statusRecorder) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// The headers the outer middleware set (the request ID among them),
-		// so a half-built raw response's headers do not reach the problem.
-		outer := w.Header().Clone()
 		defer func() {
 			rec := recover()
 			if rec == nil {
@@ -202,10 +199,14 @@ func recoverRaw(next http.Handler, sw *statusRecorder) http.Handler {
 			if sw.status != 0 || sw.hijacked {
 				panic(http.ErrAbortHandler)
 			}
+			// Drop the half-built raw response's headers, keeping the request
+			// ID, as bufferResponse does for a Huma operation. Raw
+			// registrations carry no retirement headers.
 			h := w.Header()
+			requestID := h[RequestIDHeader] //nolint:staticcheck // exact contract spelling
 			clear(h)
-			for name, values := range outer {
-				h[name] = values
+			if len(requestID) > 0 {
+				h[RequestIDHeader] = requestID
 			}
 			writeProblem(w, r, NewProblem(TypeInternalError, "An unexpected error occurred."))
 		}()

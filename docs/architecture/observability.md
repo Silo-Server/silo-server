@@ -452,6 +452,16 @@ context when that write fails, so a client that stalls there is recorded as
 aborted. The activity log still records only requests that return, so an
 aborted request has no activity row.
 
+Any other panic in a `/api/v2` handler is caught inside the v2 recorder, so it
+never reaches the listener-wide recoverer. A Huma operation's panic is caught
+where its response is buffered; a raw registration's or a v2 middleware's is
+caught by `recoverRaw` (`internal/apiv2/observe.go`). Either way the panic is
+logged once as `apiv2 handler panic`, with its value masked by
+`logredact.SanitizeText`. If nothing was written yet, the client gets the
+`internal_error` problem, recorded as a 5xx. A raw response that already sent
+its status, or a hijacked connection, is broken with `http.ErrAbortHandler`
+instead and recorded as aborted.
+
 ## Jellyfin-compatible listener
 
 The Jellyfin-compatible listener runs on its own `http.Server`, so the native
