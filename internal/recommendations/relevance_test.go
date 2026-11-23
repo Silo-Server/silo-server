@@ -91,50 +91,57 @@ type toyCatalog struct {
 	byID  map[string]*toyItem
 }
 
+// toyVector returns a unit vector in the toy catalog's space for a title of
+// mediaType whose genres carry the given weights, with noise drawn from rng.
+// The first axis is common to every title, the next two are the media types,
+// then one per toyGenres entry, then toyNoiseDims of noise.
+func toyVector(rng *rand.Rand, mediaType string, genreWeights map[string]float64) []float32 {
+	const typeAxes = 2
+	noiseAxis := 1 + typeAxes + len(toyGenres)
+	vec := make([]float64, noiseAxis+toyNoiseDims)
+	vec[0] = toyCommon
+	if mediaType == "series" {
+		vec[2] = toyType
+	} else {
+		vec[1] = toyType
+	}
+	for i, g := range toyGenres {
+		vec[1+typeAxes+i] = genreWeights[g.name]
+	}
+	var noiseNorm float64
+	noise := make([]float64, toyNoiseDims)
+	for d := range noise {
+		noise[d] = rng.NormFloat64()
+		noiseNorm += noise[d] * noise[d]
+	}
+	noiseNorm = math.Sqrt(noiseNorm)
+	for d := range noise {
+		vec[noiseAxis+d] = toyNoise * noise[d] / noiseNorm
+	}
+	out := make([]float32, len(vec))
+	var norm float64
+	for _, v := range vec {
+		norm += v * v
+	}
+	norm = math.Sqrt(norm)
+	for d, v := range vec {
+		out[d] = float32(v / norm)
+	}
+	return out
+}
+
 // newToyCatalog builds the same catalog on every run.
 func newToyCatalog() *toyCatalog {
 	rng := rand.New(rand.NewPCG(20261001, 7))
-	const typeAxes = 2
-	genreAxis := make(map[string]int, len(toyGenres))
-	for i, g := range toyGenres {
-		genreAxis[g.name] = 1 + typeAxes + i
-	}
-	noiseAxis := 1 + typeAxes + len(toyGenres)
-	dims := noiseAxis + toyNoiseDims
 	c := &toyCatalog{byID: map[string]*toyItem{}}
 	add := func(id, mediaType string, primary, secondary string) {
-		vec := make([]float64, dims)
-		vec[0] = toyCommon
-		if mediaType == "series" {
-			vec[2] = toyType
-		} else {
-			vec[1] = toyType
-		}
-		vec[genreAxis[primary]] = 1
+		weights := map[string]float64{primary: 1}
 		genres := []string{primary}
 		if secondary != "" {
-			vec[genreAxis[secondary]] = toySecondary
+			weights[secondary] = toySecondary
 			genres = append(genres, secondary)
 		}
-		var noiseNorm float64
-		noise := make([]float64, toyNoiseDims)
-		for d := range noise {
-			noise[d] = rng.NormFloat64()
-			noiseNorm += noise[d] * noise[d]
-		}
-		noiseNorm = math.Sqrt(noiseNorm)
-		for d := range noise {
-			vec[noiseAxis+d] = toyNoise * noise[d] / noiseNorm
-		}
-		out := make([]float32, dims)
-		var norm float64
-		for _, v := range vec {
-			norm += v * v
-		}
-		norm = math.Sqrt(norm)
-		for d, v := range vec {
-			out[d] = float32(v / norm)
-		}
+		out := toyVector(rng, mediaType, weights)
 		rating := 0.0
 		if rng.IntN(10) != 0 {
 			rating = 6.4 + rng.NormFloat64()
