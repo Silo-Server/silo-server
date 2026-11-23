@@ -54,7 +54,8 @@ function alphaOf(hex: string): number {
 // the preset's own colour was picked for its own fill or for the artwork. A
 // see-through fill in a preset that draws a fill gets white text, since its
 // own colour was picked for that fill and the text sits on the artwork again;
-// any see-through fill adds a text shadow when the preset has none. An accent the preset writes as
+// any see-through fill adds a text shadow when the preset has none, unless
+// the viewer turned shadows off. An accent the preset writes as
 // text that would not read on a solid fill tints it instead.
 export function applyOverlayStyle(
   preset: OverlayPreset,
@@ -90,7 +91,9 @@ export function applyOverlayStyle(
   const solidFill = fillAlpha >= SOLID_FILL_ALPHA ? background : undefined;
   // A shadow drawn to lift text off the artwork only muddies it on a fill.
   if (solidFill) next.textShadow = undefined;
-  else if (background) next.textShadow = preset.textShadow ?? SEE_THROUGH_TEXT_SHADOW;
+  else if (background && style.shadow !== false) {
+    next.textShadow = preset.textShadow ?? SEE_THROUGH_TEXT_SHADOW;
+  }
   if (background || textColor || borderColor || style.borderWidth !== undefined) {
     const strategy = preset.accentStrategy;
     next.badgeStyle = (accent) => {
