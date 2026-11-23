@@ -87,23 +87,18 @@ func (e *Engine) rankSimilar(ctx context.Context, userID int, profileID, itemID 
 		cowatchMap = map[string]float64{}
 	}
 
-	// 4. Blend scores (70% embedding, 30% co-watch), leaving out the marked
-	// titles co-watch brought in.
-	blended := blendScores(embCandidates, cowatchMap, 0.7, 0.3)
-	if len(marks) > 0 {
-		marked := make(map[string]struct{}, len(marks))
-		for _, m := range marks {
-			marked[m.MediaItemID] = struct{}{}
-		}
-		blended = excludeScoredItems(blended, marked)
+	// The marked titles co-watch brought in are left out; the embedding
+	// search already excluded them.
+	for _, m := range marks {
+		delete(cowatchMap, m.MediaItemID)
 	}
 
-	// 5. Validation pipeline, after reading the details of the co-watch
-	// neighbors the embedding search did not return.
+	// 4. Read the details of the co-watch neighbors the embedding search did
+	// not return, for their similarity, validation and MMR.
 	var cowatchOnly []string
-	for _, item := range blended {
-		if _, ok := details[item.MediaItemID]; !ok {
-			cowatchOnly = append(cowatchOnly, item.MediaItemID)
+	for id := range cowatchMap {
+		if _, ok := details[id]; !ok {
+			cowatchOnly = append(cowatchOnly, id)
 		}
 	}
 	if len(cowatchOnly) > 0 {
@@ -115,17 +110,21 @@ func (e *Engine) rankSimilar(ctx context.Context, userID int, profileID, itemID 
 			details[id] = d
 		}
 	}
-	if len(blended) > 0 {
-		blended = applyValidation(sourceMeta, blended, details)
-	}
-
-	// 6. MMR re-ranking.
 	embMap := make(map[string][]float32, len(details))
 	for id, d := range details {
 		if d.Embedding != nil {
 			embMap[id] = d.Embedding
 		}
 	}
+
+	// 5. Blend scores (70% embedding, 30% co-watch), then the validation
+	// pipeline.
+	blended := blendScores(withCowatchSimilarity(embCandidates, cowatchMap, embedding, embMap), cowatchMap, 0.7, 0.3)
+	if len(blended) > 0 {
+		blended = applyValidation(sourceMeta, blended, details)
+	}
+
+	// 6. MMR re-ranking.
 	return applyMMR(blended, embMap, e.mmrLambda(), limit), sourceMeta, nil
 }
 

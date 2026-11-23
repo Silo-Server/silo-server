@@ -567,6 +567,47 @@ func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
 	}
 }
 
+// A co-watched title the embedding search misses, because nearer titles fill
+// its limit, is still scored by its similarity to the source as well as by
+// co-watch. Here it is close enough, and watched together often enough, to
+// lead both Because You Watched and "More like this"; with its co-watch share
+// alone it would rank below every title the search found.
+func TestCowatchedTitleBeyondTheEmbeddingSearchKeepsItsSimilarityPostgres(t *testing.T) {
+	f := newRelevanceFixture(t, "cowatch-similarity")
+	ctx := t.Context()
+	const axis = 2900
+	near := func(distance float32) []float32 { return axisVector(axis, map[int]float32{axis + 1: distance}) }
+	source := f.movie(t, "source", []string{"Drama"}, "PG-13", 13, near(0))
+	// limit 2 searches the six nearest titles; these are all nearer than
+	// the co-watched one.
+	for i := range 8 {
+		f.movie(t, fmt.Sprintf("near-%d", i), []string{"Drama"}, "PG-13", 13, near(0.01*float32(i+1)))
+	}
+	cowatched := f.movie(t, "cowatched", []string{"Drama"}, "PG-13", 13, near(0.5))
+	if err := f.repo.UpsertCowatchPairs(ctx, []CowatchPair{{ItemID: source, SimilarItemID: cowatched, JaccardScore: 0.9, CowatchCount: 5}}); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = f.pool.Exec(context.Background(), `DELETE FROM item_cowatch WHERE item_id LIKE $1 OR similar_item_id LIKE $1`, f.prefix+"%")
+	})
+	userID, viewer := newTasteTestAccount(t, f.pool, f.prefix+"viewer")
+
+	byw, err := f.engine.becauseYouWatched(ctx, f.engine.rowBuilder(), source, 2, map[string]struct{}{}, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := prefixed(byw, f.prefix); len(got) == 0 || got[0] != cowatched {
+		t.Errorf("Because You Watched = %v, want the co-watched %s first", got, cowatched)
+	}
+	similar, err := f.engine.SimilarItems(ctx, userID, viewer, source, 2, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := prefixed(similar, f.prefix); len(got) == 0 || got[0] != cowatched {
+		t.Errorf("similar = %v, want the co-watched %s first", got, cowatched)
+	}
+}
+
 // "More like this" validates every candidate against the source item, those
 // the embedding search found and those only co-watch brought in: titles that
 // share no genre with it are dropped, a remake of it ranks below its peers,

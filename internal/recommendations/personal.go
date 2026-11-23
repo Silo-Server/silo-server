@@ -489,16 +489,12 @@ func (e *Engine) becauseYouWatched(ctx context.Context, builder rowBuilder, sour
 		return nil, fmt.Errorf("filter co-watch neighbors for because watched: %w", err)
 	}
 
-	// Blend scores, then drop excluded titles before MMR so they do not take
-	// the row's places.
-	blended := blendScores(embCandidates, cowatchMap, 0.7, 0.3)
-	blended = excludeScoredItems(blended, excluded)
-	blended = builder.withQualityPrior(ctx, blended, qualityMinSmallPool)
-
-	// Apply MMR re-ranking.
-	candidateIDs := make([]string, len(blended))
-	for i, item := range blended {
-		candidateIDs[i] = item.MediaItemID
+	// The candidates' embeddings, read before blending so the co-watch
+	// neighbors the embedding search missed are scored by their similarity
+	// too, and used again by aversion and MMR.
+	candidateIDs := scoredItemIDs(embCandidates)
+	for id := range cowatchMap {
+		candidateIDs = append(candidateIDs, id)
 	}
 	embMap, err := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
 	if err != nil {
@@ -509,6 +505,14 @@ func (e *Engine) becauseYouWatched(ctx context.Context, builder rowBuilder, sour
 		}
 		embMap = nil
 	}
+
+	// Blend scores, then drop excluded titles before MMR so they do not take
+	// the row's places.
+	blended := blendScores(withCowatchSimilarity(embCandidates, cowatchMap, embedding, embMap), cowatchMap, 0.7, 0.3)
+	blended = excludeScoredItems(blended, excluded)
+	blended = builder.withQualityPrior(ctx, blended, qualityMinSmallPool)
+
+	// Apply MMR re-ranking.
 	blended, _ = builder.withAversion(blended, embMap, embedding)
 	result := applyMMR(blended, embMap, builder.lambda, limit)
 
