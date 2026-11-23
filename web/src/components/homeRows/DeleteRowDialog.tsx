@@ -7,7 +7,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { useT } from "@/i18n";
+import { exactAmount, useT } from "@/i18n";
 
 /**
  * Confirms deleting one row for everyone. The row was read (with its version)
@@ -105,7 +105,10 @@ export function DeleteRowsDialog({
         <DialogHeader>
           <DialogTitle>{t("web.home.rows.deleteMany.title", { count })}</DialogTitle>
           <DialogDescription>
-            {t("web.home.rows.deleteMany.description", { count, page: pageLabel })}
+            {t("web.home.rows.deleteMany.description", {
+              amount: exactAmount(count),
+              page: pageLabel,
+            })}
           </DialogDescription>
         </DialogHeader>
         <DialogFooter className="items-center sm:justify-between">

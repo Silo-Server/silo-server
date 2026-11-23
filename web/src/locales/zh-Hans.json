@@ -105270,93 +105270,6 @@
       }
     }
   ],
-  "web.home.addRow.rules.sentenceNamed": [
-    {
-      "type": 8,
-      "value": "w",
-      "children": [
-        {
-          "type": 0,
-          "value": "显示"
-        }
-      ]
-    },
-    {
-      "type": 8,
-      "value": "libraries",
-      "children": []
-    },
-    {
-      "type": 8,
-      "value": "w",
-      "children": [
-        {
-          "type": 6,
-          "value": "count",
-          "options": {
-            "other": {
-              "value": [
-                {
-                  "type": 0,
-                  "value": "媒体库中的"
-                }
-              ]
-            }
-          },
-          "offset": 0,
-          "pluralType": "cardinal"
-        }
-      ]
-    },
-    {
-      "type": 8,
-      "value": "scope",
-      "children": []
-    },
-    {
-      "type": 5,
-      "value": "rules",
-      "options": {
-        "yes": {
-          "value": [
-            {
-              "type": 8,
-              "value": "break",
-              "children": []
-            },
-            {
-              "type": 8,
-              "value": "w",
-              "children": [
-                {
-                  "type": 0,
-                  "value": "需符合以下"
-                }
-              ]
-            },
-            {
-              "type": 8,
-              "value": "match",
-              "children": []
-            },
-            {
-              "type": 8,
-              "value": "w",
-              "children": [
-                {
-                  "type": 0,
-                  "value": "规则："
-                }
-              ]
-            }
-          ]
-        },
-        "other": {
-          "value": []
-        }
-      }
-    }
-  ],
   "web.home.addRow.rules.sentencePicked": [
     {
       "type": 8,
@@ -106817,32 +106730,6 @@
             {
               "type": 0,
               "value": "行"
-            }
-          ]
-        }
-      },
-      "offset": 0,
-      "pluralType": "cardinal"
-    }
-  ],
-  "web.home.rows.deleteMany.description": [
-    {
-      "type": 6,
-      "value": "count",
-      "options": {
-        "other": {
-          "value": [
-            {
-              "type": 0,
-              "value": "所选的行将从所有人的"
-            },
-            {
-              "type": 1,
-              "value": "page"
-            },
-            {
-              "type": 0,
-              "value": "中移除。如果Silo专门为其中某一行创建了合集，且该合集未在其他地方使用，也会一并移除。"
             }
           ]
         }
