@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 
+	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 // The Similar Users row is built from other accounts' ratings and favorites,
@@ -29,7 +32,38 @@ const (
 	similarUsersPeerProfiles      = 10
 	similarUsersPeersPerAccount   = 2
 	similarUsersCandidateProfiles = 40
+
+	// peerLikesPerKind caps how many of one similar profile's liked ratings,
+	// and separately its favorites, the row reads: the most recent, counted
+	// after leaving out what the row cannot use, so newer low ratings and
+	// episodes do not crowd out older likes.
+	peerLikesPerKind = 100
+	// peerLikedMinScore is the lowest score that rounds to 4 stars (see
+	// catalog.UserRating.Stars), the least a peer's rating must be to count
+	// as a like.
+	peerLikedMinScore = 7
 )
+
+// peerCeiling is the content-rating ceiling a profile's peers are matched
+// under (see Repo.FindSimilarUsers): the stricter of its parental controls,
+// its content-rating ceiling and its advisory-age limit as a bare age. A
+// profile with neither may match any peer, whatever it watched itself. The
+// row's titles are filtered by the profile's own access either way; this only
+// keeps a restricted profile's neighbors to those whose taste it can share.
+func peerCeiling(limits access.MaturityLimits) string {
+	ceiling := limits.MaxContentRating
+	if limits.MaxAdvisoryAge <= 0 {
+		return ceiling
+	}
+	if access.HasCeiling(ceiling) {
+		// An unusable ceiling stays: it matches no rated peer, as it shows
+		// the profile no rated title.
+		if age, ok := access.AgeForCeiling(ceiling); !ok || *age <= limits.MaxAdvisoryAge {
+			return ceiling
+		}
+	}
+	return strconv.Itoa(limits.MaxAdvisoryAge)
+}
 
 // peersAcrossAccounts keeps, in similarity order, up to limit profiles with
 // at most perAccount from any one account.
@@ -95,6 +129,72 @@ func collaborativeCandidates(peers []peerLikes) map[string]collaborativeCandidat
 	return candidates
 }
 
+// peerLikedTitles returns the recommendable titles a similar profile liked and
+// their weights: up to peerLikesPerKind of its most recent 4- and 5-star
+// ratings and as many of its favorites, a favorite weighing most.
+func (e *Engine) peerLikedTitles(ctx context.Context, userID int, profileID string) (map[string]float64, error) {
+	weights := make(map[string]float64)
+	ratings, err := e.ratingsRepo.ListRatedAtLeast(ctx, userID, profileID, peerLikedMinScore, recommendableMediaTypes, peerLikesPerKind)
+	if err != nil {
+		return nil, fmt.Errorf("list ratings for similar user %d profile %s: %w", userID, profileID, err)
+	}
+	for _, r := range ratings {
+		weight := WeightRated4
+		if r.Stars() == 5 {
+			weight = WeightRated5
+		}
+		weights[r.MediaItemID] = weight
+	}
+
+	store, err := e.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get store for similar user %d: %w", userID, err)
+	}
+	favorites, err := e.recommendableFavorites(ctx, store, profileID, peerLikesPerKind)
+	if err != nil {
+		return nil, fmt.Errorf("list favorites for similar user %d profile %s: %w", userID, profileID, err)
+	}
+	for _, id := range favorites {
+		weights[id] = max(weights[id], WeightFavorited)
+	}
+	return weights, nil
+}
+
+// recommendableFavorites returns up to limit of the profile's favorites of
+// recommendableMediaTypes, newest first. Favorites of other types, such as
+// episodes, are left out before the limit rather than taking its places.
+func (e *Engine) recommendableFavorites(ctx context.Context, store userstore.UserStore, profileID string, limit int) ([]string, error) {
+	var ids []string
+	var after *userstore.ListKey
+	for {
+		page, err := store.ListFavoritesPage(ctx, profileID, after, signalPageSize)
+		if err != nil {
+			return nil, err
+		}
+		pageIDs := make([]string, len(page))
+		for i, f := range page {
+			pageIDs[i] = f.MediaItemID
+		}
+		recommendable, err := e.repo.FilterRecommendableItemIDs(ctx, pageIDs, catalog.AccessFilter{})
+		if err != nil {
+			return nil, err
+		}
+		for _, f := range page {
+			if _, ok := recommendable[f.MediaItemID]; !ok {
+				continue
+			}
+			if ids = append(ids, f.MediaItemID); len(ids) == limit {
+				return ids, nil
+			}
+		}
+		if len(page) < signalPageSize {
+			return ids, nil
+		}
+		last := page[len(page)-1]
+		after = &userstore.ListKey{AddedAt: last.AddedAt, MediaItemID: last.MediaItemID}
+	}
+}
+
 // SimilarUsersLiked returns items highly rated or favorited by users with
 // similar taste profiles. Scores are weighted by the similarity of each peer
 // user to the requesting user. Items the target profile already rated, those
@@ -119,16 +219,7 @@ func (e *Engine) SimilarUsersLiked(ctx context.Context, userID int, profileID st
 // answers an empty, non-nil list when the row has nothing to show, so a
 // cached row records that it was built.
 func (e *Engine) similarUsersLiked(ctx context.Context, builder rowBuilder, userID int, profileID string, limit int, excluded map[string]struct{}, filter catalog.AccessFilter) ([]ScoredItem, error) {
-	meta, err := e.repo.GetTasteProfileMeta(ctx, userID, profileID)
-	if err != nil {
-		return nil, fmt.Errorf("get taste profile meta for user %d profile %s: %w", userID, profileID, err)
-	}
-	maxContentRating := ""
-	if meta != nil {
-		maxContentRating = meta.MaxContentRating
-	}
-
-	nearest, err := e.repo.FindSimilarUsers(ctx, userID, profileID, maxContentRating, similarUsersCandidateProfiles)
+	nearest, err := e.repo.FindSimilarUsers(ctx, userID, profileID, peerCeiling(filter.MaturityLimits), similarUsersCandidateProfiles)
 	if err != nil {
 		return nil, fmt.Errorf("find similar users for user %d profile %s: %w", userID, profileID, err)
 	}
@@ -139,48 +230,11 @@ func (e *Engine) similarUsersLiked(ctx context.Context, builder rowBuilder, user
 
 	peers := make([]peerLikes, 0, len(similarUsers))
 	for _, su := range similarUsers {
-		peerWeights := make(map[string]float64)
-
-		// Collect highly-rated items (4–5 stars) from this similar user.
-		ratings, err := e.ratingsRepo.List(ctx, su.UserID, su.ProfileID, 100, 0)
+		weights, err := e.peerLikedTitles(ctx, su.UserID, su.ProfileID)
 		if err != nil {
-			return nil, fmt.Errorf("list ratings for similar user %d profile %s: %w", su.UserID, su.ProfileID, err)
+			return nil, err
 		}
-
-		for _, r := range ratings {
-			var weight float64
-			switch {
-			case r.Stars() == 5:
-				weight = WeightRated5
-			case r.Stars() == 4:
-				weight = WeightRated4
-			default:
-				continue
-			}
-
-			if existing, ok := peerWeights[r.MediaItemID]; !ok || weight > existing {
-				peerWeights[r.MediaItemID] = weight
-			}
-		}
-
-		// Collect favorited items from this similar user.
-		store, err := e.storeProvider.ForUser(ctx, su.UserID)
-		if err != nil {
-			return nil, fmt.Errorf("get store for similar user %d: %w", su.UserID, err)
-		}
-
-		favorites, err := store.ListFavorites(ctx, su.ProfileID, 100, 0)
-		if err != nil {
-			return nil, fmt.Errorf("list favorites for similar user %d profile %s: %w", su.UserID, su.ProfileID, err)
-		}
-
-		for _, f := range favorites {
-			if existing, ok := peerWeights[f.MediaItemID]; !ok || WeightFavorited > existing {
-				peerWeights[f.MediaItemID] = WeightFavorited
-			}
-		}
-
-		peers = append(peers, peerLikes{userID: su.UserID, similarity: su.Score, weights: peerWeights})
+		peers = append(peers, peerLikes{userID: su.UserID, similarity: su.Score, weights: weights})
 	}
 
 	candidates := collaborativeCandidates(peers)
