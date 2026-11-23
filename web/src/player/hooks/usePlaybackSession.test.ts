@@ -26,6 +26,7 @@ import {
   RECONNECT_MAX_DELAY_MS,
   reconnectDelayMs,
   usePlaybackSession,
+  type UsePlaybackSessionResult,
 } from "./usePlaybackSession";
 
 // These hook tests exercise plan adoption and replacement against a transport
@@ -3628,11 +3629,11 @@ describe("usePlaybackSession mid-stream reconnect", () => {
     throw new TypeError("Failed to fetch");
   };
 
-  async function startPlaying() {
+  async function startPlaying(played = true) {
     const rendered = renderSession();
     await waitFor(() => expect(rendered.result.current.planRevision).toBe(1));
     // The stream played: a network failure from here on is a lost connection.
-    act(() => rendered.result.current.updatePlaybackState(100, true));
+    act(() => rendered.result.current.updatePlaybackState(100, played));
     // RTL's waitFor polls on real timers; from here the test drives time.
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
     return rendered;
@@ -3796,11 +3797,16 @@ describe("usePlaybackSession mid-stream reconnect", () => {
         afterRecovery = () => jsonResponse(playable("session-1", reopenedPlan)),
         restart,
         playing = true,
+        played = true,
+        beforeDrop,
       }: {
         recovery?: () => Response;
         afterRecovery?: () => Response;
         restart?: () => Response;
         playing?: boolean;
+        /** False: the streams showed frames but never played. */
+        played?: boolean;
+        beforeDrop?: (session: UsePlaybackSessionResult) => void;
       } = {},
     ) {
       const harness = reconnectHarness({
@@ -3815,8 +3821,8 @@ describe("usePlaybackSession mid-stream reconnect", () => {
         },
         restart,
       });
-      const rendered = await startPlaying();
-      act(() => rendered.result.current.recoverConnection(2.8, true));
+      const rendered = await startPlaying(played);
+      act(() => rendered.result.current.recoverConnection(2.8, played));
       await advance(RECONNECT_BASE_DELAY_MS);
       expect(harness.replanBodies[0]?.operation).toBe("seek_reanchor");
       expect(rendered.result.current.connectionStatus).toBe("connected");
@@ -3825,7 +3831,8 @@ describe("usePlaybackSession mid-stream reconnect", () => {
       // the drop: by Chromium, or by the viewer when `playing` is false.
       act(() => {
         rendered.result.current.reportFirstFrame();
-        rendered.result.current.updatePlaybackState(2.8, true);
+        rendered.result.current.updatePlaybackState(2.8, played);
+        beforeDrop?.(rendered.result.current);
         rendered.result.current.updatePlaybackState(secondDropAt, false);
       });
       act(() => rendered.result.current.recoverConnection(secondDropAt, playing));
@@ -3903,6 +3910,65 @@ describe("usePlaybackSession mid-stream reconnect", () => {
       expect(harness.startBodies).toHaveLength(2);
       expect(harness.startBodies[1]?.start_position).toBe(2.8);
       expect(result.current.sessionId).toBe("session-2");
+      expect(result.current.connectionStatus).toBe("connected");
+      expect(result.current.error).toBeNull();
+
+      unmount();
+    });
+
+    it("reopens it again after the viewer seeks back inside the buffer", async () => {
+      // A browser whose seekable range covers what it buffered takes the seek
+      // without a reanchor, so the plan stays the same.
+      const { harness, result, unmount } = await dropAndReopen(2.1, {
+        beforeDrop: (session) => {
+          session.updatePlaybackState(6, true);
+          session.reportSeek(2.1);
+        },
+      });
+
+      expect(harness.replanBodies[1]?.operation).toBe("seek_reanchor");
+      expect(result.current.plan?.delivery).toBe("server_remux_progressive");
+
+      unmount();
+    });
+
+    it("starts a new session when the recovery carries the old installation", async () => {
+      const installationChanged = () =>
+        jsonResponse(
+          { error: "installation_changed", message: "The server was reinstalled" },
+          { status: 409 },
+        );
+      const { harness, result, unmount } = await dropAndReopen(2.8, {
+        recovery: installationChanged,
+        afterRecovery: installationChanged,
+        restart: () =>
+          jsonResponse(playable("session-2", { ...hlsPlan, session_id: "session-2" }), {
+            status: 201,
+          }),
+      });
+      await advance(RECONNECT_MAX_DELAY_MS);
+
+      expect(harness.replanBodies[1]?.operation).toBe("failure_recovery");
+      expect(harness.startBodies).toHaveLength(2);
+      expect(result.current.sessionId).toBe("session-2");
+      expect(result.current.error).toBeNull();
+
+      unmount();
+    });
+
+    it("reconnects a stream that showed frames but never played when the recovery cannot reach the server", async () => {
+      const { harness, result, unmount } = await dropAndReopen(2.8, {
+        recovery: unreachable,
+        played: false,
+        playing: false,
+      });
+      await advance(RECONNECT_MAX_DELAY_MS);
+
+      expect(harness.replanBodies.map((body) => body.operation)).toEqual([
+        "seek_reanchor",
+        "failure_recovery",
+        "seek_reanchor",
+      ]);
       expect(result.current.connectionStatus).toBe("connected");
       expect(result.current.error).toBeNull();
 
