@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
@@ -29,6 +30,10 @@ const (
 	// sweep reads and leaves (audio-only files, unreadable files) cannot
 	// hold eligible sessions behind them.
 	pausedTimeoutPagesPerSweep = 3
+	// pausedTimeoutTeardownTimeout bounds the teardown after a won claim or
+	// for a stale copy. It runs detached from the sweep's deadline, so a sweep
+	// that runs out of time cannot leave a stopped session's copy behind.
+	pausedTimeoutTeardownTimeout = 30 * time.Second
 )
 
 // pausedAttemptExpirer ends an attempt left paused too long: it stops the
@@ -84,7 +89,8 @@ func (h *PlaybackHandler) sweepPausedTimeouts(ctx context.Context, pool *pgxpool
 		return
 	}
 	expirer, ok := h.PlanStoreV3.(pausedAttemptExpirer)
-	if !ok {
+	if !ok || h.fileResolver == nil {
+		// Without the files, audio-only sessions can't be told apart.
 		return
 	}
 	h.pausedTimeoutCursorMu.Lock()
@@ -95,13 +101,14 @@ func (h *PlaybackHandler) sweepPausedTimeouts(ctx context.Context, pool *pgxpool
 			slog.WarnContext(ctx, "paused timeout sweep failed", "component", "api", "error", err)
 			return
 		}
+		files := h.pausedCandidateFiles(ctx, candidates)
 		for _, c := range candidates {
 			if ctx.Err() != nil {
 				// The sweep ran out of time: the next one resumes at this
 				// candidate, not past the rest of the page.
 				return
 			}
-			h.endPausedTimeout(ctx, expirer, c, timeout)
+			h.endPausedTimeout(ctx, expirer, c, files[c.mediaFileID], timeout)
 			h.pausedTimeoutCursor = &pausedTimeoutCursor{pausedSince: c.pausedSince, sessionID: c.sessionID}
 		}
 		if len(candidates) < lifecycleSweepBatch {
@@ -162,8 +169,10 @@ func (h *PlaybackHandler) dropCopiesPausedOutElsewhere(ctx context.Context, pool
 		if s.stopID != pausedTimeoutStopID(s.sessionID) {
 			continue // other ends reach this copy through their own paths
 		}
-		h.finishInterruptedNativeEnd(ctx, s.sessionID)
-		h.dropUnfinishedPausedCopy(ctx, s.sessionID)
+		teardown, cancel := context.WithTimeout(context.WithoutCancel(ctx), pausedTimeoutTeardownTimeout)
+		h.finishInterruptedNativeEnd(teardown, s.sessionID)
+		h.dropUnfinishedPausedCopy(teardown, s.sessionID)
+		cancel()
 	}
 }
 
@@ -212,19 +221,10 @@ func loadPausedTimeoutCandidates(ctx context.Context, pool *pgxpool.Pool, timeou
 
 // endPausedTimeout claims one candidate's end and finishes it: from the live
 // session when this server holds it, from the attempt row otherwise. An
-// audio-only file (an audiobook or podcast) is never ended by it.
-func (h *PlaybackHandler) endPausedTimeout(ctx context.Context, expirer pausedAttemptExpirer, c pausedTimeoutCandidate, timeout time.Duration) {
-	if h.fileResolver == nil {
-		return
-	}
-	file, err := h.fileResolver.GetByID(ctx, c.mediaFileID)
-	if err != nil || file == nil {
-		if err != nil {
-			slog.WarnContext(ctx, "paused timeout sweep could not read a session's file", "component", "api", "session", c.sessionID, "error", err)
-		}
-		return
-	}
-	if file.IsAudioOnly() {
+// audio-only file (an audiobook or podcast) is never ended by it, and a
+// candidate whose file could not be read (nil) waits for a later sweep.
+func (h *PlaybackHandler) endPausedTimeout(ctx context.Context, expirer pausedAttemptExpirer, c pausedTimeoutCandidate, file *models.MediaFile, timeout time.Duration) {
+	if file == nil || file.IsAudioOnly() {
 		return
 	}
 	stopped, err := expirer.ExpirePausedAttempt(ctx, c.sessionID, pausedTimeoutStopID(c.sessionID), timeout)
@@ -234,11 +234,53 @@ func (h *PlaybackHandler) endPausedTimeout(ctx context.Context, expirer pausedAt
 		}
 		return
 	}
-	h.StreamDeny.Deny(ctx, c.sessionID)
-	slog.InfoContext(ctx, "ended a playback session paused too long", "component", "api", "session", c.sessionID,
+	teardown, cancel := context.WithTimeout(context.WithoutCancel(ctx), pausedTimeoutTeardownTimeout)
+	defer cancel()
+	h.StreamDeny.Deny(teardown, c.sessionID)
+	slog.InfoContext(teardown, "ended a playback session paused too long", "component", "api", "session", c.sessionID,
 		"playback_session_id", c.sessionID, "timeout", timeout)
-	h.finishInterruptedNativeEnd(ctx, c.sessionID)
-	h.dropUnfinishedPausedCopy(ctx, c.sessionID)
+	h.finishInterruptedNativeEnd(teardown, c.sessionID)
+	h.dropUnfinishedPausedCopy(teardown, c.sessionID)
+}
+
+// pausedCandidateFiles reads a page's media files by id: in one lookup when
+// the resolver can batch (the catalog's file repository does), otherwise once
+// per distinct file. A file it cannot read is left out, so its session waits.
+func (h *PlaybackHandler) pausedCandidateFiles(ctx context.Context, candidates []pausedTimeoutCandidate) map[int]*models.MediaFile {
+	ids := make([]int, 0, len(candidates))
+	seen := make(map[int]bool, len(candidates))
+	for _, c := range candidates {
+		if !seen[c.mediaFileID] {
+			seen[c.mediaFileID] = true
+			ids = append(ids, c.mediaFileID)
+		}
+	}
+	files := make(map[int]*models.MediaFile, len(ids))
+	if batch, ok := h.fileResolver.(interface {
+		GetByIDs(context.Context, []int) ([]*models.MediaFile, error)
+	}); ok {
+		found, err := batch.GetByIDs(ctx, ids)
+		if err != nil {
+			slog.WarnContext(ctx, "paused timeout sweep could not read its sessions' files", "component", "api", "error", err)
+		}
+		for _, file := range found {
+			if file != nil {
+				files[file.ID] = file
+			}
+		}
+		return files
+	}
+	for _, id := range ids {
+		file, err := h.fileResolver.GetByID(ctx, id)
+		if err != nil {
+			slog.WarnContext(ctx, "paused timeout sweep could not read a session's file", "component", "api", "file", id, "error", err)
+			continue
+		}
+		if file != nil {
+			files[id] = file
+		}
+	}
+	return files
 }
 
 // dropUnfinishedPausedCopy drops the copy held here of a session the paused
