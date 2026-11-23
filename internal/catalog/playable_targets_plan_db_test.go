@@ -340,7 +340,7 @@ func TestPlayableTargetResolverAnchoredCompletedRangePlan(t *testing.T) {
 	}
 	// VACUUM sets the visibility map, as autovacuum does in production, so an
 	// index-only scan of the cursor index is costed as cheap as it really is.
-	for _, statement := range []string{`VACUUM ANALYZE user_watch_progress`, `ANALYZE episodes; ANALYZE media_files; SET work_mem = '256kB'`} {
+	for _, statement := range []string{`VACUUM ANALYZE user_watch_progress`, `ANALYZE episodes; ANALYZE media_files; SET work_mem = '256kB'; SET hash_mem_multiplier = 2`} {
 		if _, err := pool.Exec(t.Context(), statement); err != nil {
 			t.Fatal(err)
 		}
@@ -374,7 +374,8 @@ func TestPlayableTargetResolverAnchoredCompletedRangePlan(t *testing.T) {
 		return plan, raw
 	}
 
-	// 256kB grants a hash 512kB, which holds the set's IDs.
+	// The cap reads both settings, so the test fixes both: 256kB at a
+	// multiplier of 2 grants a hash 512kB, which holds the set's IDs.
 	plan, raw := resolveAnchored("fitting set")
 	// The requested series' completed rows, plus one row per series of slack.
 	// Filtered rows count too: a scan that reads the profile and filters it
@@ -387,7 +388,8 @@ func TestPlayableTargetResolverAnchoredCompletedRangePlan(t *testing.T) {
 		t.Fatalf("a fitting set made %.0f key lookups; want membership in the hashed set\n%s", lookups, raw)
 	}
 
-	// At 64kB the set no longer fits: one key lookup per walked episode.
+	// At 64kB (a 128kB hash) the set no longer fits: one key lookup per
+	// walked episode.
 	if _, err := pool.Exec(t.Context(), `SET work_mem = '64kB'`); err != nil {
 		t.Fatal(err)
 	}
