@@ -411,7 +411,11 @@ func WebComponentStatusForConfig(cfg *config.Config, settings map[string]string)
 	return status
 }
 
-func StartWebComponentInstall(opts WebComponentInstallOptions, onComplete WebComponentInstallCompleteFunc) (WebComponentStatus, error) {
+// StartWebComponentInstall starts an install in the background under parent,
+// the server's lifetime context, so shutting the server down stops the build
+// instead of leaving it running in its own process group. A nil parent means
+// context.Background().
+func StartWebComponentInstall(parent context.Context, opts WebComponentInstallOptions, onComplete WebComponentInstallCompleteFunc) (WebComponentStatus, error) {
 	opts, status, err := normalizeWebInstallOptions(opts)
 	if err != nil {
 		return status, err
@@ -436,7 +440,10 @@ func StartWebComponentInstall(opts WebComponentInstallOptions, onComplete WebCom
 	notifyWebOperationProgress(opts.OnProgress, op)
 
 	go func() {
-		ctx, cancel := context.WithTimeoutCause(context.Background(), webInstallTimeout, errWebInstallTimedOut)
+		if parent == nil {
+			parent = context.Background()
+		}
+		ctx, cancel := context.WithTimeoutCause(parent, webInstallTimeout, errWebInstallTimedOut)
 		defer cancel()
 
 		installStatus, installErr := installWebComponentLocked(ctx, opts, op.ID)

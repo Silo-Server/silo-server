@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -208,5 +209,51 @@ func TestWebBuildNodeOptions(t *testing.T) {
 		if got := webBuildNodeOptions(tc.existing, tc.path); got != tc.want {
 			t.Errorf("webBuildNodeOptions(%q, %q) = %q, want %q", tc.existing, tc.path, got, tc.want)
 		}
+	}
+}
+
+// A background install runs under the server's lifetime context, so a server
+// shutdown stops the build instead of leaving it running in its own process
+// group.
+func TestStartWebComponentInstallStopsWhenTheServerStops(t *testing.T) {
+	serverCtx, stopServer := context.WithCancel(context.Background())
+	defer stopServer()
+	started := make(chan struct{})
+	var startOnce sync.Once
+	ended := make(chan WebComponentOperationStatus, 1)
+	_, err := StartWebComponentInstall(serverCtx, WebComponentInstallOptions{
+		InstallRoot: t.TempDir(),
+		SourceURL:   DefaultWebSourceURL,
+		Version:     "12.1",
+		RunCommand: func(ctx context.Context, _ string, _ []string, _ string) error {
+			startOnce.Do(func() { close(started) })
+			<-ctx.Done()
+			return ctx.Err()
+		},
+		OnProgress: func(status WebComponentOperationStatus) {
+			if status.State != WebComponentOperationRunning {
+				select {
+				case ended <- status:
+				default:
+				}
+			}
+		},
+	}, nil)
+	if err != nil {
+		t.Fatalf("StartWebComponentInstall: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("install never ran a command")
+	}
+	stopServer()
+	select {
+	case status := <-ended:
+		if status.State != WebComponentOperationFailed {
+			t.Fatalf("install ended %q after the server stopped, want %q", status.State, WebComponentOperationFailed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("install still running 5s after the server stopped")
 	}
 }
