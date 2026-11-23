@@ -3340,6 +3340,16 @@ export function VideoPlayer({
   const originalRouteInputRef = useRef({ plan, browserEngine, nativeOriginalSupport, audioTracks });
   originalRouteInputRef.current = { plan, browserEngine, nativeOriginalSupport, audioTracks };
 
+  // Starts the live transport again after hls.js re-creates its MediaSource.
+  // Assigning the element's `src` runs the HTML media element load algorithm,
+  // which clears `paused` without firing `pause` (so `onPause` never runs) and
+  // rejects a pending `play()` with AbortError. A transport that had already
+  // played is past its startup ladder, so nothing else calls `play()` again:
+  // without this, a playlist reload or media-source recovery leaves a frame on
+  // screen under controls that still say "playing". The transport effect owns
+  // the current closure; a stale transport leaves the no-op in place.
+  const resumeReloadedTransportRef = useRef<() => void>(() => {});
+
   // A delivered segment that presents no frames leaves the element on its last
   // frame while hls.js keeps buffering: every later load succeeds, so the load
   // ladder never sees a failure and nothing above it has a deadline for the
@@ -3358,6 +3368,10 @@ export function VideoPlayer({
         // frameless fragment is fetched and parsed again instead of being kept
         // as buffered media.
         hlsRef.current?.recoverMediaError();
+        // `recoverMediaError` detaches and re-attaches the MediaSource, which
+        // clears `paused` silently. The recovery is not finished while the
+        // element stays paused, so start it again as the reload does.
+        resumeReloadedTransportRef.current();
       },
     });
   }
@@ -3402,10 +3416,34 @@ export function VideoPlayer({
     let hls: HlsType | null = null;
     let engineSession: BrowserEngineSession | null = null;
     let destroyed = false;
+    // Restarts this transport after hls.js re-creates the MediaSource. The
+    // load algorithm pauses the element silently, and a transport that already
+    // played has no startup ladder left to start it, so the player does it
+    // here. It runs only for an intent to play: a viewer, room or connection
+    // pause stays paused.
+    const resumeReloadedTransport = () => {
+      if (destroyed || !video.paused) return;
+      if (connectionReplacedRef.current || connectionStatusRef.current !== "connected") return;
+      if (roomPlaybackActiveRef.current) return;
+      // The viewer's live intent, not the intent the plan was adopted with: a
+      // pause made while the reload was in flight must keep it paused.
+      if (!viewerPlayIntentRef.current) return;
+      playbackStarted = true;
+      void video.play().catch((error: unknown) => {
+        if (destroyed) return;
+        console.warn("[player] the reloaded transport did not restart", error);
+      });
+    };
+    resumeReloadedTransportRef.current = resumeReloadedTransport;
     // A replacement transport gets its own no-frame budget and starts from the
-    // element's current intent to play.
+    // viewer's live intent to play. The element is paused while a replacement
+    // loads, so reading only the element would disarm the deadline for exactly
+    // the start that still needs a frame. A room waits paused for its own
+    // command, so its delivery is not expected to frame yet.
     deliveredNoFramesRef.current?.reset();
-    deliveredNoFramesRef.current?.setPlaying(!video.paused);
+    deliveredNoFramesRef.current?.setPlaying(
+      !roomPlaybackActiveRef.current && (viewerPlayIntentRef.current || !video.paused),
+    );
     // Presented frames are the only evidence that a delivered segment produced
     // media; the element's clock keeps advancing on audio alone, so it cannot
     // stand in for one. requestVideoFrameCallback fires per presented frame and
@@ -3875,6 +3913,11 @@ export function VideoPlayer({
                       "[hls.js] stale generation during playback; reloading the playlist",
                       { resume, attempt: staleGenerationRecoveries },
                     );
+                    // The playlist reload re-creates the MediaSource, which
+                    // pauses the element without a `pause` event. Playback was
+                    // running (this branch is the non-seek one), so start it
+                    // again instead of leaving the reload paused.
+                    resumeReloadedTransport();
                     return;
                   }
                 }
@@ -3982,9 +4025,15 @@ export function VideoPlayer({
                   if (destroyed || startupGuardRef.current?.hasFailed()) return;
                   // startLoad() never requests a manifest that failed to load,
                   // so it would leave the player waiting for the startup
-                  // timeout. Load the source again instead.
-                  if (reloadManifest) hls?.loadSource(effectiveStreamUrl);
-                  else hls?.startLoad();
+                  // timeout. Load the source again instead; that re-creates the
+                  // MediaSource, so a transport that had played needs starting
+                  // again.
+                  if (reloadManifest) {
+                    hls?.loadSource(effectiveStreamUrl);
+                    resumeReloadedTransport();
+                  } else {
+                    hls?.startLoad();
+                  }
                 }, delay);
                 return;
               }
@@ -3999,10 +4048,12 @@ export function VideoPlayer({
                 if (mediaRecoveryAttemptsRef.current === 0) {
                   console.warn("[hls.js] Fatal media error, attempting recovery...");
                   hls?.recoverMediaError();
+                  resumeReloadedTransport();
                 } else if (mediaRecoveryAttemptsRef.current === 1) {
                   console.warn("[hls.js] Fatal media error (2nd), swapping audio codec...");
                   hls?.swapAudioCodec();
                   hls?.recoverMediaError();
+                  resumeReloadedTransport();
                 } else {
                   console.error("[hls.js] Fatal media error, giving up after 3 attempts");
                   if (
@@ -4062,8 +4113,12 @@ export function VideoPlayer({
               // one were hiccups rather than a segment it cannot serve.
               segmentRetry.reset();
               // A delivered fragment that yields no frame is invisible to the
-              // load ladder; the no-frame deadline owns that case.
-              if (!video.paused) deliveredNoFramesRef.current?.delivered();
+              // load ladder; the no-frame deadline owns that case. Whether a
+              // frame is expected is the player's intent to play, not the
+              // element's `paused` flag: a MediaSource re-attach clears
+              // `paused` silently, and that is exactly the state from which a
+              // frameless segment must still be able to recover.
+              deliveredNoFramesRef.current?.delivered();
               const { loaded, loading } = frag.stats;
               meter.received(frag.stats, loaded, loading.first, loading.end);
               // A fragment fetched again before it buffered was discarded, not
@@ -4331,6 +4386,9 @@ export function VideoPlayer({
     return () => {
       destroyed = true;
       cleanupStartupListeners();
+      if (resumeReloadedTransportRef.current === resumeReloadedTransport) {
+        resumeReloadedTransportRef.current = () => {};
+      }
       clearInterval(deliveredNoFramesTimer);
       video.removeEventListener("seeking", onDeliveredNoFramesSeek);
       if (frameProbe !== null && typeof video.cancelVideoFrameCallback === "function") {
@@ -4435,6 +4493,12 @@ export function VideoPlayer({
       stopped.hls as unknown as Parameters<typeof recoverFromStaleGeneration>[0],
       resume,
     );
+    // Refetching the playlist re-creates the MediaSource, which clears
+    // `paused` silently. The viewer asked to keep playing when this seek was
+    // issued, so the transport this recovery just restarted must actually
+    // start: otherwise the seek lands on a frame under a Pause control and
+    // neither a Play click nor the no-frame deadline can tell.
+    resumeReloadedTransportRef.current();
   }, [effectiveStreamUrl, effectiveTransportRevision, planRevision]);
 
   // -- Video event listeners --
@@ -4487,6 +4551,18 @@ export function VideoPlayer({
       if (streamPlayedRef.current || video.readyState >= HTMLMediaElement.HAVE_METADATA) {
         transportIdleSinceRef.current ??= Date.now();
       }
+    };
+    // Assigning `src` (hls.js re-creating its MediaSource for a playlist reload
+    // or a media recovery) runs the load algorithm, which clears `paused` and
+    // fires `emptied` without firing `pause`. The element is the one source of
+    // truth for the controls, so the Pause control cannot stay up over a paused
+    // element. The no-frame window is deliberately left armed: the viewer still
+    // means to play, and the reload may deliver a fragment that presents
+    // nothing.
+    const onEmptied = () => {
+      if (!video.paused) return;
+      setPlaying(false);
+      deliveredNoFramesRef.current?.setPlaying(false, { deliberate: false });
     };
     const clearBuffering = () => {
       if (bufferingTimerRef.current) {
@@ -4690,6 +4766,7 @@ export function VideoPlayer({
 
     video.addEventListener("play", onPlay);
     video.addEventListener("pause", onPause);
+    video.addEventListener("emptied", onEmptied);
     video.addEventListener("timeupdate", onTimeUpdate);
     video.addEventListener("seeked", onSeeked);
     video.addEventListener("durationchange", onDurationChange);
@@ -4711,6 +4788,7 @@ export function VideoPlayer({
       window.removeEventListener("online", onNetworkChange);
       video.removeEventListener("play", onPlay);
       video.removeEventListener("pause", onPause);
+      video.removeEventListener("emptied", onEmptied);
       video.removeEventListener("timeupdate", onTimeUpdate);
       video.removeEventListener("seeked", onSeeked);
       video.removeEventListener("durationchange", onDurationChange);

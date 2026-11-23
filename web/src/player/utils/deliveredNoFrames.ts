@@ -41,6 +41,19 @@ export interface DeliveredNoFramesHooks {
   onExpire: (expiry: DeliveredNoFramesExpiry) => void;
 }
 
+export interface PlayingChange {
+  /**
+   * Whether the player asked for the pause. A viewer, room or teardown pause
+   * is deliberate: playback is meant to stop, so a delivered fragment no longer
+   * owes a frame. A pause the element performs itself — assigning `src` runs
+   * the HTML media element load algorithm, which clears `paused` without
+   * firing `pause` — is not deliberate: the intent to play is unchanged, and
+   * the window stays armed. Defaults to true so an ordinary pause keeps the
+   * behaviour it had.
+   */
+  deliberate?: boolean;
+}
+
 export class DeliveredNoFramesDeadline {
   private deliveredAt: number | undefined;
   private recoveries = 0;
@@ -67,8 +80,12 @@ export class DeliveredNoFramesDeadline {
     this.deliveredAt = undefined;
   }
 
-  /** The viewer paused (or the element ended): silence is expected. */
-  setPlaying(playing: boolean): void {
+  /**
+   * Playback started or stopped. A pause the player did not ask for leaves the
+   * intent to play, and the window, untouched (see {@link PlayingChange}).
+   */
+  setPlaying(playing: boolean, change: PlayingChange = {}): void {
+    if (!playing && change.deliberate === false) return;
     this.playing = playing;
     if (!playing) this.deliveredAt = undefined;
   }

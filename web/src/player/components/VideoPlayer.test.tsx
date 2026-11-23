@@ -14,6 +14,7 @@ import type {
   PlaybackRealtimeEventEnvelope,
 } from "../realtime-protocol";
 import type { PlayerSubtitleInfo, VideoFitMode } from "../types";
+import { DELIVERED_NO_FRAMES_MS } from "../utils/deliveredNoFrames";
 import { STARTUP_TIMEOUT_MS } from "../utils/startupGuard";
 import { VideoPlayer } from "./VideoPlayer";
 import { PROGRESSIVE_REMUX_SEEK_NO_BYTES_MS } from "./VideoPlayer";
@@ -29,6 +30,8 @@ const controls = vi.hoisted(() => ({
     currentTime: number;
     duration: number;
     onSeek: (seconds: number) => void;
+    playing?: boolean;
+    onPlayPause?: () => void;
     activeSubtitleIndex: number | null;
     subtitleTracks: PlayerSubtitleInfo[];
     visible: boolean;
@@ -71,6 +74,7 @@ const hlsJS = vi.hoisted(() => ({
     emit: (event: string, data: unknown) => void;
     config: { startPosition?: number };
     url?: string;
+    recoverMediaError: () => void;
   },
   // Seconds buffered past the playhead, as hls.js measures them.
   forwardBufferSeconds: 0,
@@ -191,6 +195,7 @@ vi.mock("hls.js", () => ({
     startLoad = hlsJS.startLoad;
     stopLoad = hlsJS.stopLoad;
     loadSource = hlsJS.loadSource;
+    recoverMediaError = vi.fn();
 
     bufferedToEnd = false;
     maxBufferLength: number;
@@ -4483,6 +4488,243 @@ describe("VideoPlayer source timeline", () => {
       expect(hlsJS.loadSource).toHaveBeenCalledWith("/api/v1/stream/session-1?token=token");
       // 690 s of media is 596 s on a transport whose clock zero is source 94.
       expect((instance.config as { startPosition?: number }).startPosition).toBeCloseTo(596);
+    });
+
+    // Refetching the playlist re-creates the MediaSource. Assigning `src` runs
+    // the HTML media element load algorithm, which clears `paused` without
+    // firing `pause`; the element and the controls then disagree and nothing
+    // starts the transport again. A seek that rotates the generation must end
+    // playing, with the controls following the element.
+    it("starts a reanchored transport that reloaded in place, and the controls agree", async () => {
+      hlsJS.supported = true;
+      vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+      const onReanchorSeek = vi.fn(() => true);
+      const { container, rerenderPlayer } = renderPlayer({
+        plan: anchoredPlan,
+        onReanchorSeek,
+        transportRevision: 1,
+      });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+      fireEvent.play(video);
+      expect(controls.current?.playing).toBe(true);
+
+      const instance = hlsJS.latest!;
+      Object.defineProperty(instance, "url", {
+        configurable: true,
+        value: "/api/v1/stream/session-1?token=token",
+      });
+      Object.defineProperty(instance, "config", {
+        configurable: true,
+        value: { startPosition: 0 },
+      });
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 0, start: () => 0, end: () => 0 },
+      });
+      // hls.js re-attaching the media source: the element goes paused and
+      // reports `emptied`, never `pause`.
+      const loadSource = vi.fn(() => {
+        Object.defineProperty(video, "paused", { configurable: true, value: true });
+        fireEvent.emptied(video);
+      });
+      Object.defineProperty(instance, "loadSource", { configurable: true, value: loadSource });
+
+      act(() => controls.current!.onSeek(690));
+      expect(onReanchorSeek).toHaveBeenCalledWith(690, expect.any(Boolean));
+      act(() =>
+        instance.emit("error", {
+          fatal: true,
+          type: "networkError",
+          details: "fragLoadError",
+          response: { code: 412 },
+          frag: { sn: 163, url: "/playback/transcode/session-1/seg_00163.ts" },
+        }),
+      );
+      vi.mocked(HTMLMediaElement.prototype.play).mockClear();
+
+      // Same stream URL and transport revision: the server reused it.
+      rerenderPlayer({ plan: anchoredPlan, planRevision: 2, transportRevision: 1 });
+      await waitFor(() => expect(loadSource).toHaveBeenCalledOnce());
+
+      // The player starts the transport it just reloaded instead of leaving a
+      // paused element's frame under a Pause control.
+      await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalled());
+
+      Object.defineProperty(video, "paused", { configurable: true, value: false });
+      fireEvent.play(video);
+      expect(controls.current?.playing).toBe(true);
+    });
+
+    // The element is the single source of truth for the controls. A MediaSource
+    // re-attach clears `paused` and reports `emptied`, never `pause`, so the
+    // state has to follow the element rather than the last `play` event.
+    it("does not show Pause over an element the load algorithm emptied", async () => {
+      hlsJS.supported = true;
+      vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+      const { container } = renderPlayer({ plan: anchoredPlan });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+      fireEvent.play(video);
+      expect(controls.current?.playing).toBe(true);
+
+      Object.defineProperty(video, "paused", { configurable: true, value: true });
+      fireEvent.emptied(video);
+
+      expect(controls.current?.playing).toBe(false);
+    });
+
+    // A Play click during a pending seek must reach the live element and
+    // survive the reload that lands afterwards. The click sets the intent the
+    // reload resumes from; without it the transport stays paused under a Pause
+    // control and no deadline is armed for the frame it already showed.
+    it("applies a play click made while a seek is pending and keeps it through the reload", async () => {
+      hlsJS.supported = true;
+      vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+      const onReanchorSeek = vi.fn(() => true);
+      const { container, rerenderPlayer } = renderPlayer({
+        plan: anchoredPlan,
+        onReanchorSeek,
+        transportRevision: 1,
+      });
+      const video = container.querySelector("video");
+      if (!video) throw new Error("expected video element");
+      await waitFor(() => expect(hlsJS.latest).not.toBeNull());
+      fireEvent.loadedMetadata(video);
+      fireFrameTimeUpdate(video);
+      fireEvent.playing(video);
+      fireEvent.play(video);
+
+      const instance = hlsJS.latest!;
+      Object.defineProperty(instance, "url", {
+        configurable: true,
+        value: "/api/v1/stream/session-1?token=token",
+      });
+      Object.defineProperty(instance, "config", {
+        configurable: true,
+        value: { startPosition: 0 },
+      });
+      Object.defineProperty(video, "seekable", {
+        configurable: true,
+        value: { length: 0, start: () => 0, end: () => 0 },
+      });
+      act(() => controls.current!.onSeek(690));
+      expect(onReanchorSeek).toHaveBeenCalledWith(690, expect.any(Boolean));
+      act(() =>
+        instance.emit("error", {
+          fatal: true,
+          type: "networkError",
+          details: "fragLoadError",
+          response: { code: 412 },
+          frag: { sn: 163, url: "/playback/transcode/session-1/seg_00163.ts" },
+        }),
+      );
+
+      // The fence stopped the transport, and the element is paused while the
+      // reanchor is fetched.
+      Object.defineProperty(video, "paused", { configurable: true, value: true });
+      fireEvent.emptied(video);
+
+      // The viewer presses Play before the reanchor lands.
+      vi.mocked(HTMLMediaElement.prototype.play).mockClear();
+      act(() => controls.current!.onPlayPause!());
+      expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce();
+      Object.defineProperty(video, "paused", { configurable: true, value: false });
+      fireEvent.play(video);
+      expect(controls.current?.playing).toBe(true);
+
+      // The reanchor reuses the generation and refetches its playlist, which
+      // re-creates the MediaSource and pauses the element silently again. The
+      // click's intent is what starts it back up.
+      const loadSource = vi.fn(() => {
+        Object.defineProperty(video, "paused", { configurable: true, value: true });
+        fireEvent.emptied(video);
+      });
+      Object.defineProperty(instance, "loadSource", { configurable: true, value: loadSource });
+      vi.mocked(HTMLMediaElement.prototype.play).mockClear();
+      rerenderPlayer({ plan: anchoredPlan, planRevision: 2, transportRevision: 1 });
+      await waitFor(() => expect(loadSource).toHaveBeenCalledOnce());
+      await waitFor(() => expect(HTMLMediaElement.prototype.play).toHaveBeenCalledOnce());
+    });
+
+    // The delivered-no-frames deadline must not be cleared by a pause the
+    // viewer did not ask for: the silent pause of a MediaSource re-attach is
+    // exactly when a frameless segment needs the recovery. A deliberate pause
+    // still ends the window.
+    it("keeps the no-frame deadline through a silent pause and clears it on a viewer pause", async () => {
+      vi.useFakeTimers({
+        toFake: [
+          "setInterval",
+          "clearInterval",
+          "setTimeout",
+          "clearTimeout",
+          "performance",
+          "Date",
+        ],
+      });
+      try {
+        hlsJS.supported = true;
+        vi.spyOn(HTMLMediaElement.prototype, "canPlayType").mockReturnValue("");
+        const { container } = renderPlayer({ plan: anchoredPlan });
+        const video = container.querySelector("video");
+        if (!video) throw new Error("expected video element");
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        await act(async () => {
+          await Promise.resolve();
+        });
+        expect(hlsJS.latest).not.toBeNull();
+        fireEvent.loadedMetadata(video);
+        fireFrameTimeUpdate(video);
+        fireEvent.playing(video);
+        const instance = hlsJS.latest!;
+        const delivered = () =>
+          act(() =>
+            instance.emit("fragLoaded", {
+              frag: {
+                sn: 1,
+                type: "main",
+                url: "/playback/transcode/session-1/seg_00001.ts",
+                stats: { loaded: 100, loading: { first: 0, end: 10 } },
+              },
+            }),
+          );
+
+        // The element pauses itself when hls.js re-creates the MediaSource.
+        Object.defineProperty(video, "paused", { configurable: true, value: true });
+        fireEvent.emptied(video);
+        delivered();
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(DELIVERED_NO_FRAMES_MS + 1_000);
+        });
+        expect(instance.recoverMediaError).toHaveBeenCalledTimes(1);
+
+        // The recovery itself re-attaches the media source; the player starts
+        // the reloaded transport again rather than leaving it paused.
+        expect(HTMLMediaElement.prototype.play).toHaveBeenCalled();
+
+        // A viewer pause is deliberate: silence is expected, so no recovery.
+        (instance.recoverMediaError as ReturnType<typeof vi.fn>).mockClear();
+        Object.defineProperty(video, "paused", { configurable: true, value: false });
+        delivered();
+        act(() => controls.current!.onPlayPause!());
+        fireEvent.pause(video);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(DELIVERED_NO_FRAMES_MS + 1_000);
+        });
+        expect(instance.recoverMediaError).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     // A reanchor that builds a new generation must not refetch the stopped
