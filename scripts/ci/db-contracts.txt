@@ -1009,15 +1009,17 @@
 
 # Recommendation ranking and rows: default rows, Popular floor, genre rows, picker
 # order, taste levels, per-interest anchors, quality prior, rubric leakage,
-# media types of personal rows, Because You Watched anchors per library.
+# media types of personal rows, Because You Watched anchors per library, the
+# holdout evaluation's leakage checks and recall floor.
 ./internal/recommendations TestBecauseYouWatchedAnchorsEachLibraryOnItsOwnWatchesPostgres
 ./internal/recommendations TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres
+./internal/recommendations TestCandidateQualityRatingsPostgres
 ./internal/recommendations TestCatalogRankLeadsWithNotableTrustedRatingsPostgres
+./internal/recommendations TestCowatchedTitleBeyondTheEmbeddingSearchKeepsItsSimilarityPostgres
 ./internal/recommendations TestDefaultRowsLeaveOutASeriesRatedThroughAnEpisodePostgres
 ./internal/recommendations TestCachedRowsLeaveOutASeriesRatedThroughAnEpisodePostgres
 ./internal/recommendations TestDefaultRowsServeEachViewerLivePostgres
 ./internal/recommendations TestGenreSamplerIsRatingLedPostgres
-./internal/recommendations TestGetItemQualityRatingsPostgres
 ./internal/recommendations TestHighlyRatedRowBalancesMediaTypesPostgres
 ./internal/recommendations TestHighlyRatedRowPostgres
 ./internal/recommendations TestHighlyRatedReusesTitleCountsPostgres
@@ -1026,6 +1028,7 @@
 ./internal/recommendations TestPopularNeedsACrowdOfAccountsPostgres
 ./internal/recommendations TestPresentMediaTypesPostgres
 ./internal/recommendations TestRecentlyAddedRowPostgres
+./internal/recommendations TestRecommendationHoldoutEvalPostgres
 ./internal/recommendations TestRefreshCountsPositiveTitlesForTheLevelPostgres
 ./internal/recommendations TestRefreshWeighsAThreeStarCompletionBelowAnUnratedOnePostgres
 ./internal/recommendations TestRelevanceRubricLeakagePostgres
