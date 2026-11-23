@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/ai/chatgpt"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/backup/backuptest"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
@@ -1690,8 +1691,9 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 			}
 		}
 	}
-	// The restore's report leaves out exactly the settings the carry takes
-	// from the live server.
+	// The restore's report leaves out the settings the carry takes from the
+	// live server, except the sign-in mode and a ChatGPT record ("live")
+	// with no connected account.
 	liveOwn, err := (PGLoader{}).ServerSpecificSettingKeys(ctx, liveURL, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1701,7 +1703,8 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 	}
 	var fromLive []string
 	for i, key := range keys {
-		if _, rotated := rotatedSettings[key]; i%2 == 0 && !rotated && key != plugins.ProvisionRestoreHoldKey {
+		noConnection := key == config.AIAuthModeSettingKey || key == chatgpt.CredentialsKey
+		if _, rotated := rotatedSettings[key]; i%2 == 0 && !rotated && key != plugins.ProvisionRestoreHoldKey && !noConnection {
 			fromLive = append(fromLive, key)
 		}
 	}
@@ -1710,8 +1713,9 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 		t.Errorf("ServerSpecificSettingKeys = %v, want the settings the carry takes from the live server %v", liveOwn, fromLive)
 	}
 	// A server that never set one up still holds an empty AI provider
-	// registry, which its first start writes, and empty search settings:
-	// they supply nothing, so the report still lists what the backup loses.
+	// registry, which its first start writes, empty search settings, the
+	// AI sign-in mode, and a ChatGPT account it disconnected: they supply
+	// no connection, so the report still lists what the backup loses.
 	cipher, err := secret.New([]byte("server-specific-test-key-0123456789"))
 	if err != nil {
 		t.Fatal(err)
@@ -1726,13 +1730,21 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 	}
 	noProviders, _, _ := config.PlanAIProviderConversion(nil)
 	oneProvider := `{"version":2,"providers":[{"id":"custom-now","type":"custom","name":"Now","base_url":"http://ai.now.invalid/v1","capabilities":["chat"]}]}`
-	for registry, want := range map[string][]string{
-		noProviders[config.AIProvidersSettingKey]: {"notifications.web_push.vapid_keypair"},
-		oneProvider: {config.AIProvidersSettingKey, "notifications.web_push.vapid_keypair"},
+	disconnected := `{"active":"","has_connected":true,"accounts":[{"client_id":"c1","refresh_token":"r","needs_login":true}]}`
+	connected := `{"active":"c1","accounts":[{"client_id":"c1","refresh_token":"r"}]}`
+	for _, tc := range []struct {
+		registry, chatGPT string
+		want              []string
+	}{
+		{noProviders[config.AIProvidersSettingKey], disconnected, []string{"notifications.web_push.vapid_keypair"}},
+		{oneProvider, disconnected, []string{config.AIProvidersSettingKey, "notifications.web_push.vapid_keypair"}},
+		{noProviders[config.AIProvidersSettingKey], connected, []string{chatgpt.CredentialsKey, "notifications.web_push.vapid_keypair"}},
 	} {
 		empty, emptyURL := open()
 		for key, value := range map[string]string{
-			config.AIProvidersSettingKey:           seal(config.AIProvidersSettingKey, registry),
+			config.AIProvidersSettingKey:           seal(config.AIProvidersSettingKey, tc.registry),
+			chatgpt.CredentialsKey:                 seal(chatgpt.CredentialsKey, tc.chatGPT),
+			config.AIAuthModeSettingKey:            "api_key",
 			catalog.SearchSettingMeilisearchURL:    "",
 			catalog.SearchSettingMeilisearchAPIKey: "",
 			"notifications.web_push.vapid_keypair": seal("notifications.web_push.vapid_keypair", "pair"),
@@ -1741,8 +1753,8 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		if got, err := (PGLoader{}).ServerSpecificSettingKeys(ctx, emptyURL, cipher); err != nil || !slices.Equal(got, want) {
-			t.Errorf("ServerSpecificSettingKeys with registry %s = %v (%v), want %v", registry, got, err, want)
+		if got, err := (PGLoader{}).ServerSpecificSettingKeys(ctx, emptyURL, cipher); err != nil || !slices.Equal(got, tc.want) {
+			t.Errorf("ServerSpecificSettingKeys with registry %s and ChatGPT %s = %v (%v), want %v", tc.registry, tc.chatGPT, got, err, tc.want)
 		}
 	}
 	for i, key := range keys {

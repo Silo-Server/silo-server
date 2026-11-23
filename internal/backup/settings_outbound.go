@@ -261,10 +261,11 @@ func carriedServerSpecific(key string) bool {
 
 // ServerSpecificSettingKeys lists, sorted, the server-specific settings
 // liveURL holds a value for that CarryServerSpecificSettings gives a
-// restored database. An empty value, and an AI provider registry with no
-// providers (which a server's first start writes), supply nothing and are
-// left out. cipher (nil for none) opens the encrypted ones; one it cannot
-// open is listed.
+// restored database. What supplies no connection is left out: an empty
+// value, an AI provider registry with no providers (which a server's first
+// start writes), ChatGPT credentials with no connected account, and the AI
+// sign-in mode, which only chooses between those. cipher (nil for none)
+// opens the encrypted ones; one it cannot open is listed.
 func (l PGLoader) ServerSpecificSettingKeys(ctx context.Context, liveURL string, cipher *secret.Cipher) ([]string, error) {
 	live, err := allSettingsAt(ctx, liveURL, carriedServerSpecific)
 	if err != nil {
@@ -276,9 +277,14 @@ func (l PGLoader) ServerSpecificSettingKeys(ctx context.Context, liveURL string,
 				value = plain
 			}
 		}
-		if key == config.AIProvidersSettingKey {
+		switch key {
+		case config.AIProvidersSettingKey:
 			registry, err := config.ParseAIProviderRegistry(value)
 			return err == nil && len(registry.Providers) == 0
+		case chatgpt.CredentialsKey:
+			return !secret.IsEncrypted(value) && !chatgpt.Connected(value)
+		case config.AIAuthModeSettingKey:
+			return true
 		}
 		return strings.TrimSpace(value) == ""
 	})

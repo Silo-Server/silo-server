@@ -166,6 +166,18 @@ func decode(raw string) (credentials, error) {
 	return c, nil
 }
 
+// Connected reports whether the stored credentials (the CredentialsKey
+// value) hold an active account that can sign in without a new login, as
+// TokenSource needs. A disconnected account's record does not.
+func Connected(raw string) bool {
+	c, err := decode(raw)
+	if err != nil {
+		return false
+	}
+	i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == c.Active })
+	return i >= 0 && !c.Accounts[i].NeedsLogin && c.Accounts[i].RefreshToken != ""
+}
+
 func (s *Service) mutate(ctx context.Context, fn func(*credentials) error) error {
 	return s.store.UpdateValueAtomic(ctx, CredentialsKey, func(raw string) (string, error) {
 		c, err := decode(raw)

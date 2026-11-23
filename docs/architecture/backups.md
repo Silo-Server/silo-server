@@ -1903,8 +1903,10 @@ full restore then takes the list and bindings from the live server with its
 server-specific settings (below), so it lists a cleared unit with a setting
 the live server supplies that way as kept, not for re-entry, and leaves the
 settings it supplies out of the list of those the key cannot read
-(`ServerSpecificSettingKeys`). An empty value, or a provider list with no
-providers as a server's first start writes it, supplies nothing. `TestEveryCredentialSettingIsDecided`
+(`ServerSpecificSettingKeys`). Only a connection counts: an empty value, a
+provider list with no providers (as a server's first start writes it),
+ChatGPT credentials with no connected account, and the AI sign-in mode
+supply nothing. `TestEveryCredentialSettingIsDecided`
 fails on an encrypted setting that is neither in a unit nor this server's
 own (signing keys, storage, Redis, the web push key pair).
 
