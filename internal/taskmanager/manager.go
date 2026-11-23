@@ -5,10 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
+)
+
+// Run lease timing: a lease that misses five renewals is stale.
+const (
+	defaultRunLeaseRenewInterval = 30 * time.Second
+	defaultRunLeaseStaleAfter    = 3 * time.Minute
+	defaultRunReconcileInterval  = time.Minute
+	historyWriteTimeout          = 5 * time.Second
+	historyWriteAttempts         = 3
+	defaultShutdownDrainTimeout  = 5 * time.Second
 )
 
 // TriggerFactory is a function that creates a live Trigger from a TriggerConfig.
@@ -33,6 +44,17 @@ type TaskManager struct {
 	startCtx  context.Context //nolint:containedctx // Start's context outlives the call: tasks registered after Start run under it
 	stopLoops context.CancelFunc
 	stopped   atomic.Bool
+
+	// tracker is historyRepo's ExecutionTracker, or nil when it has none.
+	tracker ExecutionTracker
+	// Lease timing and the shutdown drain; tests shorten them before Start.
+	leaseRenewInterval   time.Duration
+	leaseStaleAfter      time.Duration
+	reconcileInterval    time.Duration
+	shutdownDrainTimeout time.Duration
+	// runWG counts runs from reservation until their history write, so Stop
+	// can wait for canceled runs to be recorded.
+	runWG sync.WaitGroup
 }
 
 // New creates a new TaskManager.
@@ -40,12 +62,18 @@ func New(triggerRepo TriggerRepository, historyRepo ExecutionRepository, trigger
 	if logger == nil {
 		logger = slog.Default()
 	}
+	tracker, _ := historyRepo.(ExecutionTracker)
 	return &TaskManager{
-		tasks:          make(map[string]*taskWorker),
-		triggerRepo:    triggerRepo,
-		historyRepo:    historyRepo,
-		triggerFactory: triggerFactory,
-		logger:         logger,
+		tasks:                make(map[string]*taskWorker),
+		triggerRepo:          triggerRepo,
+		historyRepo:          historyRepo,
+		triggerFactory:       triggerFactory,
+		logger:               logger,
+		tracker:              tracker,
+		leaseRenewInterval:   defaultRunLeaseRenewInterval,
+		leaseStaleAfter:      defaultRunLeaseStaleAfter,
+		reconcileInterval:    defaultRunReconcileInterval,
+		shutdownDrainTimeout: defaultShutdownDrainTimeout,
 	}
 }
 
@@ -180,6 +208,13 @@ func (m *TaskManager) Start(ctx context.Context) {
 	}
 	m.mu.Unlock()
 
+	if m.tracker != nil {
+		// Before loadWorker, so a run the last process lost is the task's
+		// last execution.
+		m.reconcileStaleRuns(ctx)
+		go m.reconcileLoop(ctx)
+	}
+
 	for _, w := range workers {
 		if err := m.loadWorker(ctx, w); err != nil {
 			m.logger.ErrorContext(ctx, "failed to load triggers", "task", w.task.Key(), "error", err)
@@ -202,11 +237,39 @@ func (m *TaskManager) loadWorker(ctx context.Context, w *taskWorker) error {
 		latest = nil
 	}
 
+	base := m.scheduleBase(ctx, key, latest)
+
 	w.scheduleMu.Lock()
 	configs, err := m.savedSchedule(ctx, w)
-	w.setTriggers(configs, m.triggerFactory, latest, false)
+	w.setTriggers(configs, m.triggerFactory, base, false)
 	w.scheduleMu.Unlock()
 	return err
+}
+
+// scheduleBase is the run a task's interval counts from at startup: its
+// latest run, unless that run was interrupted, in which case the latest one
+// before it that wasn't. A run cut off by a restart then runs again as soon
+// as it is due rather than a full interval after the restart. When every
+// recent run was interrupted, the interval counts from when the oldest of
+// them started, so repeated restarts can't keep postponing the task.
+func (m *TaskManager) scheduleBase(ctx context.Context, key string, latest *ExecutionResult) *ExecutionResult {
+	if !latest.IsInterrupted() {
+		return latest
+	}
+	recent, err := m.historyRepo.List(ctx, key, 20)
+	if err != nil {
+		m.logger.WarnContext(ctx, "failed to read task history for its schedule", "task", key, "error", err)
+		return latest
+	}
+	for i := range recent {
+		if !recent[i].IsInterrupted() {
+			return &recent[i]
+		}
+	}
+	if len(recent) == 0 {
+		return latest
+	}
+	return &ExecutionResult{TaskKey: key, CompletedAt: recent[len(recent)-1].StartedAt}
 }
 
 // savedSchedule reads a task's saved schedule. With none, it is the task's
@@ -344,25 +407,27 @@ func (m *TaskManager) triggerLoop(ctx context.Context, w *taskWorker) {
 			m.rearmTriggersFromNow(w, gen)
 			continue
 		}
-		execCtx, cancel, err := m.reserveFiring(ctx, w, gen, firedTrigger)
-		switch {
-		case errors.Is(err, ErrTaskNotFound):
+		if !m.acquireRunSlot() {
 			return
-		case errors.Is(err, errFiringNotClaimed):
-			// Another server runs this firing. Rearm from now, as after a
-			// skipped preflight: this server's last result is older than that
-			// run, so an interval would otherwise fire again at once.
-			m.reloadLastResult(ctx, w)
-			m.rearmTriggersFromNow(w, gen)
-			continue
-		case err != nil:
+		}
+		execCtx, cancel, err := m.reserveFiring(ctx, w, gen, firedTrigger)
+		if err != nil {
+			m.runWG.Done()
+			switch {
+			case errors.Is(err, ErrTaskNotFound):
+				return
+			case errors.Is(err, errFiringNotClaimed):
+				// Another server runs this firing. Rearm from now, as after a
+				// skipped preflight: this server's last result is older than that
+				// run, so an interval would otherwise fire again at once.
+				m.reloadLastResult(ctx, w)
+				m.rearmTriggersFromNow(w, gen)
+				continue
+			}
 			continue
 		}
 
-		result := w.executeReserved(execCtx, cancel)
-		if err := m.historyRepo.Insert(ctx, *result); err != nil {
-			m.logger.ErrorContext(ctx, "failed to persist execution result", "task", w.task.Key(), "error", err)
-		}
+		m.executeAndRecord(w, execCtx, cancel)
 	}
 }
 
@@ -452,7 +517,8 @@ func (m *TaskManager) rearmTriggersFromNow(w *taskWorker, gen uint64) {
 	w.notify()
 }
 
-// Stop stops all triggers and cancels running tasks.
+// Stop stops all triggers, cancels running tasks, and waits briefly for
+// active runs to persist their final execution history.
 func (m *TaskManager) Stop() {
 	m.mu.Lock()
 	m.stopped.Store(true)
@@ -472,6 +538,9 @@ func (m *TaskManager) Stop() {
 		}
 		w.mu.RUnlock()
 	}
+	if !waitGroupWithTimeout(&m.runWG, m.shutdownDrainTimeout) {
+		m.logger.Warn("task manager stopped with active runs still draining", "timeout", m.shutdownDrainTimeout)
+	}
 	m.logger.Info("task manager stopped")
 }
 
@@ -481,18 +550,18 @@ func (m *TaskManager) RunTask(ctx context.Context, key string) error {
 	if err != nil {
 		return err
 	}
-
-	result, err := w.run(ctx, 0)
+	if !m.acquireRunSlot() {
+		return ErrTaskNotFound
+	}
+	w.scheduleMu.Lock()
+	execCtx, cancel, err := w.reserve(ctx, 0)
+	w.scheduleMu.Unlock()
 	if err != nil {
+		m.runWG.Done()
 		return err
 	}
 
-	if result != nil {
-		if insertErr := m.historyRepo.Insert(ctx, *result); insertErr != nil {
-			m.logger.ErrorContext(ctx, "failed to persist execution result", "task", key, "error", insertErr)
-		}
-	}
-
+	m.executeAndRecord(w, execCtx, cancel)
 	return nil
 }
 
@@ -517,20 +586,186 @@ func (m *TaskManager) StartTask(key string) (TaskInfo, error) {
 	if err != nil {
 		return TaskInfo{}, err
 	}
+	if !m.acquireRunSlot() {
+		return TaskInfo{}, ErrTaskNotFound
+	}
 	w.scheduleMu.Lock()
 	ctx, cancel, err := w.reserve(context.WithValue(context.Background(), manualStartKey{}, true), 0)
 	w.scheduleMu.Unlock()
 	if err != nil {
+		m.runWG.Done()
 		return TaskInfo{}, err
 	}
 	info := w.info()
+	go m.executeAndRecord(w, ctx, cancel)
+	return info, nil
+}
+
+// acquireRunSlot registers an in-flight execution in runWG unless Stop has
+// already begun. Holding m.mu.RLock prevents Add(1) from racing with Stop's
+// Wait after m.stopped becomes true.
+func (m *TaskManager) acquireRunSlot() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if m.stopped.Load() {
+		return false
+	}
+	m.runWG.Add(1)
+	return true
+}
+
+// executeAndRecord runs a reserved task under a run lease and records the
+// result. It releases the run slot acquireRunSlot took.
+func (m *TaskManager) executeAndRecord(w *taskWorker, execCtx context.Context, cancel context.CancelFunc) {
+	defer m.runWG.Done()
+	key := w.task.Key()
+	// History writes outlive the run's cancellation, so Stop can record it.
+	writeCtx := context.WithoutCancel(execCtx)
+
+	var leaseID int64
+	if m.tracker != nil {
+		startCtx, startCancel := context.WithTimeout(writeCtx, historyWriteTimeout)
+		id, err := m.tracker.StartRun(startCtx, key)
+		startCancel()
+		if err != nil {
+			m.logger.WarnContext(writeCtx, "failed to lease task run", "task", key, "error", err)
+		}
+		leaseID = id
+	}
+	stopRenewing := m.renewRunLease(writeCtx, key, leaseID)
+	result := *w.executeReserved(execCtx, cancel)
+	stopRenewing()
+
+	if result.Status == ExecutionStatusFailed && m.shuttingDown() {
+		// Shutdown canceled the run; the task didn't fail on its own.
+		result.ErrorMessage = InterruptedExecutionMessage
+	}
+	m.recordRun(writeCtx, leaseID, result)
+}
+
+// shuttingDown reports whether the server is stopping: Stop has begun, or
+// the context Start was given, which scheduled runs inherit, is done. main
+// cancels that context well before it calls Stop.
+func (m *TaskManager) shuttingDown() bool {
+	if m.stopped.Load() {
+		return true
+	}
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.startCtx != nil && m.startCtx.Err() != nil
+}
+
+// renewRunLease renews leaseID until the returned function is called, which
+// waits for renewal to stop. A zero leaseID renews nothing.
+func (m *TaskManager) renewRunLease(ctx context.Context, key string, leaseID int64) func() {
+	if leaseID == 0 {
+		return func() {}
+	}
+	ctx, stop := context.WithCancel(ctx)
+	done := make(chan struct{})
 	go func() {
-		result := w.executeReserved(ctx, cancel)
-		if err := m.historyRepo.Insert(context.Background(), *result); err != nil {
-			m.logger.Error("failed to persist execution result", "task", key, "error", err)
+		defer close(done)
+		ticker := time.NewTicker(m.leaseRenewInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+			}
+			renewCtx, renewCancel := context.WithTimeout(ctx, historyWriteTimeout)
+			held, err := m.tracker.RenewRun(renewCtx, leaseID)
+			renewCancel()
+			switch {
+			case err != nil && ctx.Err() == nil:
+				m.logger.WarnContext(ctx, "failed to renew task run lease", "task", key, "lease", leaseID, "error", err)
+			case err == nil && !held:
+				m.logger.WarnContext(ctx, "task run lease expired while the run continues; it is recorded as interrupted", "task", key, "lease", leaseID)
+				return
+			}
 		}
 	}()
-	return info, nil
+	return func() {
+		stop()
+		<-done
+	}
+}
+
+// recordRun writes a finished run to history, retrying a failed write: a
+// lease left behind would later record a finished run as interrupted.
+func (m *TaskManager) recordRun(ctx context.Context, leaseID int64, result ExecutionResult) {
+	var err error
+	for attempt := 1; attempt <= historyWriteAttempts; attempt++ {
+		writeCtx, writeCancel := context.WithTimeout(ctx, historyWriteTimeout)
+		if leaseID != 0 {
+			err = m.tracker.FinishRun(writeCtx, leaseID, result)
+		} else {
+			err = m.historyRepo.Insert(writeCtx, result)
+		}
+		writeCancel()
+		if err == nil {
+			return
+		}
+		if attempt < historyWriteAttempts {
+			time.Sleep(time.Duration(attempt) * 250 * time.Millisecond)
+		}
+	}
+	m.logger.ErrorContext(ctx, "failed to persist execution result", "task", result.TaskKey, "error", err)
+}
+
+func (m *TaskManager) reconcileLoop(ctx context.Context) {
+	ticker := time.NewTicker(m.reconcileInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			m.reconcileStaleRuns(ctx)
+		}
+	}
+}
+
+// reconcileStaleRuns records runs whose server stopped renewing their lease,
+// on this server or any other, and refreshes those tasks' last execution.
+func (m *TaskManager) reconcileStaleRuns(ctx context.Context) {
+	reconcileCtx, cancel := context.WithTimeout(ctx, historyWriteTimeout)
+	defer cancel()
+	keys, err := m.tracker.ReconcileStaleRuns(reconcileCtx, m.leaseStaleAfter)
+	if err != nil {
+		if ctx.Err() == nil {
+			m.logger.WarnContext(ctx, "failed to reconcile stale task runs", "error", err)
+		}
+		return
+	}
+	for _, key := range keys {
+		m.logger.WarnContext(ctx, "recorded an interrupted task run", "task", key)
+	}
+	slices.Sort(keys)
+	for _, key := range slices.Compact(keys) {
+		if w, err := m.getWorker(key); err == nil {
+			readCtx, readCancel := context.WithTimeout(ctx, historyWriteTimeout)
+			m.reloadLastResult(readCtx, w)
+			readCancel()
+			w.notify()
+		}
+	}
+}
+
+func waitGroupWithTimeout(wg *sync.WaitGroup, timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case <-done:
+		return true
+	case <-timer.C:
+		return false
+	}
 }
 
 // CancelTask requests cancellation of a running task.

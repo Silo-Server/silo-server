@@ -55,7 +55,9 @@ export function DetailPanel({
         {badge}
       </div>
       {description ? (
-        <div className="text-muted-foreground mt-1 max-w-prose text-[13.5px]">{description}</div>
+        <div className="text-muted-foreground mt-1 max-w-prose text-[0.84375rem]">
+          {description}
+        </div>
       ) : null}
       {children ? <div className="mt-4">{children}</div> : null}
     </section>
@@ -113,7 +115,10 @@ export function PluginSettingsPanels({
             description={schema.description}
             badge={
               missingKeys.has(schema.key) ? (
-                <Badge variant="outline" className="border-warning/40 text-warning text-[11px]">
+                <Badge
+                  variant="outline"
+                  className="border-warning/40 text-warning text-[0.6875rem]"
+                >
                   {t("web.admin.plugins.settings.required")}
                 </Badge>
               ) : null
@@ -163,7 +168,9 @@ export function PluginSettingsPanels({
                   <div className="min-w-0">
                     <p className="text-sm font-medium">{label}</p>
                     {capability.description ? (
-                      <p className="text-muted-foreground text-[13px]">{capability.description}</p>
+                      <p className="text-muted-foreground text-[0.8125rem]">
+                        {capability.description}
+                      </p>
                     ) : null}
                     {binding?.callback_pending ? (
                       <p className="text-muted-foreground text-xs">
@@ -217,9 +224,11 @@ export function PluginSettingsPanels({
                   <div className="min-w-0 space-y-0.5">
                     <p className="text-sm font-medium">{label}</p>
                     {capability.description ? (
-                      <p className="text-muted-foreground text-[13px]">{capability.description}</p>
+                      <p className="text-muted-foreground text-[0.8125rem]">
+                        {capability.description}
+                      </p>
                     ) : null}
-                    <p className="text-muted-foreground text-[13px]">
+                    <p className="text-muted-foreground text-[0.8125rem]">
                       {t("web.admin.plugins.settings.defaultSchedule", {
                         schedule: describeTrigger(trigger),
                       })}
@@ -227,7 +236,7 @@ export function PluginSettingsPanels({
                     {registered ? (
                       <ViewTransitionLink
                         to={pluginTaskPath(installation.id, capability.id)}
-                        className="text-foreground/85 hover:text-foreground text-[13px] underline underline-offset-4"
+                        className="text-foreground/85 hover:text-foreground text-[0.8125rem] underline underline-offset-4"
                       >
                         {t("web.admin.plugins.settings.scheduleLink")}
                       </ViewTransitionLink>
@@ -279,13 +288,13 @@ export function PluginDeclaredSettings({ schemas }: { schemas: PluginConfigSchem
             <p className="flex items-center gap-2 text-sm font-medium">
               {configTitle(schema)}
               {schema.required ? (
-                <Badge variant="outline" className="text-[11px]">
+                <Badge variant="outline" className="text-[0.6875rem]">
                   {t("web.admin.plugins.settings.required")}
                 </Badge>
               ) : null}
             </p>
             {schema.description ? (
-              <p className="text-muted-foreground text-[13px]">{schema.description}</p>
+              <p className="text-muted-foreground text-[0.8125rem]">{schema.description}</p>
             ) : null}
           </li>
         ))}
@@ -350,7 +359,7 @@ function SignatureFact({ signature }: { signature: PluginSignature }) {
             })}
           </span>
           {verifiedAt ? (
-            <span className="text-muted-foreground block text-[12.5px]">{verifiedAt}</span>
+            <span className="text-muted-foreground block text-[0.78125rem]">{verifiedAt}</span>
           ) : null}
         </>
       );
@@ -425,7 +434,7 @@ export function PluginDetailRail({
       ) : null}
       {runtime?.resident ? (
         <RailPanel title={t("web.admin.plugins.rail.process")}>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13.5px]">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[0.84375rem]">
             <Fact label={t("web.admin.plugins.rail.state")}>
               {stateLabel ? t(stateLabel) : runtime.state}
             </Fact>
@@ -444,9 +453,9 @@ export function PluginDetailRail({
         </RailPanel>
       ) : null}
       <RailPanel title={t("web.admin.plugins.rail.details")}>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[13.5px]">
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-2 text-[0.84375rem]">
           <Fact label={t("web.admin.plugins.rail.pluginId")}>
-            <span className="font-mono text-[12.5px]">{pluginID}</span>
+            <span className="font-mono text-[0.78125rem]">{pluginID}</span>
           </Fact>
           {publisher ? (
             <Fact label={t("web.admin.plugins.rail.publisher")}>
@@ -483,7 +492,7 @@ export function PluginDetailRail({
           ) : null}
         </dl>
         {links.length > 0 ? (
-          <div className="mt-3.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[13.5px]">
+          <div className="mt-3.5 flex flex-wrap gap-x-4 gap-y-1.5 text-[0.84375rem]">
             {/* Fixed order (source, changelog, support), so the index is a stable key. */}
             {links.map((link, index) => (
               <a

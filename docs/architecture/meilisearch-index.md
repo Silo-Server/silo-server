@@ -84,6 +84,36 @@ fails if they stop doing so. A paged keyword search without a people query
 compares later pages with the first page's first hit, and a cut page ends the
 ranking.
 
+## Episodes rank after movies and series
+
+An episode often has the same title as a film or series ("Pressure",
+"Apocalypse Now"), and the two tie on every other ranking rule. Popularity
+does not separate them for items no rating source counts votes for, so
+Meilisearch's last tiebreak, the order documents were indexed in, decides,
+and the episodes, which far outnumber the film, can fill the first page.
+
+Each document carries `type_rank` (`catalogSearchTypeRank`): 1 for an
+episode, 0 for every other type. The `type_rank:asc` rule sits after
+`attributeRank` and `sort` and before `wordPosition`, `exactness`, and
+`popularity:desc`:
+
+- Among hits that match in the same attribute with the same words, typos, and
+  proximity, a movie or series ranks ahead of an episode, even one whose match
+  is more exact: "pilot" lists the film Bush Pilot ahead of the episodes titled
+  "Pilot".
+- A title match still ranks ahead of a match on genres or keywords, because
+  `attributeRank` comes first. So does an episode's `title` match ahead of a
+  movie that matches only through `original_title`, `sort_title`, or
+  `title_variants`.
+- `words`, `typo`, and `proximity` still lead, so the cut above holds.
+
+The ordering happens inside Meilisearch, before the hit limit, so it costs no
+extra query. A custom rule does not change `_rankingScore`. Hybrid search
+already searches media and episodes separately and merges them by that score,
+so the rule does not change hybrid ranking.
+`TestMeilisearchRankingRulesRankEpisodesAfterMediaInOneAttribute` fails if the
+rule moves out of that position.
+
 ## Searches while settings are pending
 
 Until the fingerprint is recorded, which happens only after Meilisearch has

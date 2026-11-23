@@ -6,6 +6,9 @@ import (
 	"testing"
 	"time"
 
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -159,5 +162,75 @@ func TestRefreshItemTarget_ResetOfAPinnedItemFails(t *testing.T) {
 	}
 	if err := h.service.ResetTargetForLibrary(context.Background(), RefreshTargetItem, contentID, 0); err == nil {
 		t.Error("reset of a pinned item succeeded, want an error")
+	}
+}
+
+// The refresh that ends a Complete Refresh empties the values its providers
+// don't send, so it can't do that when one of them fails to answer. It runs
+// as an ordinary refresh instead: the job succeeds, what the other providers
+// sent applies, and the values they left empty stay.
+func TestRebuildItemForLibrary_ProviderOutageKeepsStoredValues(t *testing.T) {
+	const contentID = "146000000000000100"
+	h := newTestHarness()
+	seedEditedMovie(t, h, contentID)
+	// The overview lock also holds the tagline, so the content rating is the
+	// stored value here that no lock holds and no provider sends.
+	seeded, err := h.itemRepo.GetByID(context.Background(), contentID)
+	if err != nil {
+		t.Fatalf("load seeded item: %v", err)
+	}
+	seeded.ContentRating = "PG-13"
+	if err := h.itemRepo.Upsert(context.Background(), seeded); err != nil {
+		t.Fatalf("seed content rating: %v", err)
+	}
+	providers := []Provider{
+		&capturingMetadataProvider{response: &MetadataResult{
+			HasMetadata: true, Title: "Provider Title", Year: 2006,
+			ProviderIDs: map[string]string{"tmdb": "100"},
+		}},
+		transientRemote{slug: "tvdb"},
+	}
+	h.service.hooks.process = func(ctx context.Context, req ProcessRequest) (*ProcessResult, error) {
+		req.Language = "en"
+		return h.service.ProcessWithProviders(ctx, req, providers)
+	}
+
+	if err := h.service.RebuildItemForLibrary(context.Background(), contentID, 0); err != nil {
+		t.Fatalf("RebuildItemForLibrary: %v, want an ordinary refresh to succeed", err)
+	}
+	item, err := h.itemRepo.GetByID(context.Background(), contentID)
+	if err != nil {
+		t.Fatalf("load item: %v", err)
+	}
+	if item.ContentRating != "PG-13" || item.Year != 2006 {
+		t.Errorf("content rating=%q year=%d, want the unlocked content rating kept and the answering provider's year", item.ContentRating, item.Year)
+	}
+	if len(item.LockedFields) != 2 {
+		t.Errorf("locked_fields = %v, want the stored locks kept", item.LockedFields)
+	}
+}
+
+// An enrichment provider whose key was rejected once supplied the item's
+// stored ratings, so a rebuild treats it as not answering and keeps them. A
+// reset still lets it stand, as it does a key that was never set.
+func TestUnansweredLookup_RebuildKeepsARejectedKeysValues(t *testing.T) {
+	enrichment := &PluginProvider{lookupProviderIDs: []string{"imdb"}}
+	rejected := status.Error(codes.Unauthenticated, "invalid api key")
+	missing := status.Error(codes.FailedPrecondition, "no api key")
+	for _, tc := range []struct {
+		name       string
+		req        ProcessRequest
+		err        error
+		unanswered bool
+	}{
+		{"rebuild, rejected key", ProcessRequest{rebuildMatch: true}, rejected, true},
+		{"rebuild, missing key", ProcessRequest{rebuildMatch: true}, missing, false},
+		{"reset, rejected key", ProcessRequest{resetToProvider: true}, rejected, false},
+		{"refresh, rejected key", ProcessRequest{}, rejected, false},
+	} {
+		got := tc.req.unansweredLookup(enrichment, "metadata", tc.err) != nil
+		if got != tc.unanswered {
+			t.Errorf("%s: unanswered = %v, want %v", tc.name, got, tc.unanswered)
+		}
 	}
 }

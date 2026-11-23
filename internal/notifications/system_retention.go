@@ -128,11 +128,12 @@ func (s *System) RunRetention(ctx context.Context) (RetentionStats, error) {
 			return stats, fmt.Errorf("prune push registrations of ended logins: %w", err)
 		}
 		stats.PushRegistrationsDeleted = registrations
+		// A failure partway still leaves the registrations it already removed.
 		unbound, err := s.pushDeviceRepo.DeleteRegistrationsWithNoLogin(ctx)
+		stats.UnboundPushRegistrationsDeleted = unbound
 		if err != nil {
 			return stats, fmt.Errorf("prune unbound push registrations: %w", err)
 		}
-		stats.UnboundPushRegistrationsDeleted = unbound
 	}
 	if s.DiscordPrefs != nil {
 		states, err := s.DiscordPrefs.DeleteExpiredLinkStates(ctx)

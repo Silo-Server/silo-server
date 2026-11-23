@@ -329,6 +329,21 @@ function tabHidden(): boolean {
   return typeof document !== "undefined" && document.visibilityState === "hidden";
 }
 
+export type PlaybackNetworkTier = "unmetered" | "metered" | "low_data";
+
+/**
+ * The network tier playback uses for quality selection:
+ * - `low_data` when the browser reports Data Saver (`saveData: true`);
+ * - `metered` on a cellular link without Data Saver;
+ * - `unmetered` otherwise (including browsers that expose no link type).
+ */
+export function playbackNetworkTier(): PlaybackNetworkTier {
+  const connection = networkInformation();
+  if (connection?.saveData === true) return "low_data";
+  if (connection?.type === "cellular") return "metered";
+  return "unmetered";
+}
+
 /**
  * Whether the viewer pays for this link by the byte: Data Saver is on or the
  * browser reports cellular. Such a link is not tested, and a reading taken on
@@ -336,8 +351,7 @@ function tabHidden(): boolean {
  * type counts as unmetered.
  */
 export function onMeteredConnection(): boolean {
-  const connection = networkInformation();
-  return connection?.saveData === true || connection?.type === "cellular";
+  return playbackNetworkTier() !== "unmetered";
 }
 
 /**

@@ -94,10 +94,10 @@ export function UploadedBackups({ uploads }: { uploads: readonly AdminBackupUplo
   return (
     <section aria-labelledby="uploaded-backups-heading" className="space-y-3">
       <div>
-        <h2 id="uploaded-backups-heading" className="text-[15px] font-semibold tracking-tight">
+        <h2 id="uploaded-backups-heading" className="text-[0.9375rem] font-semibold tracking-tight">
           {t("web.admin.backups.uploads.heading")}
         </h2>
-        <p className="text-muted-foreground text-[13px]">
+        <p className="text-muted-foreground text-[0.8125rem]">
           {t("web.admin.backups.uploads.description")}
         </p>
       </div>

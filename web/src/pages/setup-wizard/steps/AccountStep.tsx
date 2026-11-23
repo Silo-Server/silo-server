@@ -16,7 +16,7 @@ import { useWizardContext } from "../WizardContext";
 function Field({ id, label, children }: { id: string; label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id} className="text-[13px]">
+      <Label htmlFor={id} className="text-[0.8125rem]">
         {label}
       </Label>
       {children}

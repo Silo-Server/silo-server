@@ -68,11 +68,18 @@ type recordingExecutionRepository struct {
 	mu      sync.Mutex
 	inserts []taskmanager.ExecutionResult
 	latest  *taskmanager.ExecutionResult
+	recent  []taskmanager.ExecutionResult // List's result, newest first
+	// failInserts is how many Insert calls fail before one succeeds.
+	failInserts int
 }
 
 func (r *recordingExecutionRepository) Insert(_ context.Context, result taskmanager.ExecutionResult) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.failInserts > 0 {
+		r.failInserts--
+		return errors.New("history write failed")
+	}
 	r.inserts = append(r.inserts, result)
 	return nil
 }
@@ -82,7 +89,7 @@ func (r *recordingExecutionRepository) GetLatest(context.Context, string) (*task
 }
 
 func (r *recordingExecutionRepository) List(context.Context, string, int) ([]taskmanager.ExecutionResult, error) {
-	return nil, nil
+	return r.recent, nil
 }
 
 func (r *recordingExecutionRepository) insertCount() int {
@@ -587,5 +594,208 @@ func waitIdle(t *testing.T, manager *taskmanager.TaskManager, key string) {
 			t.Fatalf("task %s did not return to idle", key)
 		}
 		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// interruptedMessage is taskmanager.InterruptedExecutionMessage, spelled out.
+const interruptedMessage = "Interrupted: the server stopped before the task finished"
+
+// Stop waits for the run it cancels and records it as interrupted, not as a
+// failure of the task.
+func TestStopRecordsTheRunItCancelsAsInterrupted(t *testing.T) {
+	history := &recordingExecutionRepository{}
+	manager := taskmanager.New(&fakeTriggerRepository{}, history, newFakeTrigger, slog.New(slog.DiscardHandler))
+	task := gatedTask{
+		stubTask: stubTask{key: "scan"},
+		entered:  make(chan struct{}, 1),
+		release:  make(chan struct{}),
+		runs:     make(chan struct{}, 1),
+	}
+	manager.Register(task)
+	manager.Start(context.Background())
+	if _, err := manager.StartTask(task.Key()); err != nil {
+		t.Fatalf("StartTask() error = %v", err)
+	}
+	<-task.entered
+
+	manager.Stop()
+
+	history.mu.Lock()
+	defer history.mu.Unlock()
+	if len(history.inserts) != 1 {
+		t.Fatalf("recorded runs after Stop = %d, want 1", len(history.inserts))
+	}
+	if got := history.inserts[0]; got.Status != "failed" || got.ErrorMessage != interruptedMessage {
+		t.Fatalf("recorded run = %s %q, want failed %q", got.Status, got.ErrorMessage, interruptedMessage)
+	}
+}
+
+// An interval counts from the last run that wasn't interrupted, so a run a
+// restart cut off is due again at once rather than a full interval later.
+func TestStartSchedulesFromTheRunBeforeAnInterruptedOne(t *testing.T) {
+	hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)}
+	now := time.Now()
+	interrupted := taskmanager.ExecutionResult{TaskKey: "scan", Status: "failed", ErrorMessage: interruptedMessage, CompletedAt: now.Add(-time.Minute)}
+	completed := taskmanager.ExecutionResult{TaskKey: "scan", Status: "completed", CompletedAt: now.Add(-2 * time.Hour)}
+	history := &recordingExecutionRepository{
+		latest: &interrupted,
+		recent: []taskmanager.ExecutionResult{interrupted, completed},
+	}
+	manager := taskmanager.New(&fakeTriggerRepository{}, history, newFakeTrigger, slog.New(slog.DiscardHandler))
+	manager.Register(stubTask{key: "scan", triggers: []taskmanager.TriggerConfig{hourly}})
+	manager.Start(context.Background())
+	defer manager.Stop()
+
+	tasks := manager.ListTasks(true)
+	if len(tasks) != 1 || tasks[0].NextRunAt == nil {
+		t.Fatalf("tasks = %#v, want one scheduled task", tasks)
+	}
+	if want := completed.CompletedAt.Add(time.Hour); !tasks[0].NextRunAt.Equal(want) {
+		t.Fatalf("next run = %v, want %v (an hour after the last uninterrupted run)", tasks[0].NextRunAt, want)
+	}
+	if got := tasks[0].LastExecution; got == nil || got.ErrorMessage != interruptedMessage {
+		t.Fatalf("last execution = %#v, want the interrupted run", got)
+	}
+}
+
+// A history write that fails once is retried, so the run isn't lost.
+func TestRunTaskRetriesAFailedHistoryWrite(t *testing.T) {
+	history := &recordingExecutionRepository{failInserts: 1}
+	manager := taskmanager.New(&fakeTriggerRepository{}, history, newFakeTrigger, slog.New(slog.DiscardHandler))
+	manager.Register(stubTask{key: "scan"})
+	if err := manager.RunTask(context.Background(), "scan"); err != nil {
+		t.Fatalf("RunTask() error = %v", err)
+	}
+	if got := history.insertCount(); got != 1 {
+		t.Fatalf("recorded runs = %d, want 1", got)
+	}
+}
+
+// leasingRepository is an ExecutionTracker that hands out lease 7.
+type leasingRepository struct {
+	fakeExecutionRepository
+	mu       sync.Mutex
+	renewed  chan struct{}
+	finished []taskmanager.ExecutionResult
+	finishID int64
+}
+
+func (r *leasingRepository) StartRun(context.Context, string) (int64, error) { return 7, nil }
+
+func (r *leasingRepository) RenewRun(context.Context, int64) (bool, error) {
+	select {
+	case r.renewed <- struct{}{}:
+	default:
+	}
+	return true, nil
+}
+
+func (r *leasingRepository) FinishRun(_ context.Context, leaseID int64, result taskmanager.ExecutionResult) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.finishID = leaseID
+	r.finished = append(r.finished, result)
+	return nil
+}
+
+func (r *leasingRepository) ReconcileStaleRuns(context.Context, time.Duration) ([]string, error) {
+	return nil, nil
+}
+
+// renewGatedTask finishes once its run lease has been renewed.
+type renewGatedTask struct {
+	stubTask
+	renewed <-chan struct{}
+}
+
+func (t renewGatedTask) Execute(ctx context.Context, _ taskmanager.ProgressReporter) error {
+	select {
+	case <-t.renewed:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// With a tracker, a run holds a lease while it runs and is recorded by
+// finishing that lease, which releases it.
+func TestTrackedRunRenewsAndFinishesItsLease(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		history := &leasingRepository{renewed: make(chan struct{}, 1)}
+		manager := taskmanager.New(&fakeTriggerRepository{}, history, newFakeTrigger, slog.New(slog.DiscardHandler))
+		manager.SetRunLeaseTiming(time.Second, time.Minute)
+		manager.Register(renewGatedTask{stubTask: stubTask{key: "scan"}, renewed: history.renewed})
+
+		if err := manager.RunTask(context.Background(), "scan"); err != nil {
+			t.Fatalf("RunTask() error = %v", err)
+		}
+
+		history.mu.Lock()
+		defer history.mu.Unlock()
+		if history.finishID != 7 || len(history.finished) != 1 || history.finished[0].Status != "completed" {
+			t.Fatalf("finished lease %d with %#v, want lease 7 completed", history.finishID, history.finished)
+		}
+	})
+}
+
+// main cancels Start's context before it calls Stop; a scheduled run that
+// cancellation ends is interrupted too, not a failure of the task.
+func TestCanceledStartContextRecordsTheScheduledRunAsInterrupted(t *testing.T) {
+	hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)}
+	history := insertSignalingRepository{inserted: make(chan taskmanager.ExecutionResult, 1)}
+	fired := make(chan *fakeTrigger, 1)
+	factory := func(cfg taskmanager.TriggerConfig) taskmanager.Trigger {
+		tr := &fakeTrigger{cfg: cfg, ch: make(chan struct{}, 1), stopCh: make(chan struct{})}
+		select {
+		case fired <- tr:
+		default:
+		}
+		return tr
+	}
+	manager := taskmanager.New(&fakeTriggerRepository{}, history, factory, slog.New(slog.DiscardHandler))
+	task := gatedTask{
+		stubTask: stubTask{key: "scan", triggers: []taskmanager.TriggerConfig{hourly}},
+		entered:  make(chan struct{}, 1),
+		release:  make(chan struct{}),
+		runs:     make(chan struct{}, 1),
+	}
+	manager.Register(task)
+	ctx, cancel := context.WithCancel(context.Background())
+	manager.Start(ctx)
+	defer manager.Stop()
+	(<-fired).ch <- struct{}{}
+	<-task.entered
+
+	cancel()
+
+	select {
+	case got := <-history.inserted:
+		if got.Status != "failed" || got.ErrorMessage != interruptedMessage {
+			t.Fatalf("recorded run = %s %q, want failed %q", got.Status, got.ErrorMessage, interruptedMessage)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("canceled scheduled run was not recorded")
+	}
+}
+
+// A task whose recent runs were all interrupted counts its interval from
+// when the oldest of them started, not from the restart.
+func TestStartSchedulesFromTheOldestInterruptedRunWhenNoneFinished(t *testing.T) {
+	hourly := taskmanager.TriggerConfig{Type: taskmanager.TriggerTypeInterval, IntervalMs: int64(time.Hour / time.Millisecond)}
+	now := time.Now()
+	newer := taskmanager.ExecutionResult{TaskKey: "scan", Status: "failed", ErrorMessage: interruptedMessage, StartedAt: now.Add(-10 * time.Minute), CompletedAt: now.Add(-9 * time.Minute)}
+	older := taskmanager.ExecutionResult{TaskKey: "scan", Status: "failed", ErrorMessage: interruptedMessage, StartedAt: now.Add(-3 * time.Hour), CompletedAt: now.Add(-2 * time.Hour)}
+	history := &recordingExecutionRepository{latest: &newer, recent: []taskmanager.ExecutionResult{newer, older}}
+	manager := taskmanager.New(&fakeTriggerRepository{}, history, newFakeTrigger, slog.New(slog.DiscardHandler))
+	manager.Register(stubTask{key: "scan", triggers: []taskmanager.TriggerConfig{hourly}})
+	manager.Start(context.Background())
+	defer manager.Stop()
+
+	tasks := manager.ListTasks(true)
+	if len(tasks) != 1 || tasks[0].NextRunAt == nil {
+		t.Fatalf("tasks = %#v, want one scheduled task", tasks)
+	}
+	if want := older.StartedAt.Add(time.Hour); !tasks[0].NextRunAt.Equal(want) {
+		t.Fatalf("next run = %v, want %v (an hour after the oldest interrupted run started)", tasks[0].NextRunAt, want)
 	}
 }

@@ -69,7 +69,7 @@ export function ApiClientsWidget() {
         </CardTitle>
         <div className="flex min-w-0 items-center gap-2">
           {data && data.total_requests > 0 ? (
-            <span className="text-muted-foreground hidden text-[11px] whitespace-nowrap tabular-nums sm:inline">
+            <span className="text-muted-foreground hidden text-[0.6875rem] whitespace-nowrap tabular-nums sm:inline">
               {t("web.admin.dashboard.widgets.apiClients.totalRequests", {
                 count: data.total_requests,
                 count_text: data.total_requests.toLocaleString(formatLocale()),
@@ -111,7 +111,7 @@ export function ApiClientsWidget() {
                         opacity: 0.18,
                       }}
                     />
-                    <span className="text-muted-foreground relative w-4 shrink-0 text-[11px] tabular-nums">
+                    <span className="text-muted-foreground relative w-4 shrink-0 text-[0.6875rem] tabular-nums">
                       {index + 1}
                     </span>
                     <ChevronRight
@@ -135,7 +135,7 @@ export function ApiClientsWidget() {
                       </span>
                     </span>
                     {client.refused > 0 ? (
-                      <span className="text-destructive relative shrink-0 text-[11px] tabular-nums">
+                      <span className="text-destructive relative shrink-0 text-[0.6875rem] tabular-nums">
                         {t("web.admin.dashboard.widgets.apiClients.refused", {
                           count: client.refused,
                           count_text: client.refused.toLocaleString(formatLocale()),
@@ -143,14 +143,14 @@ export function ApiClientsWidget() {
                       </span>
                     ) : null}
                     {!client.session_active ? (
-                      <span className="text-muted-foreground relative hidden shrink-0 text-[11px] sm:inline">
+                      <span className="text-muted-foreground relative hidden shrink-0 text-[0.6875rem] sm:inline">
                         {t("web.admin.dashboard.widgets.apiClients.signedOut")}
                       </span>
                     ) : null}
-                    <span className="relative shrink-0 text-[13px] font-semibold tabular-nums">
+                    <span className="relative shrink-0 text-[0.8125rem] font-semibold tabular-nums">
                       {client.requests.toLocaleString(formatLocale())}
                     </span>
-                    <span className="text-muted-foreground relative w-10 shrink-0 text-end text-[11px] tabular-nums">
+                    <span className="text-muted-foreground relative w-10 shrink-0 text-end text-[0.6875rem] tabular-nums">
                       {sharePercent(client.requests, data?.total_requests ?? 0)}
                     </span>
                   </button>
@@ -175,7 +175,7 @@ function ApiClientDetail({ client, hours }: { client: AdminApiClient; hours: num
   const signingOut = useRef(false);
 
   return (
-    <div className="border-border/60 text-muted-foreground mx-2 mt-1 mb-2 space-y-2 border-s ps-3 text-[12px]">
+    <div className="border-border/60 text-muted-foreground mx-2 mt-1 mb-2 space-y-2 border-s ps-3 text-[0.75rem]">
       <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
         {client.user_agent ? (
           <>
@@ -208,9 +208,9 @@ function ApiClientDetail({ client, hours }: { client: AdminApiClient; hours: num
         <ol className="space-y-0.5">
           {(endpoints.data?.endpoints ?? []).map((endpoint) => (
             <li key={`${endpoint.method} ${endpoint.route}`} className="flex gap-2">
-              <span className="w-12 shrink-0 font-mono text-[11px]">{endpoint.method}</span>
+              <span className="w-12 shrink-0 font-mono text-[0.6875rem]">{endpoint.method}</span>
               <span
-                className="text-foreground min-w-0 flex-1 truncate font-mono text-[11px]"
+                className="text-foreground min-w-0 flex-1 truncate font-mono text-[0.6875rem]"
                 title={endpoint.route}
               >
                 {endpoint.route}

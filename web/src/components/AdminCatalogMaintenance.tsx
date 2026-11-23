@@ -47,6 +47,7 @@ import {
   formatJobProgress,
   jobStatusLabel,
 } from "./adminCatalogMaintenanceFormatters";
+import { PathText } from "@/components/PathText";
 import { Download, Plus, RefreshCw, Trash2, Upload } from "lucide-react";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDateTime } from "@/lib/datetime";
@@ -759,14 +760,14 @@ function describeExportJob(t: Translate, job: AdminJob) {
   return `${exportScopeLabel(t, job)} • ${formatDateTime(job.requested_at)}`;
 }
 
-function describeImportJob(t: Translate, job: AdminJob) {
-  const importRequest = job.request_payload as {
-    source_label?: string;
-    source_key?: string;
-  };
-  return (
-    importRequest.source_label ||
-    importRequest.source_key ||
+function describeImportJob(t: Translate, job: AdminJob): ReactNode {
+  const label = (job.request_payload as { source_label?: string }).source_label;
+  // The server's label: the remote URL, a file name, or "Export job <id>", untranslated.
+  return label ? (
+    <bdi dir="ltr">
+      <PathText path={label} />
+    </bdi>
+  ) : (
     t("web.admin.catalogMaintenance.imports.seedFallback")
   );
 }

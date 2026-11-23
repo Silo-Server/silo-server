@@ -115,7 +115,7 @@ func agedAttemptFinish(attempt DeliveryAttempt, queued time.Time) pluginAttemptF
 	if lastFailure != "" {
 		aged.message = lastFailure
 	}
-	aged.disableReason = "Deliveries failed for 24 hours"
+	aged.disableReason = exhaustedDisableReason
 	aged.quietSince = &queued
 	return aged
 }
@@ -383,7 +383,7 @@ func (s *pluginDestinationSender) processAttempt(ctx context.Context, attempt De
 	// once its plugin or this server's key is back.
 	if !result.keepEnabled {
 		queued := row.CreatedAt
-		failed.disableReason = "Deliveries failed for 24 hours"
+		failed.disableReason = exhaustedDisableReason
 		failed.quietSince = &queued
 	}
 	s.finish(ctx, attempt, d, failed)

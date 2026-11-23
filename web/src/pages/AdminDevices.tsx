@@ -409,7 +409,7 @@ export default function AdminDevices() {
         subtitle={t("web.admin.devices.subtitle", {
           shortcut: SEARCH_SHORTCUT_LABEL,
           kbd: (chunks) => (
-            <kbd className="bg-surface/70 border-border/70 text-foreground/80 inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[10.5px]">
+            <kbd className="bg-surface/70 border-border/70 text-foreground/80 inline-flex items-center rounded border px-1.5 py-0.5 font-mono text-[0.65625rem]">
               {chunks}
             </kbd>
           ),
@@ -418,7 +418,7 @@ export default function AdminDevices() {
           <div className="relative w-full sm:w-[340px]">
             <Search className="text-muted-foreground absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2" />
             <Input
-              className="bg-background/60 h-9 ps-9 pe-9 text-[13px]"
+              className="bg-background/60 h-9 ps-9 pe-9 text-[0.8125rem] text-ellipsis"
               placeholder={t("web.admin.devices.search.placeholder")}
               value={search}
               onChange={(event) => setSearch(event.target.value)}
@@ -482,7 +482,7 @@ export default function AdminDevices() {
 
         {/* device list */}
         <section className="surface-panel flex flex-col overflow-hidden rounded-xl border-0">
-          <div className="border-border/60 text-muted-foreground flex items-center justify-between border-b px-3 py-2.5 text-[10.5px] tracking-[0.08em] uppercase">
+          <div className="border-border/60 text-muted-foreground flex items-center justify-between border-b px-3 py-2.5 text-[0.65625rem] tracking-[0.08em] uppercase">
             <span>
               {filteredDevices.length !== devices.length
                 ? t("web.admin.devices.list.countOfTotal", {
@@ -589,7 +589,7 @@ function FleetPulse({
   const maxCount = sortedCounts[0] ?? 0;
 
   return (
-    <div className="surface-panel-subtle text-muted-foreground flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl px-4 py-3 text-[12px]">
+    <div className="surface-panel-subtle text-muted-foreground flex flex-wrap items-center gap-x-6 gap-y-3 rounded-xl px-4 py-3 text-[0.75rem]">
       <SeparatedRow wide separatorClassName="text-muted-foreground/30">
         <Stat
           label={t("web.admin.devices.stats.users", { count: totalUsers })}
@@ -616,13 +616,13 @@ function FleetPulse({
         )}
       </SeparatedRow>
 
-      <div className="text-muted-foreground/80 flex items-center gap-2 font-mono text-[10px] tracking-[0.06em] uppercase">
+      <div className="text-muted-foreground/80 flex items-center gap-2 font-mono text-[0.625rem] tracking-[0.06em] uppercase">
         <span>{t("web.admin.devices.stats.density")}</span>
         <Histogram counts={sortedCounts} max={maxCount} />
       </div>
 
       <div className="ms-auto flex flex-wrap items-center justify-end gap-2">
-        <span className="text-muted-foreground text-[10px] tracking-[0.08em] uppercase">
+        <span className="text-muted-foreground text-[0.625rem] tracking-[0.08em] uppercase">
           {t("web.admin.devices.groupBy.label")}
         </span>
         <SegmentedControl
@@ -659,12 +659,12 @@ function DeviceScopeControl({
         onClick={() => onChange(false)}
         aria-pressed={!overridesOnly}
         className={cn(
-          "inline-flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium transition-colors",
+          "inline-flex items-center gap-2 px-3.5 py-2 text-[0.8125rem] font-medium transition-colors",
           segmentClass(!overridesOnly),
         )}
       >
         <span>{t("web.admin.devices.scope.allDevices")}</span>
-        <span className="text-muted-foreground font-mono text-[11.5px] tabular-nums">
+        <span className="text-muted-foreground font-mono text-[0.71875rem] tabular-nums">
           {numberText(totalDevices)}
         </span>
       </button>
@@ -673,12 +673,12 @@ function DeviceScopeControl({
         onClick={() => onChange(true)}
         aria-pressed={overridesOnly}
         className={cn(
-          "border-border/60 inline-flex items-center gap-2 border-s px-3.5 py-2 text-[13px] font-medium transition-colors",
+          "border-border/60 inline-flex items-center gap-2 border-s px-3.5 py-2 text-[0.8125rem] font-medium transition-colors",
           segmentClass(overridesOnly),
         )}
       >
         <span>{t("web.admin.devices.scope.withOverrides")}</span>
-        <span className="text-muted-foreground font-mono text-[11.5px] tabular-nums">
+        <span className="text-muted-foreground font-mono text-[0.71875rem] tabular-nums">
           {devicesWithOverrides}
         </span>
       </button>
@@ -726,12 +726,12 @@ function SettingsScopeControl({
         disabled={disabled}
         aria-pressed={showAllSettings}
         className={cn(
-          "inline-flex items-center gap-1.5 px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-not-allowed",
+          "inline-flex items-center gap-1.5 px-2.5 py-1 text-[0.71875rem] transition-colors disabled:cursor-not-allowed",
           segmentClass(showAllSettings),
         )}
       >
         <span>{t("web.admin.devices.settingsScope.allSettings")}</span>
-        <span className="text-muted-foreground font-mono text-[10.5px] tabular-nums">
+        <span className="text-muted-foreground font-mono text-[0.65625rem] tabular-nums">
           {numberText(totalSettings)}
         </span>
       </button>
@@ -743,12 +743,12 @@ function SettingsScopeControl({
         disabled={!canShowOverrides}
         aria-pressed={!showAllSettings}
         className={cn(
-          "border-border/60 inline-flex items-center gap-1.5 border-s px-2.5 py-1 text-[11.5px] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+          "border-border/60 inline-flex items-center gap-1.5 border-s px-2.5 py-1 text-[0.71875rem] transition-colors disabled:cursor-not-allowed disabled:opacity-50",
           segmentClass(!showAllSettings),
         )}
       >
         <span>{t("web.admin.devices.settingsScope.overrides")}</span>
-        <span className="text-muted-foreground font-mono text-[10.5px] tabular-nums">
+        <span className="text-muted-foreground font-mono text-[0.65625rem] tabular-nums">
           {numberText(overrideCount)}
         </span>
       </button>
@@ -767,7 +767,9 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: "de
       >
         {value}
       </span>
-      <span className="text-muted-foreground text-[10px] tracking-[0.08em] uppercase">{label}</span>
+      <span className="text-muted-foreground text-[0.625rem] tracking-[0.08em] uppercase">
+        {label}
+      </span>
     </span>
   );
 }
@@ -896,7 +898,7 @@ function SegmentedControl<T extends string>({
             aria-pressed={active}
             onClick={() => onChange(opt.value)}
             className={cn(
-              "px-2.5 py-1 text-[11.5px] transition-colors",
+              "px-2.5 py-1 text-[0.71875rem] transition-colors",
               i > 0 && "border-border/60 border-s",
               segmentClass(active),
             )}
@@ -968,7 +970,7 @@ function FilterRail({
   const availablePlatforms = PLATFORM_ORDER.filter((k) => (platformCounts.get(k) ?? 0) > 0);
 
   return (
-    <aside className="surface-panel hidden h-fit flex-col gap-5 overflow-hidden rounded-xl border-0 px-3 py-4 text-[12.5px] lg:flex">
+    <aside className="surface-panel hidden h-fit flex-col gap-5 overflow-hidden rounded-xl border-0 px-3 py-4 text-[0.78125rem] lg:flex">
       <FilterGroup
         label={t("web.admin.devices.filters.savedViews")}
         action={
@@ -1073,7 +1075,7 @@ function FilterGroup({
 }) {
   return (
     <div>
-      <div className="text-muted-foreground mb-2 flex items-center justify-between px-1 text-[10px] font-semibold tracking-[0.12em] uppercase">
+      <div className="text-muted-foreground mb-2 flex items-center justify-between px-1 text-[0.625rem] font-semibold tracking-[0.12em] uppercase">
         <span>{label}</span>
         {action}
       </div>
@@ -1102,7 +1104,7 @@ function SavedViewRow({
       type="button"
       onClick={onClick}
       className={cn(
-        "group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start transition-colors",
+        "group flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-start transition-colors",
         active
           ? "bg-surface-hover/70 text-foreground"
           : "text-muted-foreground hover:bg-surface-hover/40 hover:text-foreground",
@@ -1110,7 +1112,7 @@ function SavedViewRow({
     >
       <span
         className={cn(
-          "shrink-0 transition-colors",
+          "flex h-lh shrink-0 items-center transition-colors",
           tone === "destructive"
             ? "text-destructive/85"
             : active
@@ -1120,14 +1122,16 @@ function SavedViewRow({
       >
         {icon}
       </span>
-      <span className="flex-1 truncate">{label}</span>
-      <span
-        className={cn(
-          "font-mono text-[10.5px] tabular-nums",
-          active ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        {numberText(count)}
+      <span className="min-w-0 flex-1 break-words">{label}</span>
+      <span className="flex h-lh items-center">
+        <span
+          className={cn(
+            "font-mono text-[0.65625rem] tabular-nums",
+            active ? "text-foreground" : "text-muted-foreground",
+          )}
+        >
+          {numberText(count)}
+        </span>
       </span>
     </button>
   );
@@ -1164,7 +1168,7 @@ function FacetCheckbox({
       </span>
       <span
         className={cn(
-          "font-mono text-[10.5px] tabular-nums",
+          "font-mono text-[0.65625rem] tabular-nums",
           checked ? "text-foreground" : "text-muted-foreground",
         )}
       >
@@ -1308,7 +1312,7 @@ function DeviceGroup({
               open && "rotate-90 rtl:-rotate-90",
             )}
           />
-          <span className="truncate text-[12.5px] font-semibold">{group.label}</span>
+          <span className="truncate text-[0.78125rem] font-semibold">{group.label}</span>
         </button>
         <div className="flex shrink-0 items-center gap-2">
           {group.href && (
@@ -1322,12 +1326,12 @@ function DeviceGroup({
             </Link>
           )}
           {groupAnomalies > 0 && (
-            <span className="text-destructive-label bg-destructive/10 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] tracking-[0.04em]">
+            <span className="text-destructive-label bg-destructive/10 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[0.625rem] tracking-[0.04em]">
               <AlertTriangle className="h-2.5 w-2.5" />
               {groupAnomalies}
             </span>
           )}
-          <span className="text-muted-foreground font-mono text-[10.5px] tabular-nums">
+          <span className="text-muted-foreground font-mono text-[0.65625rem] tabular-nums">
             {t("web.admin.devices.group.meta", {
               devices: group.meta.devices,
               profiles: group.meta.profiles,
@@ -1428,7 +1432,7 @@ function DeviceRow({
       <PlatformTile kind={kind} />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
-          <span dir="auto" className="text-foreground truncate text-[13px] font-medium">
+          <span dir="auto" className="text-foreground truncate text-[0.8125rem] font-medium">
             {device.device_name || t("web.admin.devices.unnamedDevice")}
           </span>
           {isAnomaly && (
@@ -1439,7 +1443,7 @@ function DeviceRow({
             />
           )}
         </div>
-        <div className="text-muted-foreground/80 mt-0.5 flex items-center gap-1.5 truncate text-[11px]">
+        <div className="text-muted-foreground/80 mt-0.5 flex items-center gap-1.5 truncate text-[0.6875rem]">
           <span className="truncate">{platformLabel(device.device_platform)}</span>
           <span className="text-muted-foreground/40">{t("web.admin.devices.separator")}</span>
           <span className={cn("tabular-nums", recency === "<24h" && "text-success/80")}>
@@ -1471,7 +1475,7 @@ function OverrideGauge({ count, active }: { count: number; active: boolean }) {
       </span>
       <span
         className={cn(
-          "min-w-[14px] text-end font-mono text-[11px] tabular-nums",
+          "min-w-[14px] text-end font-mono text-[0.6875rem] tabular-nums",
           active ? "text-foreground" : "text-muted-foreground/85",
         )}
       >
@@ -1494,7 +1498,7 @@ function EmptyFleet({ hasDevices, onClear }: { hasDevices: boolean; onClear: () 
           ? t("web.admin.devices.empty.noMatchTitle")
           : t("web.admin.devices.empty.noDevicesTitle")}
       </p>
-      <p className="text-muted-foreground max-w-xs text-[12.5px] leading-relaxed">
+      <p className="text-muted-foreground max-w-xs text-[0.78125rem] leading-relaxed">
         {hasDevices
           ? t("web.admin.devices.empty.noMatchBody")
           : t("web.admin.devices.empty.noDevicesBody")}
@@ -1515,7 +1519,7 @@ function EmptyDetail() {
       <h2 className="text-foreground text-base font-medium">
         {t("web.admin.devices.detail.emptyTitle")}
       </h2>
-      <p className="text-muted-foreground max-w-sm text-[13px] leading-relaxed">
+      <p className="text-muted-foreground max-w-sm text-[0.8125rem] leading-relaxed">
         {t("web.admin.devices.detail.emptyBody")}
       </p>
     </div>
@@ -1769,12 +1773,12 @@ function DeviceDetailPanel({
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3">
-            <p className="text-muted-foreground text-[12.5px]">
+            <p className="text-muted-foreground text-[0.78125rem]">
               {t("web.admin.devices.jsonEditor.help")}
             </p>
             <textarea
               spellCheck={false}
-              className="border-input bg-background focus:border-foreground/40 min-h-[260px] w-full rounded-md border px-3 py-2 font-mono text-[13px] leading-relaxed transition-colors outline-none"
+              className="border-input bg-background focus:border-foreground/40 min-h-[260px] w-full rounded-md border px-3 py-2 font-mono text-[0.8125rem] leading-relaxed transition-colors outline-none"
               value={jsonValue}
               onChange={(event) => setJsonValue(event.target.value)}
             />
@@ -1817,7 +1821,7 @@ function DeviceDetailPanel({
                 {data.device_name || t("web.admin.devices.unnamedDevice")}
               </h2>
               {isAnomaly && (
-                <span className="text-destructive-label border-destructive/30 bg-destructive/10 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10.5px] tracking-[0.04em] uppercase">
+                <span className="text-destructive-label border-destructive/30 bg-destructive/10 inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[0.65625rem] tracking-[0.04em] uppercase">
                   <AlertTriangle className="h-3 w-3" />
                   {t("web.admin.devices.detail.anomalyBadge")}
                 </span>
@@ -1825,7 +1829,7 @@ function DeviceDetailPanel({
             </div>
             <SeparatedRow
               separatorClassName="text-muted-foreground/40"
-              className="text-muted-foreground text-[12px]"
+              className="text-muted-foreground text-[0.75rem]"
             >
               <span className="text-foreground/80 font-mono">{data.device_id}</span>
               <span>{platformLabel(data.device_platform)}</span>
@@ -1995,12 +1999,12 @@ function ReadoutCell({
 }) {
   return (
     <div className="min-w-0">
-      <div className="text-muted-foreground text-[10px] font-semibold tracking-[0.12em] uppercase">
+      <div className="text-muted-foreground text-[0.625rem] font-semibold tracking-[0.12em] uppercase">
         {label}
       </div>
       <div
         className={cn(
-          "mt-1 truncate font-mono text-[14px]",
+          "mt-1 truncate font-mono text-[0.875rem]",
           tone === "primary"
             ? "text-foreground"
             : tone === "destructive"
@@ -2012,7 +2016,10 @@ function ReadoutCell({
         {value}
       </div>
       {sub && (
-        <div className="text-muted-foreground mt-0.5 truncate text-[11px]" title={subTitle ?? sub}>
+        <div
+          className="text-muted-foreground mt-0.5 truncate text-[0.6875rem]"
+          title={subTitle ?? sub}
+        >
           {sub}
         </div>
       )}

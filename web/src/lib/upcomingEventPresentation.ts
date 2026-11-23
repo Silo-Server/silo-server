@@ -1,4 +1,6 @@
-import { codeNumber, t } from "@/i18n";
+import { createElement, type ReactNode } from "react";
+import { LineTitle } from "@/components/TitleLine";
+import { codeNumber, t, type Translate } from "@/i18n";
 import { formatTime, preferredDateLocale } from "@/lib/datetime";
 
 interface UpcomingPresentationEvent {
@@ -48,26 +50,34 @@ export function upcomingBadgeClass(badge: string): string {
   }
 }
 
-export function formatUpcomingSubtitle(event: UpcomingPresentationEvent): string {
+/**
+ * The episode or season line under an upcoming title. Its episode title is a
+ * `LineTitle`; render it with `TitleLineParts`. It takes a component's `useT()`,
+ * since the module's `t` returns text only.
+ */
+export function formatUpcomingSubtitle(
+  event: UpcomingPresentationEvent,
+  translate: Translate,
+): ReactNode {
   if (
     (event.type === "episode" || event.type === "season_premiere") &&
     event.season_number != null
   ) {
     const season = event.season_number;
-    const title = event.episode_title;
+    const title = event.episode_title ? createElement(LineTitle, null, event.episode_title) : null;
     if (event.episode_number != null) {
       const code = { season: codeNumber(season), episode: codeNumber(event.episode_number) };
       return title
-        ? t("web.calendar.event.episodeTitled", { ...code, title })
-        : t("web.calendar.event.episode", code);
+        ? translate("web.calendar.event.episodeTitled", { ...code, title })
+        : translate("web.calendar.event.episode", code);
     }
     return title
-      ? t("web.calendar.event.seasonTitled", { season, title })
-      : t("web.calendar.event.season", { season });
+      ? translate("web.calendar.event.seasonTitled", { season, title })
+      : translate("web.calendar.event.season", { season });
   }
 
   if (event.type === "movie") {
-    return t("web.calendar.event.movie");
+    return translate("web.calendar.event.movie");
   }
 
   return "";

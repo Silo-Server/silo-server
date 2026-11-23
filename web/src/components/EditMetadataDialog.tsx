@@ -251,7 +251,7 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
         type="button"
         onClick={() => toggleLock(metadataField)}
         className={cn(
-          "inline-flex items-center gap-1 text-[10px] transition-colors",
+          "inline-flex items-center gap-1 text-[0.625rem] transition-colors",
           // Unlocked keeps 3:1 on the dialog surface (the icon is the only visible
           // sign it's a control) and stays quieter than locked amber, also in high
           // contrast mode, which brightens the muted colour.
@@ -285,15 +285,15 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
               the title keeps its whole words instead of breaking mid-word. */}
           <DialogHeader className="border-border/10 shrink-0 flex-row flex-wrap items-center justify-between gap-x-4 gap-y-1.5 border-b px-5 py-4 pe-12">
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
-              <DialogTitle className="text-[15px] font-semibold">
+              <DialogTitle className="text-[0.9375rem] font-semibold">
                 {t("web.item.dialog.editMetadataTitle")}
               </DialogTitle>
-              <span className="bg-muted/50 text-muted-foreground rounded px-2 py-0.5 text-[11px]">
+              <span className="bg-muted/50 text-muted-foreground rounded px-2 py-0.5 text-[0.6875rem]">
                 {typeLabel}
               </span>
             </div>
             {fieldLockMap && lockedCount > 0 && (
-              <span className="text-muted-foreground flex items-center gap-1 text-[11px]">
+              <span className="text-muted-foreground flex items-center gap-1 text-[0.6875rem]">
                 <Lock className="size-3" />
                 {t("web.item.editMetadata.lockedCount", { count: lockedCount })}
               </span>
@@ -312,7 +312,7 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                   type="button"
                   onClick={() => setActiveSection(section.key)}
                   className={cn(
-                    "px-4 py-2 text-start text-[13px] font-medium whitespace-nowrap transition-colors sm:break-words sm:whitespace-normal sm:focus-visible:-outline-offset-2!",
+                    "px-4 py-2 text-start text-[0.8125rem] font-medium whitespace-nowrap transition-colors sm:break-words sm:whitespace-normal sm:focus-visible:-outline-offset-2!",
                     effectiveActiveSection === section.key
                       ? "border-primary bg-primary/8 text-primary max-sm:border-b-2 sm:border-e-2"
                       : "text-muted-foreground hover:text-foreground",
@@ -561,7 +561,7 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
 
                   {(item.type === "movie" || item.type === "series") && (
                     <>
-                      <div className="text-muted-foreground pt-2 text-[11px] font-semibold tracking-wider uppercase">
+                      <div className="text-muted-foreground pt-2 text-[0.6875rem] font-semibold tracking-wider uppercase">
                         {t("web.item.editMetadata.ratings")}
                       </div>
                       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -795,7 +795,7 @@ function FieldRow({
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between">
-        <Label className="text-muted-foreground text-[12px] font-medium">{label}</Label>
+        <Label className="text-muted-foreground text-[0.75rem] font-medium">{label}</Label>
         {lockIcon}
       </div>
       {children}

@@ -600,6 +600,11 @@ func (r *refreshTestGeneralRefresher) ResetTargetForLibrary(_ context.Context, _
 	return nil
 }
 
+func (r *refreshTestGeneralRefresher) RebuildItemForLibrary(_ context.Context, id string, _ int) error {
+	r.calls = append(r.calls, "RebuildItemForLibrary "+id)
+	return nil
+}
+
 type refreshTestFolderRepo struct{ folder *models.MediaFolder }
 
 func (r refreshTestFolderRepo) GetByID(context.Context, int) (*models.MediaFolder, error) {

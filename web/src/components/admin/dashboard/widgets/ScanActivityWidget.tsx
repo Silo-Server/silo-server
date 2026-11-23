@@ -51,7 +51,7 @@ export function ScanActivityWidget() {
         </CardTitle>
         <Link
           to="/admin/autoscan"
-          className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
+          className="text-muted-foreground hover:text-primary text-[0.6875rem] transition-colors"
         >
           {t("web.admin.dashboard.widgets.scanActivity.allScans")}
         </Link>
@@ -88,23 +88,23 @@ export function ScanActivityWidget() {
                   {/* align-with-page: a short name lines up with the column's heading. */}
                   <TableCell
                     dir="auto"
-                    className="align-with-page max-w-[14rem] truncate text-[13px] font-semibold"
+                    className="align-with-page max-w-[14rem] truncate text-[0.8125rem] font-semibold"
                   >
                     {libraryNames.get(scan.library_id) ??
                       t("web.admin.dashboard.widgets.scanActivity.libraryFallback", {
                         id: scan.library_id,
                       })}
                   </TableCell>
-                  <TableCell className="text-muted-foreground hidden text-[11px] sm:table-cell">
+                  <TableCell className="text-muted-foreground hidden text-[0.6875rem] sm:table-cell">
                     {formatActiveScanMode(scan)}
                   </TableCell>
-                  <TableCell className="text-muted-foreground hidden text-[11px] md:table-cell">
+                  <TableCell className="text-muted-foreground hidden text-[0.6875rem] md:table-cell">
                     {formatActiveScanTrigger(scan.trigger)}
                   </TableCell>
                   <TableCell>
                     <ScanStatus status={scan.status} />
                   </TableCell>
-                  <TableCell className="text-muted-foreground text-end text-[11px] tabular-nums">
+                  <TableCell className="text-muted-foreground text-end text-[0.6875rem] tabular-nums">
                     {formatScanDuration(scan)}
                   </TableCell>
                 </TableRow>
@@ -122,7 +122,7 @@ function ScanStatus({ status }: { status: AutoscanScanStatus }) {
   const tone = scanStatusTone(t, status);
   const Icon = tone.icon;
   return (
-    <span className={cn("flex items-center gap-1 text-[11px] font-medium", tone.className)}>
+    <span className={cn("flex items-center gap-1 text-[0.6875rem] font-medium", tone.className)}>
       <Icon
         className={cn("h-3.5 w-3.5", status === "running" && "animate-spin")}
         aria-hidden="true"
