@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"slices"
 	"testing"
 
@@ -32,9 +33,17 @@ func (r *batchFileResolver) GetByIDs(_ context.Context, ids []int) ([]*models.Me
 	return files, nil
 }
 
+// failingBatchResolver fails every batch, as one unreadable file does.
+type failingBatchResolver struct{ singleFileResolver }
+
+func (r *failingBatchResolver) GetByIDs(context.Context, []int) ([]*models.MediaFile, error) {
+	return nil, errors.New("scanning a media file: bad chapters")
+}
+
 // TestPausedCandidateFilesReadsEachFileOnce pins that a page of paused-timeout
 // candidates reads its files in one lookup when the resolver can batch, and
-// once per distinct file when it can't, however many sessions share a file.
+// once per distinct file when it can't or the batch fails, however many
+// sessions share a file.
 func TestPausedCandidateFilesReadsEachFileOnce(t *testing.T) {
 	candidates := []pausedTimeoutCandidate{{sessionID: "a", mediaFileID: 7}, {sessionID: "b", mediaFileID: 9}, {sessionID: "c", mediaFileID: 7}}
 
@@ -54,5 +63,11 @@ func TestPausedCandidateFilesReadsEachFileOnce(t *testing.T) {
 	}
 	if files[7] == nil || files[9] == nil {
 		t.Fatalf("single resolver files = %v, want 7 and 9", files)
+	}
+
+	failing := &failingBatchResolver{}
+	files = (&PlaybackHandler{fileResolver: failing}).pausedCandidateFiles(t.Context(), candidates)
+	if !slices.Equal(failing.calls, []int{7, 9}) || files[7] == nil || files[9] == nil {
+		t.Fatalf("after a failed batch: calls %v, files %v; want each file read once", failing.calls, files)
 	}
 }

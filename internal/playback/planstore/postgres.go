@@ -577,7 +577,8 @@ func (s *Postgres) ExpireIdleAttempt(ctx context.Context, sessionID, stopID stri
 // paused and its native lifecycle row has said paused for at least timeout,
 // by the database's clock. What the sweep selected by is checked again here:
 // the client still reports (it accepted a sample within
-// PausedStreamSlotGrace), no Cast receiver renders the attempt, and no open
+// PausedStreamSlotGrace), it still plays mediaFileID (the file the sweep
+// found is not audio-only), no Cast receiver renders the attempt, and no open
 // Watch Together room lists the session.
 //
 // The attempt is locked first, the lock ApplyProgress takes, so a resume
@@ -586,7 +587,7 @@ func (s *Postgres) ExpireIdleAttempt(ctx context.Context, sessionID, stopID stri
 // snapshot is taken after the lock is held: a single UPDATE joining the
 // lifecycle row would judge it as of the statement's start and could end a
 // session a resume committed while the claim waited.
-func (s *Postgres) ExpirePausedAttempt(ctx context.Context, sessionID, stopID string, timeout time.Duration) (bool, error) {
+func (s *Postgres) ExpirePausedAttempt(ctx context.Context, sessionID, stopID string, mediaFileID int, timeout time.Duration) (bool, error) {
 	if _, err := uuid.Parse(stopID); err != nil {
 		return false, playback.ErrInvalidStopIDV3
 	}
@@ -604,8 +605,9 @@ func (s *Postgres) ExpirePausedAttempt(ctx context.Context, sessionID, stopID st
 		WHERE session_id = $1::uuid AND expires_at > NOW() AND stopped_at IS NULL
 		  AND COALESCE((last_sample->>'is_paused')::boolean, false)
 		  AND updated_at >= NOW() - make_interval(secs => $3)
+		  AND effective_media_file_id = $4
 		  AND COALESCE(normalized_request #>> '{client_playback_context,output,current_sink}', '') <> $2
-		FOR UPDATE`, sessionID, playback.CastReceiverSinkV3, playback.PausedStreamSlotGrace.Seconds()).Scan(&locked)
+		FOR UPDATE`, sessionID, playback.CastReceiverSinkV3, playback.PausedStreamSlotGrace.Seconds(), mediaFileID).Scan(&locked)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

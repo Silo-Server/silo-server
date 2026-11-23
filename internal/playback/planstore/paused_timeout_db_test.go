@@ -18,6 +18,8 @@ type pausedAttemptFixture struct {
 	store   *Postgres
 	session string
 	exec    func(sql string, args ...any)
+	// file is the attempt's effective media file, the one the sweep classified.
+	file int
 	// pausedFor backdates the session's pause.
 	pausedFor func(time.Duration)
 }
@@ -34,7 +36,11 @@ func newPausedAttemptFixture(t *testing.T) pausedAttemptFixture {
 			t.Fatal(err)
 		}
 	}
-	return pausedAttemptFixture{store: store, session: session, exec: exec, pausedFor: func(d time.Duration) {
+	var file int
+	if err := pool.QueryRow(ctx, `SELECT effective_media_file_id FROM playback_v3_attempts WHERE session_id = $1`, session).Scan(&file); err != nil {
+		t.Fatal(err)
+	}
+	return pausedAttemptFixture{store: store, session: session, exec: exec, file: file, pausedFor: func(d time.Duration) {
 		t.Helper()
 		exec(`UPDATE playback_session_lifecycle SET updated_at = NOW() - make_interval(secs => $2) WHERE session_id = $1`, session, d.Seconds())
 	}}
@@ -43,7 +49,7 @@ func newPausedAttemptFixture(t *testing.T) pausedAttemptFixture {
 // expire runs the claim under stopID and reports whether it ended the attempt.
 func (f pausedAttemptFixture) expire(t *testing.T, stopID string) bool {
 	t.Helper()
-	stopped, err := f.store.ExpirePausedAttempt(t.Context(), f.session, stopID, pausedAttemptTimeout)
+	stopped, err := f.store.ExpirePausedAttempt(t.Context(), f.session, stopID, f.file, pausedAttemptTimeout)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,7 +146,7 @@ func TestExpirePausedAttemptDB(t *testing.T) {
 		}
 		claimed := make(chan bool, 1)
 		go func() {
-			stopped, err := f.store.ExpirePausedAttempt(context.Background(), f.session, uuid.NewString(), pausedAttemptTimeout)
+			stopped, err := f.store.ExpirePausedAttempt(context.Background(), f.session, uuid.NewString(), f.file, pausedAttemptTimeout)
 			if err != nil {
 				t.Error(err)
 			}
@@ -160,17 +166,31 @@ func TestExpirePausedAttemptDB(t *testing.T) {
 	})
 }
 
-// TestExpirePausedAttemptNeedsAReportingClientDB pins that the claim rechecks,
-// under the attempt's lock, that the client still reports: one that went quiet
-// after the sweep selected it is left to the idle expiry.
-func TestExpirePausedAttemptNeedsAReportingClientDB(t *testing.T) {
-	f := newPausedAttemptFixture(t)
-	f.pausedFor(pausedAttemptTimeout + time.Minute)
-	f.exec(`UPDATE playback_v3_attempts SET updated_at = NOW() - make_interval(secs => $2) WHERE session_id = $1`,
-		f.session, (playback.PausedStreamSlotGrace + time.Minute).Seconds())
-	if f.expire(t, uuid.NewString()) {
-		t.Fatal("a session whose client stopped reporting was ended by the paused timeout")
-	}
+// TestExpirePausedAttemptRechecksTheSelectionDB pins that the claim rechecks,
+// under the attempt's lock, what the sweep selected by: a client that went
+// quiet since is left to the idle expiry, and an attempt that a replan moved
+// to another file than the one the sweep classified waits for a later sweep.
+func TestExpirePausedAttemptRechecksTheSelectionDB(t *testing.T) {
+	t.Run("the client went quiet", func(t *testing.T) {
+		f := newPausedAttemptFixture(t)
+		f.pausedFor(pausedAttemptTimeout + time.Minute)
+		f.exec(`UPDATE playback_v3_attempts SET updated_at = NOW() - make_interval(secs => $2) WHERE session_id = $1`,
+			f.session, (playback.PausedStreamSlotGrace + time.Minute).Seconds())
+		if f.expire(t, uuid.NewString()) {
+			t.Fatal("a session whose client stopped reporting was ended by the paused timeout")
+		}
+	})
+	t.Run("the file changed", func(t *testing.T) {
+		f := newPausedAttemptFixture(t)
+		f.pausedFor(pausedAttemptTimeout + time.Minute)
+		stopped, err := f.store.ExpirePausedAttempt(t.Context(), f.session, uuid.NewString(), f.file+1, pausedAttemptTimeout)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stopped {
+			t.Fatal("the claim ended an attempt playing another file than the one the sweep classified")
+		}
+	})
 }
 
 // TestExpirePausedAttemptExemptionsDB pins the exemptions the claim checks

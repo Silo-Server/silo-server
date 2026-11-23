@@ -43,7 +43,7 @@ const (
 // orders progress, so a resume that lands first keeps it live. It reports
 // whether this call stopped the attempt. planstore.Postgres provides it.
 type pausedAttemptExpirer interface {
-	ExpirePausedAttempt(ctx context.Context, sessionID, stopID string, timeout time.Duration) (bool, error)
+	ExpirePausedAttempt(ctx context.Context, sessionID, stopID string, mediaFileID int, timeout time.Duration) (bool, error)
 }
 
 // pausedTimeoutCandidate is a native session paused past the timeout whose
@@ -227,7 +227,7 @@ func (h *PlaybackHandler) endPausedTimeout(ctx context.Context, expirer pausedAt
 	if file == nil || file.IsAudioOnly() {
 		return
 	}
-	stopped, err := expirer.ExpirePausedAttempt(ctx, c.sessionID, pausedTimeoutStopID(c.sessionID), timeout)
+	stopped, err := expirer.ExpirePausedAttempt(ctx, c.sessionID, pausedTimeoutStopID(c.sessionID), c.mediaFileID, timeout)
 	if err != nil || !stopped {
 		if err != nil {
 			slog.WarnContext(ctx, "paused timeout sweep could not end a session", "component", "api", "session", c.sessionID, "error", err)
@@ -244,8 +244,9 @@ func (h *PlaybackHandler) endPausedTimeout(ctx context.Context, expirer pausedAt
 }
 
 // pausedCandidateFiles reads a page's media files by id: in one lookup when
-// the resolver can batch (the catalog's file repository does), otherwise once
-// per distinct file. A file it cannot read is left out, so its session waits.
+// the resolver can batch (the catalog's file repository does), otherwise, or
+// when the batch fails, once per distinct file. A file it cannot read is left
+// out, so its session waits.
 func (h *PlaybackHandler) pausedCandidateFiles(ctx context.Context, candidates []pausedTimeoutCandidate) map[int]*models.MediaFile {
 	ids := make([]int, 0, len(candidates))
 	seen := make(map[int]bool, len(candidates))
@@ -260,15 +261,17 @@ func (h *PlaybackHandler) pausedCandidateFiles(ctx context.Context, candidates [
 		GetByIDs(context.Context, []int) ([]*models.MediaFile, error)
 	}); ok {
 		found, err := batch.GetByIDs(ctx, ids)
-		if err != nil {
-			slog.WarnContext(ctx, "paused timeout sweep could not read its sessions' files", "component", "api", "error", err)
-		}
-		for _, file := range found {
-			if file != nil {
-				files[file.ID] = file
+		if err == nil {
+			for _, file := range found {
+				if file != nil {
+					files[file.ID] = file
+				}
 			}
+			return files
 		}
-		return files
+		// One unreadable file fails the whole batch; read them one by one so
+		// only that file's session waits.
+		slog.WarnContext(ctx, "paused timeout sweep could not batch-read its sessions' files", "component", "api", "error", err)
 	}
 	for _, id := range ids {
 		file, err := h.fileResolver.GetByID(ctx, id)
