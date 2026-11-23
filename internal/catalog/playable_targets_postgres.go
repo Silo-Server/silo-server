@@ -19,8 +19,11 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 	// completed_progress. Any other episode, such as one of a local series,
 	// keeps the single-row lookup. CASE tests completion before the file
 	// lookup, so a long-running series skips the file lookups for every
-	// episode the profile has finished.
-	unwatchedSQL := fmt.Sprintf(`CASE WHEN episode.content_id = ANY (SELECT completed.media_item_id FROM completed_progress completed)
+	// episode the profile has finished. The set is unnested from an array so
+	// the planner always hashes it: it expects a few rows from unnest whatever
+	// the profile's history, while a large estimate for the set itself turns
+	// membership into a rescan of the whole set for every episode.
+	unwatchedSQL := fmt.Sprintf(`CASE WHEN episode.content_id = ANY (SELECT unnest((SELECT array_agg(completed.media_item_id) FROM completed_progress completed WHERE completed.completed)))
 			OR (NOT (scope.series_id LIKE 'series-%%' AND starts_with(episode.content_id, `+seriesEpisodePrefixSQL+` || '-'))
 				AND EXISTS (
 					SELECT 1 FROM %s progress
@@ -34,34 +37,40 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 			SELECT content_id, media_type, series_id, season_number, preferred_content_id, ord
 			FROM unnest($1::text[], $2::text[], $3::text[], $4::integer[], $5::text[]) WITH ORDINALITY
 			  AS requested(content_id, media_type, series_id, season_number, preferred_content_id, ord)
-		), target_scopes AS (
-			SELECT ord, content_id AS series_id, NULL::integer AS season_number
-			FROM requested WHERE media_type = 'series'
-			UNION ALL
-			SELECT ord, series_id, season_number
-			FROM requested WHERE media_type = 'season' AND series_id <> '' AND season_number >= 0
-			UNION ALL
-			SELECT requested.ord, season.series_id, season.season_number
-			FROM requested
-			JOIN seasons season ON requested.media_type = 'season' AND season.content_id = requested.content_id
-			WHERE NOT (requested.series_id <> '' AND requested.season_number >= 0
-				AND requested.series_id = season.series_id AND requested.season_number = season.season_number)
+		), target_scopes AS MATERIALIZED (
+			-- Every card's scopes, for the set-wide reads below. MATERIALIZED
+			-- keeps resumable from inlining this and deriving every card's
+			-- scopes again for each resumable row. Per-card branches read their
+			-- own scopes through cardScopesSQL instead of scanning this.
+			SELECT requested.ord, scope.series_id, scope.season_number
+			FROM requested CROSS JOIN LATERAL `+cardScopesSQL+` scope
 		), completed_progress AS MATERIALIZED (
-			-- The profile's completed episodes in the requested series, read once.
+			-- The profile's progress in the requested series, read once; the
+			-- lookup keeps the completed rows.
 			-- An episode ID embeds its series' anchor
 			-- (episode-<provider>-<id>-<season>-<episode>, contentid.ForEpisode),
 			-- so each provider-anchored series is one range of the progress
 			-- primary key. Walking a long-running series then tests each
 			-- episode against this set instead of looking up its progress row.
-			SELECT progress.media_item_id
+			-- The fenced LATERAL keeps the read to one range seek per series:
+			-- joined freely, the planner may read the profile's whole history
+			-- and filter it. Completion is tested at the lookup, not here, so
+			-- the completed-history cursor index cannot serve the read; its
+			-- leading updated_at cannot bound the range, and each series would
+			-- rescan every completed row.
+			SELECT progress.media_item_id, progress.completed
 			FROM (
 				SELECT DISTINCT `+strings.ReplaceAll(seriesEpisodePrefixSQL, "scope.", "")+` AS prefix
 				FROM target_scopes WHERE series_id LIKE 'series-%%'
 			) series
-			JOIN %[2]s progress
-			  ON progress.media_item_id >= (series.prefix || '-') COLLATE "C"
-			 AND progress.media_item_id < (series.prefix || '.') COLLATE "C"
-			WHERE progress.completed
+			CROSS JOIN LATERAL (
+				SELECT progress.media_item_id, progress.completed
+				FROM %[2]s progress
+				WHERE progress.media_item_id >= (series.prefix || '-') COLLATE "C"
+				  AND progress.media_item_id < (series.prefix || '.') COLLATE "C"
+				-- One key-range seek per series, never a pass over the profile.
+				OFFSET 0
+			) progress
 		), resumable AS MATERIALIZED (
 			-- Every card's newest resumable episode, chosen once per statement.
 			-- The progress relation's truncated updated_at keeps an index from
@@ -91,10 +100,10 @@ func (r *PlayableTargetResolver) resolvePostgresTargets(ctx context.Context, arg
 					SELECT 1 FROM media_files mf WHERE mf.episode_id = requested.content_id AND %[1]s
 				) OR `+SpanningEpisodeFileExistsSQL("requested.content_id", "%[1]s")+`) THEN requested.content_id END,
 				(SELECT episode.content_id
-				 FROM target_scopes scope
+				 FROM `+cardScopesSQL+` scope
 				 JOIN episodes episode ON episode.series_id = scope.series_id
 				   AND (scope.season_number IS NULL OR episode.season_number = scope.season_number)
-				 WHERE scope.ord = requested.ord AND episode.content_id = requested.preferred_content_id
+				 WHERE episode.content_id = requested.preferred_content_id
 				   AND EXISTS (SELECT 1 FROM media_files mf WHERE mf.episode_id = episode.content_id AND %[1]s)
 				 LIMIT 1),
 				(SELECT resumable.content_id FROM resumable WHERE resumable.ord = requested.ord),
@@ -151,7 +160,7 @@ const seriesEpisodePrefixSQL = `'episode-' || substr(scope.series_id, 8)`
 func firstPlayableEpisodeSQL(episodeSQL string) string {
 	first := func(seasonSQL string) string {
 		return fmt.Sprintf(`(SELECT winner.content_id
-			FROM target_scopes scope
+			FROM `+cardScopesSQL+` scope
 			CROSS JOIN LATERAL (
 				SELECT episode.content_id, episode.season_number, episode.episode_number
 				FROM episodes episode
@@ -163,9 +172,25 @@ func firstPlayableEpisodeSQL(episodeSQL string) string {
 				ORDER BY episode.season_number, episode.episode_number, episode.content_id
 				LIMIT 1
 			) winner
-			WHERE scope.ord = requested.ord
 			ORDER BY winner.season_number, winner.episode_number, winner.content_id
 			LIMIT 1)`, seasonSQL, episodeSQL)
 	}
 	return "COALESCE(" + first("episode.season_number IS DISTINCT FROM 0") + ", " + first("episode.season_number = 0") + ")"
 }
+
+// cardScopesSQL derives one card's episode scopes from its requested row: a
+// series card's whole series, and a season card's season by its explicit
+// identity, by its season row, or both when the two disagree. Per-card
+// branches read it directly, since scanning target_scopes for each card costs
+// cards x scopes.
+const cardScopesSQL = `(SELECT requested.content_id AS series_id, NULL::integer AS season_number
+		WHERE requested.media_type = 'series'
+		UNION ALL
+		SELECT requested.series_id, requested.season_number
+		WHERE requested.media_type = 'season' AND requested.series_id <> '' AND requested.season_number >= 0
+		UNION ALL
+		SELECT season.series_id, season.season_number
+		FROM seasons season
+		WHERE requested.media_type = 'season' AND season.content_id = requested.content_id
+		  AND NOT (requested.series_id <> '' AND requested.season_number >= 0
+		    AND requested.series_id = season.series_id AND requested.season_number = season.season_number))`
