@@ -127,8 +127,9 @@ with the creator's name from the login's profile list. The web client orders the
 me** owners by the login's profile-list order.
 
 `listLibraryUserCollections` and the `user_collections` group of `getLibraryCollections` list
-the collections opted into the library's Collections tab in the same order. The group's
-`manual` sort mode keeps that order; its other sort modes re-sort it.
+the collections opted into the library's Collections tab in the same order as
+`listCollections`. The group's `manual` sort mode keeps that order; its other sort modes
+re-sort it.
 
 Each profile has one flat order of its own collections (`sort_order`). `getCollectionOrder`
 returns it with a strong ETag, and `reorderCollections` replaces it under `If-Match`.
