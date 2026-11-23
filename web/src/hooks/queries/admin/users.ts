@@ -340,7 +340,7 @@ export function useUpdateAdminUserSetting() {
     onSuccess: (_data, variables) => {
       toast.success(t("web.admin.common.users.settingUpdated"));
       queryClient.invalidateQueries({
-        queryKey: [...adminUsersKey(adminUserScope(authority)), "settings", variables.userId],
+        queryKey: adminUserSettingValuesKey(authority, variables.userId),
       });
     },
     onError: (err) => {
@@ -375,7 +375,7 @@ export function useDeleteAdminUserSetting() {
     onSuccess: (_data, variables) => {
       toast.success(t("web.admin.common.users.settingReset"));
       queryClient.invalidateQueries({
-        queryKey: [...adminUsersKey(adminUserScope(authority)), "settings", variables.userId],
+        queryKey: adminUserSettingValuesKey(authority, variables.userId),
       });
     },
     onError: (err) => {

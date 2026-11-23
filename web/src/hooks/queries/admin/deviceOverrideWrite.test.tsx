@@ -12,14 +12,14 @@ const json = (body: unknown) =>
     status: 200,
     headers: { "Content-Type": "application/json" },
   });
-const row = (fontSize: string, revision: number) => ({
+const row = (fontSize: string, revision: number, updated_at: string) => ({
   key: "playback.subtitle_appearance",
   scope: "profile_device",
   profile_id: "profile-a",
   device_id: "device-a",
   value: { fontSize },
   revision,
-  updated_at: "2026-11-23T00:00:00Z",
+  updated_at,
 });
 const valuesPage = (items: unknown[]) => json({ revision: 1, page: { has_more: false }, items });
 
@@ -38,7 +38,7 @@ afterEach(() => {
 // save settles, whether or not the list's refetch has come back.
 it.each([
   ["creating the override", []],
-  ["changing the override", [row("small", 1)]],
+  ["changing the override", [row("small", 1, "2026-11-22T00:00:00Z")]],
 ])(
   "shows a device override save in the user's stored values once it settles (%s)",
   async (_case, stored) => {
@@ -48,7 +48,7 @@ it.each([
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const url = String(input instanceof Request ? input.url : input);
         const method = init?.method ?? (input instanceof Request ? input.method : "GET");
-        if (method === "PUT") return json(row("medium", 2));
+        if (method === "PUT") return json(row("medium", 2, "2026-11-23T00:00:00Z"));
         if (url.includes("/settings/values")) {
           gets += 1;
           // The refetch after the save never answers.
