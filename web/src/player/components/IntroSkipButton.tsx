@@ -16,7 +16,7 @@ interface IntroSkipButtonProps {
    */
   caption?: string;
   timer?: { durationMs: number; deadlineMs: number | null; remainingMs: number };
-  /** Marks the pill as the intro prompt the player's root key handler acts on. */
+  /** Marks the pill as the skip prompt the player's root key handler acts on. */
   introPrompt?: boolean;
   controlsVisible?: boolean;
   /** Height of the control dock; with controls up the pill sits just above it. */
@@ -34,8 +34,8 @@ interface IntroSkipButtonProps {
 }
 
 /**
- * The shared intro/recap pill. Intro prompts provide progress from their
- * wall-clock controller; recap retains the plain button shape for now.
+ * The shared skip pill for intro, recap, credits and preview ranges. Its
+ * progress comes from the prompt's wall-clock controller.
  */
 export function IntroSkipButton({
   onSkip,

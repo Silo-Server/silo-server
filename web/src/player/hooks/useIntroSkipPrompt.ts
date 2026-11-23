@@ -3,7 +3,7 @@ import { t } from "@/i18n";
 
 import type { IntroSkipMode, PlayerTimeRange } from "../types";
 
-export const INTRO_PROMPT_SECONDS = 5;
+export const INTRO_PROMPT_SECONDS = 10;
 export const PLAYBACK_PAUSE_GRACE_MS = 1_500;
 
 const INTRO_PROMPT_MS = INTRO_PROMPT_SECONDS * 1_000;
@@ -85,6 +85,11 @@ interface UseIntroSkipPromptOptions {
    * and hidden once the seek that resolves it actually took.
    */
   onSeek: (seconds: number) => boolean | Promise<boolean>;
+  /**
+   * The `ask` offer's action, for a recap, credits or preview range that runs
+   * on this same state machine. Defaults to "Skip Intro".
+   */
+  skipLabel?: string;
 }
 
 /**
@@ -102,6 +107,7 @@ export function useIntroSkipPrompt({
   enabled,
   controlsVisible,
   onSeek,
+  skipLabel,
 }: UseIntroSkipPromptOptions) {
   const [activePrompt, setActivePromptState] = useState<ActivePrompt | null>(null);
   const activePromptRef = useRef<ActivePrompt | null>(null);
@@ -400,10 +406,11 @@ export function useIntroSkipPrompt({
     return true;
   }, [clearPrompt]);
 
+  const skipText = skipLabel ?? t("introSkip.pill.skip");
   const prompt: IntroSkipPrompt | null = activePrompt
     ? {
         kind: activePrompt.kind,
-        label: activePrompt.kind === "skip" ? t("introSkip.pill.skip") : t("introSkip.pill.undo"),
+        label: activePrompt.kind === "skip" ? skipText : t("introSkip.pill.undo"),
         caption: activePrompt.kind === "skip" ? undefined : t("introSkip.pill.undoCaption"),
         timer: {
           durationMs: INTRO_PROMPT_MS,
@@ -412,7 +419,7 @@ export function useIntroSkipPrompt({
         },
       }
     : reofferKey !== null
-      ? { kind: "skip", label: t("introSkip.pill.skip"), timer: null }
+      ? { kind: "skip", label: skipText, timer: null }
       : null;
 
   return { prompt, select, dismiss };

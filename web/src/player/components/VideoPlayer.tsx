@@ -2736,9 +2736,6 @@ export function VideoPlayer({
   const activeSkipMarker = [activeRecap, activeCredits, activePreview].find(
     (region) => region !== null && currentTime >= region.start && currentTime < region.end,
   );
-  const skipMarker = useCallback(() => {
-    if (activeSkipMarker) handleViewerSeek(activeSkipMarker.end);
-  }, [activeSkipMarker, handleViewerSeek]);
 
   const introPromptCanSeek =
     !roomPlaybackActive ||
@@ -2771,6 +2768,37 @@ export function VideoPlayer({
       // placeholder that keeps the hook's contract total while this is false.
       introSkipMode !== null,
     onSeek: handlePlayerSeek,
+  });
+
+  // Recap, credits and preview pills follow the intro's `ask` table whatever
+  // the intro mode is. One pill shows at a time: a range that begins under an
+  // intro pill waits, and starts its full timer when that pill has gone. The
+  // Next Up screen covers the player without ending the range, so there the
+  // pill is held as if paused instead of dropped.
+  const segmentKey = activeSkipMarker
+    ? `${sessionId}:${activeFileId ?? selectedVersion?.file_id ?? "unknown"}:${activeSkipMarker.kind}:${activeSkipMarker.start}:${activeSkipMarker.end}`
+    : null;
+  const {
+    prompt: activeSegmentPrompt,
+    select: selectActiveSegmentPrompt,
+    dismiss: dismissActiveSegmentPrompt,
+  } = useIntroSkipPrompt({
+    mode: "ask",
+    intro: activeSkipMarker ?? null,
+    introKey: segmentKey,
+    currentTime,
+    playing: playing && displayMode === "foreground",
+    controlsVisible,
+    enabled:
+      (displayMode === "foreground" || displayMode === "postroll") &&
+      isPlayerReady &&
+      !awaitingFirstFrame &&
+      introPromptCanSeek &&
+      activeIntroPrompt === null &&
+      // An automatic recap skip has already answered the pill.
+      !(autoSkipRecap && activeSkipMarker?.kind === "recap"),
+    onSeek: handlePlayerSeek,
+    skipLabel: activeSkipMarker ? skipMarkerLabel(t, activeSkipMarker.kind) : undefined,
   });
 
   useEffect(() => {
@@ -3849,26 +3877,29 @@ export function VideoPlayer({
     }, 0);
   }, [resetControlsTimer]);
 
+  // At most one of the intro and segment prompts exists, so each wrapper acts
+  // on whichever is on screen.
   const selectIntroPrompt = useCallback(() => {
-    if (!selectActiveIntroPrompt()) return false;
+    if (!selectActiveIntroPrompt() && !selectActiveSegmentPrompt()) return false;
     // A press on the prompt is the viewer's seek; automatic skips are not.
     resetStillWatchingStreak();
     focusTransportAfterIntroPrompt();
     return true;
-  }, [focusTransportAfterIntroPrompt, selectActiveIntroPrompt]);
+  }, [focusTransportAfterIntroPrompt, selectActiveIntroPrompt, selectActiveSegmentPrompt]);
 
   const dismissIntroPrompt = useCallback(() => {
-    if (!dismissActiveIntroPrompt()) return false;
+    if (!dismissActiveIntroPrompt() && !dismissActiveSegmentPrompt()) return false;
     focusTransportAfterIntroPrompt();
     return true;
-  }, [dismissActiveIntroPrompt, focusTransportAfterIntroPrompt]);
+  }, [dismissActiveIntroPrompt, dismissActiveSegmentPrompt, focusTransportAfterIntroPrompt]);
 
-  const introPromptVisible = activeIntroPrompt !== null;
+  const visibleSkipPrompt = activeIntroPrompt ?? activeSegmentPrompt;
+  const introPromptVisible = visibleSkipPrompt !== null;
   // Only a timed prompt takes focus and claims Enter/Space/Escape from the rest
   // of the player. The untimed offer that returns with the controls answers
   // Enter/Space only while it has focus, or Space with nothing focused would
-  // skip the intro instead of resuming.
-  const introPromptTimed = activeIntroPrompt?.timer != null;
+  // skip the range instead of resuming.
+  const introPromptTimed = visibleSkipPrompt?.timer != null;
 
   useEffect(() => {
     if (!introPromptVisible || displayMode !== "foreground") return;
@@ -5101,10 +5132,10 @@ export function VideoPlayer({
     }),
     [plan, activeQualityId],
   );
-  // Intro skip and the other segment skips take priority; a
-  // buffering pill waits behind them with its timer frozen. A minimized
+  // A skip pill on screen, timed or back with the controls, takes priority; a
+  // buffering pill waits behind it with its timer frozen. A minimized
   // player shows no pill either, so the pill waits for it to come back.
-  const higherPriorityPillActive = activeIntroPrompt !== null || activeSkipMarker !== undefined;
+  const higherPriorityPillActive = activeIntroPrompt !== null || activeSegmentPrompt !== null;
   const bufferingQuality = useAutoQualityDownshift({
     videoRef,
     planRevision,
@@ -6039,12 +6070,18 @@ export function VideoPlayer({
           showSource={showMarkerSource}
         />
       )}
-      {!isDetached && !activeIntroPrompt && activeSkipMarker && (
+      {!isDetached && !activeIntroPrompt && activeSegmentPrompt && (
         <IntroSkipButton
-          onSkip={skipMarker}
-          label={skipMarkerLabel(t, activeSkipMarker.kind)}
+          // Adjacent ranges (credits into a preview) are separate pills, each
+          // free to take focus as it appears.
+          key={segmentKey}
+          onSkip={selectIntroPrompt}
+          label={activeSegmentPrompt.label}
+          timer={activeSegmentPrompt.timer ?? undefined}
+          introPrompt
           controlsVisible={controlsVisible}
           dockHeight={dockClearance}
+          focusOnMount={focusIntroPromptOnMount}
           provenance={activeSkipMarker}
           showConfidence={showMarkerConfidence}
           showSource={showMarkerSource}
