@@ -40,8 +40,9 @@ const (
 	// server queued (an access change, stored embeddings, a deferred or
 	// failed refresh) waits for its sweep to start. Two minutes keeps that
 	// wait short while an idle tick, one advisory lock and one scan of the
-	// taste profiles, stays cheap, and leaves an embeddings reset, which the
-	// sweep refuses, at least a minute between budget-long sweeps.
+	// taste profiles, stays cheap. It is timed from the end of the last
+	// sweep, so an embeddings reset, which a sweep refuses, always has two
+	// minutes between sweeps.
 	staleSweepInterval = 2 * time.Minute
 	// staleSweepBatch is how many stale profiles the sweep reads at a time.
 	staleSweepBatch = 50
@@ -49,7 +50,8 @@ const (
 	// sweep holds staleSweepLock throughout, and an embeddings reset is
 	// refused while it does, so a large backlog is drained over several
 	// sweeps instead of one long one. The refresh running when the budget
-	// runs out finishes.
+	// runs out finishes, but is not run again for changes made during it:
+	// their marks wait for the next sweep.
 	staleSweepBudget = time.Minute
 
 	// embedMissingInterval spaces the catch-up passes that embed newly
@@ -1249,15 +1251,18 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 
 // stalenessLoop refreshes stale taste profiles every few minutes.
 func (w *Worker) stalenessLoop(ctx context.Context) {
-	ticker := time.NewTicker(staleSweepInterval)
-	defer ticker.Stop()
+	// The next sweep is timed from the end of the last one, so a sweep that
+	// overran its budget still leaves an embeddings reset a full interval.
+	timer := time.NewTimer(staleSweepInterval)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			w.refreshStaleProfiles(ctx)
+			timer.Reset(staleSweepInterval)
 		}
 	}
 }
@@ -1346,7 +1351,7 @@ func (w *Worker) sweepStaleProfiles(ctx context.Context, held clusterLock, deadl
 				return res, nil
 			}
 			res.Stale++
-			if err := w.sweepStaleProfile(ctx, held, p, &res); err != nil {
+			if err := w.sweepStaleProfile(ctx, held, p, deadline, &res); err != nil {
 				return res, err
 			}
 		}
@@ -1356,13 +1361,13 @@ func (w *Worker) sweepStaleProfiles(ctx context.Context, held clusterLock, deadl
 
 // sweepStaleProfile refreshes one stale profile for the sweep and counts the
 // outcome in res. It returns an error only when the sweep must stop.
-func (w *Worker) sweepStaleProfile(ctx context.Context, held clusterLock, p StaleProfile, res *staleSweepResult) error {
+func (w *Worker) sweepStaleProfile(ctx context.Context, held clusterLock, p StaleProfile, deadline time.Time, res *staleSweepResult) error {
 	key := profileRefreshKey(p.UserID, p.ProfileID)
 	if !w.claimProfileRefresh(key) {
 		res.Queued++ // already queued or refreshing on this server
 		return nil
 	}
-	switch err := w.runProfileRefresh(ctx, held, p.UserID, p.ProfileID, w.refreshProfile); {
+	switch err := w.runProfileRefreshUntil(ctx, held, p.UserID, p.ProfileID, w.refreshProfile, deadline); {
 	case err == nil:
 		res.Refreshed++
 	case errors.Is(err, errProfileRefreshElsewhere), errors.Is(err, errPolicyNotLoaded):
@@ -1407,6 +1412,14 @@ const profileRefreshMaxRuns = 3
 // hold the refresh queue, or the sweep's lock, for as long as it lasts: each
 // signal change marked the profile stale before asking.
 func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID int, profileID string, refresh profileRefresh) error {
+	return w.runProfileRefreshUntil(ctx, held, userID, profileID, refresh, time.Time{})
+}
+
+// runProfileRefreshUntil is runProfileRefresh that, once deadline has passed
+// (a zero deadline never does), does not run the refresh again for changes
+// made during it. Those changes marked the profile stale, so the stale sweep
+// takes it later.
+func (w *Worker) runProfileRefreshUntil(ctx context.Context, held clusterLock, userID int, profileID string, refresh profileRefresh, deadline time.Time) error {
 	key := profileRefreshKey(userID, profileID)
 	for run := 1; ; run++ {
 		// A request made before this run started is read by it.
@@ -1425,6 +1438,11 @@ func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID
 			return err
 		}
 		if !w.finishProfileRefresh(key) {
+			return nil
+		}
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			slog.InfoContext(ctx, "stale sweep out of time; profile changes left for the next sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
+			w.clearProfileRefreshPending(key)
 			return nil
 		}
 		if run == profileRefreshMaxRuns {
