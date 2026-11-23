@@ -114,6 +114,47 @@ that keep failing move behind the others, so they never fill a batch. The row is
 recorded once the cause is fixed.
 Lifecycle events themselves are at most once.
 
+## Paused timeout
+
+A native session left paused longer than
+`playback.paused_session_timeout_minutes` (default 15, `0` off, read live
+through a per-server cache) is ended, so an abandoned pause stops holding a
+stream slot and its transcode. The same sweep runs it on every API server
+(`playback_paused_timeout.go`).
+
+- **Eligible.** A native lifecycle row in `paused` since at least the timeout
+  ago, by the database's clock. Its live attempt last accepted a paused sample
+  and accepted one within `PausedStreamSlotGrace` (2 minutes): the client
+  still reports, so the idle expiry above is not the one to end it. Exempt:
+  an attempt whose `output.current_sink` is `cast_receiver` (the sender keeps
+  a Cast play going without the viewer), a session that is a member of an open
+  Watch Together room (`runtime->'members'`, any phase but `ended`), and an
+  audio-only effective file (`MediaFile.IsAudioOnly`, resolved in Go because it
+  depends on the probe). The pause starts when a sample turns the lifecycle
+  row paused; later paused samples, and seeks while paused, do not restart it.
+- **Ownership.** A session this server holds, or one no server has synced for
+  45 seconds, is this server's to end. One another server synced recently is
+  left to that server's sweep, which ends it from its own copy.
+- **Claim.** `ExpirePausedAttempt` locks the attempt row (the lock
+  `ApplyProgress` takes), requiring a paused last sample, then reads the
+  lifecycle row in a second statement, whose snapshot is taken after the lock
+  is held, and requires it to have said paused for the whole timeout. Only
+  then does it stop the attempt under `pausedTimeoutStopID`. A resume that
+  commits first, or while the claim waits on the lock, keeps the session
+  live. A single `UPDATE` that joined the lifecycle row would read that row as
+  of the statement's start under `READ COMMITTED`, and could end a session
+  that resumed and paused again while it waited.
+- **End.** The claim's winner denies the session's stream tokens and finishes
+  the end like any stopped attempt (`finishInterruptedNativeEnd`): it tears
+  down the copy it holds, or records history from the attempt row. The end
+  reason is `expired` and the provider event a pause marked `SessionEnded`.
+- **Answers.** Progress, replan and the control-ticket mint answer `410`:
+  `playback_session_paused_timeout` when the attempt's durable client features
+  list `paused_timeout_v1` (attempt-sticky), `playback_session_ended`
+  otherwise, so every client leaves. Media keeps the deny marker's
+  `410 playback_session_ended`. No socket frame announces the end.
+  [Protocol v3 §6.3](playback-protocol-v3.md) is the client contract.
+
 ## Listing
 
 The native session list (`ReadAdminPlaybackSessions`) joins the lifecycle row: `is_paused`
