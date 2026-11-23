@@ -19,14 +19,19 @@ func applyMMRQuadratic(candidates []ScoredItem, embeddings map[string][]float32,
 		limit = len(candidates)
 	}
 
-	maxScore := candidates[0].Score
-	for _, c := range candidates[1:] {
-		if c.Score > maxScore {
-			maxScore = c.Score
-		}
+	maxScore := 0.0
+	for _, c := range candidates {
+		maxScore = max(maxScore, math.Abs(c.Score))
 	}
 	if maxScore == 0 {
 		maxScore = 1
+	}
+	// A zero vector has no direction and counts as no embedding.
+	embeddingOf := func(item ScoredItem) []float32 {
+		if emb := embeddings[item.MediaItemID]; hasDirection(emb) {
+			return emb
+		}
+		return nil
 	}
 
 	remaining := make([]int, len(candidates))
@@ -45,7 +50,7 @@ func applyMMRQuadratic(candidates []ScoredItem, embeddings map[string][]float32,
 	}
 	first := remaining[bestIdx]
 	selected = append(selected, candidates[first])
-	if emb := embeddings[candidates[first].MediaItemID]; len(emb) > 0 {
+	if emb := embeddingOf(candidates[first]); len(emb) > 0 {
 		selectedEmbeddings = append(selectedEmbeddings, emb)
 	}
 	remaining = append(remaining[:bestIdx], remaining[bestIdx+1:]...)
@@ -58,7 +63,7 @@ func applyMMRQuadratic(candidates []ScoredItem, embeddings map[string][]float32,
 		var embeddedSimSum float64
 		embedded := 0
 		for i, ri := range remaining {
-			candidateEmb := embeddings[candidates[ri].MediaItemID]
+			candidateEmb := embeddingOf(candidates[ri])
 			if len(candidateEmb) == 0 {
 				continue
 			}
@@ -69,7 +74,7 @@ func applyMMRQuadratic(candidates []ScoredItem, embeddings map[string][]float32,
 			embedded++
 		}
 		for i, ri := range remaining {
-			if len(embeddings[candidates[ri].MediaItemID]) == 0 && embedded > 0 {
+			if len(embeddingOf(candidates[ri])) == 0 && embedded > 0 {
 				sims[i] = embeddedSimSum / float64(embedded)
 			}
 			mmrScore := lambda*candidates[ri].Score/maxScore - (1-lambda)*sims[i]
@@ -81,7 +86,7 @@ func applyMMRQuadratic(candidates []ScoredItem, embeddings map[string][]float32,
 
 		pick := remaining[bestMMRIdx]
 		selected = append(selected, candidates[pick])
-		if emb := embeddings[candidates[pick].MediaItemID]; len(emb) > 0 {
+		if emb := embeddingOf(candidates[pick]); len(emb) > 0 {
 			selectedEmbeddings = append(selectedEmbeddings, emb)
 		}
 		remaining = append(remaining[:bestMMRIdx], remaining[bestMMRIdx+1:]...)
@@ -92,7 +97,8 @@ func applyMMRQuadratic(candidates []ScoredItem, embeddings map[string][]float32,
 
 // The incremental applyMMR picks exactly what the quadratic version picks, in
 // the same order, over random pools that include tied scores, candidates
-// without an embedding, nil and empty embeddings, and every lambda edge.
+// without an embedding, nil, empty and zero embeddings, all-negative scores,
+// and every lambda edge.
 func TestApplyMMRMatchesQuadraticOracle(t *testing.T) {
 	rng := rand.New(rand.NewPCG(20261003, 47))
 	for trial := range 400 {
@@ -115,6 +121,8 @@ func TestApplyMMRMatchesQuadraticOracle(t *testing.T) {
 				embeddings[id] = nil
 			case 2:
 				embeddings[id] = []float32{}
+			case 3:
+				embeddings[id] = make([]float32, dims)
 			default:
 				vec := make([]float32, dims)
 				for d := range vec {
@@ -127,10 +135,16 @@ func TestApplyMMRMatchesQuadraticOracle(t *testing.T) {
 				embeddings[id] = vec
 			}
 		}
-		if rng.IntN(20) == 0 {
+		switch rng.IntN(20) {
+		case 0:
 			// All-zero relevance takes the division-by-zero guard.
 			for i := range candidates {
 				candidates[i].Score = 0
+			}
+		case 1, 2:
+			// An all-negative pool is scaled by its largest magnitude.
+			for i := range candidates {
+				candidates[i].Score -= 1.25
 			}
 		}
 		lambda := []float64{0, 0.3, 0.5, 0.7, 1, rng.Float64()}[rng.IntN(6)]
