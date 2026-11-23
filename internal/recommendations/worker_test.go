@@ -53,6 +53,8 @@ func (l fakeClusterLock) TryAlso(ctx context.Context, key int64) (func(), bool, 
 	return other.Release, true, nil
 }
 
+func (l fakeClusterLock) poolWriter(fallback externalPoolWriter) externalPoolWriter { return fallback }
+
 func (l fakeClusterLock) Check(context.Context) error { return nil }
 
 func (l fakeClusterLock) Release() { l.release() }
@@ -387,6 +389,27 @@ func TestRefreshProfileMarksStaleAgainWhenItFails(t *testing.T) {
 	}
 }
 
+func TestProfileRefreshKeepsRetryRequestedWhileLockWasBusy(t *testing.T) {
+	w, _ := newRefreshTestWorker()
+	ctx := t.Context()
+	if !w.claimProfileRefresh(profileRefreshKey(7, "p")) {
+		t.Fatal("could not claim profile refresh")
+	}
+	calls := 0
+	err := w.runProfileRefresh(ctx, nil, 7, "p", func(ctx context.Context, _ clusterLock, userID int, profileID string) error {
+		calls++
+		if calls == 1 {
+			w.RequestProfileRefresh(ctx, userID, profileID)
+			return errProfileRefreshElsewhere
+		}
+		return nil
+	})
+	if err != nil || calls != 2 {
+		t.Fatalf("refresh ran %d times, err=%v", calls, err)
+	}
+	assertNothingQueued(t, w, "retry completed")
+}
+
 // The catch-up pass runs under the embeddings job's claim: it skips while an
 // embedding run holds the job on this server or another.
 func TestEmbedMissingSkipsWhileTheEmbeddingsJobIsClaimed(t *testing.T) {
@@ -470,5 +493,61 @@ func TestRefreshProfileDefersToAnotherServersRefresh(t *testing.T) {
 	}
 	if profileRefreshLock(7, "p") == profileRefreshLock(7, "q") || profileRefreshLock(7, "p") == profileRefreshLock(8, "p") {
 		t.Fatal("different profiles share a refresh lock")
+	}
+}
+
+func TestExternalResultIdleAndProgress(t *testing.T) {
+	if !(externalResult{}).idle() {
+		t.Fatal("disabled run with no pruned titles should be idle")
+	}
+	if (externalResult{Enabled: true}).idle() {
+		t.Fatal("enabled run must not be idle")
+	}
+	if (externalResult{PrunedTitles: 3}).idle() {
+		t.Fatal("disabled run that pruned titles must not be idle")
+	}
+	if (externalResult{PruneFailed: true}).idle() {
+		t.Fatal("disabled run with prune failure must not be idle")
+	}
+
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	if p := w.currentExternalProgress(); p != (ExternalProgress{}) {
+		t.Fatalf("initial progress = %+v, want zero value", p)
+	}
+	w.setExternalProgress(ExternalPhaseTitles, 5, 20)
+	if p := w.currentExternalProgress(); p.Phase != ExternalPhaseTitles || p.Done != 5 || p.Total != 20 {
+		t.Fatalf("progress = %+v, want titles 5/20", p)
+	}
+	w.clearExternalProgress()
+	if p := w.currentExternalProgress(); p != (ExternalProgress{}) {
+		t.Fatalf("after clear progress = %+v, want zero value", p)
+	}
+}
+
+// An automatic bootstrap leaves the initial build to the schedule once a run
+// built or failed, and only retries after runs that pruned or skipped.
+func TestExternalAlreadyRan(t *testing.T) {
+	ctx := context.Background()
+	key := jobTaskKeys[JobExternal]
+	cases := []struct {
+		name   string
+		status string
+		result string
+		want   bool
+	}{
+		{"built", runStatusCompleted, `{"enabled":true}`, true},
+		{"failed", runStatusFailed, `{"enabled":true}`, true},
+		{"skipped for no lock", runStatusCompleted, `{"enabled":true,"vectors_skipped_reason":"no_lock"}`, false},
+		{"pruned while off", runStatusCompleted, `{"enabled":false,"pruned_titles":3}`, false},
+	}
+	for _, tc := range cases {
+		h := newFakeHistory()
+		h.runs = []taskmanager.ExecutionResult{{TaskKey: key, Status: tc.status, ResultData: []byte(tc.result)}}
+		if got := (&Worker{history: h}).externalAlreadyRan(ctx); got != tc.want {
+			t.Errorf("%s: already ran %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if (&Worker{history: newFakeHistory()}).externalAlreadyRan(ctx) {
+		t.Error("no recorded run: already ran, want not")
 	}
 }

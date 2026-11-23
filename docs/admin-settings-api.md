@@ -12,10 +12,12 @@ no-store responses:
   machine-managed keys answer 404, and so do missing and empty values. The
   setup wizard reads its Redis configuration through it and treats only 404 as
   absence, rejecting responses that arrive after an authority change.
-- `GET /api/v2/admin/settings/restart-keys`: the compiled `keys` and `prefixes`
-  whose changes need a server restart (`internal/config/restart_keys.go`).
-  `GET /api/v2/admin/server/status` reports whether such a change is pending
-  (see [server status and restarts](admin-api.md#server-status-and-restarts)).
+- `GET /api/v2/admin/settings/restart-keys`: the compiled restart registry
+  (`internal/config/restart_keys.go`). An exact match in `keys` requires a
+  restart. A match in `prefixes` also requires a restart unless `live_keys`
+  lists the key. `GET /api/v2/admin/server/status` reports whether such a
+  change is pending (see
+  [server status and restarts](admin-api.md#server-status-and-restarts)).
 - `GET /api/v2/admin/settings/sensitive-status`: configured secret key names,
   `managed_by_env` names, and `managed_by_env_vars`. Values are never returned.
   `configured` and `managed_by_env` are arrays and `managed_by_env_vars` is an
@@ -169,7 +171,7 @@ An administrator connects each AI provider once, and each AI job selects a
 provider from that list: `ai.text_provider_id` for text translation (used while
 `ai.auth_mode` is `api_key`), `ai.speech_provider_id` for speech-to-text, and
 `recommendations.embedding_provider_id` for recommendation embeddings (applied
-at restart, like every `recommendations.*` setting). The model settings
+at restart). The model settings
 (`ai.chat_model`, `ai.asr_model`, `recommendations.embedding_model`) are
 unchanged, except that `recommendations.embedding_model` no longer has a
 default. A binding must

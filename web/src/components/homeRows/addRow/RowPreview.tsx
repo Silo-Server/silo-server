@@ -9,14 +9,19 @@ import { PosterTile } from "@/components/calm/PosterTile";
 import { GROUP_ICONS, GROUP_TINTS } from "../rowIcons";
 
 /** Why the strip has no titles to show, or null when it has (or is loading) some. */
-function emptyMessage(t: Translate, state: PreviewState, offText: string): string | null {
+function emptyMessage(
+  t: Translate,
+  state: PreviewState,
+  offText: string,
+  emptyText?: string,
+): string | null {
   switch (state.status) {
     case "off":
       return offText;
     case "error":
       return t("web.home.addRow.preview.failed");
     case "ready":
-      return state.items.length === 0 ? t("web.home.addRow.preview.empty") : null;
+      return state.items.length === 0 ? (emptyText ?? t("web.home.addRow.preview.empty")) : null;
     default:
       return null;
   }
@@ -32,6 +37,7 @@ export function RowPreview({
   state,
   liveLabel,
   offText,
+  emptyText,
   countUpTo,
   rule,
   icon,
@@ -43,6 +49,8 @@ export function RowPreview({
   liveLabel: string;
   /** What the strip says when this surface has no preview. */
   offText: string;
+  /** Optional override when the live preview returns no items. */
+  emptyText?: string;
   /**
    * Rule rows: once the preview loads, the header says how many titles
    * match and how many of them (up to this) the row shows.
@@ -57,7 +65,7 @@ export function RowPreview({
   const t = useT();
   const group = groupOverride ?? rowKindGroup(sectionType);
   const Icon = icon ?? GROUP_ICONS[group];
-  const message = emptyMessage(t, state, offText);
+  const message = emptyMessage(t, state, offText, emptyText);
   const lookFor = state.status === "ready" && state.items.length === 0 ? rule : undefined;
   return (
     <section

@@ -1650,6 +1650,17 @@ func main() {
 			if key == markers.SettingShareByDefault && !markers.ShareByDefaultEnabled(value) && defaultMarkerSharingStopped != nil {
 				defaultMarkerSharingStopped(context.Background())
 			}
+			// Discover refetches after saving this switch. Apply it on the
+			// serving node before replying so the read sees the saved value.
+			if key == config.ExternalRecommendationsEnabledKey {
+				reloadCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+				defer cancel()
+				if err := configWatcher.ForceReload(reloadCtx); err == nil {
+					return
+				} else {
+					slog.WarnContext(ctx, "Discover recommendations setting reload failed", "component", "app", "error", err)
+				}
+			}
 			// Nudge the hot-reload watcher so same-process settings changes
 			// apply immediately even without Redis (the event bus is a no-op
 			// then, leaving only the 60s poll).
@@ -3150,6 +3161,11 @@ func main() {
 			cfg.Recommendations,
 		).WithUnratedContentPolicy(unratedContent).
 			WithUserStoreOutsidePostgres(cfg.UserDB.Backend == "sqlite")
+		// Outside-title recommendations fetch through the shared, paced
+		// client. A nil *tmdb.Client must not become a non-nil interface.
+		if tmdbClient != nil {
+			recEngine.WithExternalTMDB(tmdbClient)
+		}
 		if userStoreProvider != nil {
 			// Cached rows are built under the scope the API resolves for the
 			// profile's own requests, so reads do not filter them down.
@@ -3171,6 +3187,7 @@ func main() {
 			cfg.Recommendations.TasteProfilesCron,
 			cfg.Recommendations.CowatchCron,
 			cfg.Recommendations.RecommendationsCron,
+			cfg.Recommendations.ExternalCron,
 			cfg.Recommendations.EmbeddingsJobTimeout,
 		)
 		if err != nil {
@@ -3178,6 +3195,13 @@ func main() {
 		} else {
 			recWorker.WithJobHistory(taskrepository.NewPgExecutionRepository(deps.DB)).
 				WithPolicyCheck(policySystem.Current).
+				// The outside-title switch and cap apply without a restart.
+				WithLiveConfig(func() config.RecommendationsConfig {
+					if live := configWatcher.Config(); live != nil {
+						return live.Recommendations
+					}
+					return cfg.Recommendations
+				}).
 				WithSavedConfig(func(ctx context.Context) (config.RecommendationsConfig, error) {
 					saved, err := settingsRepo.GetAll(ctx)
 					if err != nil {
@@ -3189,6 +3213,15 @@ func main() {
 					}
 					return savedCfg.Recommendations, nil
 				})
+			configWatcher.OnChange(func(prev, updated *config.Config) {
+				if !updated.Recommendations.Enabled || !updated.Recommendations.ExternalEnabled {
+					recWorker.StopExternalGeneration()
+					return
+				}
+				if prev == nil || !prev.Recommendations.Enabled || !prev.Recommendations.ExternalEnabled {
+					recWorker.EnsureExternalNow()
+				}
+			})
 			deps.RecWorker = recWorker
 			settingsRecWorker = recWorker
 			// Watch-provider syncs rebuild a profile's recommendations once
@@ -3202,6 +3235,11 @@ func main() {
 			// their node has loaded it (WithPolicyCheck above).
 			policySystem.OnChangeApplied(recWorker.NotifyPolicyChanged)
 		}
+	} else if deps.DB != nil {
+		// With recommendations off there is no worker, whose outside-title
+		// job is what applies retention. Titles a server stored while they
+		// were on still have to age out.
+		go recommendations.RunExternalRetention(appCtx, deps.DB)
 	}
 
 	// Client IP resolver with trusted proxy config.

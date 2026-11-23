@@ -6,14 +6,17 @@ import "testing"
 // an admin changed has no key, and a row that is not built in never has one.
 func TestTitleKeyFollowsBuiltInDefaultTitles(t *testing.T) {
 	for _, row := range DefaultRows() {
-		if TitleKey(row.ID, row.Title) == "" {
+		if TitleKey(row.ID, row.Title, row.Type) == "" {
 			t.Errorf("default row %q has no title key", row.ID)
 		}
-		if key := TitleKey(row.ID, row.Title+" (mine)"); key != "" {
+		if key := TitleKey(row.ID, row.Title+" (mine)", row.Type); key != "" {
 			t.Errorf("renamed row %q has key %q", row.ID, key)
 		}
 	}
-	if key := TitleKey("custom_row", "Trending Movies"); key != "" {
+	if key := TitleKey("custom_row", "Trending Movies", TypeTMDBChart); key != "" {
 		t.Errorf("custom row has key %q", key)
+	}
+	if row, ok := recommendedRow("recommended_movies"); ok && TitleKey(row.ID, row.Title, TypeTMDBChart) != "" {
+		t.Error("a custom chart with a recommended row's ID and title got a stock title key")
 	}
 }

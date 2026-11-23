@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"slices"
 
 	"strings"
 	"sync"
@@ -208,6 +209,42 @@ func TestCanceledRequestErrorKeepsItsCause(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret-test-key") {
 		t.Fatalf("error carries the API key: %v", err)
+	}
+}
+
+// A worker disabling Discover must also stop a detail fetch already waiting
+// on TMDB when no other caller needs it.
+func TestMediaDetailCancelsAbandonedRequest(t *testing.T) {
+	started, stopped := make(chan struct{}), make(chan struct{})
+	release := make(chan struct{})
+	client := newTestClient(t, func(_ http.ResponseWriter, r *http.Request) {
+		close(started)
+		select {
+		case <-r.Context().Done():
+			close(stopped)
+		case <-release:
+		}
+	})
+	defer close(release)
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	caller, stop := context.WithCancel(ctx)
+	defer stop()
+	done := make(chan error, 1)
+	go func() { _, err := client.GetMediaDetailInLanguage(caller, "movie", 1, "en"); done <- err }()
+	select {
+	case <-started:
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	stop()
+	if err := <-done; !errors.Is(err, context.Canceled) {
+		t.Fatal(err)
+	}
+	select {
+	case <-stopped:
+	case <-ctx.Done():
+		t.Fatal("abandoned detail request still running")
 	}
 }
 
@@ -447,5 +484,141 @@ func TestGetCollectionLanguage(t *testing.T) {
 				t.Errorf("language = %q, want %q", lang, tc.sent)
 			}
 		})
+	}
+}
+
+// The detail carries the fields outside-title embedding text is built from,
+// for both of TMDB's keyword shapes.
+func TestGetMediaDetailDecodesListsKeywordsAndCrew(t *testing.T) {
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if got := r.URL.Query().Get("append_to_response"); !strings.Contains(got, "similar") {
+			t.Errorf("%s append_to_response = %q, want similar", r.URL.Path, got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/movie/603":
+			_, _ = w.Write([]byte(`{"id": 603, "title": "The Matrix", "original_language": "en", "vote_count": 27000, "popularity": 81.5,
+				"keywords": {"keywords": [{"id": 1, "name": "hacker"}, {"id": 2, "name": "simulated reality"}]},
+				"credits": {"crew": [
+					{"name": "Lana Wachowski", "job": "Director", "department": "Directing"},
+					{"name": "Lilly Wachowski", "job": "Director", "department": "Directing"},
+					{"name": "Lana Wachowski", "job": "Writer", "department": "Writing"},
+					{"name": "Lilly Wachowski", "job": "Writer", "department": "Writing"},
+					{"name": "Lana Wachowski", "job": "Screenplay", "department": "Writing"},
+					{"name": "Joel Silver", "job": "Producer", "department": "Production"},
+					{"name": "Bill Pope", "job": "Director of Photography", "department": "Camera"}
+				]},
+				"recommendations": {"results": [{"id": 604, "title": "The Matrix Reloaded"}]},
+				"similar": {"results": [{"id": 1858, "title": "Transformers"}, {"id": 680, "title": "Pulp Fiction"}]},
+				"release_dates": {"results": [{"iso_3166_1": "US", "release_dates": [
+					{"certification": "NR", "type": 1}, {"certification": "R", "type": 3}, {"certification": "NC-17", "type": 4}
+				]}]}}`))
+		case "/tv/1396":
+			_, _ = w.Write([]byte(`{"id": 1396, "name": "Breaking Bad", "original_language": "en", "vote_count": 15000, "popularity": 412.25,
+				"production_companies": [{"id": 11073, "name": "Sony Pictures Television Studios"}, {"id": 33742, "name": " High Bridge Productions "}],
+				"keywords": {"results": [{"id": 3, "name": "drug dealer"}]},
+				"credits": {"crew": [
+					{"name": "Vince Gilligan", "job": "Writer", "department": "Writing"},
+					{"name": "Michelle MacLaren", "job": "Director", "department": "Directing"}
+				]},
+				"similar": {"results": [{"id": 60059, "name": "Better Call Saul"}]}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	movie, err := client.GetMediaDetail(context.Background(), "movie", 603)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(movie.Keywords, []string{"hacker", "simulated reality"}) {
+		t.Errorf("movie keywords = %v", movie.Keywords)
+	}
+	if !slices.Equal(movie.Directors, []string{"Lana Wachowski", "Lilly Wachowski"}) || movie.Director != "Lana Wachowski" {
+		t.Errorf("movie directors = %v, director = %q", movie.Directors, movie.Director)
+	}
+	if !slices.Equal(movie.Writers, []string{"Lana Wachowski", "Lilly Wachowski"}) {
+		t.Errorf("movie writers = %v", movie.Writers)
+	}
+	if len(movie.Recommendations) != 1 || len(movie.Similar) != 2 || movie.Similar[0].ID != 1858 || movie.Similar[0].MediaType != "movie" {
+		t.Errorf("movie recommendations = %+v, similar = %+v", movie.Recommendations, movie.Similar)
+	}
+	// Two or more US certifications: the plugin's rating is the theatrical
+	// one; the enforcement rating stays the strictest.
+	if movie.USContentRating != "R" || movie.USCertification != "NC-17" {
+		t.Errorf("movie US content rating = %q, US certification = %q; want R and NC-17", movie.USContentRating, movie.USCertification)
+	}
+	if movie.VoteCount != 27000 || movie.OriginalLanguage != "en" || movie.Popularity != 81.5 {
+		t.Errorf("movie vote count = %d, original language = %q, popularity = %v", movie.VoteCount, movie.OriginalLanguage, movie.Popularity)
+	}
+
+	series, err := client.GetMediaDetail(context.Background(), "series", 1396)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(series.Keywords, []string{"drug dealer"}) {
+		t.Errorf("series keywords = %v", series.Keywords)
+	}
+	// Series studios are the production companies, as the metadata plugin
+	// stores them; company IDs stay movie-only, the ones request routing reads.
+	if !slices.Equal(series.ProductionCompanies, []string{"Sony Pictures Television Studios", "High Bridge Productions"}) || len(series.CompanyIDs) != 0 {
+		t.Errorf("series production companies = %v, company IDs = %v", series.ProductionCompanies, series.CompanyIDs)
+	}
+	if series.Popularity != 412.25 {
+		t.Errorf("series popularity = %v", series.Popularity)
+	}
+	if !slices.Equal(series.Writers, []string{"Vince Gilligan"}) || !slices.Equal(series.Directors, []string{"Michelle MacLaren"}) {
+		t.Errorf("series writers = %v, directors = %v", series.Writers, series.Directors)
+	}
+	if len(series.Similar) != 1 || series.Similar[0].MediaType != "series" || series.Similar[0].Title != "Better Call Saul" {
+		t.Errorf("series similar = %+v", series.Similar)
+	}
+	if series.VoteCount != 15000 || series.OriginalLanguage != "en" {
+		t.Errorf("series vote count = %d, original language = %q", series.VoteCount, series.OriginalLanguage)
+	}
+}
+
+// A detail is fetched and cached per language, and the callers that want
+// TMDB's default language share the request GetMediaDetail always made.
+func TestGetMediaDetailInLanguageKeysTheCacheByLanguage(t *testing.T) {
+	var mu sync.Mutex
+	var languages []string
+	client := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		language, sent := r.URL.Query()["language"]
+		mu.Lock()
+		languages = append(languages, strings.Join(language, ","))
+		mu.Unlock()
+		title := "The Matrix"
+		if sent {
+			title = "Matrix (" + language[0] + ")"
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id": 603, "title": "` + title + `"}`))
+	})
+	ctx := context.Background()
+
+	for _, tc := range []struct{ language, title string }{
+		{"", "The Matrix"},
+		{"fr", "Matrix (fr)"},
+		{"pt-BR", "Matrix (pt-BR)"},
+		{"FR", "Matrix (fr)"},             // same entry as "fr"
+		{"en", "The Matrix"},              // English is TMDB's default
+		{"x-silo-original", "The Matrix"}, // no single language to ask for
+	} {
+		detail, err := client.GetMediaDetailInLanguage(ctx, "movie", 603, tc.language)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if detail.Title != tc.title {
+			t.Errorf("language %q title = %q, want %q", tc.language, detail.Title, tc.title)
+		}
+	}
+	if detail, err := client.GetMediaDetail(ctx, "movie", 603); err != nil || detail.Title != "The Matrix" {
+		t.Fatalf("GetMediaDetail = %+v, %v; want the default-language detail", detail, err)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(languages, []string{"", "fr", "pt-BR"}) {
+		t.Fatalf("language parameters sent = %q, want one request each for default, fr and pt-BR", languages)
 	}
 }

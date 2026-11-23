@@ -1984,6 +1984,16 @@ export interface RequestMediaResult {
    * watchlist titles.
    */
   in_watchlist?: boolean;
+  /**
+   * On a recommended Discover row only: the library titles that led to
+   * recommending this one, best first, at most two.
+   */
+  reasons?: RequestMediaReason[];
+}
+
+export interface RequestMediaReason {
+  content_id: string;
+  title: string;
 }
 
 export interface RequestMediaPage {

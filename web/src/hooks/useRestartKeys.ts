@@ -23,8 +23,13 @@ function createRestartKeyMatcher(data: RestartKeysResponse | undefined): Restart
   const exact = new Set(Array.isArray(data?.keys) ? data.keys.filter(isNonEmptyString) : []);
   const prefixes = Array.isArray(data?.prefixes) ? data.prefixes.filter(isNonEmptyString) : [];
   if (exact.size === 0 && prefixes.length === 0) return EMPTY_MATCHER;
+  // Keys a prefix covers that the server reads live; absent on older servers.
+  const live = new Set(
+    Array.isArray(data?.live_keys) ? data.live_keys.filter(isNonEmptyString) : [],
+  );
   return {
-    has: (key: string) => exact.has(key) || prefixes.some((prefix) => key.startsWith(prefix)),
+    has: (key: string) =>
+      exact.has(key) || (!live.has(key) && prefixes.some((prefix) => key.startsWith(prefix))),
   };
 }
 

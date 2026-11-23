@@ -4,11 +4,10 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { AlertTriangle, ChevronDown, ChevronRight, Play, Loader2 } from "lucide-react";
+import { AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import type { AdminSettingsConnectionCheckRequest, ConnectionCheckResponse } from "@/api/types";
-import type { components } from "@/api/v2/schema";
 import { ConnectionCheckAction } from "@/components/admin/ConnectionCheckAction";
 import { formatRelativeTime } from "@/lib/date";
 import {
@@ -23,6 +22,7 @@ import {
   useTriggerTasteProfiles,
   useTriggerRecommendations,
   useTriggerCowatch,
+  useTriggerExternal,
   useResetEmbeddings,
 } from "@/hooks/queries/admin/recommendations";
 import {
@@ -35,10 +35,11 @@ import { useRefreshAIProviders } from "@/hooks/queries/admin/aiProviders";
 import { EmbeddingProviderField } from "@/pages/admin-settings/AIProviders";
 import { ModelField } from "@/pages/admin-settings/AIModelField";
 import { formatLocale } from "@/lib/appLocale";
+import { countText } from "@/pages/adminRecommendationsExternal";
 import { useT } from "@/i18n";
 import { RecEmbeddingLockCard, RecEmbeddingResetCard } from "./AdminRecommendationsEmbedding";
-
-type RecJobRun = components["schemas"]["AdminRecommendationJobRun"];
+import { RecExternalSectionNotices } from "./AdminRecommendationsExternalNotices";
+import { RecExternalJobCard, RecJobStatusCard } from "./AdminRecommendationsJobs";
 
 interface RecLocalValues {
   [key: string]: string;
@@ -70,9 +71,6 @@ const EMBEDDING_CHECK_KEYS = [
 ] as const;
 // Model names; not translated.
 const EMBEDDING_MODEL_EXAMPLES = "text-embedding-3-large, qwen3-embedding:0.6b";
-
-/** Which run a job card line describes: the last full run, or work between full runs. */
-type RecRunKind = "run" | "catchUp" | "staleSweep" | "startupBuild";
 
 function RecSettingField({
   field,
@@ -238,123 +236,6 @@ function RecSettingField({
   );
 }
 
-function RecJobLastRun({ run, kind = "run" }: { run?: RecJobRun; kind?: RecRunKind }) {
-  const t = useT();
-  if (!run) {
-    return (
-      <p className="text-muted-foreground text-xs">{t("web.admin.recommendations.jobs.noRun")}</p>
-    );
-  }
-  const when = formatRelativeTime(run.completed_at) ?? run.completed_at;
-  if (run.status === "failed") {
-    return (
-      <div className="space-y-0.5">
-        <p className="text-destructive text-xs font-medium">
-          {t("web.admin.recommendations.jobs.runFailed", { kind, when })}
-        </p>
-        {run.error && (
-          <p className="text-muted-foreground line-clamp-3 text-xs break-words" title={run.error}>
-            {run.error}
-          </p>
-        )}
-      </div>
-    );
-  }
-  return (
-    <p className="text-muted-foreground text-xs">
-      {t("web.admin.recommendations.jobs.runCompleted", { kind, when })}
-    </p>
-  );
-}
-
-function RecJobStatusCard({
-  title,
-  count,
-  total,
-  running,
-  lastRun,
-  secondaryRun,
-  secondaryRunKind,
-  note,
-  onTrigger,
-  triggerPending,
-}: {
-  title: string;
-  count: number;
-  total?: number;
-  running: boolean;
-  lastRun?: RecJobRun;
-  /** Work that runs between full runs (a catch-up pass, the stale sweep), shown beside the last full run. */
-  secondaryRun?: RecJobRun;
-  secondaryRunKind?: RecRunKind;
-  note?: string;
-  onTrigger: () => void;
-  triggerPending: boolean;
-}) {
-  const t = useT();
-  const hasProgress = total !== undefined && total > 0;
-  const pct = hasProgress ? Math.round((count / total) * 100) : 0;
-  const isDisabled = running || triggerPending;
-
-  return (
-    <div className="surface-panel min-w-0 rounded-2xl border-0 px-4 py-4 sm:px-5">
-      <div className="flex min-w-0 flex-col gap-3">
-        <div className="min-w-0 space-y-1">
-          <span className="text-sm font-semibold">{title}</span>
-          <p className="text-muted-foreground text-xs">
-            {hasProgress
-              ? t("web.admin.recommendations.jobs.itemsProgress", {
-                  count: total,
-                  done_text: count.toLocaleString(formatLocale()),
-                  count_text: total.toLocaleString(formatLocale()),
-                })
-              : t("web.admin.recommendations.jobs.entries", {
-                  count,
-                  count_text: count.toLocaleString(formatLocale()),
-                })}
-          </p>
-          {note && <p className="text-muted-foreground text-xs">{note}</p>}
-          <RecJobLastRun run={lastRun} />
-          {secondaryRun && <RecJobLastRun run={secondaryRun} kind={secondaryRunKind} />}
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onClick={onTrigger}
-          disabled={isDisabled}
-          className="w-full justify-center"
-        >
-          {running ? (
-            <>
-              <Loader2 className="size-3.5 animate-spin" />
-              {t("web.admin.recommendations.jobs.running")}
-            </>
-          ) : (
-            <>
-              <Play className="size-3.5" />
-              {t("web.admin.recommendations.jobs.run")}
-            </>
-          )}
-        </Button>
-      </div>
-
-      {hasProgress && (
-        <div className="mt-3">
-          <div className="bg-muted h-2 w-full overflow-hidden rounded-full">
-            <div
-              className="bg-primary h-full rounded-full transition-all duration-500"
-              style={{ width: `${pct}%` }}
-            />
-          </div>
-          <p className="text-muted-foreground mt-1 text-end text-xs">
-            {t("web.admin.recommendations.jobs.percent", { percent: pct })}
-          </p>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function AdminRecommendations() {
   const t = useT();
   const { data: settings, isLoading } = useAdminServerSettings();
@@ -367,6 +248,7 @@ export default function AdminRecommendations() {
   const triggerTasteProfiles = useTriggerTasteProfiles();
   const triggerCowatch = useTriggerCowatch();
   const triggerRecommendations = useTriggerRecommendations();
+  const triggerExternal = useTriggerExternal();
   const resetEmbeddings = useResetEmbeddings();
   const refreshProviders = useRefreshAIProviders();
 
@@ -452,15 +334,30 @@ export default function AdminRecommendations() {
   async function handleResetEmbeddings() {
     try {
       const deleted = await resetEmbeddings.mutateAsync();
+      const counts = {
+        embeddings: t("web.admin.recommendations.reset.embeddingCount", {
+          count: deleted.embeddings,
+          count_text: countText(deleted.embeddings),
+        }),
+        profiles: t("web.admin.recommendations.reset.tasteProfileCount", {
+          count: deleted.taste_profiles,
+          count_text: countText(deleted.taste_profiles),
+        }),
+      };
+      if (deleted.external_embeddings == null || deleted.external_rows == null) {
+        toast.success(t("web.admin.recommendations.reset.done", counts));
+        return;
+      }
       toast.success(
-        t("web.admin.recommendations.reset.done", {
-          embeddings: t("web.admin.recommendations.reset.embeddingCount", {
-            count: deleted.embeddings,
-            count_text: deleted.embeddings.toLocaleString(formatLocale()),
+        t("web.admin.recommendations.reset.doneWithExternal", {
+          ...counts,
+          external_embeddings: t("web.admin.recommendations.reset.externalEmbeddingCount", {
+            count: deleted.external_embeddings,
+            count_text: countText(deleted.external_embeddings),
           }),
-          profiles: t("web.admin.recommendations.reset.tasteProfileCount", {
-            count: deleted.taste_profiles,
-            count_text: deleted.taste_profiles.toLocaleString(formatLocale()),
+          external_rows: t("web.admin.recommendations.reset.externalRowCount", {
+            count: deleted.external_rows,
+            count_text: countText(deleted.external_rows),
           }),
         }),
       );
@@ -519,8 +416,8 @@ export default function AdminRecommendations() {
   if (isLoading || sensitiveLoading)
     return (
       <div className="space-y-6 pb-4 sm:pb-6">
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {Array.from({ length: 5 }).map((_, i) => (
             <Skeleton key={i} className="h-28 rounded-2xl" />
           ))}
         </div>
@@ -559,7 +456,7 @@ export default function AdminRecommendations() {
           <h2 className="text-lg font-medium tracking-tight">
             {t("web.admin.recommendations.jobs.title")}
           </h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
             <RecJobStatusCard
               title={t("web.admin.recommendations.jobs.embeddings")}
               count={status.embeddings.count}
@@ -617,6 +514,17 @@ export default function AdminRecommendations() {
               onTrigger={() => triggerRecommendations.mutate()}
               triggerPending={triggerRecommendations.isPending}
             />
+            {status.external && (
+              <RecExternalJobCard
+                pendingRestart={
+                  serverSettings["recommendations.enabled"] === "false" &&
+                  serverSettings["recommendations.external.enabled"] === "true"
+                }
+                status={status.external}
+                onTrigger={() => triggerExternal.mutate()}
+                triggerPending={triggerExternal.isPending}
+              />
+            )}
           </div>
         </div>
       )}
@@ -631,7 +539,8 @@ export default function AdminRecommendations() {
             disabled={
               status.embeddings.running ||
               status.taste_profiles.running ||
-              status.recommendations.running
+              status.recommendations.running ||
+              Boolean(status.external?.running)
             }
             isPending={resetEmbeddings.isPending}
             onReset={() => void handleResetEmbeddings()}
@@ -717,6 +626,14 @@ export default function AdminRecommendations() {
                       />
                     ),
                   )}
+                  {section.id === "external" ? (
+                    <RecExternalSectionNotices
+                      recsEnabled={serverSettings["recommendations.enabled"] === "true"}
+                      externalEnabled={
+                        serverSettings["recommendations.external.enabled"] === "true"
+                      }
+                    />
+                  ) : null}
                   {isEmbeddingSection ? (
                     // ConnectionCheckAction brings its own row padding.
                     <div>

@@ -3426,6 +3426,25 @@
       "body_file": "admin_recommendations_embeddings_reset.json"
     },
     {
+      "name": "admin_recommendations_external",
+      "operation_id": "triggerAdminRecommendationExternal",
+      "scenario": "Started acknowledges process-local background execution, not a persisted job.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/admin/recommendations/trigger/external",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminRecommendationStarted",
+      "body_file": "admin_recommendations_external.json"
+    },
+    {
       "name": "admin_recommendations_recommendations",
       "operation_id": "triggerAdminRecommendationRefresh",
       "scenario": "Started acknowledges process-local background execution, not a persisted job.",

@@ -15,6 +15,9 @@ type Store interface {
 	// ListRequestedTMDB reports which of the TMDB IDs the viewer's profile
 	// made a request under for the media type, in any outcome.
 	ListRequestedTMDB(ctx context.Context, viewer Viewer, mediaType MediaType, tmdbIDs []int) (map[int]bool, error)
+	// ListDeclinedByViewerTMDB reports which of the TMDB IDs have a request
+	// by the viewer's profile for the media type that was declined.
+	ListDeclinedByViewerTMDB(ctx context.Context, viewer Viewer, mediaType MediaType, tmdbIDs []int) (map[int]bool, error)
 	// ListProfileWatchlistRequests returns the active requests a profile's
 	// watchlist made.
 	ListProfileWatchlistRequests(ctx context.Context, userID int, profileID string) ([]*Request, error)

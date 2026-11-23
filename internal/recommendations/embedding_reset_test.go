@@ -95,7 +95,7 @@ func TestResetEmbeddingsRefusesWhileProfilesAreSwept(t *testing.T) {
 		t.Fatalf("reset during a stale sweep = %v, want ErrStaleSweepRunning", err)
 	}
 	keys, released := locker.snapshot()
-	if !slices.Equal(keys, []int64{embeddingsJobLock, tasteProfilesJobLock, cacheJobLock, staleSweepLock}) || released != 3 {
+	if !slices.Equal(keys, []int64{embeddingsJobLock, tasteProfilesJobLock, cacheJobLock, externalJobLock, staleSweepLock}) || released != 4 {
 		t.Fatalf("locks taken %#x, released %d", keys, released)
 	}
 	assertNothingRunning(t, w)

@@ -246,21 +246,35 @@ type MediaDetail struct {
 	Genres        []string
 	VoteAverage   float64
 	VoteCount     int
+	// Popularity is TMDB's popularity score at fetch time.
+	Popularity    float64
 	Status        string
 	Homepage      string
 	ContentRating string
 	// USCertification is the US rating alone (the one GetCertification
 	// reports); ContentRating falls back to other countries for display.
 	USCertification string
+	// USContentRating is the US rating the TMDB metadata plugin stores as a
+	// library title's content rating: for a movie the theatrical (release
+	// type 3) certification, else the first US one; for a series the US
+	// rating. "" when TMDB has no US rating. Unlike USCertification it does
+	// not pick the strictest, so it is for matching library data, not for
+	// enforcing a rating ceiling.
+	USContentRating string
 	// Certifications holds every country's certifications, keyed by ISO
 	// 3166-1 code, for readers that fall back to a title's own country.
 	Certifications      map[string][]string
 	ProductionCompanies []string
 	OriginalLanguage    string
 	KeywordIDs          []int
+	// Keywords holds the keyword names in TMDB's order, the same entries as
+	// KeywordIDs. TMDB does not translate keywords.
+	Keywords []string
 	// GenreIDs, CompanyIDs (movies) and NetworkIDs (series) are TMDB's stable
 	// identifiers for Genres, ProductionCompanies and Networks, whose names
-	// follow the configured language. OriginCountries holds ISO 3166-1 codes.
+	// follow the configured language. ProductionCompanies is filled for both
+	// media types; CompanyIDs only for movies, the ones request routing reads.
+	// OriginCountries holds ISO 3166-1 codes.
 	GenreIDs        []int
 	CompanyIDs      []int
 	NetworkIDs      []int
@@ -275,10 +289,22 @@ type MediaDetail struct {
 	// 0) included.
 	Seasons []SeasonSummary
 
-	Cast            []MediaCastMember
-	Director        string
+	Cast []MediaCastMember
+	// Director is the first crew member with the job Director, of any
+	// department.
+	Director string
+	// Directors and Writers list the credited crew the way the TMDB metadata
+	// plugin records library people (models.PersonKindFromJob over the
+	// Directing, Writing and Production departments): each name once, in
+	// TMDB's crew order. For series they come from the show's credits, not
+	// from Creators.
+	Directors       []string
+	Writers         []string
 	Creators        []string
 	Recommendations []MediaResult
+	// Similar is TMDB's "similar" list for the title, in TMDB's order. Like
+	// Recommendations it holds titles of the same media type.
+	Similar []MediaResult
 }
 
 // MediaCastMember is a single cast member entry from a TMDB credits response,
@@ -407,12 +433,14 @@ type movieDetailResponse struct {
 	OriginCountry       []string                      `json:"origin_country"`
 	VoteAverage         float64                       `json:"vote_average"`
 	VoteCount           int                           `json:"vote_count"`
+	Popularity          float64                       `json:"popularity"`
 	Status              string                        `json:"status"`
 	Homepage            string                        `json:"homepage"`
 	ProductionCompanies []companyEntry                `json:"production_companies"`
 	Credits             *creditsResponse              `json:"credits"`
 	ExternalIDs         *ExternalIDs                  `json:"external_ids"`
 	Recommendations     *recommendationsMovieResponse `json:"recommendations"`
+	Similar             *recommendationsMovieResponse `json:"similar"`
 	ReleaseDates        *releaseDatesResponse         `json:"release_dates"`
 }
 
@@ -434,17 +462,20 @@ type tvDetailResponse struct {
 		Keywords []idEntry `json:"keywords"` // movies
 		Results  []idEntry `json:"results"`  // tv
 	} `json:"keywords"`
-	Genres          []genreEntry               `json:"genres"`
-	OriginCountry   []string                   `json:"origin_country"`
-	VoteAverage     float64                    `json:"vote_average"`
-	VoteCount       int                        `json:"vote_count"`
-	Status          string                     `json:"status"`
-	Homepage        string                     `json:"homepage"`
-	Networks        []networkEntry             `json:"networks"`
-	Seasons         []seasonEntry              `json:"seasons"`
-	CreatedBy       []personEntry              `json:"created_by"`
-	Credits         *creditsResponse           `json:"credits"`
-	ExternalIDs     *ExternalIDs               `json:"external_ids"`
-	Recommendations *recommendationsTVResponse `json:"recommendations"`
-	ContentRatings  *contentRatingsResponse    `json:"content_ratings"`
+	Genres              []genreEntry               `json:"genres"`
+	OriginCountry       []string                   `json:"origin_country"`
+	VoteAverage         float64                    `json:"vote_average"`
+	VoteCount           int                        `json:"vote_count"`
+	Popularity          float64                    `json:"popularity"`
+	Status              string                     `json:"status"`
+	Homepage            string                     `json:"homepage"`
+	Networks            []networkEntry             `json:"networks"`
+	ProductionCompanies []companyEntry             `json:"production_companies"`
+	Seasons             []seasonEntry              `json:"seasons"`
+	CreatedBy           []personEntry              `json:"created_by"`
+	Credits             *creditsResponse           `json:"credits"`
+	ExternalIDs         *ExternalIDs               `json:"external_ids"`
+	Recommendations     *recommendationsTVResponse `json:"recommendations"`
+	Similar             *recommendationsTVResponse `json:"similar"`
+	ContentRatings      *contentRatingsResponse    `json:"content_ratings"`
 }

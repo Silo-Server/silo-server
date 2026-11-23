@@ -25,6 +25,7 @@ const (
 	tasteProfilesJobLock int64 = 0x53494C4F52545354 // "SILORTST"
 	cowatchJobLock       int64 = 0x53494C4F52435754 // "SILORCWT"
 	cacheJobLock         int64 = 0x53494C4F52434143 // "SILORCAC"
+	externalJobLock      int64 = 0x53494C4F52455854 // "SILOREXT"
 	// staleSweepLock lets one node sweep stale profiles at a time.
 	staleSweepLock int64 = 0x53494C4F5253544C // "SILORSTL"
 )
@@ -34,6 +35,7 @@ var jobLockKeys = map[JobName]int64{
 	JobTasteProfiles:   tasteProfilesJobLock,
 	JobCowatch:         cowatchJobLock,
 	JobRecommendations: cacheJobLock,
+	JobExternal:        externalJobLock,
 }
 
 // Each job's runs are rows in the task manager's execution history under
@@ -44,6 +46,7 @@ const (
 	tasteProfilesTaskKey = "recommendations.taste_profiles"
 	cowatchTaskKey       = "recommendations.cowatch"
 	cacheTaskKey         = "recommendations.cache"
+	externalTaskKey      = "recommendations.external"
 )
 
 var jobTaskKeys = map[JobName]string{
@@ -51,6 +54,7 @@ var jobTaskKeys = map[JobName]string{
 	JobTasteProfiles:   tasteProfilesTaskKey,
 	JobCowatch:         cowatchTaskKey,
 	JobRecommendations: cacheTaskKey,
+	JobExternal:        externalTaskKey,
 }
 
 // Partial runs do part of a job under its claim between full runs: the
@@ -116,6 +120,8 @@ type clusterLock interface {
 	// acquired is false when another server holds key. release unlocks key
 	// alone; Release unlocks it too when release was not called.
 	TryAlso(ctx context.Context, key int64) (release func(), acquired bool, err error)
+	// poolWriter binds outside-title mutations to the session that owns this lock.
+	poolWriter(fallback externalPoolWriter) externalPoolWriter
 	// Check returns errJobLockLost once the lock's session has closed, which
 	// released every key the lock held.
 	Check(ctx context.Context) error
@@ -142,6 +148,10 @@ type pgClusterLock struct {
 // closed, which released the lock: another server may start the job, so the
 // run stops.
 var errJobLockLost = errors.New("recommendation job lost its cluster lock")
+
+func (l pgClusterLock) poolWriter(_ externalPoolWriter) externalPoolWriter {
+	return externalPoolWriter{db: l.lock.Conn()}
+}
 
 func (l pgClusterLock) TryAlso(ctx context.Context, key int64) (func(), bool, error) {
 	acquired, err := l.lock.AcquireAlso(ctx, key, 0)
@@ -313,7 +323,11 @@ func (w *Worker) runJob(j job, background bool) error {
 
 // runScheduled runs a cron job, logging instead of returning a busy job.
 func (w *Worker) runScheduled(name JobName) {
-	err := w.runJob(w.jobFor(name), false)
+	j := w.jobFor(name)
+	if name == JobExternal {
+		j.quietWhenIdle = true
+	}
+	err := w.runJob(j, false)
 	switch {
 	case err == nil:
 	case errors.Is(err, ErrJobRunningElsewhere):

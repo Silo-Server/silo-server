@@ -2000,6 +2000,18 @@ library has as well as rating backfill, and after a read of several pages reache
 the end it points past `total_pages`. `GET /api/v2/requests/status` advertises
 `discover_rows_supported`.
 
+A `recommended` row (the default layout opens with `recommended_movies` and
+`recommended_series`) holds the viewer's own recommendations of titles the
+library does not have, read from stored data without a TMDB call. Its results
+carry optional `reasons`, at most two `{content_id, title}` naming the library
+titles that led to each. The admin preview of a recommended row can also
+return reasons. Its totals count
+the titles the viewer gets, and its see all pages follow page+1 with no
+`next_page`. `GET /api/v2/requests/status` reports
+`personal_discover_rows_supported`, true while requests, recommendations and
+outside-title recommendations are on; a profile with no recommendations yet has
+the row in `row_order` and not in `items`.
+
 Native Apple and Android request migrations accompany this contract change. Shipped apps
 merge only the built-in trending and popular rows, so an admin's rows reach them
 once they read `row_order`. Jellyfin compatibility does not expose this request
@@ -2328,8 +2340,11 @@ The Discover layout (`/admin/request-discover`) is v2-only:
 `GET`/`PUT`/`DELETE /admin/request-discover/layout` read, replace and reset the
 whole layout with `If-Match` on its revision (the default layout, with none
 stored, reads as revision zero; a guarded reset answers 204); list rows carry
-the status of their stored copy. `POST /admin/request-discover/preview` shows a
-row's first page before it is saved, fetching a list row's list live, and
+the status of their stored copy. A row's `type` includes `recommended`, with a
+`recommended` spec naming its `media_type`; its `hide_available` is always true.
+`POST /admin/request-discover/preview` shows a
+row's first page before it is saved, fetching a list row's list live and showing
+a recommended row as the admin's own, and
 `GET /admin/request-discover/watch-providers` lists the streaming services a
 discover row can filter on in a region. They work while requests are turned off.
 The `discover_layout` field of `getAdminRequestCapabilities` reports them.

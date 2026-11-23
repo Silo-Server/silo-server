@@ -4474,8 +4474,8 @@ export interface paths {
     get?: never;
     put?: never;
     /**
-     * Delete the embedding lock, every item embedding, taste clusters and per-profile cached rows, and clear taste profile vectors, in one transaction.
-     * @description Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile or recommendation job, or a stale profile sweep, runs on any server, while a catalog import with embeddings runs, and while a saved embedding model or base URL waits for a server restart. Run the embedding job afterwards to build the new embedding space.
+     * Delete the embedding lock, every item and outside-title embedding, taste clusters, per-profile cached rows and outside rows, and clear taste profile vectors, in one transaction.
+     * @description Recovers a server whose embedding lock pins a model it can no longer use, or switches embedding models. It refuses with 409 while the embedding, taste profile, recommendation or outside-title job, or a stale profile sweep, runs on any server, while a catalog import with embeddings runs, and while a saved embedding model or base URL waits for a server restart. Run the embedding job afterwards to build the new embedding space.
      */
     post: operations["resetAdminRecommendationEmbeddings"];
     delete?: never;
@@ -4529,6 +4529,23 @@ export interface paths {
     put?: never;
     /** Start process-local recommendation work without a durable job receipt. */
     post: operations["triggerAdminRecommendationEmbeddings"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/recommendations/trigger/external": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /** Start process-local recommendation work without a durable job receipt. */
+    post: operations["triggerAdminRecommendationExternal"];
     delete?: never;
     options?: never;
     head?: never;
@@ -17321,14 +17338,21 @@ export interface components {
        */
       url: string;
     };
+    AdminDiscoverRecommended: {
+      /**
+       * @example movie
+       * @enum {string}
+       */
+      media_type: "movie" | "series";
+    };
     AdminDiscoverRow: {
       chart?: components["schemas"]["AdminDiscoverChart"];
       discover?: components["schemas"]["AdminDiscoverFilter"];
       enabled: boolean;
-      /** @description Leave out titles the library already has */
+      /** @description Leave out titles the library already has. Always true on a recommended row, which never shows them */
       hide_available?: boolean;
       /**
-       * @description The row's ID; empty on a new row, which gets one. The six built-in rows keep their IDs and charts; a brand row's ID is its type
+       * @description The row's ID; empty on a new row, which gets one. The six built-in rows keep their IDs and charts, and recommended_movies and recommended_series keep their type and media type; a brand row's ID is its type
        * @example trending_movies
        */
       id?: string;
@@ -17339,6 +17363,7 @@ export interface components {
        */
       limit?: number;
       list?: components["schemas"]["AdminDiscoverList"];
+      recommended?: components["schemas"]["AdminDiscoverRecommended"];
       /** @description List rows only: their stored copy, which the server refreshes about every 12 hours */
       source?: components["schemas"]["AdminDiscoverSource"];
       /** @example Trending Movies */
@@ -17358,6 +17383,7 @@ export interface components {
        */
       title_key?: string;
       /**
+       * @description A recommended row shows each viewer's own recommendations of titles the library does not have, read from what the recommendations engine stored
        * @example tmdb_chart
        * @enum {string}
        */
@@ -17366,6 +17392,7 @@ export interface components {
         | "tmdb_discover"
         | "tmdb_list"
         | "mdblist"
+        | "recommended"
         | "studios"
         | "networks"
         | "genres";
@@ -17374,10 +17401,10 @@ export interface components {
       chart?: components["schemas"]["AdminDiscoverChart"];
       discover?: components["schemas"]["AdminDiscoverFilter"];
       enabled: boolean;
-      /** @description Leave out titles the library already has */
+      /** @description Leave out titles the library already has. Always true on a recommended row, which never shows them */
       hide_available?: boolean;
       /**
-       * @description The row's ID; empty on a new row, which gets one. The six built-in rows keep their IDs and charts; a brand row's ID is its type
+       * @description The row's ID; empty on a new row, which gets one. The six built-in rows keep their IDs and charts, and recommended_movies and recommended_series keep their type and media type; a brand row's ID is its type
        * @example trending_movies
        */
       id?: string;
@@ -17388,9 +17415,11 @@ export interface components {
        */
       limit?: number;
       list?: components["schemas"]["AdminDiscoverList"];
+      recommended?: components["schemas"]["AdminDiscoverRecommended"];
       /** @example Trending Movies */
       title: string;
       /**
+       * @description A recommended row shows each viewer's own recommendations of titles the library does not have, read from what the recommendations engine stored
        * @example tmdb_chart
        * @enum {string}
        */
@@ -17399,6 +17428,7 @@ export interface components {
         | "tmdb_discover"
         | "tmdb_list"
         | "mdblist"
+        | "recommended"
         | "studios"
         | "networks"
         | "genres";
@@ -21238,6 +21268,16 @@ export interface components {
       embeddings: number;
       /**
        * Format: int64
+       * @description Outside-title vectors deleted. The titles are kept and embedded again by the next outside-title run.
+       */
+      external_embeddings: number;
+      /**
+       * Format: int64
+       * @description Profiles' outside-title rows deleted.
+       */
+      external_rows: number;
+      /**
+       * Format: int64
        * @description Taste clusters deleted.
        */
       taste_clusters: number;
@@ -21246,6 +21286,35 @@ export interface components {
        * @description Taste profiles whose vectors were cleared. Each is rebuilt once the embedding job stores its titles' vectors again.
        */
       taste_profiles: number;
+    };
+    AdminRecommendationExternalStatus: {
+      /**
+       * Format: int64
+       * @description Outside titles stored.
+       */
+      count: number;
+      /** @description Whether outside-title recommendations are on: recommendations are enabled and recommendations.external.enabled is set. When off, the job only deletes expired outside titles. */
+      enabled: boolean;
+      /** @description The newest finished run on any server. Its result counts titles stored, details fetched, TMDB requests, embeddings and rows built, says whether a per-run budget ran out, and gives vectors_skipped and vectors_skipped_reason when no vectors could be stored. Absent until one finishes. */
+      last_run?: components["schemas"]["AdminRecommendationJobRun"];
+      /** @description Current phase while the job is running: sources, titles, or rows. Absent when idle. */
+      phase?: string;
+      /**
+       * Format: int64
+       * @description Items completed in the current phase while running.
+       */
+      progress_done?: number;
+      /**
+       * Format: int64
+       * @description Total items in the current phase while running.
+       */
+      progress_total?: number;
+      /**
+       * Format: int64
+       * @description Stored outside rows, one per profile and media type.
+       */
+      rows: number;
+      running: boolean;
     };
     AdminRecommendationJobRun: {
       /**
@@ -21289,6 +21358,8 @@ export interface components {
       cache_refreshed_at?: string;
       cowatch: components["schemas"]["AdminRecommendationJobStatus"];
       embeddings: components["schemas"]["AdminRecommendationJobStatus"];
+      /** @description The outside-title job. */
+      external: components["schemas"]["AdminRecommendationExternalStatus"];
       /** @description Why the stored embedding lock rejects the embedding settings this server runs with; empty when it does not. */
       lock_conflict: string;
       /** @description Values for lock_conflict_key's placeholders, by name. Absent when lock_conflict is empty. */
@@ -21881,6 +21952,8 @@ export interface components {
     };
     AdminRestartKeys: {
       keys: string[];
+      /** @description Keys that apply without a restart although one of prefixes covers them. */
+      live_keys: string[];
       prefixes: string[];
     };
     AdminScanSourceDescriptor: {
@@ -27024,14 +27097,14 @@ export interface components {
        */
       title_key?: string;
       /**
-       * @description What the row shows: tmdb_chart, tmdb_discover, tmdb_list or mdblist (title rows, in items), or studios, networks or genres (brand rows). More values may be added
+       * @description What the row shows: tmdb_chart, tmdb_discover, tmdb_list, mdblist or recommended (title rows, in items; a recommended row holds the viewer's own recommendations, see personal_discover_rows_supported), or studios, networks or genres (brand rows). More values may be added
        * @example tmdb_chart
        */
       type: string;
     };
     DiscoverSection: {
       /**
-       * @description The row's stable ID. The six built-in rows keep trending_movies, trending_series, popular_movies, popular_series, upcoming_movies and on_air_series; a row an admin adds has an opaque ID
+       * @description The row's stable ID. The six built-in rows keep trending_movies, trending_series, popular_movies, popular_series, upcoming_movies and on_air_series; the default recommended rows are recommended_movies and recommended_series; a row an admin adds has an opaque ID
        * @example trending_movies
        */
       key: string;
@@ -28087,6 +28160,8 @@ export interface components {
       follow_supported: boolean;
       /** @description Whether a series already in the library can be requested for the seasons it is missing. False while a download server that takes series uses a request plugin that cannot fetch individual seasons, so such a series stays already_available. */
       missing_seasons_requestable: boolean;
+      /** @description Whether the server serves recommended Discover rows: rows of type recommended in listDiscoverSections whose titles are the viewer's own recommendations of movies or series the library does not have, with reasons on each. True while requests, recommendations and outside-title recommendations are on. A profile with no recommendations yet gets no such row in items; the row stays in row_order. */
+      personal_discover_rows_supported: boolean;
       rating_restrictions_enforced: boolean;
       /** @description Whether removeFailedRequest is available: a requester can delete their own failed request that delivered nothing. */
       remove_failed_supported: boolean;
@@ -34442,6 +34517,15 @@ export interface components {
        */
       total_results: number;
     };
+    RequestMediaReason: {
+      /**
+       * @description The catalog item
+       * @example movie:heat-1995
+       */
+      content_id: string;
+      /** @example Heat */
+      title: string;
+    };
     RequestMediaResult: {
       /**
        * @description missing or available in this server's catalog
@@ -34473,6 +34557,8 @@ export interface components {
        * @example /abc.jpg
        */
       poster_path?: string;
+      /** @description On a recommended Discover row only: the library titles that led to recommending this title, best first, at most two. Absent elsewhere, and absent or empty when none of them is one the viewer can see */
+      reasons?: components["schemas"]["RequestMediaReason"][];
       /**
        * Format: date
        * @description Calendar date, YYYY-MM-DD
@@ -78582,6 +78668,121 @@ export interface operations {
     };
   };
   triggerAdminRecommendationEmbeddings: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminRecommendationStarted"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  triggerAdminRecommendationExternal: {
     parameters: {
       query?: never;
       header?: {
