@@ -270,35 +270,57 @@ func recommendationItemEligibilityWhereClause(alias string) string {
 	return embeddingvectors.ItemEligibilityWhereClause(alias)
 }
 
+// EmbeddingWrite is one item's vector for UpsertEmbeddings.
+type EmbeddingWrite struct {
+	ItemID        string
+	Embedding     []float32
+	CanonicalText string
+}
+
 // UpsertEmbedding stores or updates an embedding for a media item.
 func (r *Repo) UpsertEmbedding(ctx context.Context, itemID string, embedding []float32, model, canonicalText string) error {
-	padded, err := ensureCanonicalDimensions(embedding)
-	if err != nil {
-		return fmt.Errorf("upsert embedding for item %s: %w", itemID, err)
+	return r.UpsertEmbeddings(ctx, model, []EmbeddingWrite{{ItemID: itemID, Embedding: embedding, CanonicalText: canonicalText}})
+}
+
+// UpsertEmbeddings stores or updates the items' embeddings, all from model,
+// and queues their search index updates, in one transaction: every write is
+// stored, or none is. The statements go to the server in one round trip.
+func (r *Repo) UpsertEmbeddings(ctx context.Context, model string, writes []EmbeddingWrite) error {
+	if len(writes) == 0 {
+		return nil
+	}
+	batch := &pgx.Batch{}
+	ids := make([]string, 0, len(writes))
+	for _, w := range writes {
+		padded, err := ensureCanonicalDimensions(w.Embedding)
+		if err != nil {
+			return fmt.Errorf("upsert embedding for item %s: %w", w.ItemID, err)
+		}
+		batch.Queue(`
+			INSERT INTO media_item_embeddings (media_item_id, embedding, model, canonical_text)
+			VALUES ($1, $2, $3, $4)
+			ON CONFLICT (media_item_id) DO UPDATE
+				SET embedding      = EXCLUDED.embedding,
+				    model          = EXCLUDED.model,
+				    canonical_text = EXCLUDED.canonical_text,
+				    updated_at     = NOW()
+		`, w.ItemID, pgvector.NewVector(padded), model, w.CanonicalText)
+		ids = append(ids, w.ItemID)
 	}
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin upsert embedding for item %s: %w", itemID, err)
+		return fmt.Errorf("begin upsert of %d embeddings: %w", len(writes), err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 
-	_, err = tx.Exec(ctx, `
-		INSERT INTO media_item_embeddings (media_item_id, embedding, model, canonical_text)
-		VALUES ($1, $2, $3, $4)
-		ON CONFLICT (media_item_id) DO UPDATE
-			SET embedding      = EXCLUDED.embedding,
-			    model          = EXCLUDED.model,
-			    canonical_text = EXCLUDED.canonical_text,
-			    updated_at     = NOW()
-	`, itemID, pgvector.NewVector(padded), model, canonicalText)
-	if err != nil {
-		return fmt.Errorf("upsert embedding for item %s: %w", itemID, err)
+	if err := tx.SendBatch(ctx, batch).Close(); err != nil {
+		return fmt.Errorf("upsert %d embeddings: %w", len(writes), err)
 	}
-	if err := catalog.EnqueueSearchIndexUpsert(ctx, tx, itemID); err != nil {
-		return fmt.Errorf("enqueue catalog search embedding update for item %s: %w", itemID, err)
+	if err := catalog.EnqueueSearchIndexUpserts(ctx, tx, ids); err != nil {
+		return fmt.Errorf("enqueue catalog search embedding updates for %d items: %w", len(writes), err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit upsert embedding for item %s: %w", itemID, err)
+		return fmt.Errorf("commit upsert of %d embeddings: %w", len(writes), err)
 	}
 	return nil
 }
