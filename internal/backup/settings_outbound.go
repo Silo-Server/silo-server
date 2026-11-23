@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"slices"
 	"strings"
 
@@ -176,12 +177,23 @@ func (b outboundBundle) clear(ctx context.Context, tx pgx.Tx, cipher *secret.Cip
 }
 
 // carryOutboundSettings takes the outbound settings from the live server
-// (liveURL, or none for "") and says what it cleared.
-func carryOutboundSettings(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, cipher *secret.Cipher, out io.Writer) error {
+// (liveURL, or none for "") and says what it cleared. A cleared bundle
+// with a setting among liveOwn, the server-specific settings the live
+// server supplies afterwards, is the live server's, so it is reported as
+// kept.
+func carryOutboundSettings(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, cipher *secret.Cipher, liveOwn []string, out io.Writer) error {
 	carried, cleared, err := loader.CarryOutboundSettings(ctx, dbURL, liveURL, cipher)
 	if err != nil {
 		return fmt.Errorf("keeping the live server's connections to outside services: %w", err)
 	}
+	cleared = slices.DeleteFunc(cleared, func(name string) bool {
+		i := slices.IndexFunc(outboundBundles, func(b outboundBundle) bool { return b.name == name })
+		if i < 0 || !slices.ContainsFunc(outboundBundles[i].keys, func(k string) bool { return slices.Contains(liveOwn, k) }) {
+			return false
+		}
+		carried = append(carried, name)
+		return true
+	})
 	if len(carried) > 0 {
 		_, _ = fmt.Fprintf(out, "Kept this server's connections to outside services in place of the backup's: %s.\n", strings.Join(carried, ", "))
 	}
@@ -200,12 +212,7 @@ func carryOutboundSettings(ctx context.Context, loader DatabaseLoader, dbURL, li
 // keys a restore rotates (rotatedSettings) and the plugin provisioning hold
 // keep their new values. It returns how many settings it changed.
 func (l PGLoader) CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string) (int, error) {
-	serverSpecific := func(key string) bool {
-		kind, ok := SettingKindOf(key)
-		_, rotated := rotatedSettings[key]
-		return ok && kind == SettingKindServerSpecific && !rotated && key != plugins.ProvisionRestoreHoldKey
-	}
-	live, err := allSettingsAt(ctx, liveURL, serverSpecific)
+	live, err := allSettingsAt(ctx, liveURL, carriedServerSpecific)
 	if err != nil {
 		return 0, fmt.Errorf("reading the live server's settings: %w", err)
 	}
@@ -216,7 +223,7 @@ func (l PGLoader) CarryServerSpecificSettings(ctx context.Context, dbURL, liveUR
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
 	changed := 0
 	err = pgx.BeginFunc(ctx, conn, func(tx pgx.Tx) error {
-		restored, err := allSettings(ctx, tx, serverSpecific)
+		restored, err := allSettings(ctx, tx, carriedServerSpecific)
 		if err != nil {
 			return err
 		}
@@ -242,6 +249,24 @@ func (l PGLoader) CarryServerSpecificSettings(ctx context.Context, dbURL, liveUR
 		return nil
 	})
 	return changed, err
+}
+
+// carriedServerSpecific reports whether CarryServerSpecificSettings gives
+// a restored database the live value of key.
+func carriedServerSpecific(key string) bool {
+	kind, ok := SettingKindOf(key)
+	_, rotated := rotatedSettings[key]
+	return ok && kind == SettingKindServerSpecific && !rotated && key != plugins.ProvisionRestoreHoldKey
+}
+
+// ServerSpecificSettingKeys lists the server-specific settings liveURL
+// holds that CarryServerSpecificSettings gives a restored database, sorted.
+func (l PGLoader) ServerSpecificSettingKeys(ctx context.Context, liveURL string) ([]string, error) {
+	live, err := allSettingsAt(ctx, liveURL, carriedServerSpecific)
+	if err != nil {
+		return nil, fmt.Errorf("reading the live server's settings: %w", err)
+	}
+	return slices.Sorted(maps.Keys(live)), nil
 }
 
 // allSettingsAt reads the settings of the database at url that keep says to.

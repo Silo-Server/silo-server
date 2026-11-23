@@ -1689,8 +1689,24 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 			}
 		}
 	}
+	// The restore's report leaves out exactly the settings the carry takes
+	// from the live server.
+	liveOwn, err := (PGLoader{}).ServerSpecificSettingKeys(ctx, liveURL)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := (PGLoader{}).CarryServerSpecificSettings(ctx, restoredURL, liveURL); err != nil {
 		t.Fatal(err)
+	}
+	var fromLive []string
+	for i, key := range keys {
+		if _, rotated := rotatedSettings[key]; i%2 == 0 && !rotated && key != plugins.ProvisionRestoreHoldKey {
+			fromLive = append(fromLive, key)
+		}
+	}
+	slices.Sort(fromLive)
+	if !slices.Equal(liveOwn, fromLive) {
+		t.Errorf("ServerSpecificSettingKeys = %v, want the settings the carry takes from the live server %v", liveOwn, fromLive)
 	}
 	for i, key := range keys {
 		var got *string

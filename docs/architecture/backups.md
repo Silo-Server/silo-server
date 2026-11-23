@@ -1899,7 +1899,10 @@ builds no provider from the backup's legacy endpoint settings or the
 Ollama default (`config.PlanAIProviderConversion`). A binding left without
 its list, as a restore with another key leaves it, clears the unit too. A
 full restore then takes the list and bindings from the live server with its
-server-specific settings (below). `TestEveryCredentialSettingIsDecided`
+server-specific settings (below), so it lists a cleared unit with a setting
+the live server supplies that way as kept, not for re-entry, and leaves the
+settings it supplies out of the list of those the key cannot read
+(`ServerSpecificSettingKeys`). `TestEveryCredentialSettingIsDecided`
 fails on an encrypted setting that is neither in a unit nor this server's
 own (signing keys, storage, Redis, the web push key pair).
 
