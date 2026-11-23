@@ -8,6 +8,9 @@ import { useT } from "@/i18n";
 import { loginSessionDevice, sessionActive, sessionLastSeen } from "@/lib/loginSessionDevice";
 import type { LoginSession } from "@/hooks/queries/loginSessions";
 
+// Lets a button label wrap inside the card at narrow widths and large text sizes.
+const WRAPPING_BUTTON = "h-auto min-h-8 max-w-full py-1 text-start wrap-anywhere whitespace-normal";
+
 export function LoginSessionRow({
   session,
   onSignOut,
@@ -65,7 +68,7 @@ export function LoginSessionRow({
               type="button"
               size="sm"
               variant="outline"
-              className="h-auto min-h-8 max-w-full py-1 text-start wrap-anywhere whitespace-normal"
+              className={WRAPPING_BUTTON}
               aria-label={
                 session.current
                   ? t("web.settings.sessions.row.signOutThisBrowser")
@@ -83,7 +86,7 @@ export function LoginSessionRow({
             type="button"
             size="sm"
             variant="ghost"
-            className="text-muted-foreground hover:text-foreground"
+            className={cn(WRAPPING_BUTTON, "text-muted-foreground hover:text-foreground")}
             aria-label={t("web.settings.sessions.row.detailsFor", { device: device.name })}
             aria-expanded={expanded}
             aria-controls={detailsId}
