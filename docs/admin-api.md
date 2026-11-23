@@ -2245,8 +2245,8 @@ first finalization that knows one records it and later ones never change it, eve
 that did not get further. `end_reason` is why the attempt ended: `stopped` (the viewer's
 client stopped it), `terminated` (an administrator stopped or terminated it), `expired`
 (the liveness reaper ended it after the client went quiet), `aborted` (the server
-abandoned it) or `replaced` (a Jellyfin client switched play method, and the play
-continues under a new session with its own row). Every end records a row, including a
+abandoned it) or `replaced` (a Jellyfin client switched play method or version, and
+the play continues under a new session with its own row). Every end records a row, including a
 stop, close or abort handled by a server that did not hold the session's live copy;
 that row takes the start time, client and device from the shared live row when one is
 left. The one exception is a Jellyfin session copy that never reported progress: it may
