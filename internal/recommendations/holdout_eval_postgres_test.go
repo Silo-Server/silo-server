@@ -479,6 +479,10 @@ func measureEvalPersona(t *testing.T, f *relevanceFixture, c *evalCatalog, p *ev
 				t.Errorf("%s: row %q holds %s, which it engaged with before T", p.spec.name, key, id)
 			}
 		}
+		window := ids[:min(len(ids), ServedRowSize)]
+		if len(slices.Compact(slices.Sorted(slices.Values(window)))) != len(window) {
+			t.Errorf("%s: row %q serves a title twice: %v", p.spec.name, key, window)
+		}
 		recType, _, _ := strings.Cut(key, "|")
 		kind := evalRowKind(recType)
 		if kind == "" || len(ids) == 0 {
@@ -558,13 +562,18 @@ func evalReport(results []evalResult) string {
 // the same from run to run only under a fixed prefix.
 const evalPrefix = "trel-holdout-eval-"
 
-// newEvalFixture is newRelevanceFixture under evalPrefix, without titles a
-// run that did not finish left behind.
+// newEvalFixture is newRelevanceFixture under evalPrefix, without the
+// titles or the accounts, with their ratings, watches and taste profiles, a
+// run that did not finish left behind: reused title IDs would otherwise
+// carry that run's activity into this one's peer and co-watch thresholds.
+// Two runs sharing a database would still clear each other's fixtures, so
+// each needs its own; CI gives every package its own copy.
 func newEvalFixture(t *testing.T) *relevanceFixture {
 	t.Helper()
 	f := newRelevanceFixture(t, "eval")
 	f.prefix = evalPrefix
 	for _, q := range []string{
+		`DELETE FROM users WHERE username LIKE $1`,
 		`DELETE FROM item_cowatch WHERE item_id LIKE $1 OR similar_item_id LIKE $1`,
 		`DELETE FROM media_items WHERE content_id LIKE $1`,
 	} {
@@ -578,8 +587,9 @@ func newEvalFixture(t *testing.T) *relevanceFixture {
 
 // TestRecommendationHoldoutEvalPostgres runs the holdout evaluation above. It
 // fails when a held-out title reaches the engine's input, a row holds a title
-// its persona engaged with before T, or the focused persona's main row falls
-// below evalFocusedMainRecallFloor. It takes about five seconds: a thousand
+// its persona engaged with before T or serves one twice, a measured persona
+// lacks a row kind, or the focused persona's main row falls below
+// evalFocusedMainRecallFloor. It takes about five seconds: a thousand
 // embeddings to index and four full refreshes.
 func TestRecommendationHoldoutEvalPostgres(t *testing.T) {
 	f := newEvalFixture(t)
@@ -618,6 +628,15 @@ func TestRecommendationHoldoutEvalPostgres(t *testing.T) {
 	}
 	t.Logf("holdout evaluation (seed %s, refresh %s)\n%s", seeded.Round(time.Millisecond), (time.Since(start) - seeded).Round(time.Millisecond), evalReport(results))
 
+	// Every measured persona builds every row kind; a refresh that stops
+	// writing one would otherwise leave the scorecard short without failing.
+	for _, r := range results {
+		for _, kind := range evalRowKinds {
+			if len(r.rows[kind]) == 0 {
+				t.Errorf("%s: no %s row", r.name, kind)
+			}
+		}
+	}
 	if main := results[0].rows["main"]; len(main) != 1 || main[0].recall < evalFocusedMainRecallFloor {
 		t.Errorf("%s: main row %+v, want Recall@20 of at least %.2f", results[0].name, main, evalFocusedMainRecallFloor)
 	}
