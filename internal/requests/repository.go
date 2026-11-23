@@ -1084,9 +1084,8 @@ func (r *Repository) insertIntegration(ctx context.Context, exec requestExecutor
 		INSERT INTO request_integrations (
 			id, name, enabled, base_url, api_key_ref,
 			capability_id, installation_id, supported_media_types,
-			plugin_config, plugin_id, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,
-			coalesce((SELECT plugin_id FROM plugin_installations WHERE id = $7::integer), ''), now())
+			plugin_config, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9, now())
 		RETURNING `+integrationColumns,
 		i.ID, strings.TrimSpace(i.Name), i.Enabled, strings.TrimSpace(i.BaseURL),
 		apiKeyRef, capabilityID, i.InstallationID, supportedMediaTypes, pluginConfig)
@@ -1144,8 +1143,6 @@ func (r *Repository) updateIntegration(ctx context.Context, exec requestExecutor
 			name=$2, enabled=$3, base_url=$4,
 			api_key_ref = CASE WHEN $5 = '' THEN api_key_ref ELSE $5 END,
 			capability_id=$6, installation_id=$7,
-			plugin_id = coalesce((SELECT plugin_id FROM plugin_installations WHERE id = $7::integer),
-				CASE WHEN installation_id IS NOT DISTINCT FROM $7::integer THEN plugin_id ELSE '' END),
 			supported_media_types=$8, plugin_config=$9, updated_at=now()
 		WHERE id=$1
 		RETURNING `+integrationColumns,

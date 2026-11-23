@@ -9,14 +9,19 @@ import (
 )
 
 // routerRebindRepository extends the lifecycle schema with copies of the
-// plugin tables the rebind reads, so the shared database's plugins stay out.
+// plugin tables the rebind reads and the routes a delete clears, so the shared
+// database's rows stay out, and attaches the production trigger that records
+// each server's plugin.
 func routerRebindRepository(t *testing.T) (*Repository, *pgxpool.Pool) {
 	t.Helper()
 	repo, pool := lifecycleTestRepository(t)
-	for _, table := range []string{"plugin_installations", "plugin_capabilities"} {
+	for _, table := range []string{"plugin_installations", "plugin_capabilities", "request_routes"} {
 		if _, err := pool.Exec(t.Context(), `CREATE TABLE `+table+` (LIKE public.`+table+` INCLUDING ALL)`); err != nil {
 			t.Fatalf("copy %s: %v", table, err)
 		}
+	}
+	if _, err := pool.Exec(t.Context(), `CREATE TRIGGER request_integrations_plugin_id BEFORE INSERT OR UPDATE OF installation_id ON request_integrations FOR EACH ROW EXECUTE FUNCTION public.set_request_integration_plugin_id()`); err != nil {
+		t.Fatalf("attach plugin_id trigger: %v", err)
 	}
 	return repo, pool
 }
@@ -190,5 +195,38 @@ func TestRouterServerMovedToMissingInstallationForgetsItsPluginDatabase(t *testi
 
 	if rebound, err := repo.RebindOrphanedIntegrations(ctx); err != nil || len(rebound) != 0 {
 		t.Fatalf("rebind = %v, %v, want nothing", rebound, err)
+	}
+}
+
+// A replica still on the previous release writes request_integrations without
+// plugin_id during a rolling upgrade. A server it adds must still follow its
+// plugin's reinstall, and a server it moves to another plugin must not follow
+// the plugin it left, or the rebind would hand that plugin its API key.
+func TestRouterServerWrittenByPreviousReleaseKeepsItsPluginDatabase(t *testing.T) {
+	repo, pool := routerRebindRepository(t)
+	ctx := t.Context()
+	installRouterPlugin(t, pool, 10, "silo.requests.seerr", "seerr")
+	installRouterPlugin(t, pool, 11, "example.requests.seerr", "seerr")
+	insertRouterServer(t, repo, "moved", "seerr", 10)
+	// The previous release's insert and update name installation_id only.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO request_integrations (id, name, enabled, base_url, capability_id, installation_id)
+		VALUES ('added', 'added', true, 'http://router.invalid', 'seerr', 10)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE request_integrations SET installation_id = 11 WHERE id = 'moved'`); err != nil {
+		t.Fatal(err)
+	}
+
+	uninstallRouterPlugin(t, pool, 10)
+	uninstallRouterPlugin(t, pool, 11)
+	installRouterPlugin(t, pool, 20, "silo.requests.seerr", "seerr")
+
+	rebound, err := repo.RebindOrphanedIntegrations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(rebound, []string{"added"}) {
+		t.Fatalf("rebound = %v, want [added]", rebound)
 	}
 }
