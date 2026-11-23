@@ -33,6 +33,10 @@ const FRAMED_PADDING_BLOCK = 0.2;
 // From this opacity a fill, not the artwork, sits behind the text.
 const SOLID_FILL_ALPHA = 0.5;
 
+// The shadow that lifts badge text off the artwork when a see-through fill
+// leaves it there, as Minimal draws it.
+const SEE_THROUGH_TEXT_SHADOW: OverlayShadow = { x: 0, y: 1, blur: 2, color: "rgba(0,0,0,0.85)" };
+
 // The least contrast ratio at which accent-coloured text stays on a solid fill.
 const ACCENT_TEXT_CONTRAST = 3;
 
@@ -48,8 +52,9 @@ function alphaOf(hex: string): number {
 // border colour yields to the accent in presets that paint the accent there.
 // A solid fill without a chosen text colour gets black or white text, since
 // the preset's own colour was picked for its own fill or for the artwork. A
-// see-through fill in a preset that fills with the accent gets white text,
-// since that text sits on the artwork again. An accent the preset writes as
+// see-through fill in a preset that draws a fill gets white text, since its
+// own colour was picked for that fill and the text sits on the artwork again;
+// any see-through fill adds a text shadow when the preset has none. An accent the preset writes as
 // text that would not read on a solid fill tints it instead.
 export function applyOverlayStyle(
   preset: OverlayPreset,
@@ -85,6 +90,7 @@ export function applyOverlayStyle(
   const solidFill = fillAlpha >= SOLID_FILL_ALPHA ? background : undefined;
   // A shadow drawn to lift text off the artwork only muddies it on a fill.
   if (solidFill) next.textShadow = undefined;
+  else if (background) next.textShadow = preset.textShadow ?? SEE_THROUGH_TEXT_SHADOW;
   if (background || textColor || borderColor || style.borderWidth !== undefined) {
     const strategy = preset.accentStrategy;
     next.badgeStyle = (accent) => {
@@ -103,10 +109,10 @@ export function applyOverlayStyle(
           : background;
       }
       if (solidFill) css.textShadow = undefined;
-      const seeThroughAccent = accentFill && background && !solidFill;
+      const seeThroughFill = strategy === "bg" && background && !solidFill;
       const text =
         textColor ??
-        (solidFill ? readableTextOn(solidFill) : seeThroughAccent ? "#ffffff" : undefined);
+        (solidFill ? readableTextOn(solidFill) : seeThroughFill ? "#ffffff" : undefined);
       if (text && !accentText) css.color = text;
       if (borderColor && !(accent && strategy === "border")) css.borderColor = borderColor;
       if (style.borderWidth !== undefined && style.borderWidth > 0) css.borderStyle = "solid";
