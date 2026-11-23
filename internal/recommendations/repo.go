@@ -665,22 +665,13 @@ func (r *Repo) findTasteProfileCandidates(
 	}
 	args := []any{pgvector.NewHalfVector(embedding), excludeIDs, mediaTypes}
 	argIdx := 4
-	genreMatchCountSQL := "0"
-	annLimit := limit
 
+	// A genre constraint only filters: candidates are the nearest titles
+	// sharing at least one genre, in distance order. Ranking by how many
+	// genres match would let a distant title that matches every genre push
+	// a close one out of the pool; callers that want genre-first order, such
+	// as Watch Tonight cards, re-rank the pool themselves.
 	if len(genres) > 0 {
-		annLimit = limit * 5
-		if annLimit < limit {
-			annLimit = limit
-		}
-		if annLimit > 2000 {
-			annLimit = 2000
-		}
-		genreMatchCountSQL = fmt.Sprintf(`(
-				SELECT COUNT(DISTINCT matched_genre)
-				FROM unnest(COALESCE(mi.genres, '{}'::text[])) AS matched_genre
-				WHERE matched_genre = ANY($%d)
-			)`, argIdx)
 		conditions = append(conditions, fmt.Sprintf("mi.genres && $%d", argIdx))
 		args = append(args, genres)
 		argIdx++
@@ -695,6 +686,8 @@ func (r *Repo) findTasteProfileCandidates(
 
 	catalog.ApplyMaturityLimits("mi", filter, &conditions, &args, &argIdx)
 
+	// relaxed_order iterative scans can return the ANN rows slightly out of
+	// order, so the outer query restores exact distance order.
 	query := fmt.Sprintf(`
 			WITH ann_candidates AS (
 				SELECT mi.content_id,
@@ -708,17 +701,13 @@ func (r *Repo) findTasteProfileCandidates(
 			)
 			SELECT content_id,
 			       1 - distance AS similarity,
-			       genres,
-			       %s AS genre_match_count
-			FROM   ann_candidates mi
-			ORDER  BY genre_match_count DESC, distance ASC, content_id
-			LIMIT  $%d`,
+			       genres
+			FROM   ann_candidates
+			ORDER  BY distance ASC, content_id`,
 		strings.Join(conditions, " AND "),
 		argIdx,
-		genreMatchCountSQL,
-		argIdx+1,
 	)
-	args = append(args, annLimit, limit)
+	args = append(args, limit)
 
 	var items []ScoredItem
 	genreMap := make(map[string][]string, limit)
@@ -733,8 +722,7 @@ func (r *Repo) findTasteProfileCandidates(
 		for rows.Next() {
 			var item ScoredItem
 			var itemGenres []string
-			var genreMatchCount int
-			if err := rows.Scan(&item.MediaItemID, &item.Score, &itemGenres, &genreMatchCount); err != nil {
+			if err := rows.Scan(&item.MediaItemID, &item.Score, &itemGenres); err != nil {
 				return fmt.Errorf("scan taste profile candidate: %w", err)
 			}
 			item.Reason = "taste_profile_match"

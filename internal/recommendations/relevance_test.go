@@ -249,16 +249,14 @@ func (s *toyStore) FindTasteProfileCandidates(ctx context.Context, embedding []f
 }
 
 // FindTasteProfileCandidatesByMediaType mirrors findTasteProfileCandidates:
-// the nearest titles first, and with genres the nearest limit×5 that share one
-// of them, re-ordered by how many they share.
+// the nearest titles first, and with genres only those that share one of them.
 func (s *toyStore) FindTasteProfileCandidatesByMediaType(_ context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, _ catalog.AccessFilter, mediaType string) ([]ScoredItem, map[string][]string, error) {
 	if embedding == nil || limit <= 0 {
 		return []ScoredItem{}, map[string][]string{}, nil
 	}
 	type hit struct {
-		item    *toyItem
-		sim     float64
-		matches int
+		item *toyItem
+		sim  float64
 	}
 	var hits []hit
 	for i := range s.catalog.items {
@@ -269,34 +267,16 @@ func (s *toyStore) FindTasteProfileCandidatesByMediaType(_ context.Context, embe
 		if s.allowed != nil && !s.allowed(item) {
 			continue
 		}
-		matches := 0
-		for _, g := range genres {
-			if slices.Contains(item.genres, g) {
-				matches++
-			}
-		}
-		if len(genres) > 0 && matches == 0 {
+		if len(genres) > 0 && !slices.ContainsFunc(genres, func(g string) bool { return slices.Contains(item.genres, g) }) {
 			continue
 		}
-		hits = append(hits, hit{item, cosineSimilarity(embedding, item.vec), matches})
+		hits = append(hits, hit{item, cosineSimilarity(embedding, item.vec)})
 	}
-	byDistance := func(a, b hit) int {
+	slices.SortFunc(hits, func(a, b hit) int {
 		if c := cmp.Compare(b.sim, a.sim); c != 0 {
 			return c
 		}
 		return strings.Compare(a.item.id, b.item.id)
-	}
-	slices.SortFunc(hits, byDistance)
-	annLimit := limit
-	if len(genres) > 0 {
-		annLimit = min(limit*5, 2000)
-	}
-	hits = hits[:min(len(hits), annLimit)]
-	slices.SortStableFunc(hits, func(a, b hit) int {
-		if c := cmp.Compare(b.matches, a.matches); c != 0 {
-			return c
-		}
-		return byDistance(a, b)
 	})
 	hits = hits[:min(len(hits), limit)]
 	items := make([]ScoredItem, len(hits))
