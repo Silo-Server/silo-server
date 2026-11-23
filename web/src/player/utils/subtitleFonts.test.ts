@@ -159,12 +159,15 @@ describe("fontFamilyNames", () => {
   });
 
   it("stops reading a collection once its records have used the parsing budget", () => {
-    // Four fonts share one name table of 65,535 records no style can name, so
-    // they decode nothing; the fifth font's own name comes after the budget.
-    const records = 65_535;
+    // Four fonts list 600 other tables before one shared name table of 65,000
+    // records no style can name, so they decode nothing; together they spend
+    // the budget, and the fifth font's own name is never read.
+    const records = 65_000;
+    const otherTables = 600;
     const shared = 6 + records * 12;
     const header = 12 + 5 * 4;
-    const faceAt = (i: number) => header + i * 28;
+    const faceSize = 12 + (otherTables + 1) * 16;
+    const faceAt = (i: number) => header + i * faceSize;
     const sharedAt = faceAt(4);
     const late = sfntWithNames([{ platform: 3, encoding: 1, nameId: 1, value: "Late Name" }]);
     const lateAt = sharedAt + shared;
@@ -174,14 +177,16 @@ describe("fontFamilyNames", () => {
     view.setUint32(4, 0x00010000);
     view.setUint32(8, 5);
     for (let i = 0; i < 4; i += 1) {
-      view.setUint32(12 + i * 4, faceAt(i));
-      view.setUint32(faceAt(i), 0x00010000);
-      view.setUint16(faceAt(i) + 4, 1);
+      const at = faceAt(i);
+      view.setUint32(12 + i * 4, at);
+      view.setUint32(at, 0x00010000);
+      view.setUint16(at + 4, otherTables + 1);
+      const nameRecord = at + 12 + otherTables * 16;
       collection.set(
         [..."name"].map((c) => c.charCodeAt(0)),
-        faceAt(i) + 12,
+        nameRecord,
       );
-      view.setUint32(faceAt(i) + 20, sharedAt);
+      view.setUint32(nameRecord + 8, sharedAt);
     }
     view.setUint32(12 + 4 * 4, lateAt);
     view.setUint16(sharedAt + 2, records);
