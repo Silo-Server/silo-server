@@ -37,8 +37,9 @@ const (
 	localArtworkCopyBacklog = 4096
 )
 
-// imageCacheOutcomeDeferred is the outcome of a local job left for a server
-// that can see its library root.
+// imageCacheOutcomeDeferred is the outcome of a job released without an
+// attempt: a local job left for a server that can see its library root, or a
+// job waiting for the artwork store to have room.
 const imageCacheOutcomeDeferred = "deferred"
 
 // LocalArtworkCopier copies discovered local artwork into the artwork store
@@ -153,6 +154,12 @@ func (p *ImageCacheProcessor) copyDiscoveredLocalArtwork(store localArtworkJobSt
 		return
 	}
 	if job == nil {
+		return
+	}
+	// A deferral for a full store counts no attempt, so a scan finds the
+	// job again; right after a full-store failure it waits without reading
+	// or decoding the file, as background drains do.
+	if p.storageRecentlyFull() && p.deferForFullStorage(ctx, job) {
 		return
 	}
 	result := p.processOne(ctx, job)

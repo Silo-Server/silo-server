@@ -253,11 +253,11 @@ function PluginPageHeader({
   return (
     <div className="flex flex-wrap items-center gap-4">
       <PluginMonogram name={name} size="lg" />
-      <div className="min-w-[220px] flex-1">
-        <h1 className="text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance sm:text-[2rem]">
+      <div className="min-w-[min(220px,100%)] flex-1">
+        <h1 className="text-[1.75rem] leading-[1.15] font-bold tracking-[-0.035em] text-balance break-words sm:text-[2rem]">
           {name}
         </h1>
-        <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13.5px]">
+        <div className="text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[0.84375rem]">
           {meta}
         </div>
       </div>
@@ -308,7 +308,7 @@ function TierNotice({ tier }: { tier: string }) {
 /** Stands in for the Updates menu when no update policy can apply. */
 function UpdatesState({ children }: { children: ReactNode }) {
   return (
-    <span className="text-muted-foreground inline-flex h-8 items-center text-[13px]">
+    <span className="text-muted-foreground inline-flex h-8 items-center text-[0.8125rem]">
       {children}
     </span>
   );
@@ -425,7 +425,7 @@ function InstalledPluginPage({
                 <SelectTrigger
                   size="sm"
                   aria-label={t("web.admin.plugins.detail.updatesLabel")}
-                  className="h-8 text-[13px]"
+                  className="h-8 text-[0.8125rem]"
                 >
                   <SelectValue />
                 </SelectTrigger>
@@ -438,7 +438,7 @@ function InstalledPluginPage({
                 </SelectContent>
               </Select>
             )}
-            <label className="text-foreground/85 flex items-center gap-2 text-[13.5px]">
+            <label className="text-foreground/85 flex items-center gap-2 text-[0.84375rem]">
               <Switch
                 checked={installation.enabled}
                 aria-label={t("web.admin.plugins.detail.enabledLabel")}
@@ -681,7 +681,7 @@ function InstalledPluginPage({
                 })
               }
               disabled={deleteInstallation.isPending || ownership !== undefined}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              variant="destructive"
             >
               {deleteInstallation.isPending
                 ? t("web.admin.plugins.detail.uninstalling")

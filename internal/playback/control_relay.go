@@ -67,7 +67,8 @@ const (
 	controlRelayRefreshInterval = 10 * time.Second
 	// controlRelayReplyTimeout bounds the wait for the owner's reply. The
 	// owner's work is one bounded lane write (5 s socket write deadline) plus,
-	// for a terminate, the session stop; the margin covers the bus.
+	// for a terminate, the session stop; the margin covers the bus. A request
+	// whose owner then waits for the player (ForwardWaiting) adds that wait.
 	controlRelayReplyTimeout = 8 * time.Second
 	// controlRelayHandlerTimeout bounds a relayed request on the owner. It is
 	// longer than the reply wait because a request served there is not
@@ -262,10 +263,18 @@ func (r *ControlRelay) startSubscribed(ctx context.Context, publish func(context
 // outcomes). An explicit decline permits one retry at a changed owner within
 // the original reply deadline; a missing reply never permits a retry.
 func (r *ControlRelay) Forward(ctx context.Context, sessionID, op string, body any) (json.RawMessage, ControlRelayOutcome) {
-	return r.forward(ctx, sessionID, op, body, "")
+	return r.forward(ctx, sessionID, op, body, "", 0)
 }
 
-func (r *ControlRelay) forward(ctx context.Context, sessionID, op string, body any, declinedOwner string) (json.RawMessage, ControlRelayOutcome) {
+// ForwardWaiting is Forward for a request whose owner, after its own work,
+// waits up to extra for the player, as an administrator's message does for
+// the player's answer. Only that request's reply wait grows by extra, so a
+// terminate whose owner died still falls back on the usual schedule.
+func (r *ControlRelay) ForwardWaiting(ctx context.Context, sessionID, op string, body any, extra time.Duration) (json.RawMessage, ControlRelayOutcome) {
+	return r.forward(ctx, sessionID, op, body, "", extra)
+}
+
+func (r *ControlRelay) forward(ctx context.Context, sessionID, op string, body any, declinedOwner string, extra time.Duration) (json.RawMessage, ControlRelayOutcome) {
 	if r == nil || sessionID == "" {
 		return nil, ControlRelayServeLocally
 	}
@@ -315,7 +324,7 @@ func (r *ControlRelay) forward(ctx context.Context, sessionID, op string, body a
 		r.mu.Unlock()
 	}()
 
-	waitCtx, cancelWait := context.WithTimeout(ctx, r.replyTimeout)
+	waitCtx, cancelWait := context.WithTimeout(ctx, r.replyTimeout+extra)
 	defer cancelWait()
 	if err := publish(waitCtx, string(payload)); err != nil {
 		slog.WarnContext(ctx, "playback control relay: publish failed", "component", "playback", "playback_session_id", sessionID, "op", op, "error", err)
@@ -325,7 +334,7 @@ func (r *ControlRelay) forward(ctx context.Context, sessionID, op string, body a
 	case msg := <-replies:
 		if !msg.Handled {
 			if declinedOwner == "" {
-				return r.forward(waitCtx, sessionID, op, body, owner)
+				return r.forward(waitCtx, sessionID, op, body, owner, extra)
 			}
 			return nil, ControlRelayServeLocally
 		}

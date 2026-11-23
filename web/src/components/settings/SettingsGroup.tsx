@@ -44,13 +44,16 @@ export function SettingsGroup({
       <div className="grid gap-x-12 gap-y-4 lg:@[52rem]/settings-section:grid-cols-[16rem_minmax(0,1fr)]">
         <div className="min-w-0 space-y-1.5">
           <div className="flex items-baseline justify-between gap-3">
-            <h3 id={titleId} className="text-foreground text-[15px] font-semibold tracking-tight">
+            <h3
+              id={titleId}
+              className="text-foreground text-[0.9375rem] font-semibold tracking-tight"
+            >
               {title}
             </h3>
             {actions ? <div className="flex shrink-0 items-center gap-2">{actions}</div> : null}
           </div>
           {description ? (
-            <p className="text-muted-foreground text-[13px] leading-relaxed">{description}</p>
+            <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">{description}</p>
           ) : null}
         </div>
         <div

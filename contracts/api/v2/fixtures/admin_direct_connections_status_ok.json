@@ -1,0 +1,22 @@
+{
+  "enabled": false,
+  "hosts": [
+    {
+      "host": {
+        "id": "api",
+        "role": "api",
+        "name": "API"
+      },
+      "checked_at": "2026-01-02T03:04:05.678Z",
+      "features": [
+        {
+          "feature": "direct",
+          "kind": "local",
+          "state": "off",
+          "reason": "disabled"
+        }
+      ],
+      "knobs": []
+    }
+  ]
+}

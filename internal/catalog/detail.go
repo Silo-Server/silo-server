@@ -22,10 +22,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/fspath"
 	"github.com/Silo-Server/silo-server/internal/imagesize"
 	"github.com/Silo-Server/silo-server/internal/lang"
+	"github.com/Silo-Server/silo-server/internal/mediatrack"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/naming"
 	"github.com/Silo-Server/silo-server/internal/overlays"
-	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/settingsresolve"
@@ -64,8 +64,7 @@ type PlaybackProbeEnsurer interface {
 
 // CopySafetyRacer resolves an unknown H.264 copy-safety verdict out of band.
 // The watch page asks for it and never waits: the verdict is not part of the
-// response, and any session that later ends up on a stream-copy route for the
-// file is switched off it by the playback-side notifier when the scan lands.
+// response; the persisted verdict reaches the plans made after it lands.
 //
 // It is a narrow injected interface so the catalog keeps no dependency on the
 // playback session machinery that implements it.
@@ -4376,7 +4375,7 @@ type audioPrefResolver struct {
 	profileLang string
 
 	audioDone bool
-	audioPref *playback.AudioTrackPreference
+	audioPref *mediatrack.AudioTrackPreference
 
 	originalDone bool
 	originalLang string
@@ -4420,12 +4419,12 @@ func (s *DetailService) newAudioPrefResolver(ctx context.Context, filter AccessF
 // audioPreference returns a fresh copy of the item's stored audio preference
 // (or nil). A copy is returned each call so the caller can resolve the
 // original-language sentinel in place without mutating the memoized value.
-func (r *audioPrefResolver) audioPreference(ctx context.Context) *playback.AudioTrackPreference {
+func (r *audioPrefResolver) audioPreference(ctx context.Context) *mediatrack.AudioTrackPreference {
 	if !r.audioDone {
 		r.audioDone = true
 		if strings.TrimSpace(r.contentID) != "" {
 			if pref, prefErr := r.store.GetAudioPreference(ctx, r.profileID, r.contentID); prefErr == nil && pref != nil {
-				r.audioPref = &playback.AudioTrackPreference{
+				r.audioPref = &mediatrack.AudioTrackPreference{
 					AudioTrackIndex: pref.AudioTrackIndex,
 					AudioLanguage:   pref.AudioLanguage,
 					TrackSignature:  pref.TrackSignature,
@@ -4524,7 +4523,7 @@ func (s *DetailService) effectiveAudioSelectionWith(
 		return effectiveAudioSelection{}
 	}
 	if r == nil || !r.valid {
-		index := playback.SelectAudioTrack(file.AudioTracks, "", nil)
+		index := mediatrack.SelectAudioTrack(file.AudioTracks, "", nil)
 		return effectiveAudioSelection{
 			Index:    index,
 			Language: resolveSelectedAudioLanguage(file, index, "", false),
@@ -4542,7 +4541,7 @@ func (s *DetailService) effectiveAudioSelectionWith(
 		return originalLanguage
 	}
 
-	usesOriginal := playback.IsOriginalLanguagePreference(preferredLang)
+	usesOriginal := mediatrack.IsOriginalLanguagePreference(preferredLang)
 	if usesOriginal {
 		preferredLang = resolveOriginalLanguage()
 		if preferredLang == "" {
@@ -4551,7 +4550,7 @@ func (s *DetailService) effectiveAudioSelectionWith(
 			// failure behavior while moving the content-scoped read to canonical
 			// storage.
 			preferredLang = r.profileLanguage(ctx)
-			if playback.IsOriginalLanguagePreference(preferredLang) {
+			if mediatrack.IsOriginalLanguagePreference(preferredLang) {
 				preferredLang = resolveOriginalLanguage()
 			}
 		}
@@ -4563,7 +4562,7 @@ func (s *DetailService) effectiveAudioSelectionWith(
 		seriesPref.AudioLanguage = preferredLang
 	}
 
-	index := playback.SelectAudioTrack(file.AudioTracks, preferredLang, seriesPref)
+	index := mediatrack.SelectAudioTrack(file.AudioTracks, preferredLang, seriesPref)
 	return effectiveAudioSelection{
 		Index:    index,
 		Language: resolveSelectedAudioLanguage(file, index, originalLanguage, usesOriginal),
@@ -5082,9 +5081,9 @@ func fileIDOrZero(version *FileVersion) int {
 //
 // It deliberately does not wait for an unknown verdict: the bitstream scan is
 // started in the background instead, so opening the watch page costs nothing
-// even for a file nobody has played yet. No session exists at this point — if
-// one appears and lands on a stream-copy route before the scan finishes, the
-// playback-side notifier switches it off that route when the verdict lands.
+// even for a file nobody has played yet. The verdict is persisted for the
+// download policy and for the strict web decoders that get a copy-unsafe
+// source encoded on the first plan.
 func (s *DetailService) preparePlaybackFiles(ctx context.Context, files []*models.MediaFile) []*models.MediaFile {
 	return s.prepareFiles(ctx, files, true)
 }

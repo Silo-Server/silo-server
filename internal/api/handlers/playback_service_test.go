@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	jsonv2 "encoding/json/v2"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -18,6 +19,7 @@ import (
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	evt "github.com/Silo-Server/silo-server/internal/events"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/nodeauth/nodeauthtest"
 	"github.com/Silo-Server/silo-server/internal/playback"
@@ -243,11 +245,224 @@ func TestStopPlaybackV2FirstStopWinsAndLaterStopsReplay(t *testing.T) {
 	assertPlaybackOperationError(t, err, http.StatusBadRequest, "bad_request")
 }
 
+func TestNativePlaybackStopPublishesSavedProgressToProfile(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		detached bool
+	}{
+		{name: "live session"},
+		{name: "detached session", detached: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newPlaybackServiceFixture(t)
+			store := newPlaybackTestStore(t)
+			f.handler.StoreProvider = testUserStoreProvider{store: store}
+			f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{
+				ID: 100, ContentID: "series-1", EpisodeID: "episode-1", Duration: 3600,
+			}}
+			f.handler.EpisodeLookup = testEpisodeLookup{episode: &models.Episode{SeriesID: "series-1"}}
+			f.handler.EventsHub = evt.NewHub("playback-test", nil)
+			events, unsubscribe := f.handler.EventsHub.Subscribe()
+			t.Cleanup(unsubscribe)
+			if tc.detached {
+				if err := f.manager.StopSession(f.session.ID); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			_, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 600})
+			if err != nil {
+				t.Fatal(err)
+			}
+			select {
+			case event := <-events:
+				t.Fatalf("position-only sample published %s", event.Event)
+			default:
+			}
+
+			if !tc.detached {
+				f.handler.sessionMgr = liveStopSnapshotRace{f.manager}
+			}
+			command := PlaybackStopCommand{StopID: "c2c87108-1bb1-4d1b-b25d-c37d928a9bd7", Sequence: 2, Position: new(900.0)}
+			stopped, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, command)
+			if err != nil || stopped.Outcome != PlaybackOutcomeStopped {
+				t.Fatalf("stop: %+v, %v", stopped, err)
+			}
+			select {
+			case event := <-events:
+				var payload userStateEventPayload
+				if err := jsonv2.Unmarshal(event.Data, &payload); err != nil {
+					t.Fatal(err)
+				}
+				if event.Channel != evt.ChannelUserState || event.Event != userStateChangedEvent ||
+					event.UserID != f.caller.UserID || event.ProfileID != f.caller.ProfileID ||
+					payload.ProfileID != f.caller.ProfileID || payload.ContentID != "episode-1" ||
+					payload.SeriesID != "series-1" || payload.Change != "progress" || !payload.PlaybackStopped {
+					t.Fatalf("unexpected watch-state event: %+v, payload %+v", event, payload)
+				}
+			default:
+				t.Fatal("saved playback stop did not publish a watch-state event")
+			}
+			saved, err := store.GetProgress(t.Context(), f.caller.ProfileID, "episode-1")
+			if err != nil || saved == nil || saved.PositionSeconds != 900 {
+				t.Fatalf("saved progress: %+v, %v", saved, err)
+			}
+			replayed, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, command)
+			if err != nil || replayed.Outcome != PlaybackOutcomeReplayed {
+				t.Fatalf("replay: %+v, %v", replayed, err)
+			}
+			select {
+			case event := <-events:
+				t.Fatalf("replayed stop published %s", event.Event)
+			default:
+			}
+		})
+	}
+}
+
+func TestCompatibilityPlaybackStopPublishesV2WatchState(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	f.handler.StoreProvider = testUserStoreProvider{store: newPlaybackTestStore(t)}
+	f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{
+		ID: 100, ContentID: "movie-1", Duration: 3600,
+	}}
+	f.handler.EventsHub = evt.NewHub("playback-test", nil)
+	events, unsubscribe := f.handler.EventsHub.Subscribe()
+	t.Cleanup(unsubscribe)
+
+	session := &playback.Session{
+		ID: f.session.ID, UserID: f.caller.UserID, ProfileID: f.caller.ProfileID,
+		MediaFileID: 100, Position: 900, IsJellyfinCompat: true,
+	}
+	if result := f.handler.persistStopAndHistory(t.Context(), session); result.HistoryID == "" {
+		t.Fatalf("compatibility stop did not write history: %+v", result)
+	}
+	select {
+	case event := <-events:
+		var payload userStateEventPayload
+		if err := jsonv2.Unmarshal(event.Data, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if !event.V2Only || payload.ContentID != "movie-1" || !payload.PlaybackStopped {
+			t.Fatalf("unexpected compatibility stop event: %+v, payload %+v", event, payload)
+		}
+	default:
+		t.Fatal("compatibility stop did not publish a watch-state event")
+	}
+	if result := f.handler.persistStopAndHistory(t.Context(), session); !result.AlreadyRecorded {
+		t.Fatalf("compatibility replay was recorded again: %+v", result)
+	}
+	select {
+	case event := <-events:
+		t.Fatalf("replayed compatibility stop published %s", event.Event)
+	default:
+	}
+}
+
+func TestSQLitePlaybackStopReplayPreservesLaterProgress(t *testing.T) {
+	ctx := t.Context()
+	store := newPlaybackTestStore(t)
+	stop := userstore.PlaybackStopWrite{
+		Entry: userstore.WatchHistoryEntry{
+			ID: "final-stop", ProfileID: "profile-1", MediaItemID: "movie-1", DurationSeconds: 3600,
+		},
+		ReplayUntil:     time.Now().Add(time.Hour),
+		PositionSeconds: 900,
+	}
+	if _, replay, err := userstore.CommitPlaybackStop(ctx, store, stop); err != nil || replay {
+		t.Fatalf("initial stop: replay=%t, err=%v", replay, err)
+	}
+	if err := store.RemoveHistoryItems(ctx, "profile-1", []string{"movie-1"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetProgress(ctx, "profile-1", "movie-1", 1800, 3600, stop.Thresholds); err != nil {
+		t.Fatal(err)
+	}
+	// A change to the threshold during receipt recovery cannot turn the
+	// committed stop into a new completion.
+	stop.Thresholds.WatchedPct = 10
+	if _, replay, err := userstore.CommitPlaybackStop(ctx, store, stop); err != nil || !replay {
+		t.Fatalf("retried stop: replay=%t, err=%v", replay, err)
+	}
+	progress, err := store.GetProgress(ctx, "profile-1", "movie-1")
+	if err != nil || progress == nil || progress.PositionSeconds != 1800 {
+		t.Fatalf("later progress: %+v, %v", progress, err)
+	}
+	history, err := store.ListHistory(ctx, "profile-1", 1, 0)
+	if err != nil || len(history) != 0 {
+		t.Fatalf("stop replay restored removed history: %+v, %v", history, err)
+	}
+}
+
+func TestSQLitePlaybackProgressSkipsHintsBelowMinimumResume(t *testing.T) {
+	ctx := t.Context()
+	store := newPlaybackTestStore(t)
+	thresholds := userstore.ProgressThresholds{MinResumePct: 10}
+	if err := store.SetProgress(ctx, "profile-1", "movie-1", 900, 3600, thresholds); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateProgressHints(ctx, "profile-1", "movie-1", userstore.VersionHints{FileID: 1}); err != nil {
+		t.Fatal(err)
+	}
+	written, completed, err := userstore.WritePlaybackProgress(ctx, store, "session-1", 1, "profile-1", "movie-1", 30, 3600, thresholds, userstore.VersionHints{FileID: 2})
+	if err != nil || written || completed {
+		t.Fatalf("skipped sample: written=%t, completed=%t, err=%v", written, completed, err)
+	}
+	progress, err := store.GetProgress(ctx, "profile-1", "movie-1")
+	if err != nil || progress == nil || progress.PositionSeconds != 900 || progress.LastFileID == nil || *progress.LastFileID != 1 {
+		t.Fatalf("skipped sample changed progress or hints: %+v, %v", progress, err)
+	}
+}
+
+func TestNativePlaybackStopFinalizesAfterSenderDisconnects(t *testing.T) {
+	f := newPlaybackServiceFixture(t)
+	store := newPlaybackTestStore(t)
+	f.handler.StoreProvider = testUserStoreProvider{store: store}
+	f.handler.fileResolver = testPlaybackFileResolver{file: &models.MediaFile{
+		ID: 100, ContentID: "movie-1", Duration: 3600,
+	}}
+	attempts := f.handler.PlanStoreV3.(playback.ProgressStoreV3)
+	record, err := f.handler.PlanStoreV3.GetAttempt(t.Context(), f.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	receipt, first, err := attempts.StopAttempt(t.Context(), f.session.ID, uuid.NewString(), &playback.ProgressSampleV3{Sequence: 1, Position: 900})
+	if err != nil || !first {
+		t.Fatalf("accept stop: %+v, %v", receipt, err)
+	}
+	disconnected, cancel := context.WithCancel(f.ctx)
+	cancel()
+	final := f.handler.finalizeStopV2(disconnected, attempts, record, f.session.ID, receipt)
+	if !final.Finalized || final.HistoryID == "" {
+		t.Fatalf("accepted stop did not finish: %+v", final)
+	}
+	if saved, err := store.GetProgress(t.Context(), f.caller.ProfileID, "movie-1"); err != nil || saved == nil || saved.PositionSeconds != 900 {
+		t.Fatalf("saved progress: %+v, %v", saved, err)
+	}
+}
+
+type liveStopSnapshotRace struct {
+	*playback.SessionManager
+}
+
+func (m liveStopSnapshotRace) GetSession(id string) (*playback.Session, error) {
+	session, err := m.SessionManager.GetSession(id)
+	if err == nil && session.Position == 900 {
+		// An accepted heartbeat finally reaches the live copy after the
+		// stop applied 900 to it, but before teardown snapshots the copy.
+		if updateErr := m.UpdateProgress(id, 600, false); updateErr != nil {
+			return nil, updateErr
+		}
+		return m.SessionManager.GetSession(id)
+	}
+	return session, err
+}
+
 // TestStopPlaybackV2RefusesServerStopIDs covers a client stop that names one
 // of the ids the server mints for its own ends: it is refused, so a client
 // cannot record its play as terminated, expired or aborted.
 func TestStopPlaybackV2RefusesServerStopIDs(t *testing.T) {
-	for _, minted := range []func(string) string{adminStopID, expiredStopID, abortStopID} {
+	for _, minted := range []func(string) string{adminStopID, expiredStopID, abortStopID, pausedTimeoutStopID} {
 		f := newPlaybackServiceFixture(t)
 		_, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: minted(f.session.ID)})
 		assertPlaybackOperationError(t, err, http.StatusBadRequest, "bad_request")
@@ -675,29 +890,41 @@ func TestStopFinalizationRunsOnce(t *testing.T) {
 	}
 }
 
-// An attempt an administrator ended answers 410 on progress and replan, so the
-// player exits; an expired attempt keeps answering 404 so the player renews.
-func TestStoppedAttemptAnswersGoneOnlyWhenAnAdministratorEndedIt(t *testing.T) {
+// An attempt an administrator or the paused timeout ended answers 410 on
+// progress and replan, so the player exits: the paused timeout with its own
+// type for a client that advertised paused_timeout_v1. An expired attempt
+// keeps answering 404 so the player renews. Another profile gets 403 either
+// way.
+func TestStoppedAttemptAnswersGoneWhenThePlayerMustLeave(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		stop   func(*PlaybackHandler, string)
-		status int
-		code   string
+		name     string
+		stopID   func(string) string
+		features []string
+		status   int
+		code     string
 	}{
-		{"administrator", func(h *PlaybackHandler, id string) { stopAttemptAs(h, id, adminStopID(id)) }, http.StatusGone, "playback_session_ended"},
-		{"expiry", func(h *PlaybackHandler, id string) { stopAttemptAs(h, id, expiredStopID(id)) }, http.StatusNotFound, "session_not_found"},
+		{"administrator", adminStopID, nil, http.StatusGone, "playback_session_ended"},
+		{"paused timeout", pausedTimeoutStopID, []string{playback.FeaturePausedTimeoutV3}, http.StatusGone, "playback_session_paused_timeout"},
+		{"paused timeout, legacy client", pausedTimeoutStopID, nil, http.StatusGone, "playback_session_ended"},
+		{"expiry", expiredStopID, []string{playback.FeaturePausedTimeoutV3}, http.StatusNotFound, "session_not_found"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newPlaybackServiceFixture(t)
-			record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			tc.stop(f.handler, f.session.ID)
-			_, err = f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 10})
+			record := f.withClientFeatures(t, tc.features...)
+			stopAttemptAs(f.handler, f.session.ID, tc.stopID(f.session.ID))
+			_, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 10})
 			assertPlaybackOperationError(t, err, tc.status, tc.code)
-			_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto"}, Digest: "d"})
+			replan := PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto"}, Digest: "d"}
+			_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, replan)
 			assertPlaybackOperationError(t, err, tc.status, tc.code)
+			// Another profile is refused before it learns how the play ended.
+			other := f.caller
+			other.ProfileID = "profile-2"
+			otherCtx := apimw.SetProfileID(f.ctx, other.ProfileID)
+			_, err = f.handler.ApplyProgressV2(otherCtx, other, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 10})
+			assertPlaybackOperationError(t, err, http.StatusForbidden, "forbidden")
+			_, err = f.handler.ReplanPlaybackV2(otherCtx, other, f.session.ID, replan)
+			assertPlaybackOperationError(t, err, http.StatusForbidden, "forbidden")
 		})
 	}
 }
@@ -736,11 +963,38 @@ func (s *stopAfterFirstReadPlanStoreV3) GetAttempt(ctx context.Context, sessionI
 	return record, err
 }
 
-// An administrator stop that lands after the replan precheck still answers
-// 410, not the 404 the player would renew from.
-func TestReplanAnswersGoneWhenAnAdministratorStopLandsMidReplan(t *testing.T) {
-	f := newPlaybackServiceFixture(t)
-	start := v3HandlerStartRequest()
+// An administrator stop or a paused timeout that lands after the replan
+// precheck still answers 410, not the 404 the player would renew from.
+func TestReplanAnswersGoneWhenAnEndLandsMidReplan(t *testing.T) {
+	for _, tc := range []struct {
+		stopID func(string) string
+		code   string
+	}{
+		{adminStopID, "playback_session_ended"},
+		{pausedTimeoutStopID, "playback_session_paused_timeout"},
+	} {
+		f := newPlaybackServiceFixture(t)
+		start := v3HandlerStartRequest()
+		memory, ok := f.handler.PlanStoreV3.(*playback.MemoryPlanStoreV3)
+		if !ok {
+			t.Fatalf("plan store = %T", f.handler.PlanStoreV3)
+		}
+		record := f.withClientFeatures(t, playback.FeaturePausedTimeoutV3)
+		f.handler.PlanStoreV3 = &stopAfterFirstReadPlanStoreV3{MemoryPlanStoreV3: memory, stop: func() {
+			if err := f.manager.StopSession(f.session.ID); err != nil {
+				t.Fatal(err)
+			}
+			stopAttemptAs(f.handler, f.session.ID, tc.stopID(f.session.ID))
+		}}
+		_, err := f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto", Failure: playback.FailureV3{Classification: "network_error"}, Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext}, Digest: "d"})
+		assertPlaybackOperationError(t, err, http.StatusGone, tc.code)
+	}
+}
+
+// withClientFeatures sets the fixture attempt's durable client features and
+// returns the attempt.
+func (f *playbackServiceFixture) withClientFeatures(t *testing.T, features ...string) *playback.AttemptRecordV3 {
+	t.Helper()
 	memory, ok := f.handler.PlanStoreV3.(*playback.MemoryPlanStoreV3)
 	if !ok {
 		t.Fatalf("plan store = %T", f.handler.PlanStoreV3)
@@ -749,14 +1003,9 @@ func TestReplanAnswersGoneWhenAnAdministratorStopLandsMidReplan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.handler.PlanStoreV3 = &stopAfterFirstReadPlanStoreV3{MemoryPlanStoreV3: memory, stop: func() {
-		if err := f.manager.StopSession(f.session.ID); err != nil {
-			t.Fatal(err)
-		}
-		stopAttemptAs(f.handler, f.session.ID, adminStopID(f.session.ID))
-	}}
-	_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto", Failure: playback.FailureV3{Classification: "network_error"}, Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext}, Digest: "d"})
-	assertPlaybackOperationError(t, err, http.StatusGone, "playback_session_ended")
+	record.NormalizedRequest.ClientFeatures = features
+	memory.ReplaceAttempt(context.Background(), *record)
+	return record
 }
 
 // TestStaleCopyExpiryLeavesTheRemoteTransport: a replica reaping a stale copy

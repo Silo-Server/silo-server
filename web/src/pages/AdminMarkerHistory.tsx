@@ -3,6 +3,7 @@ import { Link } from "react-router";
 import { RefreshCw } from "lucide-react";
 import type { MarkerEditAuditEntry, MarkerSegment } from "@/api/types";
 import { PageHeader } from "@/components/page/PageHeader";
+import { PathText } from "@/components/PathText";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -113,9 +114,21 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
     row.media_title ||
     fileName(row.file_path) ||
     t("web.admin.markers.history.fileFallback", { id: String(row.media_file_id) });
+  // The label as text, for the tooltip of a row with a type.
   const itemLabel = row.item_type
     ? t("web.admin.markers.history.itemWithType", { title, type: row.item_type })
-    : title;
+    : undefined;
+  // The title on its own element takes its own direction without turning the
+  // translated words around it. Without a type the title is the whole label, so
+  // it carries the tooltip, which then reads in the title's direction too.
+  const titleNode = (
+    <span dir="auto" className="truncate" title={row.item_type ? undefined : title}>
+      {title}
+    </span>
+  );
+  const label = row.item_type
+    ? t("web.admin.markers.history.itemWithType", { title: titleNode, type: row.item_type })
+    : titleNode;
 
   return (
     <TableRow>
@@ -123,22 +136,38 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
         {formatHistoryDate(row.created_at)}
       </TableCell>
       <TableCell>
-        <div className="max-w-[18rem] truncate font-medium">
+        {/* The words around the title are flex items that keep the page's
+            direction and don't shrink, so a cut label cuts the title, which
+            keeps its start. The link cuts its own text, so the box around it
+            doesn't clip its focus outline. */}
+        <div className="w-fit max-w-[18rem] font-medium">
           {row.item_id ? (
             <Link
               to={`/item/${encodeURIComponent(row.item_id)}`}
-              className="hover:text-primary hover:underline"
+              className="hover:text-primary flex overflow-hidden whitespace-pre hover:underline"
               title={itemLabel}
             >
-              {itemLabel}
+              {label}
             </Link>
           ) : (
-            <span title={itemLabel}>{itemLabel}</span>
+            <span className="flex overflow-hidden whitespace-pre" title={itemLabel}>
+              {label}
+            </span>
           )}
         </div>
-        <div className="text-muted-foreground max-w-[18rem] truncate text-xs">
-          {row.file_path ||
-            t("web.admin.markers.history.mediaFileFallback", { id: String(row.media_file_id) })}
+        {/* A path reads left to right in any language, so a cut one keeps its
+            start; w-fit keeps it on the page's start side, and the tooltip
+            shows the rest. The fallback label follows the page. */}
+        <div
+          dir={row.file_path ? "ltr" : undefined}
+          className="text-muted-foreground w-fit max-w-[18rem] truncate text-xs"
+          title={row.file_path || undefined}
+        >
+          {row.file_path ? (
+            <PathText path={row.file_path} />
+          ) : (
+            t("web.admin.markers.history.mediaFileFallback", { id: String(row.media_file_id) })
+          )}
         </div>
       </TableCell>
       <TableCell>{t(MARKER_LABEL_KEYS[row.segment])}</TableCell>
@@ -171,7 +200,14 @@ function MarkerHistoryRow({ row }: { row: MarkerEditAuditEntry }) {
         <div className="text-muted-foreground max-w-[13rem] truncate text-xs">
           {row.request_id ?? t("web.admin.markers.history.noRequestId")}
         </div>
-        <div className="text-muted-foreground max-w-[13rem] truncate text-xs">
+        {/* An address or user agent reads left to right in any language, so an
+            IPv6 address keeps its order and a cut one keeps its start; w-fit
+            keeps it on the page's start side. */}
+        <div
+          dir="ltr"
+          className="text-muted-foreground w-fit max-w-[13rem] truncate text-xs"
+          title={row.client_ip ?? row.user_agent}
+        >
           {row.client_ip ?? row.user_agent ?? ""}
         </div>
       </TableCell>

@@ -3,6 +3,7 @@ package metadata
 import (
 	"context"
 
+	"github.com/Silo-Server/silo-server/internal/bookid"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
@@ -86,6 +87,10 @@ type ProcessRequest struct {
 	// cleared and every unlocked field takes the providers' value, empty
 	// included. See resetToProvider in mergeAndPersist.
 	resetToProvider bool
+	// rebuildMatch marks the refresh that ends a Complete Refresh
+	// (RebuildItemForLibrary): like a reset, every unlocked field takes the
+	// providers' value, empty included, but the item keeps its locks.
+	rebuildMatch bool
 	// enrichmentOnly marks a bulk enrichment write: one enrichment provider's
 	// fields merged into an item that is already matched. See
 	// persistEnrichment for how it differs from a scheduled refresh.
@@ -104,6 +109,15 @@ type ProcessRequest struct {
 // existing item without the rest of a refresh.
 func (r ProcessRequest) writesFieldsOnly() bool {
 	return r.enrichmentOnly || r.localReapply
+}
+
+// clearsUnsentValues reports whether the write empties the unlocked stored
+// values its providers don't send: a Reset to Provider, or the refresh that
+// ends a Complete Refresh. Such a write stops when a provider doesn't answer
+// (resetProviderFailure), since it can't tell a value the provider lacks from
+// one it failed to send.
+func (r ProcessRequest) clearsUnsentValues() bool {
+	return r.resetToProvider || r.rebuildMatch
 }
 
 // ProcessResult is the output of MetadataService.Process().
@@ -305,8 +319,14 @@ type PersonDetailResult struct {
 
 // MetadataResult carries structured metadata from a single provider.
 type MetadataResult struct {
-	HasMetadata          bool
-	ProviderIDs          map[string]string
+	HasMetadata bool
+	ProviderIDs map[string]string
+	// WorkClaims are the work ids of an audiobook or ebook, kept out of
+	// ProviderIDs (bookid.SplitWorkIDs): one entry per GetMetadata answer
+	// merged in, which catalog.ApplyWorkClaimsTx writes with the item.
+	// Results are merged only after admission; a caller that merges an
+	// unadmitted result carries its claims too.
+	WorkClaims           []bookid.WorkClaims
 	Title                string
 	OriginalTitle        string
 	SortTitle            string

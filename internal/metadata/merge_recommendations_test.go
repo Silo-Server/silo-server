@@ -62,7 +62,7 @@ func TestMergeMarksMovedProfilesStalePostgres(t *testing.T) {
 	}
 	stale := func() map[string]bool {
 		t.Helper()
-		profiles, err := recs.GetStaleProfiles(ctx, 10000)
+		profiles, err := recs.GetStaleProfiles(ctx, recommendations.StaleProfilesPage{Limit: 10000})
 		if err != nil {
 			t.Fatal(err)
 		}

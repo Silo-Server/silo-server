@@ -37,6 +37,7 @@ type SectionHandler struct {
 	sectionReader interface {
 		GetByID(context.Context, string) (*sections.PageSection, error)
 	}
+	sectionLister         sectionScopeLister
 	fetcher               *sections.Fetcher
 	previewFetcher        sectionPreviewFetcher // set to fetcher at construction; separate for test injection
 	episodeFetcher        sectionEpisodeFetcher
@@ -77,7 +78,7 @@ func (h *SectionHandler) refreshSeasonalLists(ctx context.Context, configs ...js
 
 // NewSectionHandler creates a new SectionHandler.
 func NewSectionHandler(repo *sections.Repository, fetcher *sections.Fetcher) *SectionHandler {
-	return &SectionHandler{repo: repo, sectionReader: repo, fetcher: fetcher, previewFetcher: fetcher, episodeFetcher: fetcher, playableTargets: fetcher}
+	return &SectionHandler{repo: repo, sectionReader: repo, sectionLister: repo, fetcher: fetcher, previewFetcher: fetcher, episodeFetcher: fetcher, playableTargets: fetcher}
 }
 
 type sectionEpisodeFetcher interface {
@@ -973,9 +974,9 @@ func (h *SectionHandler) ResolveProfileSectionSettings(ctx context.Context, user
 // resolveProfileSectionSettings is ResolveProfileSectionSettings after the
 // library check.
 func (h *SectionHandler) resolveProfileSectionSettings(ctx context.Context, userID int, profileID, scope string, libraryID *int, filter catalog.AccessFilter) ([]sections.ResolvedSection, error) {
-	adminSections, err := h.repo.ListByScope(ctx, scope, libraryID)
+	adminSections, err := h.activeAdminSections(ctx, scope, libraryID)
 	if err != nil {
-		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to load sections")
+		return nil, err
 	}
 
 	var overrides []sections.ProfileSectionOverride

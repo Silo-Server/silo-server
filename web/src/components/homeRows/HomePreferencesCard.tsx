@@ -23,7 +23,7 @@ const NEXT_UP_MODES = optionsFor(SETTING_DEFINITIONS[SETTING_KEYS.UI_NEXT_UP_MOD
 function InheritedNote({ value }: { value: string }) {
   const t = useT();
   return (
-    <p className="text-muted-foreground text-[13px] leading-relaxed">
+    <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
       {t("web.home.preferences.inherited", { value })}
     </p>
   );
@@ -90,7 +90,10 @@ export function HomePreferencesCard({
           <label htmlFor={nextUpId} className="text-sm font-semibold">
             {t("web.home.preferences.nextUpLabel")}
           </label>
-          <p id={`${nextUpId}-help`} className="text-muted-foreground text-[13px] leading-relaxed">
+          <p
+            id={`${nextUpId}-help`}
+            className="text-muted-foreground text-[0.8125rem] leading-relaxed"
+          >
             {t("web.home.preferences.nextUpHelp")}
           </p>
           {loaded && !nextUpChosen ? (
@@ -128,7 +131,7 @@ export function HomePreferencesCard({
           </label>
           <p
             id={`${newReleasesFirstId}-help`}
-            className="text-muted-foreground text-[13px] leading-relaxed"
+            className="text-muted-foreground text-[0.8125rem] leading-relaxed"
           >
             {t("web.home.preferences.newReleasesFirstHelp")}
           </p>
@@ -162,7 +165,7 @@ export function HomePreferencesCard({
           </label>
           <p
             id={`${hideWatchedId}-help`}
-            className="text-muted-foreground text-[13px] leading-relaxed"
+            className="text-muted-foreground text-[0.8125rem] leading-relaxed"
           >
             {t("web.home.preferences.hideWatchedHelp")}
           </p>

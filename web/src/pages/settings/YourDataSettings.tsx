@@ -87,7 +87,7 @@ function ImportSummary({ result }: { result: ProfileImportResult }) {
                 ),
               })}
               {data.notes.map((note, position) => (
-                <span key={position} className="text-muted-foreground block text-xs">
+                <span key={position} className="text-muted-foreground block text-xs wrap-anywhere">
                   {note}
                 </span>
               ))}
@@ -96,12 +96,12 @@ function ImportSummary({ result }: { result: ProfileImportResult }) {
         </ul>
       ) : null}
       {result.unmatched.length > 0 ? (
-        <p className="text-muted-foreground text-[13px] break-words">
+        <p className="text-muted-foreground text-[0.8125rem] break-words">
           {t("web.settings.yourData.summary.unmatched", { titles: titleList(result.unmatched) })}
         </p>
       ) : null}
       {result.hidden.length > 0 ? (
-        <p className="text-muted-foreground text-[13px] break-words">
+        <p className="text-muted-foreground text-[0.8125rem] break-words">
           {t("web.settings.yourData.summary.hidden", { titles: titleList(result.hidden) })}
         </p>
       ) : null}

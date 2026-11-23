@@ -1,5 +1,5 @@
-// Package imageutil provides image resizing and thumbhash generation
-// for collection poster and backdrop uploads.
+//go:build !silo_node
+
 package imageutil
 
 import (
@@ -45,11 +45,6 @@ func init() {
 	bimg.VipsCacheSetMaxMem(0)
 }
 
-// ErrInvalidImage reports source bytes that libvips cannot read as an image.
-// Failures after the header was read, such as encoding a variant, do not wrap
-// it; see PixelDataUndecodable for damaged pixel data.
-var ErrInvalidImage = errors.New("imageutil: invalid image")
-
 // maxGoDecodePixels bounds the raster this package lets the standard library
 // allocate, in PixelDataUndecodable and the thumbhash fallback. A
 // few-kilobyte file can declare large dimensions, and image.Decode allocates
@@ -87,24 +82,6 @@ func SourceUnusable(err error, data []byte) bool {
 		return true
 	}
 	return !errors.Is(err, ErrBusy) && PixelDataUndecodable(data)
-}
-
-// MaxCachedOriginalDimension caps the longest edge of a cached "original"
-// variant at 4K. Provider artwork is rarely larger (TMDB backdrops top out at
-// 3840 wide, posters at 2000x3000), so the original keeps the provider's full
-// resolution; the cap bounds an outlier upload rather than everyday art.
-const MaxCachedOriginalDimension = 3840
-
-// Variant holds a named image variant (e.g. "original", "w500").
-type Variant struct {
-	Key  string
-	Data []byte
-}
-
-// VariantResult contains generated variants and their output format.
-type VariantResult struct {
-	Variants []Variant
-	Ext      string // file extension including dot: ".webp"
 }
 
 // GenerateVariants produces WebP variants of the source image at the requested
@@ -218,12 +195,23 @@ func EncodeWebPWidth(data []byte, width int) ([]byte, error) {
 // Rasterize renders an SVG, HEIF or AVIF source to a PNG no larger than
 // MaxCachedOriginalDimension on its longest edge, which the other functions
 // here then accept. They refuse those formats themselves; see checkFormat.
+// An SVG is drawn at exactly that size; see rasterizeSVG.
 // Call it only for a source the operator chose, such as a metadata
 // provider's artwork or a cover in a library folder: the budget charges the
 // source for its declared size, which these formats can exceed many times.
 func Rasterize(data []byte) ([]byte, error) {
+	return RasterizeWithin(data, MaxCachedOriginalDimension)
+}
+
+// RasterizeWithin is Rasterize for a smaller result, maxDim on the longest
+// edge, for a caller that only shows a small copy.
+func RasterizeWithin(data []byte, maxDim int) ([]byte, error) {
 	if !NeedsRasterizing(data) {
 		return nil, fmt.Errorf("%w: not an SVG, HEIF or AVIF", ErrInvalidImage)
+	}
+	maxDim = min(max(maxDim, 1), MaxCachedOriginalDimension)
+	if bimg.DetermineImageType(data) == bimg.SVG {
+		return rasterizeSVG(data, maxDim)
 	}
 	size, release, err := reserveHeader(data)
 	if err != nil {
@@ -231,7 +219,7 @@ func Rasterize(data []byte) ([]byte, error) {
 	}
 	defer release()
 	opts := bimg.Options{Type: bimg.PNG, StripMetadata: true}
-	fitWithin(&opts, size, MaxCachedOriginalDimension)
+	fitWithin(&opts, size, maxDim)
 	out, err := bimg.NewImage(data).Process(opts)
 	if err != nil {
 		return nil, fmt.Errorf("imageutil: rasterize: %w", err)

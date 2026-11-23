@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
@@ -67,6 +68,30 @@ func parseOperationalLogOptionsFromRequest(r *http.Request) (opslog.ListOptions,
 	return opts, nil
 }
 
+// sameClientIP reports whether a client_ip filter names the address an audit
+// event carries, the way the inet comparison matches stored rows. Both sides
+// are parsed, so text formatting (case, zero compression) and a single-host
+// prefix (/32, /128, as events from older servers carry) don't matter. Values
+// that are not addresses compare as text.
+func sameClientIP(filter, value string) bool {
+	a, aok := parseHostAddress(filter)
+	b, bok := parseHostAddress(value)
+	if aok && bok {
+		return a == b
+	}
+	return filter == value
+}
+
+func parseHostAddress(value string) (netip.Addr, bool) {
+	if addr, err := netip.ParseAddr(value); err == nil {
+		return addr, true
+	}
+	if prefix, err := netip.ParsePrefix(value); err == nil && prefix.IsSingleIP() {
+		return prefix.Addr(), true
+	}
+	return netip.Addr{}, false
+}
+
 func parseAuditLogOptionsFromRequest(r *http.Request) (activitylog.ListOptions, error) {
 	opts := activitylog.ListOptions{
 		Method:            strings.TrimSpace(r.URL.Query().Get("method")),
@@ -77,6 +102,14 @@ func parseAuditLogOptionsFromRequest(r *http.Request) (activitylog.ListOptions, 
 		PlaybackSessionID: strings.TrimSpace(r.URL.Query().Get("playback_session_id")),
 		Cursor:            strings.TrimSpace(r.URL.Query().Get("cursor")),
 		Limit:             parseLimit(r, 100),
+	}
+
+	if opts.ClientIP != "" {
+		normalized, ok := activitylog.NormalizeClientIPFilter(opts.ClientIP)
+		if !ok {
+			return activitylog.ListOptions{}, invalidQueryError("client_ip")
+		}
+		opts.ClientIP = normalized
 	}
 
 	statusCode, err := parseOptionalIntQuery(r, "status_code")
@@ -523,7 +556,7 @@ func matchesAuditLog(opts activitylog.ListOptions, entry activitylog.AuditEntry)
 	if opts.PathPrefix != "" && !strings.HasPrefix(entry.Path, opts.PathPrefix) {
 		return false
 	}
-	if opts.ClientIP != "" && entry.ClientIP != opts.ClientIP {
+	if opts.ClientIP != "" && !sameClientIP(opts.ClientIP, entry.ClientIP) {
 		return false
 	}
 	if opts.RequestID != "" && entry.RequestID != opts.RequestID {

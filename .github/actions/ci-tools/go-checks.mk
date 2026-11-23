@@ -12,15 +12,23 @@ lint:
 	$(MAKE) -f Makefile lint-router-recovery
 
 # The whole tree, so a change that breaks vet in a package it did not touch
-# still fails; lint-changed reports only changed lines.
+# still fails; lint-changed reports only changed lines. The macOS node build
+# is vetted too, since Linux never compiles the darwin installer, and its
+# cross-build fails on a new cgo import or a gap in imageutil's node stub.
 vet:
 	go vet ./...
+	GOOS=darwin GOARCH=arm64 CGO_ENABLED=0 go vet -tags silo_node ./cmd/silo/ ./internal/nodeinstall/ ./internal/nodebuild/ ./internal/imageutil/ ./web/
+	$(MAKE) -f Makefile build-node-darwin NODE_DARWIN_OUT=/dev/null
 
 # Package assertions belong to the tests lane; these check generated artifacts.
 contracts:
 	$(MAKE) -j1 -f Makefile verify-settings-bindings verify-playback-fixtures verify-route-inventory
 	$(MAKE) -j1 -f Makefile verify-apiv2-openapi CONTRACT_GO_TESTS=0
 	git fetch --no-tags origin "+refs/heads/$${CONTRACT_BASE_REF}:refs/remotes/origin/$${CONTRACT_BASE_REF}"
+	@base="$$(git merge-base "origin/$${CONTRACT_BASE_REF}" HEAD)" && \
+		entry="$$(git ls-tree "$$base" -- contracts/api/v2/openapi.json)" && \
+		blob="$$(printf '%s\n' "$$entry" | awk '$$2 == "blob" { print $$3 }')" && \
+		if [ -n "$$blob" ]; then git cat-file -e "$$blob"; fi
 	$(MAKE) -j1 -f Makefile verify-apiv2-contract CONTRACT_GO_TESTS=0 BASE_REF="origin/$${CONTRACT_BASE_REF}"
 
 # Go's test cache cannot see files a test's child process reads, so these

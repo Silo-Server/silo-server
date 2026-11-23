@@ -595,3 +595,35 @@ func TestCachingOffKeepsStoredArtworkNoProviderFills(t *testing.T) {
 		t.Errorf("logo = %q, want the stored copy kept", got.LogoPath)
 	}
 }
+
+// claimingLocalArtworkStore hands out one claimed job.
+type claimingLocalArtworkStore struct {
+	job *models.MetadataImageCacheJob
+}
+
+func (s *claimingLocalArtworkStore) enqueueHeldLocalJobs(_ context.Context, inputs []EnqueueImageCacheJobInput) ([]EnqueueImageCacheJobInput, error) {
+	return inputs, nil
+}
+
+func (s *claimingLocalArtworkStore) claimQueuedLocalJob(context.Context, EnqueueImageCacheJobInput, string) (*models.MetadataImageCacheJob, error) {
+	job := s.job
+	s.job = nil
+	return job, nil
+}
+
+// A scan that finds sidecar artwork right after the store was found full
+// defers the job without reading or decoding the file. Storage deferrals
+// count no attempt, so every scan would otherwise process each sidecar
+// again only for its write to be refused.
+func TestDiscoveredArtworkWaitsWhileStorageIsFull(t *testing.T) {
+	jobs := &deferringImageCacheJobs{}
+	cacher := &fakeImageCacher{}
+	p := NewImageCacheProcessor(jobs, cacher, nil, nil, nil)
+	now := time.Now()
+	p.storageFullAt.Store(&now)
+	in := EnqueueImageCacheJobInput{TargetType: ImageCacheTargetItem, TargetContentID: "movie-1", ImageType: ImageCacheImagePoster, SourcePath: "file:///media/Film/poster.jpg"}
+	p.copyDiscoveredLocalArtwork(&claimingLocalArtworkStore{job: &models.MetadataImageCacheJob{ID: 7, LockedBy: "local-artwork:x", TargetType: in.TargetType, TargetContentID: in.TargetContentID, ImageType: in.ImageType, SourcePath: in.SourcePath}}, in)
+	if len(cacher.reqs) != 0 || len(jobs.deferredIDs) != 1 || jobs.deferText != imageCacheStorageFullError {
+		t.Fatalf("cached %d images, deferred %v (%q); want the job deferred unread", len(cacher.reqs), jobs.deferredIDs, jobs.deferText)
+	}
+}

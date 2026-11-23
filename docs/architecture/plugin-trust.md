@@ -11,9 +11,14 @@ install it.
 native child process through go-plugin. The API server, or the
 [network access](network-access.md) proxy for provider plugins, starts it with:
 
-- **The same OS user.** The shipped image runs as root, so plugins do too.
-  There is no separate user, namespace, seccomp profile, or filesystem
-  confinement.
+- **The same OS user.** Plugins inherit the OS account that runs the Silo
+  process. The shipped omnibus image (`ghcr.io/silo-server/silo-server:latest`)
+  runs Silo as the configured non-root `PUID`/`PGID` user (image default `911`,
+  Compose default `1000`; see [omnibus-image.md](omnibus-image.md)). The base
+  image (`<full SHA>-base`, and the `build-N` and `latest` tags from before the
+  omnibus layout) and any deployment that runs Silo itself as root run plugins
+  as root. Either way, there is no separate per-plugin user, namespace, seccomp
+  profile, or filesystem confinement.
 - **An allowlisted environment.** `pluginhost.ProcessEnv`
   (`internal/pluginhost/process_env.go`) passes only `PATH`, `HOME`, `TMPDIR`,
   `TZ`, the locale, the CA certificate paths, and the proxy variables, and the
@@ -131,6 +136,25 @@ Every catalog install, manual or automatic, resolves through
    `loadManifestFromBinary` run the binary, followed by the catalog identity
    check. A first-party binary that fails verification never runs.
 
+A server whose platform differs from the one that installed a plugin goes
+through the same two steps. The stored archive holds only the installing
+server's build, so before running it such a server resolves the installed
+version for its own platform in the catalog the plugin came from and
+downloads it through `downloadBinary`
+(`internal/plugins/platform_archive.go`). The build must also declare the
+installed manifest apart from its checksum and supported platforms, be a
+binary for that platform,
+and, when the installed build's signature was verified, verify from the same
+source repository. It is stored in
+`plugin_platform_archives` for that platform, tied to the stored archive's
+checksum, so other servers on that platform extract it without fetching. An
+official plugin whose version the catalog's list no longer names resolves from
+that version's release descriptor, as provisioning an exact version does. A
+plugin that was uploaded, or whose version a third-party catalog no longer
+lists, fails to start on that server with an error naming both platforms, and
+the server tries again after a minute without reading the stored archive
+meanwhile. Startup preload doesn't fetch: the plugin's first launch does.
+
 The server enforces these refusals: `cmd/silo` builds the one
 `SignatureChecker` that the catalog service and the installer share with
 `SignatureCheckerOptions.Enforce` on. With the option off, which only tests
@@ -152,9 +176,11 @@ not run (trust root or bundle unreachable) for a plugin the check never
 refuses. For a first-party plugin that case is a refusal. A verified
 row also stores `signature_source_repo` and `signature_verified_at`. Replacing
 an installation records the new package's result, so an upload over a verified
-install reads `unsigned`. The bundle is not stored. Verification happens once,
-on the node that runs the install. Plugin loads, and the other nodes that
-extract the stored archive, keep checking only the archive's SHA-256.
+install reads `unsigned`. The bundle is not stored. Verification happens on
+the node that runs the install, and once per other platform on the server that
+fetches that platform's build; the installation records only the install's
+result. Plugin loads, and the other nodes that extract a stored archive, keep
+checking only the archive's SHA-256.
 
 ### Trust root
 

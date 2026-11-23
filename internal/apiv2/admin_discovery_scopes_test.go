@@ -108,6 +108,10 @@ func TestMonitorScopeWithholdsDeploymentDetails(t *testing.T) {
 	if body := do(t, h, "GET", Prefix+"/admin/requests", "", bearer("sa_monitor")).Body.String(); strings.Contains(body, "last_error") || strings.Contains(body, "radarr.lan") || strings.Contains(body, "instance_name") || strings.Contains(body, "route_name") || !strings.Contains(body, `"id":"r-1"`) {
 		t.Fatal("monitor request list", body)
 	}
+	// The counts carry the requests switch, so the key needs no settings read.
+	if body := do(t, h, "GET", Prefix+"/admin/requests/counts", "", bearer("sa_monitor")).Body.String(); !strings.Contains(body, `"requests_enabled":true`) {
+		t.Fatal("monitor request counts", body)
+	}
 	for _, path := range []string{"/admin/request-integrations", "/admin/request-settings", "/admin/request-routes"} {
 		requireProblem(t, do(t, h, "GET", Prefix+path, "", bearer("sa_monitor")), TypePermissionDenied)
 	}

@@ -11,7 +11,7 @@ import {
   StaleApiRequestContextError,
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
-import { v2, type V2Result } from "@/api/v2/request";
+import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
 import type {
   StreamNode,
   NodeCapabilities,
@@ -202,9 +202,15 @@ function useNodeWrite() {
           });
       }
     },
-    onError: (_error, intent) => {
+    onError: (error, intent) => {
       if (mounted.current && intent.authority && isNodeWriteAuthorityActive(intent.authority))
-        toast.error(t("web.admin.nodes.hooks.nodes.changeUnconfirmed"));
+        // A refusal says why, in the interface's language; anything else
+        // leaves the outcome unknown.
+        toast.error(
+          error instanceof V2ProblemError && error.status === 409
+            ? error.message
+            : t("web.admin.nodes.hooks.nodes.changeUnconfirmed"),
+        );
     },
     onSettled: (_result, _error, intent) => {
       if (intent.authority && isNodeWriteAuthorityActive(intent.authority))

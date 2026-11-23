@@ -1,5 +1,5 @@
 import { existsSync, readdirSync, readFileSync, renameSync, rmdirSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { promisify } from "node:util";
 import { brotliCompress, constants, gzip } from "node:zlib";
 import { defineConfig, loadEnv, transformWithEsbuild, type Plugin } from "vite";
@@ -12,6 +12,25 @@ import { configDefaults } from "vitest/config";
 /// <reference types="vitest" />
 
 const PRECOMPRESS_MIN_BYTES = 1024;
+// Large lazy JS chunks (primarily the 40 precompiled locale catalogs, ~1.2-1.5 MB
+// each) dominate Brotli-11 CPU time while barely benefiting over quality 6.
+// Keep quality 11 for the launch chunks, CSS, WASM, and smaller JS chunks.
+const BROTLI_FAST_JS_MIN_BYTES = 512 * 1024;
+const BROTLI_QUALITY_MAX = 11;
+const BROTLI_QUALITY_LARGE_LAZY_JS = 6;
+const EAGER_OR_VENDOR_CHUNK = /(?:^|[\\/])(?:index|vendor-react)-[A-Za-z0-9_-]+\.js$/;
+
+// Exported for vite.config.test.ts.
+export function brotliQualityForAsset(fileName: string, byteLength: number): number {
+  if (
+    fileName.endsWith(".js") &&
+    byteLength >= BROTLI_FAST_JS_MIN_BYTES &&
+    !EAGER_OR_VENDOR_CHUNK.test(fileName)
+  ) {
+    return BROTLI_QUALITY_LARGE_LAZY_JS;
+  }
+  return BROTLI_QUALITY_MAX;
+}
 
 // These tests need globals or Node APIs unavailable or non-configurable in VM
 // contexts, so they run on the threads pool and everything else on vmThreads.
@@ -72,9 +91,10 @@ export function precompressStaticAssets(): Plugin {
           const bytes = await readFile(filePath);
           if (bytes.byteLength < PRECOMPRESS_MIN_BYTES) return;
 
+          const quality = brotliQualityForAsset(output.fileName, bytes.byteLength);
           const [br, gz] = await Promise.all([
             brotliCompressAsync(bytes, {
-              params: { [constants.BROTLI_PARAM_QUALITY]: 11 },
+              params: { [constants.BROTLI_PARAM_QUALITY]: quality },
             }),
             gzipAsync(bytes, { level: 9 }),
           ]);
@@ -163,6 +183,27 @@ const CATALOG_PART = /[\\/]src[\\/]locales[\\/][^\\/]+\.json\?part=(app|admin)$/
  */
 // Exported for vite.config.test.ts.
 export function catalogParts(): Plugin {
+  // Both ?part=app and ?part=admin read the same locale JSON file (~3 MB each).
+  // Cache the split strings per (file, mtimeMs) so builds and test workers parse
+  // each catalog once instead of twice per load.
+  const cache = new Map<string, Promise<{ mtimeMs: number; app: string; admin: string }>>();
+
+  function splitCatalog(file: string, mtimeMs: number) {
+    return readFile(file, "utf8").then((raw) => {
+      const messages = JSON.parse(raw) as Record<string, unknown>;
+      const app: Record<string, unknown> = {};
+      const admin: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(messages)) {
+        if (key.startsWith(ADMIN_MESSAGE_PREFIX)) {
+          admin[key] = value;
+        } else {
+          app[key] = value;
+        }
+      }
+      return { mtimeMs, app: JSON.stringify(app), admin: JSON.stringify(admin) };
+    });
+  }
+
   return {
     name: "silo-catalog-parts",
     enforce: "pre",
@@ -171,12 +212,20 @@ export function catalogParts(): Plugin {
       if (!match) return null;
       const file = id.slice(0, id.indexOf("?"));
       this.addWatchFile(file);
-      const admin = match[1] === "admin";
-      const messages = JSON.parse(await readFile(file, "utf8")) as Record<string, unknown>;
-      const part = Object.fromEntries(
-        Object.entries(messages).filter(([key]) => key.startsWith(ADMIN_MESSAGE_PREFIX) === admin),
-      );
-      return JSON.stringify(part);
+      const { mtimeMs } = await stat(file);
+      const existing = cache.get(file);
+      let entry = existing ? await existing : undefined;
+      if (!entry || entry.mtimeMs !== mtimeMs) {
+        const next = splitCatalog(file, mtimeMs);
+        cache.set(file, next);
+        try {
+          entry = await next;
+        } catch (err) {
+          cache.delete(file);
+          throw err;
+        }
+      }
+      return match[1] === "admin" ? entry.admin : entry.app;
     },
   };
 }
@@ -229,6 +278,9 @@ export default defineConfig(({ mode }) => {
   const webVersion = (
     JSON.parse(readFileSync(path.resolve(__dirname, "package.json"), "utf8")) as { version: string }
   ).version;
+  // Pull-request builds verify compilation and bundle budget without shipping
+  // dist/, so CI sets SILO_SKIP_PRECOMPRESS=1 to skip writing .br/.gz sidecars.
+  const skipPrecompress = env.SILO_SKIP_PRECOMPRESS === "1";
 
   return {
     plugins: [
@@ -236,7 +288,7 @@ export default defineConfig(({ mode }) => {
       react(),
       tailwindcss(),
       themeBootScript(),
-      precompressStaticAssets(),
+      ...(skipPrecompress ? [] : [precompressStaticAssets()]),
       moveManifestOutOfDist(),
     ],
     json: {
@@ -257,6 +309,9 @@ export default defineConfig(({ mode }) => {
       // A font inlined into the CSS downloads for everyone, defeating the
       // unicode-range subsets in src/fonts.css, so fonts always stay files.
       assetsInlineLimit: (filePath: string) => (/\.woff2?$/.test(filePath) ? false : undefined),
+      // scripts/check-bundle-budget.mjs reports the real brotli-11 launch cost,
+      // and precompressStaticAssets writes gzip sidecars on release builds.
+      reportCompressedSize: false,
       // scripts/check-bundle-budget.mjs reads the manifest to find the chunks
       // the entry loads before the app can run. moveManifestOutOfDist keeps it
       // out of the embedded bundle.

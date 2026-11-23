@@ -412,7 +412,7 @@ export default function AdminPlaybackHistory() {
                               </Link>
                               <Link
                                 to={`/admin/logs?playback_session_id=${encodeURIComponent(row.session_id)}&focus=playback&component=ffmpeg`}
-                                className="text-primary/80 text-sm font-medium"
+                                className="text-primary text-sm"
                               >
                                 {t("web.admin.activity.row.ffmpegLogs")}
                               </Link>
@@ -514,7 +514,7 @@ function historyRowLabel(row: AdminPlaybackHistoryItem, t: Translate): string {
 function InfoCard({ label, value }: { label: string; value: string }) {
   return (
     <div className="surface-panel rounded-2xl border-0 p-4">
-      <div className="text-muted-foreground text-[11px] font-medium">{label}</div>
+      <div className="text-muted-foreground text-[0.6875rem] font-medium">{label}</div>
       <div className="mt-1 text-2xl font-extrabold tracking-tight">{value}</div>
     </div>
   );

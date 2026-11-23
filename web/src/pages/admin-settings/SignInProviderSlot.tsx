@@ -3,10 +3,11 @@ import { joinList } from "@/lib/appLocale";
 import { useIsMutating } from "@tanstack/react-query";
 import { Link } from "react-router";
 import { ArrowUpRight, Check, Copy, KeyRound, Loader2, X } from "lucide-react";
+import { Direction } from "radix-ui";
 
 import type { PluginInstallation } from "@/api/types";
 import { V2ProblemError } from "@/api/v2/request";
-import { fieldIsVisible } from "@/components/admin/plugins/schemaFormUtils";
+import { fieldIsVisible, textDirection } from "@/components/admin/plugins/schemaFormUtils";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { AdvancedSection } from "@/components/settings/AdvancedSection";
 import { Button } from "@/components/ui/button";
@@ -170,6 +171,7 @@ function CopyField({
           and checked against the provider's form. */}
       <textarea
         id={valueId}
+        dir="ltr"
         readOnly
         rows={Math.max(1, Math.ceil(value.length / 34))}
         value={value}
@@ -453,6 +455,16 @@ function ProviderPanel({
         .get(layout.testUsername.schemaKey)
         ?.managedFields.includes(layout.testUsername.field.key)
     : false;
+  const shownTestUsername =
+    layout.testUsername && testUsernameManaged
+      ? String(
+          layout.entries.get(layout.testUsername.schemaKey)?.saved?.[
+            layout.testUsername.field.key
+          ] ?? "",
+        )
+      : testUsername;
+  const testUsernamePlaceholder = t("web.admin.settings.signIn.provider.test.usernamePlaceholder");
+  const pageDir = Direction.useDirection();
   const statusRef = useRef<HTMLParagraphElement>(null);
   const testHeadingRef = useRef<HTMLHeadingElement>(null);
   const testErrorRef = useRef<HTMLParagraphElement>(null);
@@ -667,19 +679,12 @@ function ProviderPanel({
                 </label>
                 <Input
                   id={testUsernameId}
-                  value={
-                    testUsernameManaged
-                      ? String(
-                          layout.entries.get(layout.testUsername.schemaKey)?.saved?.[
-                            layout.testUsername.field.key
-                          ] ?? "",
-                        )
-                      : testUsername
-                  }
+                  dir={textDirection(pageDir, shownTestUsername, testUsernamePlaceholder, false)}
+                  value={shownTestUsername}
                   disabled={testUsernameManaged}
                   aria-describedby={testUsernameManaged ? testUsernameNote : undefined}
                   onChange={(event) => setTestUsername(event.target.value)}
-                  placeholder={t("web.admin.settings.signIn.provider.test.usernamePlaceholder")}
+                  placeholder={testUsernamePlaceholder}
                   autoComplete="off"
                   className="w-56"
                 />

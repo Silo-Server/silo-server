@@ -887,6 +887,9 @@ func (e *Enricher) persistMetadataAndProviderIDsTx(
 			return fmt.Errorf("persisting audiobook provider IDs: %w", err)
 		}
 	}
+	if err := catalog.ApplyWorkClaimsTx(ctx, tx, item.ContentID, audiobookItemType, result.WorkClaims); err != nil {
+		return fmt.Errorf("persisting audiobook work ids: %w", err)
+	}
 	if err := e.itemRepo.UpdateMetadataTx(ctx, tx, item.ContentID, upd); err != nil {
 		return fmt.Errorf("updating audiobook metadata: %w", err)
 	}

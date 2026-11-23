@@ -4,6 +4,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useT, type MessageKey } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { leadingGraphemes } from "@/lib/text";
 
 /**
  * Shared building blocks for the account page's cards. They follow the app's
@@ -47,7 +48,7 @@ export function DetailCard({
             {title}
           </h3>
           {description ? (
-            <div className="text-muted-foreground text-[13px] leading-relaxed wrap-anywhere">
+            <div className="text-muted-foreground text-[0.8125rem] leading-relaxed wrap-anywhere">
               {description}
             </div>
           ) : null}
@@ -179,7 +180,7 @@ export function SourceTag({ source }: { source: "default" | "group" | "custom" }
     <span
       data-source={source}
       className={cn(
-        "shrink-0 text-[10px] font-semibold tracking-[0.06em] uppercase",
+        "shrink-0 text-[0.625rem] font-semibold tracking-[0.06em] uppercase",
         source === "custom"
           ? "rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-amber-300"
           : "text-muted-foreground/80",
@@ -212,7 +213,7 @@ export function SubTabs<T extends string>({
           <TabsTrigger
             key={item.value}
             value={item.value}
-            className="flex-none rounded-lg px-3 py-1.5 text-[13px] max-lg:min-h-11"
+            className="flex-none rounded-lg px-3 py-1.5 text-[0.8125rem] max-lg:min-h-11"
           >
             {item.label}
           </TabsTrigger>
@@ -227,18 +228,27 @@ export function ListRow({
   title,
   meta,
   trailing,
+  titleDir,
 }: {
   leading?: ReactNode;
   title: ReactNode;
   meta?: ReactNode;
   trailing?: ReactNode;
+  /** "auto" for a title that is a name in either script, such as a device name. */
+  titleDir?: "auto";
 }) {
   return (
     <div className="border-border/50 flex items-center gap-3 border-t px-4 py-3 first:border-t-0 sm:px-5">
       {leading ? <div className="shrink-0">{leading}</div> : null}
       <div className="min-w-0 flex-1">
         {/* On a phone a long title (a device name) wraps rather than being cut off. */}
-        <div className="truncate text-sm font-medium max-lg:wrap-anywhere max-lg:whitespace-normal">
+        <div
+          dir={titleDir}
+          className={cn(
+            "truncate text-sm font-medium max-lg:wrap-anywhere max-lg:whitespace-normal",
+            titleDir && "align-with-page w-fit max-w-full",
+          )}
+        >
           {title}
         </div>
         {meta ? <div className="text-muted-foreground text-xs wrap-anywhere">{meta}</div> : null}
@@ -292,7 +302,8 @@ const AVATAR_GRADIENTS = [
 const NO_INITIAL = "?";
 
 /** A round avatar image, or an initial on one of five gradients (picked by `seed`)
- * when there is no image or it fails to load. */
+ * when there is no image or it fails to load. CSS upper-cases the initial so the
+ * page language applies (Turkish "i" becomes "İ"), which `toUpperCase` would not. */
 export function InitialAvatar({
   name,
   seed,
@@ -315,7 +326,7 @@ export function InitialAvatar({
           size === "lg" ? "text-2xl sm:text-3xl" : "text-sm",
         )}
       >
-        {name.trim().charAt(0) || NO_INITIAL}
+        {leadingGraphemes(name.trim(), 1) || NO_INITIAL}
       </AvatarFallback>
     </Avatar>
   );

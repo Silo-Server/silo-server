@@ -16,7 +16,7 @@ import (
 type AdminBackupRestoreSetting struct {
 	Key             string `json:"key"`
 	Class           string `json:"class" enum:"portable,external_service" doc:"external_service: connects to an outside service (mail, requests, metadata providers)"`
-	Status          string `json:"status" enum:"on_this_server,differs,needs_another_key,kept_stricter,cleared,unverified_backup" doc:"on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores"`
+	Status          string `json:"status" enum:"on_this_server,differs,needs_another_key,kept_stricter,cleared,unverified_backup,managed_by_environment" doc:"on_this_server: same value here; needs_another_key: encrypted with another SECRET_KEY and never written; kept_stricter: the backup's value would widen access (who can sign in, how long sessions last, what a rating-capped profile sees, mail transport security), so this server keeps its stricter value and a restore never writes it; cleared: the restore changes where a service connects and the backup has no secret this server can read for it, so restoring clears the secret here and turns the service off; unverified_backup: it connects to an outside service, which a backup this server cannot verify never restores; managed_by_environment: this server's environment sets it, or sets another setting of the outside-service connection it belongs to (mail's SMTP settings, for example), so a restore never writes it and this server keeps its value"`
 	Masked          bool   `json:"masked" doc:"An encrypted or sensitive setting: both values are omitted"`
 	BackupValue     string `json:"backup_value" doc:"The value in the backup; empty when masked"`
 	CurrentValue    string `json:"current_value" doc:"The value on this server; empty when masked"`
@@ -46,17 +46,18 @@ type AdminBackupRestoreCollection struct {
 	LocalID      string   `json:"local_id,omitempty" doc:"The collection here: for a manual collection the one with the same name in the mapped library, for a template collection the one the same template created for the mapped library"`
 	TemplateID   string   `json:"template_id,omitempty" doc:"A template collection's template in the collection template catalog"`
 	BundleID     string   `json:"bundle_id,omitempty" doc:"The template bundle that created a template collection"`
-	Changes      []string `json:"changes,omitempty" doc:"A template collection's fields the admin changed from the template's defaults that a restore writes here: title, description, visibility, featured, sort order, item sort, source, sync schedule, poster, backdrop"`
+	Changes      []string `json:"changes,omitempty" enum:"title,description,visibility,featured,sort_order,item_sort,source,sync_schedule,poster,backdrop,libraries" doc:"What a restore writes to a template collection here: the fields the admin changed from the template's defaults, and libraries when it adds the collection to more of them"`
 }
 
 // AdminBackupRestoreHomeSection is a backup page section against this
 // server.
 type AdminBackupRestoreHomeSection struct {
-	Scope       string   `json:"scope" enum:"home,library"`
-	LibraryID   *ID      `json:"library_id,omitempty" doc:"The library here whose page holds the section"`
-	SectionType string   `json:"section_type"`
-	LocalID     string   `json:"local_id,omitempty" doc:"The matching section here: the same id on the server that took the backup, else the one section of the page with the same type and title"`
-	Changes     []string `json:"changes,omitempty" doc:"What a restore replaces in the section here: title, position, featured, item limit, enabled, web only, configuration, and N collection items"`
+	Scope                  string   `json:"scope" enum:"home,library"`
+	LibraryID              *ID      `json:"library_id,omitempty" doc:"The library here whose page holds the section"`
+	SectionType            string   `json:"section_type"`
+	LocalID                string   `json:"local_id,omitempty" doc:"The matching section here: the same id on the server that took the backup, else the one section of the page with the same type and title"`
+	Changes                []string `json:"changes,omitempty" enum:"type,title,title_translation,position,featured,item_limit,enabled,web_only,collection_replaced,configuration,collection_items" doc:"What a restore replaces in the section here"`
+	MissingCollectionItems int      `json:"missing_collection_items,omitempty" doc:"With the collection_items change: the items of the backup's collection, in this server's catalog, that the section's collection here lacks and a restore adds"`
 }
 
 type AdminBackupRestoreItem struct {
@@ -65,7 +66,7 @@ type AdminBackupRestoreItem struct {
 	Label           string                         `json:"label"`
 	Status          string                         `json:"status" enum:"on_this_server,not_on_this_server,differs,folder_missing,ambiguous,needs_another_key"`
 	Selectable      bool                           `json:"selectable" doc:"Whether the item can be chosen. Items on this server already have nothing to restore."`
-	Reason          string                         `json:"reason,omitempty" enum:"same,path_in_use,folder_missing,library_not_restorable,library_not_mapped,ambiguous_name,needs_another_key,config_needs_another_key,other_version,item_not_on_this_server,file_missing,not_in_backup,changed_since_preview,ambiguous_account,ambiguous_profile,policy_wider,group_not_on_this_server,login_taken,profile_limit,user_store_unsupported,template_not_available,collection_not_mapped,unreadable,files_missing_here,needs_install,kept_stricter,unverified_backup,over_restore_budget,needs_primary_profile"`
+	Reason          string                         `json:"reason,omitempty" enum:"same,path_in_use,folder_missing,library_not_restorable,library_not_mapped,ambiguous_name,needs_another_key,config_needs_another_key,other_version,item_not_on_this_server,file_missing,not_in_backup,changed_since_preview,ambiguous_account,ambiguous_profile,policy_wider,group_not_on_this_server,login_taken,profile_limit,user_store_unsupported,template_not_available,collection_not_mapped,unreadable,files_missing_here,needs_install,kept_stricter,unverified_backup,over_restore_budget,needs_primary_profile,managed_by_environment"`
 	Message         string                         `json:"message,omitempty" doc:"What restoring the item does or why it cannot be chosen, for display"`
 	Requires        []string                       `json:"requires" doc:"Items (section:id) that must be chosen with this one: a collection whose library is restored by the same request"`
 	RestartRequired bool                           `json:"restart_required"`
@@ -89,7 +90,7 @@ type AdminBackupRestoreAccount struct {
 	Match             string                               `json:"match" enum:"account_id,restored,username_email,new" doc:"account_id: the backup is this server's and the account id exists; restored: an earlier restore of this backup's server created it; username_email: the one account here whose username or email is this account's username or email; new: restoring creates it"`
 	Target            string                               `json:"target" doc:"What a restore selection names for this account: the local account id, or new"`
 	LocalID           *ID                                  `json:"local_id,omitempty" doc:"The matched account here"`
-	LocalUsername     string                               `json:"local_username,omitempty"`
+	LocalUsername     string                               `json:"local_username,omitempty" doc:"The matched account's username, or its email when it has none"`
 	Group             string                               `json:"group,omitempty" doc:"The account's access group in the backup; a new account joins the group of that name here"`
 	PolicyDifferences []AdminBackupRestorePolicyDifference `json:"policy_differences" doc:"For a new account, what this server's policy would grant beyond the backup's; any difference makes it unselectable"`
 	LibrariesLeftOut  int                                  `json:"libraries_left_out" doc:"Library entries of the account's own library list with no library here; they are dropped, never widened"`
@@ -219,7 +220,7 @@ type AdminBackupRestoreReportItem struct {
 	Kind            string   `json:"kind" enum:"settings_page,plugin,library,collection,template_collection,item_artwork,branding,home_section,account"`
 	Label           string   `json:"label"`
 	Outcome         string   `json:"outcome" enum:"restored,unchanged,left_out,failed"`
-	Reason          string   `json:"reason,omitempty" enum:"same,path_in_use,folder_missing,library_not_restorable,library_not_mapped,ambiguous_name,needs_another_key,config_needs_another_key,other_version,item_not_on_this_server,file_missing,not_in_backup,changed_since_preview,ambiguous_account,ambiguous_profile,policy_wider,group_not_on_this_server,login_taken,profile_limit,user_store_unsupported,template_not_available,collection_not_mapped,unreadable,files_missing_here,needs_install,kept_stricter,unverified_backup,over_restore_budget,needs_primary_profile" doc:"Why a left_out item was left out"`
+	Reason          string   `json:"reason,omitempty" enum:"same,path_in_use,folder_missing,library_not_restorable,library_not_mapped,ambiguous_name,needs_another_key,config_needs_another_key,other_version,item_not_on_this_server,file_missing,not_in_backup,changed_since_preview,ambiguous_account,ambiguous_profile,policy_wider,group_not_on_this_server,login_taken,profile_limit,user_store_unsupported,template_not_available,collection_not_mapped,unreadable,files_missing_here,needs_install,kept_stricter,unverified_backup,over_restore_budget,needs_primary_profile,managed_by_environment" doc:"Why a left_out item was left out"`
 	Message         string   `json:"message,omitempty"`
 	Error           string   `json:"error,omitempty" doc:"Why a failed item failed"`
 	RestartRequired bool     `json:"restart_required"`
@@ -410,7 +411,8 @@ func adminBackupRestoreSetOf(p *backup.RestorePreview) AdminBackupRestoreSet {
 				item.Account = adminBackupRestoreAccountOf(a)
 			}
 			if h := it.HomeSection; h != nil {
-				item.HomeSection = &AdminBackupRestoreHomeSection{Scope: h.Scope, LibraryID: idOfIntPtr(h.LibraryID), SectionType: h.SectionType, LocalID: h.LocalID, Changes: h.Changes}
+				item.HomeSection = &AdminBackupRestoreHomeSection{Scope: h.Scope, LibraryID: idOfIntPtr(h.LibraryID), SectionType: h.SectionType, LocalID: h.LocalID, Changes: h.Changes,
+					MissingCollectionItems: h.MissingCollectionItems}
 			}
 			section.Items = append(section.Items, item)
 		}
