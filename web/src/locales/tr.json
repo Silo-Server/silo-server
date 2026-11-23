@@ -521,6 +521,12 @@
       "value": "Bu oynatma oturumu sona erdi. Oynatmayı yeniden başlatın."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Bu akışın yerini yenisi aldı. Oynatma geçerli akışta devam ediyor."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -24033,6 +24039,12 @@
       "value": "Konuşmayı metne dönüştürme sağlayıcısı geçici olarak kullanılamıyor. Daha sonra tekrar deneyin."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı sağlayıcısında kullanılabilir kredi yok veya bir kullanım ya da harcama sınırına ulaşıldı. Sağlayıcı bakiyesini ve sınırlarını ya da ChatGPT kullanım ayarlarını kontrol edin."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24043,6 +24055,80 @@
     {
       "type": 0,
       "value": "Metin yapay zekâsı bağlantısı başarısız oldu. Modeli, akıl yürütme düzeyini, hizmet katmanını, hesap bağlantısını ve sağlayıcı kullanım sınırlarını kontrol edin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı erişimi reddedildi. API anahtarının veya ChatGPT hesabının bu modeli kullanma izni olup olmadığını kontrol edin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı uç noktası veya modeli kullanılamıyor. Sağlayıcının temel URL’sini ve modeli kontrol edin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Bağlı ChatGPT hesabı plan kullanımını paylaşamıyor. ChatGPT kullanım ayarlarını kontrol edin veya başka bir hesap bağlayın."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı sağlayıcısı istekleri hız sınırlamasına tabi tutuyor. Daha sonra tekrar deneyin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı sağlayıcısı kontrol isteğini reddetti. Modeli, akıl yürütme düzeyini ve hesabın kullanım ayarlarını kontrol edin. Sağlayıcının hata mesajı sunucu günlüğünde yer alıyor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı sağlayıcısı kontrol isteğini reddetti (durum: "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Modeli, akıl yürütme düzeyini ve hizmet katmanını kontrol edin. Sağlayıcının hata mesajı sunucu günlüğünde yer alıyor."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı bağlantı kontrolü zaman aşımına uğradı. Sağlayıcının erişilebilir olup olmadığını kontrol edip tekrar deneyin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı sağlayıcısı kimlik bilgilerini reddetti. Sağlayıcının API anahtarını değiştirin veya ChatGPT ile yeniden oturum açın."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Metin yapay zekâsı sağlayıcısı geçici olarak kullanılamıyor. Daha sonra tekrar deneyin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo, metin yapay zekâsı sağlayıcısına ulaşamadı. Sağlayıcının temel URL’sini ve bu sunucunun sağlayıcıya bağlanabildiğini kontrol edin."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Metin modeli Silo’nun kullanamayacağı bir yanıt döndürdü. Başka bir model seçin."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -67033,6 +67119,12 @@
       "value": "İzlendi olarak işaretleme eşiği"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Jenerik işaretçisi bulunan yapımlar, oynatma jeneriğe ulaştığında da izlenmiş sayılır."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -101674,6 +101766,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

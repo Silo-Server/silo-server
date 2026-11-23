@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vitest";
 
-import { emailDir, mixesDirections } from "./direction";
+import { emailDir, mixesDirections, startsRightToLeft } from "./direction";
+
+describe("startsRightToLeft", () => {
+  it.each([
+    ["a Latin title", "The Return of the King", false],
+    ["digits before a Latin title", "1883 (2021)", false],
+    ["an Arabic title", "عودة الملك", true],
+    ["a Hebrew title", "שובו של המלך", true],
+    ["a Syriac title", "ܡܠܟܐ", true],
+    ["a Thaana title", "ދިވެހި", true],
+    ["an N'Ko title", "ߒߞߏ", true],
+    ["an Adlam digit before a Latin title", "𞥑 Days", true],
+    ["an N'Ko digit before a Latin title", "߁ Days", true],
+    ["an Arabic question mark before a Latin title", "؟ Days", true],
+    ["only digits", "2049", false],
+  ])("%s", (_case, text, want) => {
+    expect(startsRightToLeft(text)).toBe(want);
+  });
+});
 
 describe("emailDir", () => {
   // undefined keeps the page's direction; "ltr" forces left to right.

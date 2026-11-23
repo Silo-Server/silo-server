@@ -138,15 +138,6 @@ type PlaybackProbeEnsurer interface {
 // *playback.CopySafetyRace implements it.
 type PlaybackCopySafetyRacer interface {
 	RaceScanForPlan(fileID int, plan *playback.PlanV3)
-	// RaceScan re-engages the race for a file whose verdict is still open. The
-	// serve paths use it when they revive a stream-copy transport: the replica
-	// that planned it may be gone, and only a race running *here* can withdraw
-	// the route from the session this replica just rebuilt.
-	RaceScan(fileID int)
-	// VideoCopyUnsafeKnown answers, without ffmpeg and without waiting, whether
-	// this replica can already condemn a video stream-copy of the file —
-	// including from a verdict whose write to the row failed.
-	VideoCopyUnsafeKnown(ctx context.Context, file *models.MediaFile) bool
 }
 
 type PlaybackChapterThumbnailQueuer interface {
@@ -260,7 +251,8 @@ type PlaybackHandler struct {
 	ProbeEnsurer       PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
 	// CopySafetyRacer resolves an unknown H.264 copy-safety verdict behind an
 	// already-issued stream-copy plan. Optional: without it an unknown verdict
-	// simply stays unknown and the copy route is never withdrawn.
+	// stays unknown, and strict web decoders and downloads treat the file as
+	// copy-safe.
 	CopySafetyRacer        PlaybackCopySafetyRacer
 	ChapterThumbnailQueuer PlaybackChapterThumbnailQueuer
 	IntroAnalyzer          PlaybackEpisodeAnalyzer
@@ -497,6 +489,27 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 	return t
 }
 
+// playbackThresholdsForFile is playbackThresholds with file's end credits,
+// for session's position measured on a timeline of duration seconds. The
+// credits count only when file is the one session streams and the timeline is
+// that file's own. A session that streams another file than the one it loaded,
+// such as a lower-bitrate version or the next part of a multipart title, one
+// whose streamed file is unknown (a detached Jellyfin stop that only guessed
+// its version), or a longer timeline such as a whole audiobook, keeps the
+// percentage rule.
+func (h *PlaybackHandler) playbackThresholdsForFile(ctx context.Context, session *playback.Session, file *models.MediaFile, duration float64) userstore.ProgressThresholds {
+	t := h.playbackThresholds(ctx)
+	if file == nil || duration != float64(file.Duration) {
+		return t
+	}
+	if session != nil && (session.MediaFileID != file.ID && (session.MediaFileID > 0 || session.RequestedMediaFileID > 0) ||
+		session.TimelineDuration > 0 && session.TimelineDuration != duration) {
+		return t
+	}
+	t.CreditsStartSeconds = markers.CreditsLimitsForFile(file).EndCreditsStart(models.EffectiveMarkerSegments(file), duration)
+	return t
+}
+
 // --- Request/Response types ---
 
 func semanticPlayMethod(s *playback.Session) playback.PlayMethod {
@@ -507,6 +520,20 @@ func semanticPlayMethod(s *playback.Session) playback.PlayMethod {
 		return s.BasePlayMethod
 	}
 	return s.PlayMethod
+}
+
+// reconstructTransportForServe rebuilds a lost local transport from the token
+// recipe for the manifest and segment serve routes. A nil card yields a nil
+// result, which is the caller's not-found: to a client, a recipe it cannot
+// present and a recipe that no longer rebuilds are the same thing.
+// The returned error carries a tone-map execution failure so the serve handler
+// can render it as a 422 instead of a generic not-found; it is nil for every
+// other rebuild outcome, including a plain miss.
+func (h *PlaybackHandler) reconstructTransportForServe(ctx context.Context, sessionID string, requestedSegment int, card *playback.RecipeCard) (*playback.TranscodeSession, error) {
+	if card == nil {
+		return nil, nil
+	}
+	return h.tm.ReconstructTranscodeWithError(ctx, sessionID, requestedSegment, *card)
 }
 
 // ensurePlaybackProbe repairs probe metadata and stamps the H.264 copy-safety
@@ -632,9 +659,6 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 				return session, playback.SessionLoaded, nil, nil, nil
 			}
 			if card != nil {
-				if videoCopyReconstructRefused(r.Context(), h.fileResolver, h.CopySafetyRacer, card) {
-					return nil, playback.SessionMissing, nil, nil, nil
-				}
 				session, _, status, reconstructErr := h.tm.LoadOrReconstructTranscodeWithError(r.Context(), h.sessionMgr.GetSession, sessionID, requestUserID, requestedSegment, card)
 				return session, status, card, claims, reconstructErr
 			}
@@ -659,18 +683,6 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 		if routeStatus := nativeAPIEgressStatusV3(card.RoutingWorkload, card.RoutingExecution, card.RoutingEgress); routeStatus != 0 {
 			return nil, playback.SessionUnavailable, card, claims, &nativeRouteBindingErrorV3{status: routeStatus}
 		}
-	}
-	// The copy-safety verdict gates the revival before it happens, not after.
-	// Reconstruction registers the playback session against the user's stream
-	// caps, so a refusal that ran later would leave a session nobody serves
-	// holding an admission slot the client's fresh attempt needs — and a
-	// remote-node recipe never reaches the local transport reconstruct at all
-	// (the serve handlers proxy to the node instead), so a gate down there would
-	// miss it entirely. A revival the verdict does not condemn re-engages the
-	// race here, so the session about to be rebuilt is covered by a race this
-	// replica owns. See playback_copy_safety.go.
-	if videoCopyReconstructRefused(r.Context(), h.fileResolver, h.CopySafetyRacer, card) {
-		return nil, playback.SessionMissing, nil, nil, nil
 	}
 	// A tone-mapped or keyframe-planned rebuild can fail for a reason the
 	// player has to hear (a terminal tone-map verdict, a playlist that can no
@@ -1057,7 +1069,7 @@ func (h *PlaybackHandler) persistProgress(ctx context.Context, session *playback
 	}
 
 	duration := float64(file.Duration)
-	thresholds := h.playbackThresholds(ctx)
+	thresholds := h.playbackThresholdsForFile(ctx, session, file, duration)
 	hints := userstore.VersionHints{
 		FileID:     file.ID,
 		Resolution: file.Resolution,
@@ -1113,7 +1125,7 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	}
 
 	duration := float64(file.Duration)
-	thresholds := h.playbackThresholds(ctx)
+	thresholds := h.playbackThresholdsForFile(ctx, session, file, duration)
 	watchSvc := watchstate.NewService(h.StoreProvider).
 		WithStableIdentityResolver(h.StableIdentityResolver).
 		WithCompletionObserver(h.CompletionObserver)
@@ -1154,8 +1166,8 @@ func (h *PlaybackHandler) persistStopAndHistory(ctx context.Context, session *pl
 	// an earlier stop failed to mark is not lost; the mark skips episodes
 	// already completed.
 	var spanWritten bool
-	if (historyID == "" || session.IsJellyfinCompat) && (result.Completed || (result.AlreadyRecorded && duration > 0 &&
-		session.Position/duration > userstore.WatchedFraction(thresholds.WatchedPct))) {
+	if (historyID == "" || session.IsJellyfinCompat) && (result.Completed || (result.AlreadyRecorded &&
+		thresholds.Watched(session.Position, duration))) {
 		targets, spanErr := h.spannedEpisodeTargets(ctx, file)
 		if spanErr == nil {
 			spanWritten, spanErr = watchSvc.RecordSpannedEpisodesWatched(ctx, session.UserID, session.ProfileID, targets, stoppedAt)
@@ -1281,9 +1293,7 @@ func (h *PlaybackHandler) buildAdminHistoryEntry(
 			duration = session.TimelineDuration
 		}
 		durationPtr = &duration
-		if duration > 0 && session.Position/duration > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct) {
-			completed = true
-		}
+		completed = h.playbackThresholdsForFile(ctx, session, file, duration).Watched(session.Position, duration)
 	}
 
 	entry := &AdminPlaybackHistoryEntry{
@@ -1355,7 +1365,7 @@ func (h *PlaybackHandler) finalizeSessionStopWithResult(ctx context.Context, ses
 	h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
 	h.cleanupStoppedSessionTransport(ctx, session)
 	if reason.userInitiated() || session.TranscodeNodeURL != "" {
-		// A system teardown (an FFmpeg exit, a copy-safety stop) leaves the
+		// A system teardown (an FFmpeg exit) leaves the
 		// attempt live for the client's next request to rebuild, as a stream
 		// token would; only a real stop retires the recovery card. A remote
 		// transport is the exception: the teardown above stopped its node job

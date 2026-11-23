@@ -521,6 +521,12 @@
       "value": "Această sesiune de redare s-a încheiat. Porniți din nou redarea."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Acest stream a fost înlocuit. Redarea continuă pe streamul curent."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -26390,6 +26396,12 @@
       "value": "Furnizorul de conversie a vorbirii în text este temporar indisponibil. Încercați din nou mai târziu."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Furnizorul de AI pentru text nu are credit disponibil sau s-a atins o limită de utilizare sau de cheltuieli. Verificați soldul și limitele la furnizor sau setările de utilizare ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -26400,6 +26412,80 @@
     {
       "type": 0,
       "value": "Conexiunea la AI pentru text nu a reușit. Verificați modelul, nivelul de raționament, nivelul serviciului, conexiunea contului și limitele de utilizare ale furnizorului."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Accesul la AI pentru text a fost refuzat. Verificați dacă cheia API sau contul ChatGPT are permisiunea de a folosi acest model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Endpointul sau modelul de AI pentru text nu este disponibil. Verificați adresa URL de bază a furnizorului și modelul."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Contul ChatGPT conectat nu poate partaja utilizarea planului său. Verificați setările de utilizare ChatGPT sau conectați alt cont."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Furnizorul de AI pentru text limitează frecvența cererilor. Încercați din nou mai târziu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Furnizorul de AI pentru text a refuzat cererea de verificare. Verificați modelul, nivelul de raționament și setările de utilizare ale contului. Eroarea furnizorului se află în jurnalul serverului."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Furnizorul de AI pentru text a respins cererea de verificare (stare "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Verificați modelul, nivelul de raționament și nivelul serviciului. Eroarea furnizorului se află în jurnalul serverului."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Verificarea conexiunii la AI pentru text a expirat. Verificați disponibilitatea furnizorului și încercați din nou."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Furnizorul de AI pentru text a respins datele de autentificare. Înlocuiți cheia API a furnizorului sau conectați-vă din nou cu ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Furnizorul de AI pentru text este temporar indisponibil. Încercați din nou mai târziu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo nu a putut accesa furnizorul de AI pentru text. Verificați adresa URL de bază a furnizorului și dacă acest server se poate conecta la el."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Modelul de text a returnat un răspuns pe care Silo nu îl poate folosi. Alegeți alt model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -74591,6 +74677,12 @@
       "value": "Marcare ca vizionat la"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titlurile cu un marcaj pentru generic sunt considerate vizionate și atunci când redarea ajunge la generic."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -112407,6 +112499,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

@@ -42,7 +42,7 @@ the track's block, is cut off, or doesn't decompress is reported in a
 one cue but several frames, so a laced track tagged with NUMBER_OF_FRAMES
 rates `incomplete`.
 
-## Same output as today's extraction
+## Same output as extraction from the source
 
 Packets go back to FFmpeg as a one-track file on stdin, written by
 `WriteStream`: a subtitle-only Matroska stream (`WriteMKS`) or a one-track MP4
@@ -69,8 +69,8 @@ and mov_text to WebVTT and SubRip. Invariants that keep them equal:
   or between a window's samples is filled with empty text samples.
 
 When a cue starts before the source's start time, FFmpeg's muxer shifts the
-whole output later so no timestamp is negative (`avoid_negative_ts`). Today's
-extraction does it too, so the whole-track output matches, but a window that
+whole output later so no timestamp is negative (`avoid_negative_ts`). Extraction from
+the source does it too, so the whole-track output matches, but a window that
 leaves that cue out isn't shifted. Windows can also differ from FFmpeg's own
 seek through the source, which lands on whatever packet precedes the seek
 point; an empty window converts to the WebVTT header alone.

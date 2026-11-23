@@ -521,6 +521,12 @@
       "value": "Sesi pemutaran ini telah berakhir. Mulai putar lagi."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Stream ini telah diganti. Pemutaran berlanjut di stream saat ini."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -21876,6 +21882,12 @@
       "value": "Penyedia ucapan-ke-teks sementara tidak tersedia. Coba lagi nanti."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Penyedia AI teks tidak memiliki kredit yang tersedia, atau batas penggunaan atau pengeluaran telah tercapai. Periksa saldo dan batas penyedia, atau pengaturan penggunaan ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -21886,6 +21898,80 @@
     {
       "type": 0,
       "value": "Koneksi AI teks gagal. Periksa model, tingkat penalaran, tingkat layanan, koneksi akun, dan batas penggunaan penyedia."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Akses AI teks ditolak. Pastikan kunci API atau akun ChatGPT diizinkan menggunakan model ini."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Endpoint atau model AI teks tidak tersedia. Periksa URL dasar penyedia dan model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Akun ChatGPT yang terhubung tidak dapat membagikan penggunaan paketnya. Periksa pengaturan penggunaan ChatGPT, atau hubungkan akun lain."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Penyedia AI teks membatasi laju permintaan. Coba lagi nanti."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Penyedia AI teks menolak permintaan pemeriksaan. Periksa model, tingkat penalaran, dan pengaturan penggunaan akun. Log server berisi kesalahan dari penyedia."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Penyedia AI teks menolak permintaan pemeriksaan (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Periksa model, tingkat penalaran, dan tingkat layanan. Log server berisi kesalahan dari penyedia."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Waktu pemeriksaan koneksi AI teks habis. Periksa ketersediaan penyedia, lalu coba lagi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Penyedia AI teks menolak kredensial. Ganti kunci API penyedia, atau masuk dengan ChatGPT lagi."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Penyedia AI teks sementara tidak tersedia. Coba lagi nanti."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo tidak dapat menjangkau penyedia AI teks. Periksa URL dasar penyedia dan pastikan server ini dapat terhubung ke penyedia tersebut."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Model teks mengembalikan respons yang tidak dapat digunakan Silo. Pilih model lain."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -60838,6 +60924,12 @@
       "value": "Tandai sudah ditonton pada"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Judul yang memiliki penanda kredit juga dihitung sudah ditonton setelah pemutaran mencapai kredit."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -93349,6 +93441,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

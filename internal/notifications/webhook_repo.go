@@ -200,52 +200,62 @@ func (r *WebhookRepository) DeleteAllForProfile(ctx context.Context, userID int,
 	return deleteProfileTargetsInOrder(ctx, r.pool, "notification_webhooks", userID, profileID)
 }
 
-// RecordSuccess resets the failure streak after a delivered attempt.
-func (r *WebhookRepository) RecordSuccess(ctx context.Context, webhookID string) error {
-	_, err := r.pool.Exec(ctx, `
+// lockForFinish locks a webhook before a send's outcome is recorded, in the
+// order a delete takes its locks (the webhook, then its attempts by cascade),
+// so the two can't deadlock. It reports whether the webhook still exists.
+func (r *WebhookRepository) lockForFinish(ctx context.Context, tx pgx.Tx, webhookID string) (bool, error) {
+	tag, err := tx.Exec(ctx, `SELECT 1 FROM notification_webhooks WHERE id = $1 FOR NO KEY UPDATE`, webhookID)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// RecordSuccess resets the failure and rejection streaks after a delivered
+// attempt.
+func (r *WebhookRepository) RecordSuccess(ctx context.Context, tx pgx.Tx, webhookID string) error {
+	_, err := tx.Exec(ctx, `
 		UPDATE notification_webhooks
-		SET last_success_at = now(), consecutive_failures = 0, updated_at = now()
+		SET last_success_at = now(), consecutive_failures = 0, consecutive_rejections = 0,
+		    updated_at = now()
 		WHERE id = $1`, webhookID)
 	return err
 }
 
-// RecordFailure increments the failure streak and stores the diagnostic.
-func (r *WebhookRepository) RecordFailure(ctx context.Context, webhookID string, httpStatus *int, message string) error {
-	_, err := r.pool.Exec(ctx, `
+// RecordFailure extends the failure streak and stores the diagnostic. A
+// rejected delivery (a non-retryable 4xx) also extends the rejection streak,
+// whose new length it returns. A success, re-enabling, and a new URL reset
+// both streaks.
+func (r *WebhookRepository) RecordFailure(ctx context.Context, tx pgx.Tx, webhookID string, httpStatus *int, message string, rejected bool) (int, error) {
+	var rejections int
+	err := tx.QueryRow(ctx, `
 		UPDATE notification_webhooks
 		SET last_failure_at = now(),
 		    last_failure_status = $2,
 		    last_failure_message = left($3, 256),
 		    consecutive_failures = consecutive_failures + 1,
+		    -- Clamped to the failure streak as it stood, so a reset that
+		    -- cleared only consecutive_failures (a build from before this
+		    -- column, during an upgrade) can't leave old rejections counting.
+		    consecutive_rejections = LEAST(consecutive_rejections, consecutive_failures) + CASE WHEN $4 THEN 1 ELSE 0 END,
 		    updated_at = now()
-		WHERE id = $1`, webhookID, httpStatus, message)
-	return err
+		WHERE id = $1
+		RETURNING consecutive_rejections`, webhookID, httpStatus, message, rejected).Scan(&rejections)
+	return rejections, err
 }
 
-// Disable auto-disables a webhook with a profile-visible reason.
-func (r *WebhookRepository) Disable(ctx context.Context, webhookID, reason string) error {
-	_, err := r.pool.Exec(ctx, `
+// Disable auto-disables an enabled webhook with a profile-visible reason and
+// reports whether this call disabled it, so concurrent failures post one
+// notice.
+func (r *WebhookRepository) Disable(ctx context.Context, tx pgx.Tx, webhookID, reason string) (bool, error) {
+	tag, err := tx.Exec(ctx, `
 		UPDATE notification_webhooks
 		SET enabled = false, disabled_reason = left($2, 256), updated_at = now()
-		WHERE id = $1`, webhookID, reason)
-	return err
-}
-
-// RecentFinalOutcomes returns the most recent terminal attempt outcomes
-// (delivered/failed/auto_disabled) for a webhook, newest first. Used for the
-// 3-consecutive-non-retryable-4xx auto-disable rule.
-func (r *WebhookRepository) RecentFinalOutcomes(ctx context.Context, webhookID string, limit int) ([]DeliveryAttempt, error) {
-	rows, err := r.pool.Query(ctx, `
-		SELECT id, notification_delivery_id, webhook_id, attempt_number, attempted_at,
-		       next_retry_at, http_status, outcome, failure_message
-		FROM webhook_delivery_attempts
-		WHERE webhook_id = $1 AND outcome IN ('delivered', 'failed', 'auto_disabled')
-		ORDER BY attempted_at DESC
-		LIMIT $2`, webhookID, limit)
+		WHERE id = $1 AND enabled`, webhookID, reason)
 	if err != nil {
-		return nil, fmt.Errorf("list final webhook outcomes: %w", err)
+		return false, err
 	}
-	return scanDeliveryAttempts(rows)
+	return tag.RowsAffected() == 1, nil
 }
 
 func scanDeliveryAttempts(rows pgx.Rows) ([]DeliveryAttempt, error) {
@@ -314,30 +324,47 @@ func (r *WebhookRepository) ClaimDue(ctx context.Context, limit int) ([]Delivery
 }
 
 func (r *WebhookRepository) claim(ctx context.Context, query string, args ...any) ([]DeliveryAttempt, error) {
-	rows, err := r.pool.Query(ctx, query, args...)
+	conn, err := r.pool.Acquire(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("claim webhook attempts: %w", err)
 	}
-	return scanDeliveryAttempts(rows)
+	defer conn.Release()
+	// Taken once a connection is in hand and before the query: the lease
+	// starts when the claiming statement does, so time it spends waiting on
+	// row locks counts against the lease, but waiting for a connection
+	// doesn't.
+	claimedAt := time.Now()
+	rows, err := conn.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("claim webhook attempts: %w", err)
+	}
+	attempts, err := scanDeliveryAttempts(rows)
+	for i := range attempts {
+		attempts[i].claimedAt = claimedAt
+	}
+	return attempts, err
 }
 
 // FinalizeAttempt records a send result: the new outcome, the attempt number
-// just consumed, and the optional next retry time.
-func (r *WebhookRepository) FinalizeAttempt(ctx context.Context, attemptID, outcome string, attemptNumber int, httpStatus *int, failureMessage string, nextRetryAt *time.Time) error {
+// just consumed, and the optional next retry time. It applies only while the
+// attempt still holds the claim it was sent under, and reports whether it
+// did: a send that outlived its lease was reclaimed, and the worker holding
+// the new claim records the outcome.
+func (r *WebhookRepository) FinalizeAttempt(ctx context.Context, q pluginDestinationExec, claimed DeliveryAttempt, outcome string, attemptNumber int, httpStatus *int, failureMessage string, nextRetryAt *time.Time) (bool, error) {
 	var message *string
 	if failureMessage != "" {
 		message = &failureMessage
 	}
-	_, err := r.pool.Exec(ctx, `
+	tag, err := q.Exec(ctx, `
 		UPDATE webhook_delivery_attempts
 		SET outcome = $2, attempt_number = $3, attempted_at = now(),
 		    http_status = $4, failure_message = left($5, 256), next_retry_at = $6
-		WHERE id = $1`,
-		attemptID, outcome, attemptNumber, httpStatus, message, nextRetryAt)
+		WHERE id = $1 AND outcome = 'retrying' AND next_retry_at = $7`,
+		claimed.ID, outcome, attemptNumber, httpStatus, message, nextRetryAt, claimed.NextRetryAt)
 	if err != nil {
-		return fmt.Errorf("finalize webhook attempt: %w", err)
+		return false, fmt.Errorf("finalize webhook attempt: %w", err)
 	}
-	return nil
+	return tag.RowsAffected() == 1, nil
 }
 
 // DeleteOldAttempts applies attempt retention: delivered rows past 7 days,
@@ -431,6 +458,9 @@ func (r *WebhookRepository) UpdateGuarded(ctx context.Context, userID int, profi
 	row, err := scanWebhook(tx.QueryRow(ctx, `UPDATE notification_webhooks SET
  name=$4, url_ciphertext=$5, url_host=$6, enabled=$7,
  notify_next_up=$8, notify_requests=$9, consecutive_failures=$10,
+ -- Every rejection is also a failure, so resetting the failure streak
+ -- (re-enabling, a new URL) resets the rejection streak too.
+ consecutive_rejections=LEAST(consecutive_rejections, $10),
  disabled_reason=$11, updated_at=now()
  WHERE user_id=$1 AND profile_id=$2 AND id=$3 RETURNING `+webhookColumns,
 		userID, profile, id, hook.Name, hook.URLCiphertext, hook.URLHost, hook.Enabled,

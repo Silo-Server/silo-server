@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useRef } from "react";
 import { onlineManager } from "@tanstack/react-query";
 import { toast } from "sonner";
 
-import { V2ProblemError } from "@/api/v2/request";
+import { readableErrorText, V2ProblemError } from "@/api/v2/request";
 import { t } from "@/i18n";
 import { appearanceCache, type StorageKey } from "@/utils/storage";
 
@@ -42,16 +42,24 @@ export function refusedOffline(error: unknown): boolean {
 }
 
 /**
- * Tells the user a preference change made offline wasn't saved, for callers
- * that show the change at once and report no save error of their own. Other
- * failures stay with the caller's existing handling. Returns whether the
- * write was refused offline, so it is certain nothing was stored.
+ * Tells the user a preference change made offline wasn't saved, once for a
+ * burst of them. Other failures stay with the caller's own handling. Returns
+ * whether the write was refused offline, so it is certain nothing was stored.
  */
 export function reportOfflineSettingFailure(error: unknown): boolean {
   if (!refusedOffline(error)) return false;
   // One toast for a burst of offline changes, not one per click.
   toast.error(t("web.settings.offlineChangeNotSaved"), { id: "setting-write-offline" });
   return true;
+}
+
+/**
+ * The error toast for a setting write that reports its own failures: the
+ * offline notice once for a burst of offline changes, and otherwise the
+ * error's own message, or `fallback` when that is developer English.
+ */
+export function toastSettingWriteError(error: unknown, fallback: string): void {
+  if (!reportOfflineSettingFailure(error)) toast.error(readableErrorText(error, fallback));
 }
 
 /**

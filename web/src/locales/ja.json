@@ -521,6 +521,12 @@
       "value": "この再生セッションは終了しました。もう一度再生してください。"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "このストリームは置き換えられました。現在のストリームで再生を続行しています。"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -22012,6 +22018,12 @@
       "value": "音声認識プロバイダーは一時的に利用できません。しばらくしてからもう一度お試しください。"
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "テキストAIプロバイダーで利用可能なクレジットがないか、利用上限または支出上限に達しました。プロバイダーの残高と上限、またはChatGPTの利用設定を確認してください。"
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -22022,6 +22034,80 @@
     {
       "type": 0,
       "value": "テキストAIに接続できませんでした。モデル、推論レベル、サービスティア、アカウントの連携、プロバイダーの利用上限を確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "テキストAIへのアクセスが拒否されました。APIキーまたはChatGPTアカウントでこのモデルを使用できるか確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "テキストAIのエンドポイントまたはモデルを利用できません。プロバイダーのベースURLとモデルを確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "連携しているChatGPTアカウントでは、プランの利用枠を共有できません。ChatGPTの利用設定を確認するか、別のアカウントを連携してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "テキストAIプロバイダーがリクエストのレートを制限しています。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "テキストAIプロバイダーが確認のリクエストを拒否しました。モデル、推論レベル、アカウントの利用設定を確認してください。プロバイダーのエラーはサーバーログに記録されています。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "テキストAIプロバイダーが確認のリクエストを拒否しました（ステータス"
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "）。モデル、推論レベル、サービスティアを確認してください。プロバイダーのエラーはサーバーログに記録されています。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "テキストAIの接続確認がタイムアウトしました。プロバイダーの稼働状況を確認して、もう一度お試しください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "テキストAIプロバイダーが認証情報を拒否しました。プロバイダーのAPIキーを置き換えるか、ChatGPTに再度サインインしてください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "テキストAIプロバイダーは一時的に利用できません。しばらくしてからもう一度お試しください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "SiloはテキストAIプロバイダーに接続できませんでした。プロバイダーのベースURLと、このサーバーからプロバイダーに接続できるかを確認してください。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "テキストモデルが、Siloで使用できない応答を返しました。別のモデルを選択してください。"
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -60982,6 +61068,12 @@
       "value": "視聴済みにする進行度"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "クレジットのマーカーがあるタイトルは、再生がクレジットに達した時点でも視聴済みになります。"
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -93197,6 +93289,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

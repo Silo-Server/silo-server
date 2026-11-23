@@ -521,6 +521,12 @@
       "value": "Táto relácia prehrávania sa skončila. Spustite prehrávanie znova."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Tento stream bol nahradený. Prehrávanie pokračuje v aktuálnom streame."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -28827,6 +28833,12 @@
       "value": "Poskytovateľ prevodu reči na text je dočasne nedostupný. Skúste to znova neskôr."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Poskytovateľ textovej AI nemá k dispozícii žiadny kredit alebo sa dosiahol limit používania či výdavkov. Skontrolujte zostatok a limity u poskytovateľa alebo nastavenia používania ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -28837,6 +28849,80 @@
     {
       "type": 0,
       "value": "Pripojenie k textovej AI zlyhalo. Skontrolujte model, úroveň uvažovania, úroveň služby, pripojenie účtu a limity používania u poskytovateľa."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Prístup k textovej AI bol zamietnutý. Skontrolujte, či kľúč API alebo účet ChatGPT môže používať tento model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Koncový bod alebo model textovej AI nie je k dispozícii. Skontrolujte základnú URL poskytovateľa a model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Pripojený účet ChatGPT nemôže zdieľať využitie svojho plánu. Skontrolujte nastavenia používania ChatGPT alebo pripojte iný účet."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Poskytovateľ textovej AI obmedzuje frekvenciu požiadaviek. Skúste to znova neskôr."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Poskytovateľ textovej AI odmietol požiadavku na kontrolu. Skontrolujte model, úroveň uvažovania a nastavenia používania účtu. Chybu od poskytovateľa nájdete v denníku servera."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Poskytovateľ textovej AI odmietol požiadavku na kontrolu (stav "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Skontrolujte model, úroveň uvažovania a úroveň služby. Chybu od poskytovateľa nájdete v denníku servera."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Časový limit kontroly pripojenia k textovej AI vypršal. Skontrolujte dostupnosť poskytovateľa a skúste to znova."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Poskytovateľ textovej AI odmietol prihlasovacie údaje. Nahraďte kľúč API poskytovateľa alebo sa znova prihláste cez ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Poskytovateľ textovej AI je dočasne nedostupný. Skúste to znova neskôr."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo sa nedokázalo spojiť s poskytovateľom textovej AI. Skontrolujte základnú URL poskytovateľa a to, či sa k nemu tento server dokáže pripojiť."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Textový model vrátil odpoveď, ktorú Silo nedokáže použiť. Vyberte iný model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -81705,6 +81791,12 @@
       "value": "Označiť ako pozreté pri"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Tituly so značkou záverečných titulkov sa považujú za pozreté aj vtedy, keď prehrávanie dosiahne záverečné titulky."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -122140,6 +122232,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

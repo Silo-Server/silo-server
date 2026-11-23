@@ -521,6 +521,12 @@
       "value": "此播放会话已结束。请重新开始播放。"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "此串流已被替换。播放将在当前串流上继续。"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -22048,6 +22054,12 @@
       "value": "语音转文字提供商暂时不可用。请稍后重试。"
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "文本AI提供商没有可用额度，或已达到用量或消费限额。请检查提供商余额和限额，或ChatGPT用量设置。"
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -22058,6 +22070,80 @@
     {
       "type": 0,
       "value": "文本AI连接失败。请检查模型、推理级别、服务层级、账户连接以及提供商的用量限制。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "文本AI访问被拒绝。请检查该API密钥或ChatGPT账户是否可以使用此模型。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "文本AI端点或模型不可用。请检查提供商的基础URL和模型。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "已连接的ChatGPT账户无法共享其套餐用量。请检查ChatGPT用量设置，或连接其他账户。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "文本AI提供商正在限制请求频率。请稍后重试。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "文本AI提供商拒绝了检查请求。请检查模型、推理级别以及账户的用量设置。服务器日志中有提供商返回的错误。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "文本AI提供商拒绝了检查请求（状态"
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "）。请检查模型、推理级别和服务层级。服务器日志中有提供商返回的错误。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "文本AI连接检查超时。请检查提供商是否可用，然后重试。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "文本AI提供商拒绝了凭据。请更换该提供商的API密钥，或重新使用ChatGPT登录。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "文本AI提供商暂时不可用。请稍后重试。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo无法连接到文本AI提供商。请检查提供商的基础URL，以及此服务器能否连接到它。"
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "文本模型返回了Silo无法使用的响应。请选择其他模型。"
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -61354,6 +61440,12 @@
       "value": "标记为已观看的进度"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "带有片尾字幕标记的影片，在播放到片尾字幕时也会计为已看完。"
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -94025,6 +94117,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

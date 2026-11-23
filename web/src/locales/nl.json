@@ -521,6 +521,12 @@
       "value": "Deze afspeelsessie is beëindigd. Start het afspelen opnieuw."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Deze stream is vervangen. Het afspelen gaat verder op de huidige stream."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -24065,6 +24071,12 @@
       "value": "De provider voor spraak-naar-tekst is tijdelijk niet beschikbaar. Probeer het later opnieuw."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "De provider voor tekst-AI heeft geen tegoed meer, of er is een gebruiks- of bestedingslimiet bereikt. Controleer je tegoed en limieten bij de provider, of de gebruiksinstellingen van ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -24075,6 +24087,80 @@
     {
       "type": 0,
       "value": "Verbinding met tekst-AI mislukt. Controleer het model, het redeneerniveau, het serviceniveau, de accountkoppeling en de gebruikslimieten van de provider."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Toegang tot tekst-AI geweigerd. Controleer of de API-sleutel of het ChatGPT-account dit model mag gebruiken."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Endpoint of model voor tekst-AI is niet beschikbaar. Controleer de basis-URL van de provider en het model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Het gekoppelde ChatGPT-account kan het gebruik van zijn abonnement niet delen. Controleer de gebruiksinstellingen van ChatGPT of koppel een ander account."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "De provider voor tekst-AI beperkt het aantal verzoeken. Probeer het later opnieuw."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "De provider voor tekst-AI heeft het controleverzoek geweigerd. Controleer het model, het redeneerniveau en de gebruiksinstellingen van het account. De foutmelding van de provider staat in de serverlog."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "De provider voor tekst-AI heeft het controleverzoek geweigerd (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Controleer het model, het redeneerniveau en het serviceniveau. De foutmelding van de provider staat in de serverlog."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "De verbindingscontrole voor tekst-AI duurde te lang. Controleer of de provider beschikbaar is en probeer het opnieuw."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "De provider voor tekst-AI heeft de inloggegevens geweigerd. Vervang de API-sleutel van de provider of log opnieuw in met ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "De provider voor tekst-AI is tijdelijk niet beschikbaar. Probeer het later opnieuw."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Silo kan de provider voor tekst-AI niet bereiken. Controleer de basis-URL van de provider en of deze server er verbinding mee kan maken."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Het tekstmodel gaf een antwoord terug dat Silo niet kan gebruiken. Kies een ander model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -67301,6 +67387,12 @@
       "value": "Als bekeken markeren bij"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titels met een aftitelingsmarkering tellen ook als bekeken zodra het afspelen de aftiteling bereikt."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -102036,6 +102128,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

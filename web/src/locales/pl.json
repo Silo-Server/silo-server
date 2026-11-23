@@ -521,6 +521,12 @@
       "value": "Ta sesja odtwarzania się zakończyła. Rozpocznij odtwarzanie ponownie."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Ten strumień został zastąpiony. Odtwarzanie trwa w bieżącym strumieniu."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -29463,6 +29469,12 @@
       "value": "Dostawca zamiany mowy na tekst jest tymczasowo niedostępny. Spróbuj ponownie później."
     }
   ],
+  "web.admin.common.connectionCheck.result.textAIBilling": [
+    {
+      "type": 0,
+      "value": "Dostawca tekstowej AI nie ma dostępnych środków albo osiągnięto limit użycia lub wydatków. Sprawdź saldo i limity u dostawcy albo ustawienia użycia w ChatGPT."
+    }
+  ],
   "web.admin.common.connectionCheck.result.textAIConnected": [
     {
       "type": 0,
@@ -29473,6 +29485,80 @@
     {
       "type": 0,
       "value": "Nie udało się połączyć z tekstową AI. Sprawdź model, poziom rozumowania, poziom usługi, połączenie konta i limity użycia u dostawcy."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIForbidden": [
+    {
+      "type": 0,
+      "value": "Odmówiono dostępu do tekstowej AI. Sprawdź, czy klucz API lub konto ChatGPT może używać tego modelu."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAINotFound": [
+    {
+      "type": 0,
+      "value": "Punkt końcowy lub model tekstowej AI jest niedostępny. Sprawdź bazowy adres URL dostawcy i model."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIPlanIneligible": [
+    {
+      "type": 0,
+      "value": "Połączone konto ChatGPT nie może udostępniać limitu użycia ze swojego planu. Sprawdź ustawienia użycia w ChatGPT lub połącz inne konto."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRateLimited": [
+    {
+      "type": 0,
+      "value": "Dostawca tekstowej AI ogranicza liczbę żądań. Spróbuj ponownie później."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRefused": [
+    {
+      "type": 0,
+      "value": "Dostawca tekstowej AI odmówił obsłużenia żądania sprawdzenia. Sprawdź model, poziom rozumowania i ustawienia użycia konta. Błąd dostawcy znajdziesz w logu serwera."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIRejected": [
+    {
+      "type": 0,
+      "value": "Dostawca tekstowej AI odrzucił żądanie sprawdzenia (status "
+    },
+    {
+      "type": 1,
+      "value": "status"
+    },
+    {
+      "type": 0,
+      "value": "). Sprawdź model, poziom rozumowania i poziom usługi. Błąd dostawcy znajdziesz w logu serwera."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAITimedOut": [
+    {
+      "type": 0,
+      "value": "Upłynął limit czasu sprawdzania połączenia z tekstową AI. Sprawdź dostępność dostawcy i spróbuj ponownie."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnauthorized": [
+    {
+      "type": 0,
+      "value": "Dostawca tekstowej AI odrzucił dane uwierzytelniające. Zastąp klucz API dostawcy lub zaloguj się ponownie przez ChatGPT."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnavailable": [
+    {
+      "type": 0,
+      "value": "Dostawca tekstowej AI jest tymczasowo niedostępny. Spróbuj ponownie później."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnreachable": [
+    {
+      "type": 0,
+      "value": "Nie udało się połączyć z dostawcą tekstowej AI. Sprawdź bazowy adres URL dostawcy i to, czy ten serwer może się z nim połączyć."
+    }
+  ],
+  "web.admin.common.connectionCheck.result.textAIUnusableResponse": [
+    {
+      "type": 0,
+      "value": "Model tekstowy zwrócił odpowiedź, której Silo nie może użyć. Wybierz inny model."
     }
   ],
   "web.admin.common.deviceConnections.bufferingAction.accepted": [
@@ -82255,6 +82341,12 @@
       "value": "Oznacz jako obejrzane przy"
     }
   ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Tytuły ze znacznikiem napisów końcowych są też oznaczane jako obejrzane, gdy odtwarzanie dotrze do napisów końcowych."
+    }
+  ],
   "web.admin.settings.playback.watch.minResume": [
     {
       "type": 0,
@@ -122552,6 +122644,20 @@
     {
       "type": 1,
       "value": "series"
+    }
+  ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
     }
   ],
   "web.common.activity.subtitle.movie": [

@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
@@ -233,8 +232,8 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	if err == nil && file != nil {
 		result.MediaItemID = playbackProgressTarget(file)
 		result.DurationSeconds = float64(file.Duration)
-		result.Completed = result.HistoryID != "" && !session.DisableProgressPersistence && result.DurationSeconds > 0 &&
-			session.Position/result.DurationSeconds > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct)
+		result.Completed = result.HistoryID != "" && !session.DisableProgressPersistence &&
+			h.playbackThresholdsForFile(ctx, session, file, result.DurationSeconds).Watched(session.Position, result.DurationSeconds)
 	}
 	return realtimeStopOutcome{result: result, reason: endReasonForStop(session.ID, receipt.StopID), notify: notify}
 }
@@ -288,44 +287,6 @@ func (h *PlaybackHandler) abortPlaybackSessionByID(ctx context.Context, sessionI
 		return err
 	}
 	return h.abortPlaybackSession(ctx, session)
-}
-
-// CopySafetyPlaybackControl adapts the playback handler to the session control
-// playback.CopySafetyNotifier needs: the notifier owns the decision to withdraw
-// a plan, the handler owns realtime command bookkeeping and session teardown.
-type CopySafetyPlaybackControl struct {
-	playback *PlaybackHandler
-}
-
-// NewCopySafetyPlaybackControl returns the adapter, or nil without a handler.
-func NewCopySafetyPlaybackControl(handler *PlaybackHandler) *CopySafetyPlaybackControl {
-	if handler == nil {
-		return nil
-	}
-	return &CopySafetyPlaybackControl{playback: handler}
-}
-
-func (c *CopySafetyPlaybackControl) RememberRealtimeCommand(commandID, sessionID string, name playback.CommandName) {
-	if c == nil {
-		return
-	}
-	c.playback.rememberRealtimeCommand(commandID, sessionID, name)
-}
-
-func (c *CopySafetyPlaybackControl) ForgetRealtimeCommand(commandID string) {
-	if c == nil {
-		return
-	}
-	c.playback.forgetRealtimeCommand(commandID)
-}
-
-// StopSession ends the session as a system teardown, not a user stop: the
-// recipe card is kept so the client's recovery can rebuild from it.
-func (c *CopySafetyPlaybackControl) StopSession(ctx context.Context, sessionID string) error {
-	if c == nil {
-		return playback.ErrSessionNotFound
-	}
-	return c.playback.stopPlaybackSessionByID(ctx, sessionID, "")
 }
 
 func (h *PlaybackHandler) rememberRealtimeCommand(commandID, sessionID string, name playback.CommandName) {
