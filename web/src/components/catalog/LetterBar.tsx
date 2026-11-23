@@ -68,13 +68,13 @@ export default function LetterBar({ letters, activeLetter, onJump }: LetterBarPr
     if (enabled.length === 0) return;
     const at = enabled.indexOf(tabStop ?? "");
     let next: string | undefined;
+    // A vertical bar: Left and Right are left to spatial navigation, which
+    // takes a remote back to the grid beside it.
     switch (event.key) {
       case "ArrowDown":
-      case "ArrowRight":
         next = enabled[Math.min(at + 1, enabled.length - 1)];
         break;
       case "ArrowUp":
-      case "ArrowLeft":
         next = enabled[Math.max(at - 1, 0)];
         break;
       case "Home":

@@ -73,11 +73,16 @@ export default function BrandCarousel({
             className="embla__viewport overflow-hidden pe-4 sm:pe-6 lg:pe-10 xl:pe-12"
             tabIndex={0}
             aria-label={t("web.common.ui.carousel.label", { title })}
+            data-nav-group
             onKeyDown={(e) => {
+              if (e.target !== e.currentTarget) return;
               const key = readingArrowKey(e);
+              // Claimed, so spatial navigation doesn't also move focus.
               if (key === "ArrowLeft") {
+                e.preventDefault();
                 scrollPrev();
               } else if (key === "ArrowRight") {
+                e.preventDefault();
                 scrollNext();
               }
             }}

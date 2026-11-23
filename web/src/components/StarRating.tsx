@@ -9,8 +9,6 @@ interface StarRatingProps {
   value: number | null;
   onChange: (score: number | null) => void;
   size?: number;
-  /** When false, ArrowUp/ArrowDown are left to an enclosing menu's navigation. */
-  verticalArrows?: boolean;
 }
 
 const STAR_COUNT = 5;
@@ -35,12 +33,12 @@ function wholeStar(score: number): number {
  * the whole star; on the star that is already set it clears the rating
  * (onChange(null)). Half stars take a drag: pressing and moving sideways
  * fills the stars up to the half under the pointer and sets that value on
- * release. Keyboard users step half a star with the arrow keys, and
+ * release. Keyboard users step half a star with Left and Right, and
  * activating a radio sets its own value. Hovering previews the whole star in
  * CSS only (see `.star-rating` in app.css), so moving across the stars does
  * not render.
  */
-function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarRatingProps) {
+function StarRating({ value, onChange, size = 20 }: StarRatingProps) {
   const t = useT();
   const [suppressPreview, setSuppressPreview] = useState(false);
   // The score under a pressed pointer while it drags, null when none is down.
@@ -114,17 +112,19 @@ function StarRating({ value, onChange, size = 20, verticalArrows = true }: StarR
     setSuppressPreview(false);
   }
 
+  // Only Left and Right rate. Up and Down belong to whatever surrounds the
+  // stars (a menu, or a remote moving between controls), and Left or Right
+  // past either end leaves the stars too, so a remote is never trapped here.
   function handleKeyDown(e: React.KeyboardEvent) {
     let newValue: number | null = null;
     const key = readingArrowKey(e);
-    if (key === "ArrowRight" || (verticalArrows && key === "ArrowUp")) {
-      e.preventDefault();
+    if (key === "ArrowRight") {
       newValue = Math.min((rating ?? 0) + 1, MAX_SCORE);
-    } else if (key === "ArrowLeft" || (verticalArrows && key === "ArrowDown")) {
-      e.preventDefault();
-      newValue = Math.max((rating ?? 2) - 1, 1);
+    } else if (key === "ArrowLeft" && rating !== null) {
+      newValue = Math.max(rating - 1, 1);
     }
-    if (newValue !== null) {
+    if (newValue !== null && newValue !== rating) {
+      e.preventDefault();
       commit(newValue);
       e.currentTarget
         .querySelector<HTMLButtonElement>(`[data-rating="${newValue}"]`)

@@ -117,12 +117,12 @@ export function VolumeControl({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       let newVolume: number | null = null;
+      // Left and Right only, like the seek bar: a TV remote has no other way
+      // off the slider than Up and Down (see lib/spatialNavigation).
       switch (e.key) {
-        case "ArrowUp":
         case "ArrowRight":
           newVolume = Math.min(1, volume + 0.05);
           break;
-        case "ArrowDown":
         case "ArrowLeft":
           newVolume = Math.max(0, volume - 0.05);
           break;
