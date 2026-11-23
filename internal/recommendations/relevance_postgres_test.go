@@ -433,12 +433,14 @@ func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
 	// The audiobook is the latest completion; the movies follow it.
 	f.finish(t, userID, viewer, append([]string{finishedBook}, finished...)...)
 
-	// The latest movie is co-watched with an audiobook and the ebook, and the
-	// finished audiobook with another audiobook.
+	// The latest movie is co-watched with an audiobook, the ebook and a movie
+	// of its genre (Because You Watched validates against the source, so a
+	// movie of another genre would be dropped), and the finished audiobook
+	// with another audiobook.
 	if err := f.repo.UpsertCowatchPairs(ctx, []CowatchPair{
 		{ItemID: finished[0], SimilarItemID: books[0], JaccardScore: 0.9, CowatchCount: 5},
 		{ItemID: finished[0], SimilarItemID: books[6], JaccardScore: 0.9, CowatchCount: 5},
-		{ItemID: finished[0], SimilarItemID: movies[40], JaccardScore: 0.5, CowatchCount: 3},
+		{ItemID: finished[0], SimilarItemID: movies[39], JaccardScore: 0.5, CowatchCount: 3},
 		{ItemID: finishedBook, SimilarItemID: books[1], JaccardScore: 0.9, CowatchCount: 5},
 	}); err != nil {
 		t.Fatal(err)
@@ -533,8 +535,8 @@ func TestPersonalRowsOfferOnlyRecommendableMediaTypesPostgres(t *testing.T) {
 		t.Errorf("cached rows %v hold a Because You Watched row for the finished audiobook", slices.Collect(maps.Keys(cached)))
 	}
 	byw := cached[RecTypeBecauseWatched+"|"+finished[0]]
-	if !slices.Contains(byw, movies[40]) {
-		t.Errorf("Because You Watched %s = %v, want its co-watched movie %s", finished[0], byw, movies[40])
+	if !slices.Contains(byw, movies[39]) {
+		t.Errorf("Because You Watched %s = %v, want its co-watched movie %s", finished[0], byw, movies[39])
 	}
 	if !slices.Contains(cached[RecTypeSimilarUsersLiked+"|"], open) {
 		t.Errorf("Similar Users = %v, want the open movie the peers rated", cached[RecTypeSimilarUsersLiked+"|"])
@@ -608,10 +610,11 @@ func TestCowatchedTitleBeyondTheEmbeddingSearchKeepsItsSimilarityPostgres(t *tes
 	}
 }
 
-// "More like this" validates every candidate against the source item, those
-// the embedding search found and those only co-watch brought in: titles that
-// share no genre with it are dropped, a remake of it ranks below its peers,
-// and a co-watched title without an embedding keeps its place.
+// "More like this" and Because You Watched validate every candidate against
+// the source item, those the embedding search found and those only co-watch
+// brought in: titles that share no genre with it are dropped, a remake of it
+// ranks below its peers, and a co-watched title without an embedding keeps
+// its place.
 func TestSimilarItemsValidateEveryCandidatePostgres(t *testing.T) {
 	f := newRelevanceFixture(t, "similar-validate")
 	ctx := t.Context()
@@ -654,22 +657,28 @@ func TestSimilarItemsValidateEveryCandidatePostgres(t *testing.T) {
 	})
 	userID, viewer := newTasteTestAccount(t, f.pool, f.prefix+"viewer")
 
-	items, err := f.engine.SimilarItems(ctx, userID, viewer, source, 10, catalog.AccessFilter{})
+	similar, err := f.engine.SimilarItems(ctx, userID, viewer, source, 10, catalog.AccessFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := prefixed(items, f.prefix)
-	if slices.Contains(got, comedy) || slices.Contains(got, otherComedy) {
-		t.Errorf("similar = %v, want no title without a shared genre", got)
+	byw, err := f.engine.becauseYouWatched(ctx, f.engine.rowBuilder(), source, 10, map[string]struct{}{}, catalog.AccessFilter{})
+	if err != nil {
+		t.Fatal(err)
 	}
-	if !slices.Contains(got, drama) {
-		t.Errorf("similar = %v, want the co-watched %s without an embedding", got, drama)
-	}
-	at := slices.Index(got, remake)
-	for _, peer := range peers {
-		if i := slices.Index(got, peer); i < 0 || at < i {
-			t.Errorf("similar = %v, want every peer, and the remake after them", got)
-			break
+	for name, items := range map[string][]ScoredItem{"similar": similar, "Because You Watched": byw} {
+		got := prefixed(items, f.prefix)
+		if slices.Contains(got, comedy) || slices.Contains(got, otherComedy) {
+			t.Errorf("%s = %v, want no title without a shared genre", name, got)
+		}
+		if !slices.Contains(got, drama) {
+			t.Errorf("%s = %v, want the co-watched %s without an embedding", name, got, drama)
+		}
+		at := slices.Index(got, remake)
+		for _, peer := range peers {
+			if i := slices.Index(got, peer); i < 0 || at < i {
+				t.Errorf("%s = %v, want every peer, and the remake after them", name, got)
+				break
+			}
 		}
 	}
 }

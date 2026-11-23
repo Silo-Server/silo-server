@@ -437,7 +437,9 @@ func sortScoredItems(items []ScoredItem) {
 }
 
 // BecauseYouWatched returns items similar to a specific item the user has
-// watched. Blends embedding similarity (70%) with co-watch data (30%). Titles
+// watched. Blends embedding similarity (70%) with co-watch data (30%) and
+// validates the candidates against the source like SimilarItems: a title
+// sharing no genre with it is dropped and a remake of it ranks lower. Titles
 // in the profile's recommendation exclusion set, and those filter does not
 // admit, are left out before ranking.
 func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
@@ -455,29 +457,33 @@ func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID st
 // becauseYouWatched is BecauseYouWatched with the exclusion set given, ranked
 // by builder, whose aversion it applies.
 func (e *Engine) becauseYouWatched(ctx context.Context, builder rowBuilder, sourceItemID string, limit int, excluded map[string]struct{}, filter catalog.AccessFilter) ([]ScoredItem, error) {
-	embedding, err := e.repo.GetEmbedding(ctx, sourceItemID)
+	// The source's embedding and the metadata validation compares against,
+	// in one read.
+	embedding, sourceMeta, err := e.repo.GetSimilarSource(ctx, sourceItemID)
 	if err != nil {
-		return nil, fmt.Errorf("get embedding for item %s: %w", sourceItemID, err)
+		return nil, err
 	}
 	if embedding == nil {
 		return nil, nil
 	}
-
 	// Constrain to the source item's media type so "Because you watched" never
 	// mixes movies, series, and audiobooks in one rail.
-	sourceMeta, _ := e.repo.GetItemMetadata(ctx, sourceItemID)
-	sourceType := ""
-	if sourceMeta != nil {
-		sourceType = sourceMeta.Type
-	}
+	sourceType := sourceMeta.Type
 
-	// Get embedding-based candidates (3x for MMR). Excluded titles and those
-	// the viewer cannot see are left out in the query, so they do not take
-	// the candidates' places.
+	// Get embedding-based candidates (3x for MMR), with the details
+	// validation and MMR read. Excluded titles and those the viewer cannot
+	// see are left out in the query, so they do not take the candidates'
+	// places.
 	excludeIDs := append([]string{sourceItemID}, scoredItemIDsFromSet(excluded)...)
-	embCandidates, err := e.repo.FindSimilar(ctx, embedding, excludeIDs, sourceType, limit*3, filter)
+	found, err := e.repo.FindSimilarCandidates(ctx, embedding, excludeIDs, sourceType, limit*3, filter)
 	if err != nil {
 		return nil, fmt.Errorf("find similar for because watched: %w", err)
+	}
+	embCandidates := make([]ScoredItem, len(found))
+	details := make(map[string]CandidateDetails, len(found))
+	for i, c := range found {
+		embCandidates[i] = c.ScoredItem
+		details[c.MediaItemID] = c.Details
 	}
 
 	// Get co-watch neighbors the viewer can see, of the source item's media
@@ -492,31 +498,28 @@ func (e *Engine) becauseYouWatched(ctx context.Context, builder rowBuilder, sour
 	if err != nil {
 		return nil, fmt.Errorf("filter co-watch neighbors for because watched: %w", err)
 	}
-
-	// The candidates' embeddings, read before blending so the co-watch
-	// neighbors the embedding search missed are scored by their similarity
-	// too, and used again by aversion and MMR.
-	candidateIDs := scoredItemIDs(embCandidates)
-	for id := range cowatchMap {
-		candidateIDs = append(candidateIDs, id)
+	for id := range excluded {
+		delete(cowatchMap, id)
 	}
-	embMap, err := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
-	if err != nil {
+
+	// The details of the co-watch neighbors the embedding search did not
+	// return, read before blending so they are scored by their similarity
+	// too, and used again by validation, aversion and MMR.
+	if err := e.addCowatchDetails(ctx, details, cowatchMap); err != nil {
 		if !builder.aversion.empty() {
-			// Without embeddings the row could not rank against the
-			// profile's turned-away titles.
-			return nil, fmt.Errorf("because watched embeddings: %w", err)
+			// Without their embeddings the row could not rank them against
+			// the profile's turned-away titles.
+			return nil, fmt.Errorf("because watched co-watch details: %w", err)
 		}
-		embMap = nil
+		slog.WarnContext(ctx, "reading co-watch candidate details failed; ranking them without", "component", "recommendations", "item_id", sourceItemID, "error", err)
 	}
+	embMap := candidateEmbeddings(details)
 
-	// Blend scores, then drop excluded titles before MMR so they do not take
-	// the row's places.
+	// Blend scores, validate them against the source like "More like this",
+	// then apply the quality prior, aversion and MMR.
 	blended := blendScores(withCowatchSimilarity(embCandidates, cowatchMap, embedding, embMap), cowatchMap, 0.7, 0.3)
-	blended = excludeScoredItems(blended, excluded)
+	blended = applyValidation(sourceMeta, blended, details)
 	blended = builder.withQualityPrior(ctx, blended, qualityMinSmallPool)
-
-	// Apply MMR re-ranking.
 	blended, _ = builder.withAversion(blended, embMap, embedding)
 	result := applyMMR(blended, embMap, builder.lambda, limit)
 

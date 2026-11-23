@@ -3010,19 +3010,6 @@ type ItemMetadata struct {
 	Studios []string
 }
 
-// GetItemMetadata returns lightweight metadata for a single item.
-func (r *Repo) GetItemMetadata(ctx context.Context, itemID string) (*ItemMetadata, error) {
-	var m ItemMetadata
-	err := r.pool.QueryRow(ctx, `
-		SELECT title, COALESCE(type, ''), genres, COALESCE(year, 0), studios
-		FROM media_items WHERE content_id = $1`, itemID,
-	).Scan(&m.Title, &m.Type, &m.Genres, &m.Year, &m.Studios)
-	if err != nil {
-		return nil, fmt.Errorf("get item metadata %s: %w", itemID, err)
-	}
-	return &m, nil
-}
-
 // GetSimilarSource returns the embedding and metadata of the item a Similar
 // list is anchored on, in one read. It returns nil, nil, nil when the item has
 // no embedding.
