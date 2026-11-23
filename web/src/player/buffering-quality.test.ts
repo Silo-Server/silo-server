@@ -74,7 +74,7 @@ it("reports one stall that outlasts a prompt's timeout as one stall", () => {
   c.event({ type: "plan_adopted", plan }, 0);
   c.event({ type: "playing" }, 0);
   c.event({ type: "waiting" }, 20000);
-  // The prompt shows at 26000 and times out at 41000, mid-stall.
+  // The prompt shows at 26000 and times out at 36000, mid-stall.
   for (let t = 20100; t <= 50000; t += 100) c.tick(t);
   c.event({ type: "playing" }, 50000);
   c.stop(60000);
