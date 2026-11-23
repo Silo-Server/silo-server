@@ -5545,6 +5545,7 @@ export function VideoPlayer({
     onCommand: executeRealtimeCommand,
     onEvent: handleRealtimeEvent,
     supportedCommands: VIDEO_PLAYBACK_COMMANDS,
+    onSessionEnded: markSessionEnded,
   });
 
   useEffect(() => {
