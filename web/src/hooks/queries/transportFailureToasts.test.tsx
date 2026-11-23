@@ -35,6 +35,7 @@ import {
   useDeleteAllAdminUserDeviceSettingsForDevice,
   useUpdateAdminUserSetting,
 } from "./admin/users";
+import { useUpdateItemMetadata } from "./items";
 import { useSetSubtitlePreference } from "./subtitles";
 import { useSetAudioPreference } from "./trackPreferences";
 
@@ -121,6 +122,19 @@ describe("write failures whose error text is developer English", () => {
     );
     expect(audioText).toBe("Failed to save audio preference");
     expect(subtitleText).toBe("Failed to save subtitle preference");
+  });
+
+  it("show an item metadata save's own message, and keep the server's explanation", async () => {
+    const { result } = renderHook(() => useUpdateItemMetadata("item-1"), { wrapper });
+    const save = () => result.current.mutateAsync({ title: "New title" });
+
+    for (const error of developerText) {
+      mocks.v2.mockRejectedValueOnce(error);
+      expect(await toastFor(save)).toBe("Failed to save metadata");
+    }
+
+    mocks.v2.mockRejectedValueOnce(v2Problem(409, "conflict", "The item changed elsewhere."));
+    expect(await toastFor(save)).toBe("The item changed elsewhere.");
   });
 
   it("show one offline notice for a burst of saves made offline", async () => {

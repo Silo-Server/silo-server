@@ -6,9 +6,8 @@ import {
   type Query,
 } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { V2ProblemError } from "@/api/v2/request";
+import { readableErrorText, V2ProblemError, v2 } from "@/api/v2/request";
 import { t } from "@/i18n";
-import { v2 } from "@/api/v2/request";
 import {
   browseDiscoverV2,
   cancelMediaRequestV2,
@@ -290,7 +289,7 @@ export function useCreateMediaRequest() {
       invalidateRequestSurfaces(queryClient);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("requests.error.create"));
+      toast.error(readableErrorText(err, t("requests.error.create")));
     },
   });
 }
@@ -321,7 +320,7 @@ export function useToggleRequestFollow() {
       invalidateRequestSurfaces(queryClient);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("requests.error.follow"));
+      toast.error(readableErrorText(err, t("requests.error.follow")));
     },
   });
 }
@@ -338,7 +337,7 @@ export function useCancelMediaRequest() {
     // acted first, and the row should show what happened.
     onSettled: () => invalidateRequestSurfaces(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.common.requests.toast.cancelFailed"));
+      toast.error(readableErrorText(err, t("web.common.requests.toast.cancelFailed")));
     },
   });
 }
@@ -355,7 +354,7 @@ export function useRemoveFailedMediaRequest() {
     // row should show what happened.
     onSettled: () => invalidateRequestSurfaces(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.common.requests.toast.removeFailed"));
+      toast.error(readableErrorText(err, t("web.common.requests.toast.removeFailed")));
     },
   });
 }

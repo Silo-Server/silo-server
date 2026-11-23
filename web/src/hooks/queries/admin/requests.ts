@@ -6,7 +6,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { toast } from "sonner";
-import { problemFieldDetail, V2ProblemError } from "@/api/v2/request";
+import { problemFieldDetail, readableErrorText, V2ProblemError, v2 } from "@/api/v2/request";
 import { t } from "@/i18n";
 import {
   getAdminRequestSettingsV2,
@@ -38,7 +38,6 @@ import {
   type RequestRouting,
   type RequestRoutingMode,
 } from "@/api/v2/adminRequests";
-import { v2 } from "@/api/v2/request";
 import type {
   LoadRequestIntegrationOptionsRequest,
   MediaRequest,
@@ -184,7 +183,7 @@ export function useApproveMediaRequest() {
     // acted first, and the row should show what happened.
     onSettled: () => invalidateRequestSurfaces(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.admin.requests.toast.approveFailed"));
+      toast.error(readableErrorText(err, t("web.admin.requests.toast.approveFailed")));
     },
   });
 }
@@ -202,7 +201,7 @@ export function useDeclineMediaRequest() {
     // acted first, and the row should show what happened.
     onSettled: () => invalidateRequestSurfaces(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.admin.requests.toast.declineFailed"));
+      toast.error(readableErrorText(err, t("web.admin.requests.toast.declineFailed")));
     },
   });
 }
@@ -219,7 +218,7 @@ export function useRetryMediaRequest() {
     // acted first, and the row should show what happened.
     onSettled: () => invalidateRequestSurfaces(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.admin.requests.toast.retryFailed"));
+      toast.error(readableErrorText(err, t("web.admin.requests.toast.retryFailed")));
     },
   });
 }
@@ -238,7 +237,7 @@ export function useAdminCancelMediaRequest() {
     // acted first, and the row should show what happened.
     onSettled: () => invalidateRequestSurfaces(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.admin.requests.toast.cancelFailed"));
+      toast.error(readableErrorText(err, t("web.admin.requests.toast.cancelFailed")));
     },
   });
 }
@@ -377,9 +376,7 @@ export function useUpdateRequestSettings() {
       invalidateRequestSurfaces(queryClient);
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.requests.toast.settingsSaveFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.requests.toast.settingsSaveFailed")));
       // A refused save (412) means someone else saved; read their version so
       // a discarded draft starts from it.
       queryClient.invalidateQueries({ queryKey: adminKeys.requestSettings() });
@@ -525,9 +522,7 @@ export function useDeleteRequestIntegration() {
       invalidateRequestServers(queryClient);
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.requests.toast.serverDeleteFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.requests.toast.serverDeleteFailed")));
     },
   });
 }
@@ -574,7 +569,7 @@ export function useUpdateRequestRouting() {
       void invalidateRequestRoutes(queryClient);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.admin.requests.toast.routingFailed"));
+      toast.error(readableErrorText(err, t("web.admin.requests.toast.routingFailed")));
       void queryClient.invalidateQueries({ queryKey: adminKeys.requestRouting() });
     },
   });

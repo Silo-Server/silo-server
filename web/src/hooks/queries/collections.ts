@@ -16,7 +16,7 @@ import type {
   CollectionSortConfig,
 } from "@/api/types";
 import { requiredETag } from "@/api/v2/etag";
-import { v2, V2ProblemError } from "@/api/v2/request";
+import { readableErrorText, v2, V2ProblemError } from "@/api/v2/request";
 import { PERSONAL_SCOPE } from "@/lib/collections/scope";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
@@ -162,7 +162,7 @@ export function useAddItemToCollection() {
       putCollectionItem(PERSONAL_SCOPE, collectionId, mediaItemId, 0),
     onSuccess: (_data, vars) => PERSONAL_SCOPE.invalidate(queryClient, vars.collectionId),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.collections.toast.addFailed"));
+      toast.error(readableErrorText(err, t("web.collections.toast.addFailed")));
     },
   });
 }
@@ -185,7 +185,7 @@ export function useRemoveCollectionItem(collectionId: string, source: "user" | "
         ? PERSONAL_SCOPE.invalidate(queryClient, collectionId)
         : invalidateAdminCollectionQueries(queryClient),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.collections.toast.removeItemFailed"));
+      toast.error(readableErrorText(err, t("web.collections.toast.removeItemFailed")));
     },
   });
 }

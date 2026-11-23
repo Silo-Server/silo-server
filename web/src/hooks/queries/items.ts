@@ -22,6 +22,7 @@ import type {
 } from "@/api/types";
 import {
   problemFieldDetail,
+  readableErrorText,
   V2ProblemError,
   V2TransportError,
   v2,
@@ -245,7 +246,7 @@ export function useRefreshItemMetadata() {
         toast.dismiss(context?.toastID);
         return;
       }
-      toast.error(err instanceof Error ? err.message : t("web.item.toast.refreshFailed"), {
+      toast.error(readableErrorText(err, t("web.item.toast.refreshFailed")), {
         id: context?.toastID,
       });
     },
@@ -290,7 +291,7 @@ const redetectionToasts = {
     );
   },
   onError: (error: unknown) => {
-    toast.error(error instanceof Error ? error.message : t("web.item.toast.redetectFailed"));
+    toast.error(readableErrorText(error, t("web.item.toast.redetectFailed")));
   },
 };
 
@@ -390,7 +391,7 @@ export function useUpdateItemMetadata(contentId: string) {
       });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.item.toast.saveMetadataFailed"));
+      toast.error(readableErrorText(err, t("web.item.toast.saveMetadataFailed")));
     },
   });
 }
@@ -481,7 +482,7 @@ export function useWatchedStateMutation(item: WatchedMutationItem) {
           in_watchlist: detail.user_state?.in_watchlist ?? false,
         },
       }));
-      toast.error(err instanceof Error ? err.message : t("web.item.toast.watchedUpdateFailed"));
+      toast.error(readableErrorText(err, t("web.item.toast.watchedUpdateFailed")));
     },
     onSuccess: (_data, nextPlayed) => {
       toast.success(getWatchedToastMessage(item, nextPlayed));
@@ -528,7 +529,7 @@ export function useSearchItemMatchCandidates(contentId: string) {
       })),
     retry: false,
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.item.toast.matchSearchFailed"));
+      toast.error(readableErrorText(err, t("web.item.toast.matchSearchFailed")));
     },
     meta: { queryClient },
   });
@@ -664,7 +665,7 @@ export function useApplyItemMatch() {
       }
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.item.toast.matchApplyFailed"));
+      toast.error(readableErrorText(err, t("web.item.toast.matchApplyFailed")));
     },
   });
 }
@@ -704,7 +705,7 @@ export function useSplitItem() {
       ]);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.item.toast.splitFailed"));
+      toast.error(readableErrorText(err, t("web.item.toast.splitFailed")));
     },
   });
 }
@@ -729,7 +730,7 @@ function imageErrorMessage(err: unknown, fallback: string) {
     const field = err.problem.errors?.[0];
     return field ? problemFieldDetail(field) : err.message;
   }
-  return err instanceof Error ? err.message : fallback;
+  return readableErrorText(err, fallback);
 }
 
 // Refreshes every view that shows the item's artwork, and the series' views
@@ -839,7 +840,7 @@ export function useTranslateItemMetadata(contentId: string) {
       });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.item.toast.translateFailed"));
+      toast.error(readableErrorText(err, t("web.item.toast.translateFailed")));
     },
   });
 }

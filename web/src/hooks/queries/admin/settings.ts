@@ -1,4 +1,4 @@
-import { v2, V2ProblemError, type V2Result } from "@/api/v2/request";
+import { readableErrorText, v2, V2ProblemError, type V2Result } from "@/api/v2/request";
 import { useRef } from "react";
 import {
   adminSettingsKey,
@@ -302,9 +302,7 @@ export function useUpdateServerSettings(displayed?: SettingsValues) {
     },
     onError: (err, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.settings.hooks.settings.updateFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.settings.hooks.settings.updateFailed")));
       // A validation refusal can mean a restart left one of these keys set by
       // the environment. Read the list again so the form drops that draft and
       // the next save can go through.
@@ -429,9 +427,7 @@ export function useUpdateServerSetting(displayed?: SettingsValues) {
     },
     onError: (err, intent) => {
       if (!isCapturedProfileAuthorityActive(intent.profileContext)) return;
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.settings.hooks.settings.updateOneFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.settings.hooks.settings.updateOneFailed")));
     },
   });
   const capture = (values: { key: string; value: string }) => ({
@@ -665,7 +661,7 @@ function useJellyfinWebCommand(
     },
     onError: (err, intent) => {
       if (!jellyfinWebAuthorityActive(intent)) return;
-      toast.error(err instanceof Error ? err.message : t(failed));
+      toast.error(readableErrorText(err, t(failed)));
     },
   });
 }

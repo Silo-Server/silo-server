@@ -3,6 +3,7 @@ import type { FormEvent } from "react";
 import { Navigate } from "react-router";
 import { toast } from "sonner";
 
+import { readableErrorText } from "@/api/v2/request";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createProfile } from "@/hooks/queries/profiles";
@@ -66,7 +67,7 @@ export function AccountStep() {
       // Stay busy: this step unmounts as soon as the account exists.
     } catch (err) {
       setSubmitting(false);
-      toast.error(err instanceof Error ? err.message : t("web.setup.account.createFailed"));
+      toast.error(readableErrorText(err, t("web.setup.account.createFailed")));
     }
   }
 
@@ -193,7 +194,7 @@ function CreateProfileStep({
       onCreated(await createProfile({ name: name.trim() || username }));
     } catch (err) {
       setSubmitting(false);
-      toast.error(err instanceof Error ? err.message : t("web.setup.account.createProfileFailed"));
+      toast.error(readableErrorText(err, t("web.setup.account.createProfileFailed")));
     }
   }
 

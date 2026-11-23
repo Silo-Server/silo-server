@@ -9,6 +9,7 @@ import {
 import { toast } from "sonner";
 import { t } from "@/i18n";
 
+import { readableErrorText } from "@/api/v2/request";
 import { adminRefreshPerson, adminUpdatePerson } from "@/api/v2/people";
 import type { ItemDetail, Person, UpdatePersonRequest } from "@/api/types";
 import { getPerson, refreshPerson, type PersonRefreshResult } from "@/api/v2/people";
@@ -262,7 +263,7 @@ export function useRefreshPerson(id: string | undefined, isAdmin: boolean) {
       );
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.item.toast.refreshFailed"));
+      toast.error(readableErrorText(err, t("web.item.toast.refreshFailed")));
     },
   });
 }
@@ -292,7 +293,7 @@ export function useUpdatePersonMetadata(id: string | undefined) {
       toast.success(t("web.person.toast.saved"));
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.item.toast.saveMetadataFailed"));
+      toast.error(readableErrorText(err, t("web.item.toast.saveMetadataFailed")));
     },
   });
 }
