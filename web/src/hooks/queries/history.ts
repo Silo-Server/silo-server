@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { v2 } from "@/api/v2/request";
+import { readableErrorText, v2 } from "@/api/v2/request";
 import { toast } from "sonner";
 import { t } from "@/i18n";
 import { invalidateMediaSurfaceQueries } from "./mediaSurfaceRefresh";
@@ -18,7 +18,7 @@ export function useRemoveHistory() {
       bumpHomeRefreshSignal(queryClient);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.catalog.history.removeFailed"));
+      toast.error(readableErrorText(err, t("web.catalog.history.removeFailed")));
     },
   });
 }

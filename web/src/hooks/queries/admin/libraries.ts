@@ -38,6 +38,7 @@ import {
 import {
   v2,
   problemFieldDetail,
+  readableErrorText,
   V2ProblemError,
   type V2Body,
   type V2Result,
@@ -153,9 +154,7 @@ export function useReorderLibraries() {
       queryClient.invalidateQueries({ queryKey: libraryKeys.all });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.libraries.toast.reorderFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.reorderFailed")));
     },
   });
 }
@@ -274,9 +273,7 @@ export function useUpsertLibraryRootOverride() {
       toast.success(t("web.admin.libraries.toast.rootOverrideSaved"));
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.libraries.toast.rootOverrideSaveFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.rootOverrideSaveFailed")));
     },
   });
 }
@@ -378,7 +375,7 @@ export function useCreateLibrary() {
       }
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.admin.libraries.toast.saveFailed"));
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.saveFailed")));
     },
   });
 }
@@ -402,7 +399,7 @@ export function useUpdateLibrary() {
       }
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.admin.libraries.toast.saveFailed"));
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.saveFailed")));
     },
   });
 }
@@ -418,7 +415,7 @@ export function useDeleteLibrary() {
       queryClient.invalidateQueries({ queryKey: adminKeys.jobs("delete_library") });
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.admin.libraries.toast.deleteFailed"));
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.deleteFailed")));
     },
   });
 }
@@ -439,9 +436,7 @@ export function useCheckLibraryMount() {
       queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.libraries.toast.mountCheckFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.mountCheckFailed")));
     },
   });
 }
@@ -458,7 +453,7 @@ export function useScanAllLibraries() {
       toast.success(t("web.admin.libraries.toast.scanAllStarted"));
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.admin.libraries.toast.scanFailed"));
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.scanFailed")));
     },
   });
 }
@@ -595,9 +590,7 @@ export function useRetryLibraryMetadataMatchQueue() {
       queryClient.invalidateQueries({ queryKey: adminKeys.libraryMatchQueueDetail(id) });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.libraries.toast.matcherBacklogFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.matcherBacklogFailed")));
     },
   });
 }
@@ -646,9 +639,7 @@ export function useSetLibraryProviders() {
       });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.libraries.toast.providerChainFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.providerChainFailed")));
     },
   });
 }
@@ -668,9 +659,7 @@ export function useUploadLibraryPoster() {
       queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.libraries.toast.posterUploadFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.posterUploadFailed")));
     },
   });
 }
@@ -685,9 +674,7 @@ export function useDeleteLibraryPoster() {
       queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.libraries.toast.posterRemoveFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.posterRemoveFailed")));
     },
   });
 }
@@ -726,9 +713,7 @@ export function useRefreshLibraryMetadata() {
         queryClient.invalidateQueries({ queryKey: adminKeys.jobs("__all") });
         return;
       }
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.libraries.toast.refreshFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.refreshFailed")));
     },
   });
 }
@@ -746,9 +731,7 @@ export function useCancelAdminJob() {
       queryClient.invalidateQueries({ queryKey: adminKeys.jobs("__all") });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.libraries.toast.cancelJobFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.cancelJobFailed")));
     },
   });
 }
@@ -837,7 +820,7 @@ export function useSetUnmatchedItemIgnored() {
     mutationFn: (variables: UnmatchedItemIgnoreVariables) =>
       setUnmatchedItemIgnored({ ...variables, ignored: !variables.ignored }),
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.admin.libraries.toast.undoFailed"));
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.undoFailed")));
     },
     onSettled: refresh,
   });
@@ -887,9 +870,7 @@ export function useConfirmEmptyRootCleanup() {
       queryClient.invalidateQueries({ queryKey: adminKeys.libraries() });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.libraries.toast.cleanupConfirmFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.cleanupConfirmFailed")));
     },
   });
 }
@@ -957,9 +938,7 @@ export function useCreateCatalogExportJob() {
         queryClient.invalidateQueries({ queryKey: adminKeys.jobs("catalog_export") });
         return;
       }
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.libraries.toast.exportQueueFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.exportQueueFailed")));
     },
   });
 }
@@ -974,9 +953,7 @@ export function usePublishCatalogExportJob() {
       queryClient.invalidateQueries({ queryKey: adminKeys.jobs("catalog_export") });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.libraries.toast.exportPublishFailed"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.exportPublishFailed")));
     },
   });
 }
@@ -1020,7 +997,7 @@ export function useImportCatalogSeed() {
         toast.error([err.message, ...err.problem.errors.map(problemFieldDetail)].join(" "));
         return;
       }
-      toast.error(err instanceof Error ? err.message : t("web.admin.libraries.toast.importFailed"));
+      toast.error(readableErrorText(err, t("web.admin.libraries.toast.importFailed")));
     },
   });
 }

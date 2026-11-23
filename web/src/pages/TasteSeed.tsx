@@ -9,6 +9,7 @@ import { useT } from "@/i18n";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { decodeThumbhash } from "@/lib/thumbhash";
 import type { SectionItem } from "@/api/types";
+import { readableErrorText } from "@/api/v2/request";
 import { useTasteSeedItems, useSubmitTasteSeed } from "@/hooks/queries/tasteSeed";
 import { setTasteSeedDismissed } from "@/lib/tasteSeed";
 
@@ -146,7 +147,7 @@ export default function TasteSeed() {
       }
       navigate(donePath, { replace: true });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("web.home.tasteSeed.saveFailed"));
+      toast.error(readableErrorText(err, t("web.home.tasteSeed.saveFailed")));
     }
   }, [selected, items, submit, navigate, profile, donePath, t]);
 

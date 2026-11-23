@@ -1,7 +1,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { t } from "@/i18n";
-import { v2 } from "@/api/v2/request";
+import { readableErrorText, v2 } from "@/api/v2/request";
 import {
   invalidateMediaSurfaceQueries,
   removeItemFromHomeSectionCaches,
@@ -74,7 +74,7 @@ export function useDismissHomeItem() {
     mutationFn: (variables: DismissHomeItemVariables) =>
       v2("DELETE /api/v2/home/dismissals/{surface}/{item_id}", { path: dismissalPath(variables) }),
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : t("web.home.dismiss.undoFailed"));
+      toast.error(readableErrorText(error, t("web.home.dismiss.undoFailed")));
     },
     onSuccess: async (_data, variables) => {
       await invalidateMediaSurfaceQueries(queryClient, { itemId: variables.itemId });
@@ -89,7 +89,7 @@ export function useDismissHomeItem() {
         body: dismissalBody(variables),
       }),
     onError: (error) => {
-      toast.error(error instanceof Error ? error.message : t("web.home.dismiss.removeFailed"));
+      toast.error(readableErrorText(error, t("web.home.dismiss.removeFailed")));
     },
     onSuccess: async (_data, variables) => {
       removeItemFromHomeSectionCaches(queryClient, variables.itemId, variables.surface);

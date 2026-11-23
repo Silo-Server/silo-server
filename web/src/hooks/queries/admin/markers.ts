@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { t } from "@/i18n";
 import { getAllMarkerHistory } from "@/api/v2/markers";
-import { v2 } from "@/api/v2/request";
+import { readableErrorText, v2 } from "@/api/v2/request";
 import type { MarkerProviderUpdateRequest } from "@/api/types";
 import { useAdminServerSettings } from "@/hooks/queries/admin/settings";
 import { adminKeys } from "@/hooks/queries/keys";
@@ -95,7 +95,7 @@ export function useUpdateMarkerProvider() {
       ]);
     },
     onError: (err) => {
-      toast.error(err instanceof Error ? err.message : t("web.admin.markers.providers.saveFailed"));
+      toast.error(readableErrorText(err, t("web.admin.markers.providers.saveFailed")));
     },
   });
 }
@@ -130,9 +130,7 @@ export function useValidateMarkerProvider() {
       }
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.markers.providers.testFailedDefault"),
-      );
+      toast.error(readableErrorText(err, t("web.admin.markers.providers.testFailedDefault")));
     },
   });
 }
