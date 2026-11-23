@@ -150,7 +150,8 @@ describe("useShowThenSave after an online failure", () => {
     steps: Array<[number, unknown] | "read unsettled" | "read ok">,
   ) {
     const { result, rerender } = renderHook(
-      ({ owner, readUnsettled }) => useShowThenSave(owner, readUnsettled),
+      ({ owner, readUnsettled }) =>
+        useShowThenSave(owner, { isError: readUnsettled, fetchStatus: "idle" }),
       { initialProps: { owner: null as string | null, readUnsettled: false } },
     );
     let owner: string | null = null;
@@ -230,15 +231,8 @@ describe("useShowThenSave after an online failure", () => {
     },
   );
 
-  // The re-read after the failure failed too, so its cached answer is no newer
-  // than the change: the reconcile waits for a read that succeeds, and for any
-  // save started meanwhile.
-  it("waits for a failed settings read to succeed", async () => {
-    expect(
-      await reconcilesAcross(["ui.text_scale"], ["read unsettled", [0, problem(502)], "read ok"]),
-    ).toEqual([0, 0, 1]);
-  });
-
+  // The re-read after the failure failed too, so the reconcile waits for a
+  // read that succeeds, and then for any save started meanwhile.
   it("waits for a save started before a failed settings read succeeds", async () => {
     expect(
       await reconcilesAcross(

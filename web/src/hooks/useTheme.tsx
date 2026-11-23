@@ -114,14 +114,11 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   // that must stay distinguishable from an explicit choice so the local warm
   // start keeps its layering, so those values are dropped here rather than
   // treated as the profile's preference.
-  const {
-    data: effectiveSettings,
-    isError: settingsReadFailed,
-    fetchStatus: settingsFetchStatus,
-  } = useEffectiveSettings({
+  const settingsRead = useEffectiveSettings({
     keys: APPEARANCE_KEYS,
     enabled: loadApi,
   });
+  const { data: effectiveSettings } = settingsRead;
   const storedValue = (key: (typeof APPEARANCE_KEYS)[number]): unknown => {
     const setting = effectiveSettings?.[key];
     return setting !== undefined && setting.source !== "default" ? setting.value : undefined;
@@ -246,10 +243,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => query.removeEventListener("change", onChange);
   }, [cacheOwner]);
 
-  const showThenSave = useShowThenSave(
-    cacheOwner,
-    settingsReadFailed || settingsFetchStatus !== "idle",
-  );
+  const showThenSave = useShowThenSave(cacheOwner, settingsRead);
 
   const setTextScale = useCallback(
     (value: TextScale) =>

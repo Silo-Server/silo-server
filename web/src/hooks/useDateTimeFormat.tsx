@@ -64,14 +64,11 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
   // ownership can never move one provider and leave this one behind.
   const cacheOwner = useAppearanceCacheOwner();
   const loadApiSettings = cacheOwner !== null;
-  const {
-    data: effectiveSettings,
-    isError: settingsReadFailed,
-    fetchStatus: settingsFetchStatus,
-  } = useEffectiveSettings({
+  const settingsRead = useEffectiveSettings({
     keys: FORMAT_KEYS,
     enabled: loadApiSettings,
   });
+  const { data: effectiveSettings } = settingsRead;
   const settingMutation = useSetSettingValue();
 
   const local = useDateTimeFormat();
@@ -113,10 +110,7 @@ export function DateTimeFormatProvider({ children }: { children: ReactNode }) {
     }
   }, [dateFormat, timeFormat, apiLoaded, cacheOwner, reconciles]);
 
-  const showThenSave = useShowThenSave(
-    cacheOwner,
-    settingsReadFailed || settingsFetchStatus !== "idle",
-  );
+  const showThenSave = useShowThenSave(cacheOwner, settingsRead);
 
   const setDateFormat = useCallback(
     (value: DateFormatPreference) =>

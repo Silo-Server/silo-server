@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useReducer, useRef } from "react";
-import { onlineManager } from "@tanstack/react-query";
+import { onlineManager, type FetchStatus } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { readableErrorText, V2ProblemError } from "@/api/v2/request";
@@ -131,14 +131,17 @@ interface UnsettledPreference {
  * change failed in a way that may have saved, `reconcile` shows what the
  * server holds instead.
  *
- * `readUnsettled` is whether the caller's settings read last failed or is
- * still running or paused. A reconcile waits for it to succeed: when the
- * re-read after the failure failed too, or was paused offline (which settles
- * the save without it), its cached answer is no newer than the change, which
- * may have been stored, so it must not replace that change on screen or in
- * the cache.
+ * `read` is the state of the settings read the caller shows. A reconcile
+ * waits for it to succeed: when the re-read after the failure failed too, or
+ * was paused offline (which settles the save without it), its cached answer is
+ * no newer than the change, which may have been stored, so it must not replace
+ * that change on screen or in the cache.
  */
-export function useShowThenSave(cacheOwner: string | null, readUnsettled = false) {
+export function useShowThenSave(
+  cacheOwner: string | null,
+  read?: { isError: boolean; fetchStatus: FetchStatus },
+) {
+  const readUnsettled = read ? read.isError || read.fetchStatus !== "idle" : false;
   const unsettled = useRef(new Map<string, UnsettledPreference>());
   // Per owner, the reconcile owed for a change that may have saved, run once
   // nothing is saving: a caller reconciles every preference it shows at once.
