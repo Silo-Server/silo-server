@@ -1440,6 +1440,12 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 	// segment, so a segment still missing afterwards can be reported as the
 	// broken route it is rather than as an absent segment.
 	localRestartAttempted := false
+	// A name the writer has opened but not finished is not a segment yet. Wait
+	// for it within the same budget a missing segment gets; the retry mapping
+	// below answers one that never completes.
+	if err != nil && errors.Is(err, playback.ErrSegmentIncomplete) {
+		segmentLease, err = transcodeSession.WaitForOpenSegment(segmentName, transcodeSession.SegmentCompletionBudget())
+	}
 	if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
 		segNum, parseErr := playback.ParseSegmentNumber(name)
 		if parseErr == nil {
@@ -1603,15 +1609,24 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		status, code, message := hlsSegmentErrorResponse(err)
+		if errors.Is(err, playback.ErrSegmentIncomplete) {
+			w.Header().Set("Retry-After", strconv.Itoa(playback.SegmentIncompleteRetryAfterSeconds))
+		}
 		writeError(w, status, code, message)
 		return
 	}
 
 	defer func() { _ = segmentLease.Close() }()
-	sw := httpstream.NewRollingDeadlineWriter(w)
-	http.ServeContent(sw, r, segmentLease.Info.Name(), segmentLease.Info.ModTime(), segmentLease.File)
-	if r.Method == http.MethodGet &&
-		sw.CompletedFullResponse(segmentLease.Info.Size()) {
+	complete, serveErr := playback.ServeSegmentLease(w, r, segmentLease)
+	if serveErr != nil {
+		status, code, message := hlsSegmentErrorResponse(serveErr)
+		if errors.Is(serveErr, playback.ErrSegmentIncomplete) {
+			w.Header().Set("Retry-After", strconv.Itoa(playback.SegmentIncompleteRetryAfterSeconds))
+		}
+		writeError(w, status, code, message)
+		return
+	}
+	if r.Method == http.MethodGet && complete {
 		if segNum, parseErr := playback.ParseSegmentNumber(name); parseErr == nil {
 			transcodeSession.ReportSegmentDownloadedForGeneration(segNum, segmentLease.Generation)
 		}
@@ -1813,6 +1828,8 @@ func hlsSegmentErrorResponse(err error) (status int, code, message string) {
 		return http.StatusServiceUnavailable, "NotReady", "Transcode playlist not ready"
 	case errors.Is(err, tonemap.ErrSourcePreflightRejected):
 		return http.StatusUnsupportedMediaType, "TranscodeUnsupported", "The media source is unsupported by the selected tone-map executor"
+	case errors.Is(err, playback.ErrSegmentIncomplete):
+		return http.StatusServiceUnavailable, "TranscodeUnavailable", "Segment is not complete yet"
 	case errors.Is(err, playback.ErrSegmentNotFound), errors.Is(err, playback.ErrTranscodeFailed):
 		return http.StatusNotFound, "NotFound", "Segment not found"
 	default:

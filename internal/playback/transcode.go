@@ -4319,6 +4319,19 @@ func (s *TranscodeSession) openSegment(name string) (lease *SegmentLease, dv81 b
 		_ = segment.Close()
 		return nil, false, "", ErrSegmentNotFound
 	}
+	// Bytes on disk are not the same as a whole segment. The HLS muxer still
+	// holds "<name>.tmp" while it produces a media segment, and it truncates
+	// and rewrites init.mp4 in place, so a request that races either can read a
+	// prefix. Refuse that and let the caller wait or retry (ErrSegmentIncomplete)
+	// instead of answering 200 with bytes the client cannot decode.
+	if segmentTempInProgress(root, name) {
+		_ = segment.Close()
+		return nil, false, "", ErrSegmentIncomplete
+	}
+	if err := initSegmentComplete(name, segment, info.Size()); err != nil {
+		_ = segment.Close()
+		return nil, false, "", err
+	}
 	if s.segmentIncarnation == "" {
 		s.segmentIncarnation = uuid.NewString()
 	}
@@ -4463,7 +4476,14 @@ func (s *TranscodeSession) CloseProcess() error {
 // it: every other stop advances the generation so a stopped session's stale
 // timeline is fenced out.
 func (s *TranscodeSession) CloseProcessRetained() error {
-	return s.shutdownProcess(false, false)
+	err := s.shutdownProcess(false, false)
+	// The stopped process may have died between opening a segment's temp file
+	// and renaming it, and this directory keeps being served for the overlap: a
+	// leftover would make that name look like a live writer for its duration.
+	// CloseProcess deliberately does not do this, because its output directory
+	// can belong to a live winning session that is still writing temp files.
+	s.removeStaleSegmentTemps()
+	return err
 }
 
 // shutdown kills the ffmpeg process and, when removeOutput is true, removes the
@@ -4917,6 +4937,9 @@ func (s *TranscodeSession) restart(
 	if done != nil {
 		<-done
 	}
+	// The reaped process may have died between opening a segment's temp file and
+	// renaming it; a leftover would look like a live writer for that name.
+	s.removeStaleSegmentTemps()
 	s.closeSubtitleSpan()
 
 	// A planned stream's complete VOD playlist keeps the same segment numbers
@@ -5291,6 +5314,15 @@ func (s *TranscodeSession) WaitForOpenSegmentContext(ctx context.Context, name s
 	return s.waitForOpenSegmentContext(ctx, name, timeout, 0)
 }
 
+// SegmentCompletionBudget is how long a request may wait for a name this
+// session has opened but not finished writing. It is the same budget a missing
+// segment gets, so a request that races a writer's last bytes is served the
+// whole segment instead of a retry, and a writer that never completes answers
+// ErrSegmentIncomplete inside the client's own read allowance.
+func (s *TranscodeSession) SegmentCompletionBudget() time.Duration {
+	return segmentWaitTimeout(s.Opts().SegmentDuration)
+}
+
 // WaitForOpenSegmentWithStall is WaitForOpenSegment with a produced-head
 // watchdog. A wait may use the full timeout while the encoder keeps advancing
 // the head; if the head does not move for stall, it returns ErrSegmentStalled
@@ -5345,12 +5377,24 @@ func (s *TranscodeSession) waitForOpenSegmentContext(ctx context.Context, name s
 	lastStallCheck := time.Time{}
 	lastTempAt := time.Time{}
 	var lastTempSize int64
+	// incomplete records that this wait saw the name present but not whole. The
+	// deadline answer then names that condition instead of a missing segment, so
+	// the handler can answer a retry rather than a restart or a 404.
+	incomplete := false
+	deadlineErr := func() error {
+		if incomplete {
+			return ErrSegmentIncomplete
+		}
+		return ErrSegmentNotFound
+	}
 	for {
 		segment, err := s.OpenSegment(name)
 		if err == nil {
 			return segment, nil
 		}
-		if !errors.Is(err, ErrSegmentNotFound) {
+		if errors.Is(err, ErrSegmentIncomplete) {
+			incomplete = true
+		} else if !errors.Is(err, ErrSegmentNotFound) {
 			return nil, err
 		}
 
@@ -5379,7 +5423,7 @@ func (s *TranscodeSession) waitForOpenSegmentContext(ctx context.Context, name s
 			case <-ctx.Done():
 				return nil, ctx.Err()
 			case <-deadline:
-				return nil, ErrSegmentNotFound
+				return nil, deadlineErr()
 			case <-time.After(100 * time.Millisecond):
 				continue
 			}
@@ -5392,7 +5436,10 @@ func (s *TranscodeSession) waitForOpenSegmentContext(ctx context.Context, name s
 			return nil, fmt.Errorf("%w: %w", ErrTranscodeFailed, waitErr)
 		}
 		if !running {
-			return nil, ErrSegmentNotFound
+			// A stopped generation can still hold a prefix of a name (a writer
+			// killed mid-segment); report it as the retryable condition it is
+			// rather than as a segment that never existed.
+			return nil, deadlineErr()
 		}
 
 		if numbered && stall > 0 {
@@ -5405,7 +5452,7 @@ func (s *TranscodeSession) waitForOpenSegmentContext(ctx context.Context, name s
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-deadline:
-			return nil, ErrSegmentNotFound
+			return nil, deadlineErr()
 		case <-time.After(100 * time.Millisecond):
 		}
 	}

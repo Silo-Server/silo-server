@@ -1115,6 +1115,27 @@ form. Without it a long title's playlist exceeds 4 MiB, which some players
 
 A playlist served larger than 3.5 MiB is logged with its session id.
 
+### 4.3 Segment responses
+
+A `200` on a segment route is only sent for a segment the writer has finished. A
+segment request must never be answered with a prefix of the segment's bytes: a
+client appends what it receives as one fragment, and a fragment that decodes to
+no frame leaves the player on its last presented frame while every later load
+succeeds.
+
+The segment layer therefore refuses a name whose writer has not finished it
+instead of serving what is on disk. That covers the HLS muxer's temp file still
+being present for the name and an `init.mp4` that is not a whole ISO-BMFF file
+(FFmpeg truncates and rewrites it in place at a restart, with no temp file).
+Such a request waits for the writer within the segment wait budget, then answers
+`503 unavailable` with `Retry-After: 1` (v2: `dependency_unavailable`), which
+hls.js retries. Once the writer finishes the same name, it is served normally.
+
+A response that ends before the length it announced — a file that shrank or was
+replaced under the lease — is aborted instead of being closed cleanly, so the
+client sees a failed transfer and re-requests the segment rather than accepting
+a truncated fragment as delivered.
+
 ---
 
 ## 5. The timeline model

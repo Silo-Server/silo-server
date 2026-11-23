@@ -300,7 +300,7 @@ func (a *Analyzer) build() (*Inventory, error) {
 			"request_kind: inferred from decode/parse calls in the handler body, matched by callee name and by the " +
 				"substring \"body\" in the decoded argument",
 			"response_media_kind: inferred from Content-Type string literals and from writer-call names " +
-				"(json.NewEncoder, writeJSON, respondJSON, writeError, ServeContent, ServeFile)",
+				"(json.NewEncoder, writeJSON, respondJSON, writeError, ServeContent, ServeFile, ServeSegmentLease)",
 			"upgrades_websocket: inferred from an Upgrade/Accept call whose callee names a websocket package or " +
 				"contains the substring \"grade\"",
 		},

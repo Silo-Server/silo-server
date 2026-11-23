@@ -29,7 +29,6 @@ import (
 	"github.com/Silo-Server/silo-server/internal/downloadprepare"
 	"github.com/Silo-Server/silo-server/internal/downloadstorage"
 	"github.com/Silo-Server/silo-server/internal/httpheader"
-	"github.com/Silo-Server/silo-server/internal/httpstream"
 	"github.com/Silo-Server/silo-server/internal/mediasample"
 	"github.com/Silo-Server/silo-server/internal/nodeauth"
 	"github.com/Silo-Server/silo-server/internal/nodeconfig"
@@ -3267,6 +3266,12 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 	} else {
 		segmentLease, err = session.OpenSegmentForGeneration(segmentName, requestedGeneration)
 	}
+	// A name the writer has opened but not finished is not a segment yet. Wait
+	// for it within the same budget a missing segment gets rather than entering
+	// the restart machinery, which would not make those bytes whole.
+	if err != nil && errors.Is(err, playback.ErrSegmentIncomplete) {
+		segmentLease, err = session.WaitForOpenSegmentContext(r.Context(), name, session.SegmentCompletionBudget())
+	}
 	if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
 		segNum, parseErr := playback.ParseSegmentNumber(name)
 		if parseErr == nil {
@@ -3417,6 +3422,13 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "segment generation is stale", http.StatusPreconditionFailed)
 			return
 		}
+		if errors.Is(err, playback.ErrSegmentIncomplete) {
+			// The bytes exist but are not a whole segment. Answer the retry the
+			// client already understands instead of a body it cannot decode.
+			w.Header().Set("Retry-After", strconv.Itoa(playback.SegmentIncompleteRetryAfterSeconds))
+			http.Error(w, "segment is not complete yet", http.StatusServiceUnavailable)
+			return
+		}
 		http.Error(w, "segment not found", http.StatusNotFound)
 		return
 	}
@@ -3457,10 +3469,17 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set(transcodeproxy.GenerationHeader, segmentLease.GenerationToken)
 	}
 	defer func() { _ = segmentLease.Close() }()
-	sw := httpstream.NewRollingDeadlineWriter(w)
-	http.ServeContent(sw, r, segmentLease.Info.Name(), segmentLease.Info.ModTime(), segmentLease.File)
-	if !proxied && r.Method == http.MethodGet &&
-		sw.CompletedFullResponse(segmentLease.Info.Size()) {
+	complete, serveErr := playback.ServeSegmentLease(w, r, segmentLease)
+	if serveErr != nil {
+		if errors.Is(serveErr, playback.ErrSegmentIncomplete) {
+			w.Header().Set("Retry-After", strconv.Itoa(playback.SegmentIncompleteRetryAfterSeconds))
+			http.Error(w, "segment is not complete yet", http.StatusServiceUnavailable)
+			return
+		}
+		http.Error(w, "segment not found", http.StatusNotFound)
+		return
+	}
+	if !proxied && r.Method == http.MethodGet && complete {
 		if segmentNumber, parseErr := playback.ParseSegmentNumber(name); parseErr == nil {
 			session.ReportSegmentDownloadedForGeneration(segmentNumber, segmentLease.Generation)
 		}

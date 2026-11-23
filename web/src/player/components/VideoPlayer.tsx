@@ -92,6 +92,10 @@ import {
   segmentRetryDelayMs,
   type StartupSegmentVerdict,
 } from "../utils/segmentRetry";
+import {
+  DeliveredNoFramesDeadline,
+  type DeliveredNoFramesExpiry,
+} from "../utils/deliveredNoFrames";
 import { isTimeBuffered } from "../utils/bufferPolicy";
 import { isSafariBrowserV3, resolveHLSEngineV3 } from "../utils/hlsEngine";
 import { isFirefoxUserAgent } from "../utils/browser";
@@ -3336,6 +3340,28 @@ export function VideoPlayer({
   const originalRouteInputRef = useRef({ plan, browserEngine, nativeOriginalSupport, audioTracks });
   originalRouteInputRef.current = { plan, browserEngine, nativeOriginalSupport, audioTracks };
 
+  // A delivered segment that presents no frames leaves the element on its last
+  // frame while hls.js keeps buffering: every later load succeeds, so the load
+  // ladder never sees a failure and nothing above it has a deadline for the
+  // silence. Bound that state and recover the media source a bounded number of
+  // times per transport, logging the expiry so the cause is visible.
+  const deliveredNoFramesRef = useRef<DeliveredNoFramesDeadline | null>(null);
+  if (deliveredNoFramesRef.current === null) {
+    deliveredNoFramesRef.current = new DeliveredNoFramesDeadline({
+      now: () => performance.now(),
+      onExpire: ({ waitedMs, recoveries }: DeliveredNoFramesExpiry) => {
+        console.warn("[player] a delivered segment presented no frames", {
+          waited_ms: Math.round(waitedMs),
+          recoveries,
+        });
+        // Recreate the media source and reload around the playhead, so the
+        // frameless fragment is fetched and parsed again instead of being kept
+        // as buffered media.
+        hlsRef.current?.recoverMediaError();
+      },
+    });
+  }
+
   // -- hls.js lifecycle --
   useEffect(() => {
     // Where the transport this one replaces had got to, on the player clock this
@@ -3376,6 +3402,32 @@ export function VideoPlayer({
     let hls: HlsType | null = null;
     let engineSession: BrowserEngineSession | null = null;
     let destroyed = false;
+    // A replacement transport gets its own no-frame budget and starts from the
+    // element's current intent to play.
+    deliveredNoFramesRef.current?.reset();
+    deliveredNoFramesRef.current?.setPlaying(!video.paused);
+    // Presented frames are the only evidence that a delivered segment produced
+    // media; the element's clock keeps advancing on audio alone, so it cannot
+    // stand in for one. requestVideoFrameCallback fires per presented frame and
+    // stays silent for a fragment that decodes to nothing.
+    let frameProbe: number | null = null;
+    const watchPresentedFrames = () => {
+      if (typeof video.requestVideoFrameCallback !== "function") return;
+      frameProbe = video.requestVideoFrameCallback(() => {
+        deliveredNoFramesRef.current?.framed();
+        watchPresentedFrames();
+      });
+    };
+    watchPresentedFrames();
+    // A seek is not a frameless segment: the element goes silent while the
+    // target is fetched and parsed, which can outlast the window on a slow
+    // link. Close the window at the seek and let the next delivered fragment
+    // arm a new one.
+    const onDeliveredNoFramesSeek = () => deliveredNoFramesRef.current?.framed();
+    video.addEventListener("seeking", onDeliveredNoFramesSeek);
+    const deliveredNoFramesTimer = setInterval(() => {
+      deliveredNoFramesRef.current?.poll();
+    }, 1_000);
     // Counts this transport's failed loads, so a segment that keeps failing
     // stops being requested and a passing hiccup is still retried.
     const segmentRetry = new SegmentRetryBudget();
@@ -4009,6 +4061,9 @@ export function VideoPlayer({
               // The transport delivered a fragment, so failures since the last
               // one were hiccups rather than a segment it cannot serve.
               segmentRetry.reset();
+              // A delivered fragment that yields no frame is invisible to the
+              // load ladder; the no-frame deadline owns that case.
+              if (!video.paused) deliveredNoFramesRef.current?.delivered();
               const { loaded, loading } = frag.stats;
               meter.received(frag.stats, loaded, loading.first, loading.end);
               // A fragment fetched again before it buffered was discarded, not
@@ -4276,6 +4331,12 @@ export function VideoPlayer({
     return () => {
       destroyed = true;
       cleanupStartupListeners();
+      clearInterval(deliveredNoFramesTimer);
+      video.removeEventListener("seeking", onDeliveredNoFramesSeek);
+      if (frameProbe !== null && typeof video.cancelVideoFrameCallback === "function") {
+        video.cancelVideoFrameCallback(frameProbe);
+        frameProbe = null;
+      }
       if (recoveryTimer !== null) {
         clearTimeout(recoveryTimer);
         recoveryTimer = null;
@@ -4405,6 +4466,7 @@ export function VideoPlayer({
       // intent is to play.
       viewerPlayIntentRef.current = true;
       setPlaying(true);
+      deliveredNoFramesRef.current?.setPlaying(true);
       setAutoplayBlocked(false);
       const idleSince = transportIdleSinceRef.current;
       transportIdleSinceRef.current = null;
@@ -4415,6 +4477,7 @@ export function VideoPlayer({
     const onPause = () => {
       resetRoomCatchupRate();
       setPlaying(false);
+      deliveredNoFramesRef.current?.setPlaying(false);
       // Do not record this as viewer intent. A teardown, a seek replacement or
       // a translation handoff pauses the element without the viewer asking;
       // `setPlayback` records the controls' own play/pause intent.
