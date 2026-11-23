@@ -261,32 +261,46 @@ func carriedServerSpecific(key string) bool {
 }
 
 // ServerSpecificSettingKeys lists, sorted, the server-specific settings
-// liveURL holds a value for that CarryServerSpecificSettings gives a
-// restored database. What supplies no connection is left out: an empty
-// value, an AI provider registry with no providers (which a server's first
-// start writes), and ChatGPT credentials with no connected account. cipher
-// (nil for none) opens the encrypted ones; one it cannot open is listed.
+// liveURL holds that CarryServerSpecificSettings gives a restored database
+// and that supply a connection there (suppliesConnection). cipher (nil for
+// none) opens the encrypted ones.
 func (l PGLoader) ServerSpecificSettingKeys(ctx context.Context, liveURL string, cipher *secret.Cipher) ([]string, error) {
 	live, err := allSettingsAt(ctx, liveURL, carriedServerSpecific)
 	if err != nil {
 		return nil, fmt.Errorf("reading the live server's settings: %w", err)
 	}
-	maps.DeleteFunc(live, func(key, value string) bool {
-		if cipher != nil {
-			if plain, err := cipher.DecryptIfEncrypted(value, secret.SettingsAAD(key)); err == nil {
-				value = plain
-			}
-		}
-		switch key {
-		case config.AIProvidersSettingKey:
-			registry, err := config.ParseAIProviderRegistry(value)
-			return err == nil && len(registry.Providers) == 0
-		case chatgpt.CredentialsKey:
-			return !secret.IsEncrypted(value) && !chatgpt.Connected(value)
-		}
-		return strings.TrimSpace(value) == ""
-	})
+	maps.DeleteFunc(live, func(key, value string) bool { return !suppliesConnection(key, value, cipher) })
 	return slices.Sorted(maps.Keys(live)), nil
+}
+
+// suppliesConnection reports whether the live server's value of a
+// server-specific setting key supplies what a restore would otherwise
+// report as lost. Nothing is supplied by an empty value, an encrypted one
+// cipher (nil for none) cannot open, an AI provider registry with no
+// providers (which a server's first start writes), ChatGPT credentials
+// with no connected account, or a job binding, which only names a provider
+// of the registry.
+func suppliesConnection(key, value string, cipher *secret.Cipher) bool {
+	if secret.IsEncrypted(value) {
+		if cipher == nil {
+			return false
+		}
+		plain, err := cipher.Decrypt(value, secret.SettingsAAD(key))
+		if err != nil {
+			return false
+		}
+		value = plain
+	}
+	switch {
+	case key == config.AIProvidersSettingKey:
+		registry, err := config.ParseAIProviderRegistry(value)
+		return err != nil || len(registry.Providers) > 0
+	case key == chatgpt.CredentialsKey:
+		return chatgpt.Connected(value)
+	case slices.Contains(config.AIProviderBindingKeys(), key):
+		return false
+	}
+	return strings.TrimSpace(value) != ""
 }
 
 // allSettingsAt reads the settings of the database at url that keep says to.
