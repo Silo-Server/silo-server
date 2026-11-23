@@ -138,13 +138,20 @@ describe("useShowThenSave after an online failure", () => {
     });
   });
 
-  it("reconciles only once another preference's save has settled", async () => {
-    const { result } = renderHook(() => useShowThenSave(null));
+  // Picks each `key` (or `owner:key`, switching to that cache owner first) in
+  // turn, then settles the picks in `order` with `outcomes`; returns how often
+  // a reconcile had run after each settle.
+  async function reconcilesAcross(picks: string[], order: number[], outcomes: unknown[]) {
+    const { result, rerender } = renderHook(({ owner }) => useShowThenSave(owner), {
+      initialProps: { owner: null as string | null },
+    });
     const settles: Array<(outcome: unknown) => void> = [];
     let reconciled = 0;
-    for (const key of ["ui.text_scale", "ui.text_weight"]) {
+    for (const pick of picks) {
+      const [owner, key] = pick.includes(":") ? pick.split(":") : [null, pick];
+      rerender({ owner });
       result.current({
-        key,
+        key: key!,
         value: "picked",
         previous: "stored",
         show: () => {},
@@ -157,14 +164,39 @@ describe("useShowThenSave after an online failure", () => {
         },
       });
     }
+    const after: number[] = [];
+    for (const [step, i] of order.entries()) {
+      settles[i]!(outcomes[step]);
+      await settled();
+      after.push(reconciled);
+    }
+    return after;
+  }
 
-    settles[0]!(problem(502));
-    await settled();
-    // Reconciling now would put back the text weight that is still saving.
-    expect(reconciled).toBe(0);
+  it("reconciles once an earlier save that a newer one replaced settles last", async () => {
+    expect(
+      await reconcilesAcross(
+        ["ui.text_weight", "ui.text_weight", "ui.text_scale"],
+        [2, 1, 0],
+        [problem(502), "saved", "saved"],
+      ),
+    ).toEqual([0, 0, 1]);
+  });
 
-    settles[1]!("saved");
-    await settled();
-    expect(reconciled).toBe(1);
+  it("reconciles only once another preference's save has settled", async () => {
+    // Reconciling at the 502 would put back the text weight that is still saving.
+    expect(
+      await reconcilesAcross(["ui.text_scale", "ui.text_weight"], [0, 1], [problem(502), "saved"]),
+    ).toEqual([0, 1]);
+  });
+
+  it("reconciles the active profile once a save the previous one made settles", async () => {
+    expect(
+      await reconcilesAcross(
+        ["a:ui.text_weight", "b:ui.text_scale"],
+        [1, 0],
+        [problem(502), "saved"],
+      ),
+    ).toEqual([0, 1]);
   });
 });

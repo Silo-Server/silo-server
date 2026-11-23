@@ -134,7 +134,7 @@ export function useShowThenSave(cacheOwner: string | null) {
   const unsettled = useRef(new Map<string, UnsettledPreference>());
   // The reconcile owed for a change that may have saved, run once nothing is
   // saving: a caller reconciles every preference it shows at once.
-  const owedReconcile = useRef<(() => void) | null>(null);
+  const owedReconcile = useRef<{ owner: string | null; run: () => void } | null>(null);
   // A restore shows the value through the provider's current state, so it is
   // skipped once another account or profile owns the appearance.
   const currentOwner = useRef(cacheOwner);
@@ -180,7 +180,9 @@ export function useShowThenSave(cacheOwner: string | null) {
         const owed = owedReconcile.current;
         if (!owed || unsettled.current.size > 0) return;
         owedReconcile.current = null;
-        if (currentOwner.current === cacheOwner) owed();
+        // Only for the owner whose change it was, which may not be the
+        // owner of the save that settled last.
+        if (currentOwner.current === owed.owner) owed.run();
       };
       const showStored = () => {
         // Once another owner holds the appearance, leave it alone: writing the
@@ -199,11 +201,12 @@ export function useShowThenSave(cacheOwner: string | null) {
         () => {
           settle();
           // A change that saved after a newer one doesn't replace it.
-          if (change < pending.stored.change) return;
-          pending.stored = { value, change, cached: String(value) };
-          // It landed after the newest change failed and put back an older
-          // value, with nothing picked since: show what is stored now.
-          if (pending.restored) showStored();
+          if (change >= pending.stored.change) {
+            pending.stored = { value, change, cached: String(value) };
+            // It landed after the newest change failed and put back an older
+            // value, with nothing picked since: show what is stored now.
+            if (pending.restored) showStored();
+          }
           reconcileOnceSettled();
         },
         (error: unknown) => {
@@ -212,7 +215,7 @@ export function useShowThenSave(cacheOwner: string | null) {
           if (pending.latest === token) {
             if (!unsaved(error)) {
               // It may have saved: the settings re-read has the answer.
-              if (reconcile) owedReconcile.current = reconcile;
+              if (reconcile) owedReconcile.current = { owner: cacheOwner, run: reconcile };
             } else {
               pending.restored = true;
               showStored();
