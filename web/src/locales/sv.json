@@ -521,6 +521,12 @@
       "value": "Uppspelningssessionen har avslutats. Starta uppspelningen igen."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Den här streamen har ersatts. Uppspelningen fortsätter på den aktuella."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -67599,6 +67605,12 @@
     {
       "type": 0,
       "value": "Markera som sedd vid"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titlar med en eftertextmarkör räknas också som sedda när uppspelningen når eftertexterna."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

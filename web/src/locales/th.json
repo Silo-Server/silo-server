@@ -521,6 +521,12 @@
       "value": "เซสชันการเล่นนี้สิ้นสุดแล้ว โปรดเริ่มเล่นอีกครั้ง"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "มีการแทนที่สตรีมนี้แล้ว การเล่นยังคงดำเนินต่อในสตรีมปัจจุบัน"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -61952,6 +61958,12 @@
     {
       "type": 0,
       "value": "ทำเครื่องหมายว่าดูแล้วที่"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "รายการที่มีเครื่องหมายช่วงเครดิตจะนับว่าดูแล้วเช่นกันเมื่อเล่นถึงช่วงเครดิต"
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

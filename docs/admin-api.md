@@ -1923,7 +1923,8 @@ for 5 minutes — a seven-day ranking barely moves within minutes — with the s
 
 `plays` on both lists counts completed `user_watch_history` rows with source
 `playback` or `legacy` (the default for rows written without a source). Every
-playback stop writes a row, completed only past the watched threshold, so a
+playback stop writes a row, completed only past the watched threshold or inside
+the played file's end credits, so a
 title watched in several sittings is one play and a title abandoned partway is
 none; the time spent in those sittings still counts toward `total_seconds`.
 Playback from Silo and Jellyfin clients both writes `playback` rows. Marking something watched is
