@@ -329,8 +329,9 @@ func (s *Service) lockScheduled(ctx context.Context) (*pendingRun, RunResult, er
 		// finish the slot's backup leaves the others nothing to do. The run
 		// records this slot, so moving backup.time while it runs cannot leave
 		// tonight open for a second copy.
-		slot = nightlySlot(s.opts.Now(), s.backupTime(ctx), s.opts.Location)
-		done, err := s.slotBackedUp(ctx, slot)
+		var prev time.Time
+		slot, prev = nightlySlot(s.opts.Now(), s.backupTime(ctx), s.opts.Location)
+		done, err := s.slotBackedUp(ctx, prev)
 		if err != nil || done {
 			held.Release(context.WithoutCancel(ctx))
 			if err != nil {

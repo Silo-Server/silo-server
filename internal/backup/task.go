@@ -88,31 +88,36 @@ func (s *Service) backupTime(ctx context.Context) string {
 // nightlySlot is the scheduled time a nightly run at now belongs to: the
 // latest backup.time (HH:MM) at or before now, on the wall clock of loc,
 // the zone the daily trigger fires in (Options.Location, time.Local
-// unless set).
-func nightlySlot(now time.Time, at string, loc *time.Location) time.Time {
+// unless set). prev is the previous night's slot: backup.time on the
+// calendar day before slot's. Both come from their own date, because
+// time.Date moves a backup.time the clocks skip on the spring-forward night
+// (02:30 in New York becomes 01:30 EST), and a day before that moved slot
+// would land before the previous night's backup (#4707).
+func nightlySlot(now time.Time, at string, loc *time.Location) (slot, prev time.Time) {
 	hour, minute, ok := config.ParseBackupTime(at)
 	if !ok {
 		hour, minute, _ = config.ParseBackupTime(config.DefaultBackupTime)
 	}
 	local := now.In(loc)
-	slot := time.Date(local.Year(), local.Month(), local.Day(), hour, minute, 0, 0, loc)
+	year, month, day := local.Date()
+	slot = time.Date(year, month, day, hour, minute, 0, 0, loc)
 	if slot.After(local) {
-		slot = slot.AddDate(0, 0, -1)
+		day--
+		slot = time.Date(year, month, day, hour, minute, 0, 0, loc)
 	}
-	return slot
+	return slot, time.Date(year, month, day-1, hour, minute, 0, 0, loc)
 }
 
-// slotBackedUp reports whether a scheduled backup already succeeded for
-// slot, on any server: a recorded slot after this server's previous one,
-// the same wall-clock time a calendar day earlier (AddDate, so a daylight
-// saving change, when consecutive slots are 23 or 25 hours apart, still
-// backs up each night). Servers in different time zones compute different
-// slots for one night, and another zone's slot for the same night lands
-// after this server's previous one, so the later server skips; a mismatch,
-// or a backup.time moved earlier, at worst skips one night's run and never
-// takes a second copy. A failed nightly records no slot, so the next
-// server still tries.
-func (s *Service) slotBackedUp(ctx context.Context, slot time.Time) (bool, error) {
+// slotBackedUp reports whether a scheduled backup already succeeded for the
+// night after prev, on any server: a recorded slot after prev, this server's
+// previous slot (see nightlySlot; on a daylight saving change consecutive
+// slots are 23 or 25 hours apart, and each night is still backed up).
+// Servers in different time zones compute different slots for one night,
+// and another zone's slot for the same night lands after this server's
+// previous one, so the later server skips; a mismatch, or a backup.time
+// moved earlier, at worst skips one night's run and never takes a second
+// copy. A failed nightly records no slot, so the next server still tries.
+func (s *Service) slotBackedUp(ctx context.Context, prev time.Time) (bool, error) {
 	if s.opts.Status == nil {
 		return false, nil
 	}
@@ -120,12 +125,12 @@ func (s *Service) slotBackedUp(ctx context.Context, slot time.Time) (bool, error
 	if err != nil {
 		return false, fmt.Errorf("reading the latest nightly backup: %w", err)
 	}
-	return slotDone(rec.LastNightlySlot, slot), nil
+	return slotDone(rec.LastNightlySlot, prev), nil
 }
 
 // slotDone is slotBackedUp's rule for the latest recorded slot.
-func slotDone(last *time.Time, slot time.Time) bool {
-	return last != nil && last.After(slot.AddDate(0, 0, -1))
+func slotDone(last *time.Time, prev time.Time) bool {
+	return last != nil && last.After(prev)
 }
 
 func scheduleFor(at string) []taskmanager.TriggerConfig {

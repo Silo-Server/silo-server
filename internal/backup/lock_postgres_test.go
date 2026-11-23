@@ -69,7 +69,7 @@ func TestSubsystemLockSerializesBackupsAndDeletesDB(t *testing.T) {
 	// Another server already took tonight's backup: the next server's
 	// scheduled run, once the lock is free, skips it and deletes nothing.
 	// Yesterday's backup leaves tonight's to take.
-	slot := nightlySlot(time.Now(), config.DefaultBackupTime, time.Local)
+	slot, _ := nightlySlot(time.Now(), config.DefaultBackupTime, time.Local)
 	if _, err := pool.Exec(ctx, `INSERT INTO backup_status (singleton) VALUES (true) ON CONFLICT (singleton) DO NOTHING`); err != nil {
 		t.Fatal(err)
 	}
