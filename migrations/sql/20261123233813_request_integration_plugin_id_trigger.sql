@@ -11,10 +11,6 @@
 -- installation records the new one's plugin, or none when it is gone. Any
 -- other update keeps plugin_id, so a server whose installation was removed
 -- still remembers its plugin until the rebind moves it.
-UPDATE request_integrations i
-SET plugin_id = p.plugin_id
-FROM plugin_installations p
-WHERE p.id = i.installation_id AND i.plugin_id <> p.plugin_id;
 -- +goose StatementBegin
 CREATE FUNCTION set_request_integration_plugin_id() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
@@ -28,6 +24,13 @@ END;
 $$;
 -- +goose StatementEnd
 CREATE TRIGGER request_integrations_plugin_id BEFORE INSERT OR UPDATE OF installation_id ON request_integrations FOR EACH ROW EXECUTE FUNCTION set_request_integration_plugin_id();
+-- Repair rows written before the trigger, including by a previous-release
+-- replica since the column was added. CREATE TRIGGER holds off writers until
+-- this migration commits, so no write lands between the two.
+UPDATE request_integrations i
+SET plugin_id = p.plugin_id
+FROM plugin_installations p
+WHERE p.id = i.installation_id AND i.plugin_id <> p.plugin_id;
 
 -- +goose Down
 DROP TRIGGER request_integrations_plugin_id ON request_integrations;
