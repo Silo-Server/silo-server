@@ -729,9 +729,11 @@ func (r *Repo) findTasteProfileCandidates(
 		columns, names = candidateDetailColumns, candidateDetailNames
 	}
 	// relaxed_order iterative scans can return the ANN rows slightly out of
-	// order, so the outer query restores exact distance order.
+	// order, so the outer query restores exact distance order. As pgvector
+	// documents, the CTE is materialized and the sort is on distance + 0, so
+	// the planner cannot take the scan's order as already sorted.
 	query := fmt.Sprintf(`
-			WITH ann_candidates AS (
+			WITH ann_candidates AS MATERIALIZED (
 				SELECT mi.content_id,
 				       e.embedding::halfvec(3072) <=> $1::halfvec(3072) AS distance,
 				       %s
@@ -743,7 +745,7 @@ func (r *Repo) findTasteProfileCandidates(
 			)
 			SELECT content_id, distance, %s
 			FROM   ann_candidates
-			ORDER  BY distance ASC, content_id`,
+			ORDER  BY distance + 0 ASC, content_id`,
 		columns,
 		strings.Join(conditions, " AND "),
 		argIdx,
