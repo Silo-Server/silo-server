@@ -28,6 +28,9 @@ type videoFactsV3 struct {
 	base                                               PlanV3
 	// mustAdapt means no route that copies the video can work.
 	mustAdapt, remuxActive, transcodeStage, subtitleForced bool
+	// sourceFailsOnClient means a strict web decoder would fail this
+	// copy-unsafe source both as is and copied, so neither is offered.
+	sourceFailsOnClient bool
 	// evidenceInsufficient means the client's evidence tier, not a known
 	// decode gap, kept the video off copy routes.
 	evidenceInsufficient bool
@@ -199,7 +202,8 @@ func (p *candidatePlannerV3) routeFacts(evidenceInsufficient bool) {
 	f.mustAdapt = f.quality.RequiresTranscode || !f.videoOK || !f.anyCopyRange() || !anySubtitle
 	// A remux maps only the base layer, so Profile 7 is never copied as is.
 	remuxRangeOK := f.rangeOK && source.DVProfile != 7 || f.serverDV81
-	f.remuxActive = !f.mustAdapt && !source.VideoCopyUnsafe && (remuxRangeOK || f.stripProgressive || f.stripHLS) &&
+	f.sourceFailsOnClient = source.VideoCopyUnsafe && strictParameterSetWebV3(in.Request)
+	f.remuxActive = !f.mustAdapt && !f.sourceFailsOnClient && (remuxRangeOK || f.stripProgressive || f.stripHLS) &&
 		(f.remuxSubtitleOK || f.hlsSubtitleOK)
 	if f.remuxActive {
 		p.remuxAudioFacts()
@@ -270,7 +274,7 @@ func (p *candidatePlannerV3) videoCandidates() []candidateV3 {
 	}
 	sidecar := []candidateSubtitleV3{candidateSidecarV3}
 	hls := []candidateSubtitleV3{candidateOnDemandRenditionsV3, candidatePipelineRenditionV3, candidateSidecarV3}
-	if !f.mustAdapt && f.quality.PreservesSource && f.videoOK && f.audioOK && f.originalAudioOK && f.originalSubtitleOK &&
+	if !f.mustAdapt && !f.sourceFailsOnClient && f.quality.PreservesSource && f.videoOK && f.audioOK && f.originalAudioOK && f.originalSubtitleOK &&
 		containsFoldV3(request.Capabilities.Containers, source.Container) && deliveryAvailableV3(request, DeliveryClassOriginalHTTPV3) {
 		original := func(video candidateVideoV3, ok bool) {
 			add(candidateV3{route: candidateOriginalV3, video: video}, ok, sidecar...)
