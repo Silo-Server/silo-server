@@ -196,13 +196,86 @@ function base64ToBytes(value: string): Uint8Array {
   return bytes;
 }
 
+// Name IDs libass matches a style's font name against: family, full name and
+// PostScript name.
+const MATCHED_NAME_IDS = new Set([1, 4, 6]);
+
+/**
+ * Returns the lower-cased names an ASS style can use to select this font file
+ * (every font of a TrueType/OpenType collection), or none when the data is not
+ * an sfnt font.
+ */
+export function fontFamilyNames(data: Uint8Array): string[] {
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  const names = new Set<string>();
+  try {
+    if (data.byteLength >= 12 && view.getUint32(0) === 0x74746366 /* ttcf */) {
+      const count = view.getUint32(8);
+      for (let i = 0; i < count; i += 1) {
+        readSfntNames(view, view.getUint32(12 + i * 4), names);
+      }
+    } else {
+      readSfntNames(view, 0, names);
+    }
+  } catch {
+    // Truncated or malformed font data: keep the names read so far.
+  }
+  return [...names];
+}
+
+function readSfntNames(view: DataView, fontOffset: number, names: Set<string>): void {
+  const version = view.getUint32(fontOffset);
+  // TrueType (0x00010000 or "true") and CFF ("OTTO") outlines.
+  if (version !== 0x00010000 && version !== 0x74727565 && version !== 0x4f54544f) return;
+  const numTables = view.getUint16(fontOffset + 4);
+  for (let i = 0; i < numTables; i += 1) {
+    const record = fontOffset + 12 + i * 16;
+    if (view.getUint32(record) !== 0x6e616d65 /* name */) continue;
+    const table = view.getUint32(record + 8);
+    const count = view.getUint16(table + 2);
+    const storage = table + view.getUint16(table + 4);
+    for (let j = 0; j < count; j += 1) {
+      const entry = table + 6 + j * 12;
+      const platform = view.getUint16(entry);
+      if (!MATCHED_NAME_IDS.has(view.getUint16(entry + 6))) continue;
+      const length = view.getUint16(entry + 8);
+      const start = storage + view.getUint16(entry + 10);
+      const name = decodeName(view, platform, start, length).trim().toLowerCase();
+      if (name) names.add(name);
+    }
+    return;
+  }
+}
+
+function decodeName(view: DataView, platform: number, start: number, length: number): string {
+  let out = "";
+  if (platform === 0 || platform === 3) {
+    for (let i = 0; i + 1 < length; i += 2) out += String.fromCharCode(view.getUint16(start + i));
+  } else if (platform === 1) {
+    for (let i = 0; i < length; i += 1) out += String.fromCharCode(view.getUint8(start + i));
+  }
+  return out;
+}
+
+/** The font a style or \fn override names, as libass looks it up. */
+function assFontKey(name: string): string {
+  return name.trim().replace(/^@/, "").trim().toLowerCase();
+}
+
 /**
  * Forces ASS style font names and inline \fn overrides to the selected fallback
- * family. Without this, libass repeatedly asks for unavailable style fonts such
- * as Trebuchet MS before falling back, which both logs noisily and can leave
- * non-Latin glyphs boxed if fallback fonts are not loaded yet.
+ * family, except those naming a font in `keep` (the fonts attached to the media
+ * file, which the renderer has loaded). Without this, libass repeatedly asks
+ * for unavailable style fonts such as Trebuchet MS before falling back, which
+ * both logs noisily and can leave non-Latin glyphs boxed if fallback fonts are
+ * not loaded yet. Glyphs a kept font lacks still render in the fallback, which
+ * is the renderer's default font.
  */
-export function forceASSFontFamily(content: string, family: string): string {
+export function forceASSFontFamily(
+  content: string,
+  family: string,
+  keep: ReadonlySet<string> = new Set(),
+): string {
   const normalized = content.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
   let inStyleSection = false;
   let fontNameIndex = -1;
@@ -229,14 +302,16 @@ export function forceASSFontFamily(content: string, family: string): string {
         const style = line.match(/^(\s*Style\s*:\s*)(.*)$/i);
         if (style && fontNameIndex >= 0) {
           const fields = style[2]!.split(",");
-          if (fontNameIndex < fields.length) {
+          if (fontNameIndex < fields.length && !keep.has(assFontKey(fields[fontNameIndex]!))) {
             fields[fontNameIndex] = family;
           }
           return `${style[1]}${fields.join(",")}`;
         }
       }
 
-      return line.replace(/\\fn[^\\}]*/g, `\\fn${family}`);
+      return line.replace(/\\fn([^\\}]*)/g, (override, name: string) =>
+        keep.has(assFontKey(name)) ? override : `\\fn${family}`,
+      );
     })
     .join("\n");
 }
