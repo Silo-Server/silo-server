@@ -1923,7 +1923,8 @@ for 5 minutes — a seven-day ranking barely moves within minutes — with the s
 
 `plays` on both lists counts completed `user_watch_history` rows with source
 `playback` or `legacy` (the default for rows written without a source). Every
-playback stop writes a row, completed only past the watched threshold, so a
+playback stop writes a row, completed only past the watched threshold or inside
+the played file's end credits, so a
 title watched in several sittings is one play and a title abandoned partway is
 none; the time spent in those sittings still counts toward `total_seconds`.
 Playback from Silo and Jellyfin clients both writes `playback` rows. Marking something watched is
@@ -2255,10 +2256,15 @@ was recorded still gets its row, without the item and duration only the file gav
 an attempt is finalized more than once (copies on several servers, a retried stop), the
 end that stopped the session's lifecycle first sets the reason, and `lifecycle_seq` is
 that end's sequence number on the sessions channel (null on rows recorded before
-lifecycle numbers existed). Every one of these fields is
+lifecycle numbers existed). `subtitle` is the subtitle the play's plan delivered when it
+ended, in the live session rows' shape, or null when it showed none. Of several
+finalizations, the one that ended latest decides it, even one that did not get further
+into the play, and a subtitle change on its own never moves `ended_at`. When the lifecycle
+sweep ends a play whose attempt is gone, it only knows the subtitle the play's live or
+start row last synced, and counts it from that sync, so a subtitle a later finalization
+recorded is kept. Every one of these fields is
 null when unknown, which includes every attempt recorded before it existed; `end_reason`
-is also null for a server teardown the client never recovered from (an encoder exit, a
-withdrawn plan).
+is also null for a server teardown the client never recovered from (an encoder exit).
 
 `GET /api/v2/admin/playback-history/capabilities` reports `available`, `ended_before`,
 `watch_measurement`, `client_ip`, `device_identity`, `client_identity`,

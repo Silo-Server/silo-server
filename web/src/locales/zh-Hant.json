@@ -521,6 +521,12 @@
       "value": "此播放工作階段已結束。請重新開始播放。"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "此串流已被取代。播放會在目前的串流上繼續。"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -61570,6 +61576,12 @@
     {
       "type": 0,
       "value": "標記為已觀看的進度"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "具有片尾字幕標記的作品，播放到片尾字幕時也會視為已觀看。"
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

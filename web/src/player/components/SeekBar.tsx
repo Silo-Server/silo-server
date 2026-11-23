@@ -464,7 +464,8 @@ export function SeekBar({
               <div className="text-sm font-semibold tabular-nums">{formatTime(previewTime)}</div>
               {hoverChapter && (
                 <div
-                  className="mt-0.5 truncate text-xs text-[var(--hud-ash)]"
+                  dir="auto"
+                  className="bidi-text mt-0.5 truncate text-xs text-[var(--hud-ash)]"
                   title={hoverChapter.title}
                 >
                   {hoverChapter.title}

@@ -389,7 +389,7 @@ function ScanHistoryCard({
           {scan.error_message}
         </div>
       ) : null}
-      <div className="text-muted-foreground mt-3 font-mono text-[11px] [overflow-wrap:anywhere]">
+      <div className="text-muted-foreground mt-3 font-mono text-[0.6875rem] [overflow-wrap:anywhere]">
         {scan.id}
       </div>
     </div>
@@ -438,7 +438,7 @@ export function ScanHistoryTable({
             </TableCell>
             <TableCell className="font-medium">
               {libraryName(t, librariesByID, scan.library_id)}
-              <div className="text-muted-foreground mt-1 font-mono text-[11px]">{scan.id}</div>
+              <div className="text-muted-foreground mt-1 font-mono text-[0.6875rem]">{scan.id}</div>
             </TableCell>
             <TableCell className="whitespace-nowrap">{scanSourceName(t, scan, lookups)}</TableCell>
             {/* Table cells default to nowrap. The path and error set their own

@@ -122,7 +122,7 @@ export function CuratedTitlesEditor({
           />
         </div>
         {searchStatus ? (
-          <p role="status" className="text-muted-foreground text-[13px]">
+          <p role="status" className="text-muted-foreground text-[0.8125rem]">
             {searchStatus}
           </p>
         ) : debounced.length > 0 ? (
@@ -176,11 +176,11 @@ export function CuratedTitlesEditor({
       {/* grid-cols-1 holds the column to the editor's width. An implicit auto
           column grows to fit the longest title instead of cutting it. */}
       <div className="grid grid-cols-1 gap-2">
-        <span id={listId} className="text-muted-foreground text-[13px]">
+        <span id={listId} className="text-muted-foreground text-[0.8125rem]">
           {t("web.home.addRow.curated.inOrder", { titles: titleCount(itemIds.length) })}
         </span>
         {itemIds.length === 0 ? (
-          <p className="border-border text-muted-foreground rounded-xl border border-dashed px-3 py-3 text-[13px]">
+          <p className="border-border text-muted-foreground rounded-xl border border-dashed px-3 py-3 text-[0.8125rem]">
             {t("web.home.addRow.curated.empty")}
           </p>
         ) : (

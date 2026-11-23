@@ -40,10 +40,10 @@ export function PluginUploadPanel() {
 
   return (
     <section className={PANEL} aria-labelledby="plugin-upload-heading">
-      <h2 id="plugin-upload-heading" className="text-[15px] font-semibold">
+      <h2 id="plugin-upload-heading" className="text-[0.9375rem] font-semibold">
         {t("web.admin.plugins.upload.heading")}
       </h2>
-      <p className="text-muted-foreground text-[13px]">
+      <p className="text-muted-foreground text-[0.8125rem]">
         {t("web.admin.plugins.upload.description")}
       </p>
       <form onSubmit={handleSubmit} className="mt-3 flex flex-col gap-2.5 sm:flex-row">
@@ -115,10 +115,10 @@ export function PluginRepositoriesPanel({
     <section className={PANEL} aria-labelledby="plugin-repositories-heading">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <h2 id="plugin-repositories-heading" className="text-[15px] font-semibold">
+          <h2 id="plugin-repositories-heading" className="text-[0.9375rem] font-semibold">
             {t("web.admin.plugins.repositories.heading")}
           </h2>
-          <p className="text-muted-foreground text-[13px]">
+          <p className="text-muted-foreground text-[0.8125rem]">
             {t("web.admin.plugins.repositories.description")}
           </p>
         </div>
@@ -160,7 +160,7 @@ export function PluginRepositoriesPanel({
       {repositories.length > 0 ? (
         <ul className="mt-2 divide-y">
           {repositories.map((repo) => (
-            <li key={repo.id} className="flex min-w-0 items-center gap-2.5 py-2 text-[13.5px]">
+            <li key={repo.id} className="flex min-w-0 items-center gap-2.5 py-2 text-[0.84375rem]">
               <span
                 aria-hidden="true"
                 className={cn(
@@ -174,7 +174,7 @@ export function PluginRepositoriesPanel({
                   ? sourceLabel(repo.source_kind)
                   : repo.display_name}
               </span>
-              <span className="text-muted-foreground min-w-0 flex-1 truncate text-[12.5px]">
+              <span className="text-muted-foreground min-w-0 flex-1 truncate text-[0.78125rem]">
                 {repo.managed ? t("web.admin.plugins.repositories.managed") : repo.url}
               </span>
               {repo.managed ? null : (

@@ -521,6 +521,12 @@
       "value": "Ta seja predvajanja se je končala. Znova začnite predvajanje."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Ta pretok je bil zamenjan. Predvajanje se nadaljuje s trenutnim pretokom."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -81494,6 +81500,12 @@
     {
       "type": 0,
       "value": "Označi kot ogledano pri"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Naslovi z oznako za odjavno špico se štejejo za ogledane tudi, ko predvajanje doseže odjavno špico."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

@@ -171,7 +171,7 @@ function SectionIndex({
             <button
               type="button"
               onClick={() => scrollToSection(section.id)}
-              className="hover:bg-accent focus-visible:ring-ring/50 flex w-full items-baseline justify-between gap-3 rounded-md px-2 py-1 text-start text-[13px] outline-none focus-visible:ring-[3px]"
+              className="hover:bg-accent focus-visible:ring-ring/50 flex w-full items-baseline justify-between gap-3 rounded-md px-2 py-1 text-start text-[0.8125rem] outline-none focus-visible:ring-[3px]"
             >
               <span className="min-w-0 wrap-anywhere">{t(SECTION_TITLES[section.id])}</span>
               <span className="text-muted-foreground shrink-0 text-xs tabular-nums">
@@ -248,7 +248,7 @@ function LibraryGroupRows({
         open={open}
         onOpenChange={setOpen}
         controls={listId}
-        className="text-foreground max-w-full gap-1.5 text-[13px] font-medium"
+        className="text-foreground max-w-full gap-1.5 text-[0.8125rem] font-medium"
       >
         {/* One run of text, so the count follows the name's last word. A name
             with no spaces still breaks to fit. The name keeps its own direction,
@@ -286,7 +286,7 @@ function BlockedGroupRows({ group, ...rows }: Omit<RowsProps, "items"> & { group
   return (
     <div className="border-border/60 border-t py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="flex items-start gap-1.5 text-[13px]">
+        <span className="flex items-start gap-1.5 text-[0.8125rem]">
           <span
             aria-hidden="true"
             className="mt-[calc((1lh-0.375rem)/2)] size-1.5 shrink-0 rounded-full bg-amber-500"
@@ -357,7 +357,7 @@ function NeverRestored({ keys }: { keys: readonly string[] }) {
   return (
     <div className="border-border/60 border-t py-2">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-muted-foreground flex items-start gap-1.5 text-[13px]">
+        <span className="text-muted-foreground flex items-start gap-1.5 text-[0.8125rem]">
           <Lock aria-hidden="true" className="mt-[calc((1lh-0.875rem)/2)] size-3.5 shrink-0" />
           {t("web.admin.backups.restore.choose.neverRestored")}
         </span>
@@ -451,7 +451,7 @@ function SectionBlock({
 
   const nothingMatches =
     visible.length === 0 && query.trim() !== "" ? (
-      <p className="text-muted-foreground py-3 text-[13px]">
+      <p className="text-muted-foreground py-3 text-[0.8125rem]">
         {t("web.admin.backups.restore.choose.noMatches")}
       </p>
     ) : null;
@@ -489,7 +489,7 @@ function SectionBlock({
         <div className="min-w-0 lg:@[52rem]/settings-section:pt-3.5">
           {section.items.length > 0 && restorable === 0 ? (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2">
-              <span className="text-muted-foreground text-[13px]">
+              <span className="text-muted-foreground text-[0.8125rem]">
                 {nothingToRestoreText(counts)}
               </span>
               <Disclosure open={showAll} onOpenChange={setShowAll} controls={sameListId}>
@@ -716,7 +716,10 @@ export function RestoreChoose({
             still trims the notice by a fraction of a pixel, enough to scroll. */}
         <div className="overlay-scroll space-y-4 lg:-mx-1 lg:-mt-1 lg:mb-0 lg:min-h-0 lg:shrink-[100000] lg:overflow-y-auto lg:[mask-image:linear-gradient(to_bottom,black_calc(100%_-_1rem),transparent)] lg:px-1 lg:pt-1 lg:pb-4">
           <SectionIndex sections={set.sections} selection={selection} variant="list" />
-          <h2 id="restore-summary-heading" className="text-[15px] font-semibold tracking-tight">
+          <h2
+            id="restore-summary-heading"
+            className="text-[0.9375rem] font-semibold tracking-tight"
+          >
             {t("web.admin.backups.restore.choose.summaryHeading")}
           </h2>
           {plan.length === 0 ? (
@@ -726,7 +729,7 @@ export function RestoreChoose({
           ) : (
             <PlanSentences sentences={plan.flatMap((group) => group.sentences)} />
           )}
-          <p className="text-muted-foreground text-[13px] leading-relaxed">
+          <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
             {t("web.admin.backups.restore.choose.recoveryPoint")}
           </p>
         </div>
@@ -745,7 +748,7 @@ export function RestoreChoose({
               ref={noticeRef}
               role="status"
               tabIndex={noticeScrolls ? 0 : undefined}
-              className="overlay-scroll focus-visible:outline-ring -mx-[0.25em] rounded-sm px-[0.25em] text-[13px] wrap-anywhere text-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 lg:-mt-[0.25em] lg:mb-[calc(1rem-0.25em)] lg:max-h-[calc(8rem+0.5em)] lg:min-h-0 lg:overflow-y-auto lg:py-[0.25em] dark:text-amber-400"
+              className="overlay-scroll focus-visible:outline-ring -mx-[0.25em] rounded-sm px-[0.25em] text-[0.8125rem] wrap-anywhere text-amber-600 focus-visible:outline-2 focus-visible:outline-offset-2 lg:-mt-[0.25em] lg:mb-[calc(1rem-0.25em)] lg:max-h-[calc(8rem+0.5em)] lg:min-h-0 lg:overflow-y-auto lg:py-[0.25em] dark:text-amber-400"
             >
               {/* A block child, so useScrolls sees the text grow. Only while a
                   name can't wrap to fit, such as a run of joined emoji, does it

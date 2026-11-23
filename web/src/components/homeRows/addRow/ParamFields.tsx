@@ -45,7 +45,7 @@ function Field({
     <div className="grid gap-2">
       <Label htmlFor={htmlFor}>{label}</Label>
       {children}
-      {hint ? <p className="text-muted-foreground text-[13px]">{hint}</p> : null}
+      {hint ? <p className="text-muted-foreground text-[0.8125rem]">{hint}</p> : null}
     </div>
   );
 }

@@ -1457,7 +1457,7 @@ export default function EbookReader() {
           <Button
             asChild
             size="lg"
-            className="h-11 gap-2 rounded-full px-6 text-[15px] font-bold shadow-lg"
+            className="h-11 gap-2 rounded-full px-6 text-[0.9375rem] font-bold shadow-lg"
           >
             <Link to={nextChapterHref} replace>
               {t("web.reader.endOfBook.nextChapter", { chapter: nextChapter.label })}

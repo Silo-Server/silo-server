@@ -52,7 +52,7 @@ export function ProfileLaunchSettingsGroup() {
             </Button>
           ))}
         </div>
-        <p className="text-muted-foreground text-[13px] leading-relaxed">
+        <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
           {mode === "ask"
             ? t("web.settings.profileLaunch.askHint")
             : t("web.settings.profileLaunch.rememberHint")}

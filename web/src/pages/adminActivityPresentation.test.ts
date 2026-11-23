@@ -37,9 +37,9 @@ describe("playback session title", () => {
     expect(getPlaybackSessionSubtitle(session)).toBe("S1E2");
   });
 
-  it("keeps a movie's own title", () => {
+  it("keeps a movie's own title and gives it no subtitle", () => {
     const session = makeSession({ media_type: "movie", media_title: "Heat" });
     expect(getPlaybackSessionTitle(session)).toBe("Heat");
-    expect(getPlaybackSessionSubtitle(session)).toBe("Movie");
+    expect(getPlaybackSessionSubtitle(session)).toBeNull();
   });
 });

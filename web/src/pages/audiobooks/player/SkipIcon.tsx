@@ -17,7 +17,7 @@ export function SkipIcon({
 }) {
   const Arrow = direction === "back" ? RotateCcw : RotateCw;
   const box = size === "lg" ? "h-7 w-7" : "h-6 w-6";
-  const label = size === "lg" ? "text-[8.5px]" : "text-[8px]";
+  const label = size === "lg" ? "text-[0.53125rem]" : "text-[0.5rem]";
   const flick =
     direction === "back" ? "group-active:-rotate-[18deg]" : "group-active:rotate-[18deg]";
   return (

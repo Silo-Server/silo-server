@@ -62,6 +62,8 @@
 ./internal/scanner TestHDR10PlusBackfillStopsWhenStorageStallsDB
 ./internal/scanner TestRescanKeepsHDR10PlusWhenTheFrameReadFailsDB
 ./internal/scanner TestHDR10PlusBackfillWaitsADayAfterANoFrameReadDB
+./internal/scanner TestAttachmentBitrateBackfillRecomputesFontHeavyFilesOnceDB
+./internal/scanner TestAttachmentBitrateBackfillResumesAfterStorageStallDB
 ./internal/scanner TestRescanKeepsSidecarsItCouldNotListDB
 ./internal/scanner TestScanStateCarriesProbeRejectionDB
 ./internal/scanner TestRescanKeepsProbeFactsOfARejectedUnchangedFileDB
@@ -293,6 +295,10 @@
 # and resolves the rebuilt item (#934).
 ./internal/metadata TestCompleteRefreshRebuildsSeriesDB
 
+# A complete metadata refresh that merges onto an item whose match the admin
+# cleared leaves only the providers' current values and keeps locks (#4336).
+./internal/metadata TestCompleteRefreshDropsAClearedMatchsValuesDB
+
 # Profile history and account/invitation persistence.
 ./internal/api/handlers TestAccessGroupUpdateLibraryPolicyDB
 ./internal/api/handlers TestClearResumePositionTargetsDB
@@ -371,6 +377,7 @@
 ./internal/taskmanager/tasks TestRefreshRequestDownloadsSkipsDuringReconcilePostgres
 ./internal/taskmanager/tasks TestReconcileWaitsForADownloadRefreshPostgres
 ./internal/taskmanager/tasks TestReconcileSkipsWhileAnotherReconcileRunsPostgres
+./internal/taskmanager/tasks TestAdvisoryClusterLockLeavesASingleConnectionPoolFreePostgres
 ./internal/taskmanager/repository TestPgExecutionRepositoryPruneReportsBatchLimit
 
 # A task run whose server stops renewing its lease is recorded once, as an
@@ -732,8 +739,8 @@
 ./internal/api/handlers TestAdminPlaybackWatchTimeDB
 
 # A play's device, client and stream decisions are filled once by any
-# finalization, its end reason follows the latest one, and the history
-# window is inclusive below and exclusive above.
+# finalization, its end reason and subtitle follow the latest one, and the
+# history window is inclusive below and exclusive above.
 ./internal/api/handlers TestAdminPlaybackHistoryFactsDB
 ./internal/api/handlers TestLiveSessionReadsTheSyncedRowDB
 ./internal/audiobooks TestABSPlaybackSessionKeepsItsFileDB
@@ -743,6 +750,8 @@
 ./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
 ./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
 ./internal/api/handlers TestLifecycleSweepBacksOffFailedEndsDB
+./internal/api/handlers TestLifecycleSweepKeepsARecordedSubtitleDB
+./internal/api/handlers TestLifecycleSweepTakesALaterSyncedSubtitleDB
 # A live row names an episode as the history entry its play leaves does.
 ./internal/api/handlers TestEpisodeLiveRowNamesItAsHistoryDB
 
@@ -1419,6 +1428,7 @@
 ./internal/watchstate TestPluginSourcedPlaysDB
 ./internal/usercollections TestCollectionImportRemapsLibrariesDB
 ./internal/usercollections TestCarriedCollectionsMapToTheImportingProfileDB
+./internal/usercollections TestLibraryTabCollectionsFollowSavedOrderDB
 
 # Accounts and profile imports: one connection, and statements that do not grow with a document.
 ./internal/backup TestAccountsAndImportOnOneConnectionDB

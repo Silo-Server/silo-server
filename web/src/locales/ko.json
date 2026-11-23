@@ -521,6 +521,12 @@
       "value": "재생 세션이 종료됐어요. 다시 재생하세요."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "이 스트림이 다른 스트림으로 교체됐어요. 현재 스트림에서 계속 재생돼요."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -61368,6 +61374,12 @@
     {
       "type": 0,
       "value": "시청 완료 처리 기준"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "크레딧 마커가 있는 작품은 재생이 크레딧에 도달할 때도 시청한 것으로 처리돼요."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

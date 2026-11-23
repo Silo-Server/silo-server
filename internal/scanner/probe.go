@@ -484,12 +484,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 		pd.Duration = duration
 	}
 
-	// Parse bitrate from format (bps to kbps).
-	if raw.Format.BitRate != "" {
-		if br, err := strconv.Atoi(raw.Format.BitRate); err == nil {
-			pd.Bitrate = br / 1000
-		}
-	}
+	pd.Bitrate = formatBitrateKbps(raw)
 
 	for _, s := range raw.Streams {
 		switch s.CodecType {
@@ -645,6 +640,30 @@ const (
 	trackSpanToleranceSeconds  = 5
 	trackSpanRelativeTolerance = 0.01
 )
+
+// formatBitrateKbps is the container's overall bitrate without attachments.
+// Matroska has no bitrate field, so FFmpeg derives bit_rate from the file
+// size and duration, which counts attached files such as the fonts fansub
+// releases embed. Those are read once at load, not streamed, and counting
+// them can double a file's rate and push it past a client's bandwidth limit.
+func formatBitrateKbps(raw *ffprobeOutput) int {
+	bps, err := strconv.ParseInt(raw.Format.BitRate, 10, 64)
+	if err != nil || bps <= 0 {
+		return 0
+	}
+	var attachmentBytes int64
+	for _, s := range raw.Streams {
+		if s.CodecType == "attachment" && s.ExtradataSize > 0 {
+			attachmentBytes += s.ExtradataSize
+		}
+	}
+	if duration := parseFloat(raw.Format.Duration); attachmentBytes > 0 && durationIsPositiveFinite(duration) {
+		if streamBps := bps - int64(float64(attachmentBytes)*8/duration); streamBps > 0 {
+			bps = streamBps
+		}
+	}
+	return int(bps / 1000)
+}
 
 func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	if raw == nil {

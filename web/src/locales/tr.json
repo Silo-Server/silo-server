@@ -521,6 +521,12 @@
       "value": "Bu oynatma oturumu sona erdi. Oynatmayı yeniden başlatın."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Bu akışın yerini yenisi aldı. Oynatma geçerli akışta devam ediyor."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -67111,6 +67117,12 @@
     {
       "type": 0,
       "value": "İzlendi olarak işaretleme eşiği"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Jenerik işaretçisi bulunan yapımlar, oynatma jeneriğe ulaştığında da izlenmiş sayılır."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [

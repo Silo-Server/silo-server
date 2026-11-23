@@ -327,7 +327,7 @@ export function SortableSectionCardRow({
           </span>
           <SectionSummaryBadges section={section} catalog={catalog} showVisibility />
         </div>
-        <div className="text-muted-foreground text-[13px]">
+        <div className="text-muted-foreground text-[0.8125rem]">
           {t("web.home.rows.sections.kindAndLimit", {
             item_count: section.itemLimit,
             kind: rowKindLabel(section.sectionType),

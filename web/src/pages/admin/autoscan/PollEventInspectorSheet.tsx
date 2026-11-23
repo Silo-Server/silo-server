@@ -83,7 +83,7 @@ function FilterChip({
       <span>{label}</span>
       <span
         className={cn(
-          "rounded px-1 text-[11px] tabular-nums",
+          "rounded px-1 text-[0.6875rem] tabular-nums",
           active ? "bg-background/70 text-foreground" : "bg-muted text-muted-foreground",
         )}
       >
@@ -296,13 +296,13 @@ function PollEventInspectorBody({
           <TabsList variant="line" className="h-9 gap-4 p-0">
             <TabsTrigger value="paths" className="px-1 pb-2 text-xs font-medium">
               <span>{t("web.admin.autoscan.activity.details.paths")}</span>
-              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[11px] tabular-nums">
+              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[0.6875rem] tabular-nums">
                 {numberText(event.changes_returned)}
               </span>
             </TabsTrigger>
             <TabsTrigger value="scans" className="px-1 pb-2 text-xs font-medium">
               <span>{t("web.admin.autoscan.activity.details.scansCreated")}</span>
-              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[11px] tabular-nums">
+              <span className="bg-muted text-muted-foreground rounded px-1.5 py-0.5 text-[0.6875rem] tabular-nums">
                 {numberText(event.scan_runs.length)}
               </span>
             </TabsTrigger>
@@ -418,7 +418,7 @@ function PollEventInspectorBody({
                             <button
                               type="button"
                               onClick={() => jumpToScanRun(change.scan_run_id!)}
-                              className="border-border/80 bg-muted/40 text-muted-foreground hover:border-foreground/30 hover:text-foreground focus-visible:ring-ring inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[11px] transition-colors focus-visible:ring-2 focus-visible:outline-none"
+                              className="border-border/80 bg-muted/40 text-muted-foreground hover:border-foreground/30 hover:text-foreground focus-visible:ring-ring inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[0.6875rem] transition-colors focus-visible:ring-2 focus-visible:outline-none"
                             >
                               <span>{change.scan_run_id}</span>
                               <ChevronRight
@@ -427,7 +427,7 @@ function PollEventInspectorBody({
                               />
                             </button>
                           ) : (
-                            <span className="text-muted-foreground font-mono text-[11px]">
+                            <span className="text-muted-foreground font-mono text-[0.6875rem]">
                               {change.scan_run_id}
                             </span>
                           )
@@ -583,7 +583,9 @@ function PollEventInspectorBody({
                           </div>
                         ) : null}
                       </div>
-                      <span className="text-muted-foreground font-mono text-[11px]">{run.id}</span>
+                      <span className="text-muted-foreground font-mono text-[0.6875rem]">
+                        {run.id}
+                      </span>
                     </div>
                   </div>
                 ))}

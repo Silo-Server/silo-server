@@ -29,10 +29,13 @@ export function ToggleRow({
     <div className="grid gap-3">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0">
-          <label htmlFor={id} className="text-[14.5px] font-semibold">
+          <label htmlFor={id} className="text-[0.90625rem] font-semibold">
             {label}
           </label>
-          <p id={`${id}-help`} className="text-muted-foreground mt-0.5 text-[13px] leading-snug">
+          <p
+            id={`${id}-help`}
+            className="text-muted-foreground mt-0.5 text-[0.8125rem] leading-snug"
+          >
             {help}
           </p>
         </div>

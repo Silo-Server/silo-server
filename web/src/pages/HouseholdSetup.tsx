@@ -114,7 +114,7 @@ export default function HouseholdSetup() {
                   {(p.is_child || p.has_pin) && (
                     <Badge
                       variant="outline"
-                      className="bg-background absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0 font-mono text-[9px] tracking-wider uppercase"
+                      className="bg-background absolute -bottom-2 left-1/2 -translate-x-1/2 px-1.5 py-0 font-mono text-[0.5625rem] tracking-wider uppercase"
                     >
                       {p.is_child
                         ? t("web.onboarding.householdSetup.kidsBadge")

@@ -155,7 +155,10 @@ export default function AdminSubtitlesTable({
                       </div>
                     )}
                     {subtitle.media_type === "episode" && (
-                      <Badge variant="outline" className="text-[10px] tracking-[0.12em] uppercase">
+                      <Badge
+                        variant="outline"
+                        className="text-[0.625rem] tracking-[0.12em] uppercase"
+                      >
                         {t("web.admin.common.subtitles.table.episode")}
                       </Badge>
                     )}

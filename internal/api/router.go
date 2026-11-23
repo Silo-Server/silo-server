@@ -1651,34 +1651,14 @@ func newChiRouter(deps Dependencies) chi.Router {
 		} else {
 			playbackHandler.MarkerUpdateNotifier = playback.NewMarkerUpdateNotifier(deps.SessionMgr, realtimeHub)
 		}
-		// Optimistic remux: a play is never blocked on the H.264 copy-safety
-		// scan, so the scan runs behind the issued plan and the notifier moves
-		// any session that is already stream-copying an unsafe source off that
-		// route (or stops it, for a client that cannot be told). Both halves
-		// need the same probe ensurer the playback and detail surfaces use.
+		// A play is never blocked on the H.264 copy-safety scan: the scan runs
+		// behind the issued plan and persists its verdict for later replans.
+		// It needs the same probe ensurer the playback and detail surfaces use.
 		if copySafetyScanner, ok := deps.ProbeEnsurer.(playback.CopySafetyScanner); ok && deps.FileRepo != nil {
-			copySafetyRace := playback.NewCopySafetyRace(
-				copySafetyScanner,
-				deps.FileRepo,
-				playback.NewCopySafetyNotifier(
-					deps.SessionMgr,
-					playbackHandler.PlanStoreV3,
-					playbackHandler.CommandDispatcher,
-					handlers.NewCopySafetyPlaybackControl(playbackHandler),
-				),
-			)
-			if copySafetyRace != nil {
+			if copySafetyRace := playback.NewCopySafetyRace(copySafetyScanner, deps.FileRepo); copySafetyRace != nil {
 				playbackHandler.CopySafetyRacer = copySafetyRace
 				if detailSvc != nil {
 					detailSvc.SetCopySafetyRacer(copySafetyRace)
-				}
-				if streamHandler != nil {
-					// The progressive remux serve path revives stream-copy
-					// transports of its own, and its single long response is
-					// the one thing no later request can gate. It needs the
-					// same racer to refuse a condemned revival and to cover an
-					// undecided one.
-					streamHandler.CopySafetyRacer = copySafetyRace
 				}
 			}
 		}

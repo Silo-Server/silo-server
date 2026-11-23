@@ -124,7 +124,7 @@ function ReportRow({ item }: { item: RestoreReportItem }) {
           })}
         </p>
         {details.map((detail, position) => (
-          <p key={position} className="text-muted-foreground mt-0.5 text-[13px] break-words">
+          <p key={position} className="text-muted-foreground mt-0.5 text-[0.8125rem] break-words">
             {detail}
           </p>
         ))}
@@ -162,7 +162,7 @@ function AccountReport({
   return (
     <div className="mt-2 space-y-2">
       {described ? null : (
-        <p className="text-[13px]">
+        <p className="text-[0.8125rem]">
           {account.created
             ? t("web.admin.backups.restore.run.accountCreated")
             : t("web.admin.backups.restore.run.accountMerged")}
@@ -331,7 +331,7 @@ export function RestoreRun({
                 : t("web.admin.backups.restore.run.restoring")}
           </div>
           <Progress value={percent} aria-label={t("web.admin.backups.restore.run.progressLabel")} />
-          <p className="text-muted-foreground text-[13px]">
+          <p className="text-muted-foreground text-[0.8125rem]">
             {active?.operation === "restore" && active.message
               ? t("web.admin.backups.restore.run.withServerMessage", {
                   text: progressNote,
@@ -385,14 +385,16 @@ export function RestoreRun({
           {report ? reportHeadline(report.counts) : t("web.admin.backups.restore.run.noReport")}
         </p>
         {job.finished_at ? (
-          <p className="text-muted-foreground text-[13px]">
+          <p className="text-muted-foreground text-[0.8125rem]">
             {t("web.admin.backups.restore.run.finished", {
               date: backupDateTime(job.finished_at),
             })}
           </p>
         ) : null}
         {ending ? <SettingFieldStatus tone="warn">{ending}</SettingFieldStatus> : null}
-        {detail ? <p className="text-muted-foreground text-[13px] break-words">{detail}</p> : null}
+        {detail ? (
+          <p className="text-muted-foreground text-[0.8125rem] break-words">{detail}</p>
+        ) : null}
       </div>
 
       <ReportList label={t("web.admin.backups.restore.run.report")} items={items} />
