@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { v2 } from "@/api/v2/request";
 import type { components } from "@/api/v2/schema";
 import { adminKeys } from "../keys";
@@ -10,6 +10,7 @@ export type AIProviderCheck = components["schemas"]["AdminAIProviderCheck"];
 export type AICapability = AIProvider["capabilities"][number];
 
 const providersKey = ["admin", "ai", "providers"] as const;
+const createProviderKey = [...providersKey, "create"] as const;
 
 export function useAIProviders() {
   return useQuery({
@@ -46,11 +47,18 @@ export function useAIProviderModels(id: string) {
  */
 function useProviderWrite<TInput, TResult>(
   request: (input: TInput) => Promise<TResult>,
-  { changesSettings = false } = {},
+  {
+    changesSettings = false,
+    mutationKey,
+  }: { changesSettings?: boolean; mutationKey?: readonly string[] } = {},
 ) {
   const qc = useQueryClient();
   return useMutation({
+    mutationKey,
     mutationFn: request,
+    // Offline, fail at once rather than pause: the add dialog stays open
+    // while a create is pending, and a paused one would hold it shut.
+    networkMode: "always",
     retry: false,
     onSettled: async () => {
       await Promise.all([
@@ -73,17 +81,24 @@ export interface AIProviderDraft {
 }
 
 export function useCreateAIProvider() {
-  return useProviderWrite((draft: AIProviderDraft) =>
-    v2("POST /api/v2/admin/ai/providers", {
-      body: {
-        type: draft.type,
-        name: draft.name,
-        base_url: draft.base_url,
-        api_key: draft.api_key || undefined,
-        capabilities: draft.capabilities,
-      },
-    }),
+  return useProviderWrite(
+    (draft: AIProviderDraft) =>
+      v2("POST /api/v2/admin/ai/providers", {
+        body: {
+          type: draft.type,
+          name: draft.name,
+          base_url: draft.base_url,
+          api_key: draft.api_key || undefined,
+          capabilities: draft.capabilities,
+        },
+      }),
+    { mutationKey: createProviderKey },
   );
+}
+
+/** Whether a provider create is still waiting for the server. */
+export function useAIProviderCreatePending() {
+  return useIsMutating({ mutationKey: createProviderKey }) > 0;
 }
 
 export function useUpdateAIProvider() {

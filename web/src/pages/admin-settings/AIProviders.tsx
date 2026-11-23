@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  useAIProviderCreatePending,
   useAIProviders,
   useCheckAIProvider,
   useCreateAIProvider,
@@ -293,7 +294,8 @@ const CHATGPT_TYPE = "chatgpt";
  * Connects a provider in two steps: what kind it is, then where it is and its
  * key. `types` is never empty while the dialog is open. `capability` is what a
  * new custom endpoint is assumed to serve until the administrator says
- * otherwise.
+ * otherwise. It stays open while Add is pending, so a caller staging the new
+ * provider from `onCreated` (the setup wizard) gets it before moving on.
  */
 export function AddAIProviderDialog({
   open,
@@ -310,9 +312,10 @@ export function AddAIProviderDialog({
   onCreated?: (provider: AIProvider) => void;
   onChooseChatGPT?: () => void;
 }) {
+  const saving = useAIProviderCreatePending();
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+    <Dialog open={open} onOpenChange={saving ? undefined : onOpenChange}>
+      <DialogContent className="sm:max-w-2xl" showCloseButton={!saving}>
         {/* Remounting on every open starts the wizard at step one. */}
         {open ? (
           <AddAIProviderSteps
