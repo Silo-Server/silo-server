@@ -1407,20 +1407,23 @@ can transcode. A strict decoder therefore fails each copy route it is offered
 copies) before it gets the encode.
 
 Web clients other than Firefox are the exception. Their decoders (Media Source
-Extensions, Safari's HLS) are the strict ones, and a track, quality or reconnect
-replan starts over with no attempted keys, so recovery alone would fail the
-copies again on every such change. The planner gives them the encode for a
-copy-unsafe source up front, as it did before the walk existed
-(`strictParameterSetWebV3`). Firefox decodes these sources and keeps the copy.
+Extensions, Safari's HLS) are treated as strict, and a track, quality or
+reconnect replan starts over with no attempted keys, so recovery alone would
+fail the copies again on every such change. The planner offers them neither
+direct play nor a copy of a copy-unsafe source (`strictParameterSetWebV3`), so
+they get the encode on the first plan. Firefox decodes these sources and keeps
+direct play and the copy.
 
 Downloads cannot recover, so the download policy
-(`playback.Resolve`) never remuxes these sources: a download keeps the original
-file when the client plays its container and codecs, and encodes it otherwise.
+(`playback.Resolve`) never remuxes these sources. A download keeps the original
+file when the client plays its container and codecs, and is encoded otherwise.
+When download transcoding is off, or the client sends no capabilities, it keeps
+the original file too.
 
 Detecting the condition means reading the opening seconds of the source, which
 on remote storage costs seconds, so a play never waits for it. An unresolved
-verdict plans as copy-safe. `CopySafetyRace` scans behind a plan that copies
-the video and persists the verdict on the `media_files` row, where the download
+verdict plans as copy-safe. `CopySafetyRace` scans behind a remux plan (and
+when the watch page loads) and persists the verdict on the `media_files` row, where the download
 policy and the web exception above read it. The verdict never stops a copy that is playing, and a copy
 revived after a replica restart, a node loss or a rehome is rebuilt like any
 other recipe: a copy that plays has proven the decoder handles it, and one that

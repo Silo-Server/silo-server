@@ -1089,9 +1089,9 @@ type SourceDescriptorV3 struct {
 	// unsafe: the scan found picture parameter sets redefined in-band with
 	// conflicting content, which strict decoders fail whether copied or played
 	// as is, or a synchronous scan could not finish. Streaming plans it like
-	// any other source and leaves it to recovery, except for web clients with
-	// strict decoders, which get the encode; downloads, which cannot recover,
-	// never remux it.
+	// any other source and leaves it to recovery, except that web clients
+	// with strict decoders get the encode on the first plan; downloads, which
+	// cannot recover, never remux it.
 	VideoCopyUnsafe bool `json:"video_copy_unsafe,omitempty"`
 }
 

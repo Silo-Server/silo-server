@@ -55,8 +55,8 @@ type CopySafetyFileLoader interface {
 //
 // A play never waits on the scan. Its verdict is persisted for the download
 // policy, which never remuxes a copy-unsafe source because a download cannot
-// recover, and for web clients whose decoders are known to be strict, which
-// get the encode up front. For every other client the planner treats such a
+// recover, and for web clients treated as strict decoders, which get the
+// encode on the first plan. For every other client the planner treats such a
 // source like any other, and the verdict never withdraws a copy that is
 // playing: decoders that apply in-band parameter sets play it fine, and the
 // ones that do not report the failure that starts the replan.

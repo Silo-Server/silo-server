@@ -682,7 +682,7 @@ func TestPlanPlaybackV3FallsBackFromProgressiveToHLSWithoutRepeatingKey(t *testi
 
 // A copy-unsafe source streams like any other: decoders that apply in-band
 // parameter sets play its copy, and strict ones fail it and recover to the
-// encode. Only downloads still encode it up front.
+// encode. Strict browsers get the encode on the first plan.
 func TestPlanPlaybackV3CopyUnsafeSourceStillCopies(t *testing.T) {
 	file := detailedFixtureFileV3()
 	file.VideoTracks[0].VideoRange = "SDR"
@@ -733,6 +733,16 @@ func TestPlanPlaybackV3CopyUnsafeSourceStillCopies(t *testing.T) {
 		web.ClientPlaybackContext.Device = DeviceContextV3{Platform: "web", PlatformDetails: map[string]string{"user_agent": test.userAgent}}
 		if result := planFileV3(web, file); result.Plan == nil || result.Plan.Delivery != test.want {
 			t.Errorf("%s: result = %s, want %s", name, ExplainPlannerResultV3(result), test.want)
+		}
+		// An MP4 the browser could play as is fails there the same way.
+		mp4 := *file
+		mp4.Container = "mp4"
+		want := test.want
+		if want == DeliveryRemuxProgressiveV3 {
+			want = DeliveryOriginalHTTPV3
+		}
+		if result := planFileV3(web, &mp4); result.Plan == nil || result.Plan.Delivery != want {
+			t.Errorf("%s, mp4: result = %s, want %s", name, ExplainPlannerResultV3(result), want)
 		}
 	}
 }
