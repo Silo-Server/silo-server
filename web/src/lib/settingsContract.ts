@@ -9,7 +9,7 @@
  */
 
 export const SETTINGS_API_VERSION = 1;
-export const SETTINGS_REVISION = 30;
+export const SETTINGS_REVISION = 31;
 
 export interface SettingSuggestedOption {
   value: string;
@@ -811,9 +811,9 @@ export const SETTING_DEFINITIONS: Record<SettingKey, SettingDefinition> = {
     type: "boolean",
     nullable: false,
     persistence: "remote",
-    introducedIn: 30,
+    introducedIn: 31,
     scopes: ["profile", "profile_device"],
-    scopeIntroducedIn: [30, 30],
+    scopeIntroducedIn: [31, 31],
     resolutionOrder: ["profile_device", "profile", "default"],
     defaultValue: true,
     label: "Show Next Up",

@@ -6,7 +6,7 @@ import { SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
  * Next Up on with that many seconds of `playback.next_up_prompt_seconds`
  * (0 is "At end"). The native apps offer the same choices.
  *
- * `offOffered` is whether the server defines `next_up_enabled` (revision 30).
+ * `offOffered` is whether the server defines `next_up_enabled` (revision 31).
  * Where it does not, Off is not on the list and the key is never written.
  */
 export const NEXT_UP_OFF = "off";

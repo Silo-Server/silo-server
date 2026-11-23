@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 30,
+  "revision": 31,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -744,7 +744,7 @@
     },
     {
       "key": "playback.next_up_enabled",
-      "introduced_in": 30,
+      "introduced_in": 31,
       "persistence": "remote",
       "allowed_scopes": ["profile", "profile_device"],
       "resolution_order": ["profile_device", "profile", "default"],

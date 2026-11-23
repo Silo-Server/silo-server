@@ -652,7 +652,7 @@ function WatchPlaybackHostContent() {
       settingsCapabilities.data,
       SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE,
     );
-  // Whether Next Up can be turned off: a server below revision 30 does not
+  // Whether Next Up can be turned off: a server below revision 31 does not
   // define the key and rejects the whole batch for it.
   const supportsNextUpEnabled =
     capabilitiesKnown &&
