@@ -46,11 +46,6 @@ export function playbackSessionEndReason(error: unknown): PlaybackSessionEndReas
   return null;
 }
 
-/** Whether the server ended this playback session for good; see playbackSessionEndReason. */
-export function isPlaybackSessionEndedError(error: unknown): boolean {
-  return playbackSessionEndReason(error) !== null;
-}
-
 /**
  * Whether a failed player request may succeed if it is sent again later: the
  * server answered 5xx, or never answered at all (network failure, timeout,
