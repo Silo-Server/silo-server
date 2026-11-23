@@ -70,7 +70,7 @@ func TestPastEndFMP4Fragment(t *testing.T) {
 
 type streamEndStoreFunc func(ctx context.Context, fileID, from, seconds int) (bool, error)
 
-func (f streamEndStoreFunc) ShortenDuration(ctx context.Context, fileID, from, seconds int) (bool, error) {
+func (f streamEndStoreFunc) ShortenDuration(ctx context.Context, fileID, from, seconds int, _ time.Time) (bool, error) {
 	return f(ctx, fileID, from, seconds)
 }
 
@@ -95,13 +95,17 @@ func TestStreamEndRecorder(t *testing.T) {
 			return 0
 		}
 	}
-	r.Note(context.Background(), 7, 160, 149.5)
+	readSince := time.Now()
+	note := func(planned, end float64) {
+		r.Note(context.Background(), 7, StreamEnd{Seconds: end, PlannedSeconds: planned, ReadSince: readSince})
+	}
+	note(160, 149.5)
 	if got := next(); got != 150 {
 		t.Fatalf("stored %d s, want 150", got)
 	}
-	r.Note(context.Background(), 7, 160, 149.5)
-	r.Note(context.Background(), 7, 149, 149.5)
-	r.Note(context.Background(), 7, 160, 140.2)
+	note(160, 149.5)
+	note(149, 149.5)
+	note(160, 140.2)
 	if got := next(); got != 141 {
 		t.Fatalf("stored %d s, want the repeated end skipped and 141 next", got)
 	}

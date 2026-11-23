@@ -21,6 +21,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
 
@@ -45,29 +46,30 @@ type LogSink interface {
 // Settings are required; each other field disables the route, or the part of
 // one, that needs it when nil.
 // runsFile reports whether session is a remote transcode this server started
-// on the reporting node (at reportingNodeURL) for the media file it names: the playback session it holds
-// runs that transport on that node and plays that file. A node's stream end
-// lowers a stored duration only then, so a node cannot shorten a file it is
-// not transcoding. A session another API server holds is left to the reports
-// that server receives.
-func (s *Server) runsFile(reportingNodeURL string, session nodesessions.SessionInfo) bool {
+// on the reporting node (at reportingNodeURL) for the media file it names:
+// the playback session it holds runs that transport on that node and plays
+// that file. It also returns when that playback session started, which no
+// run of its transcode precedes. A node's stream end lowers a stored duration
+// only then, so a node cannot shorten a file it is not transcoding. A session
+// another API server holds is left to the reports that server receives.
+func (s *Server) runsFile(reportingNodeURL string, session nodesessions.SessionInfo) (time.Time, bool) {
 	if s.opts.Transcodes == nil || session.MediaFileID <= 0 || reportingNodeURL == "" {
-		return false
+		return time.Time{}, false
 	}
-	nodeURL, fileID, ok := s.opts.Transcodes.RemoteTranscode(session.SessionID)
-	return ok && fileID == session.MediaFileID && nodepool.CanonicalNodeURL(reportingNodeURL) == nodepool.CanonicalNodeURL(nodeURL)
+	nodeURL, fileID, startedAt, ok := s.opts.Transcodes.RemoteTranscode(session.SessionID)
+	return startedAt, ok && fileID == session.MediaFileID && nodepool.CanonicalNodeURL(reportingNodeURL) == nodepool.CanonicalNodeURL(nodeURL)
 }
 
 // TranscodeSource finds the remote transcode a playback session this server
 // holds runs as a transport. *playback.SessionManager implements it.
 type TranscodeSource interface {
-	RemoteTranscode(transportID string) (nodeURL string, mediaFileID int, ok bool)
+	RemoteTranscode(transportID string) (nodeURL string, mediaFileID int, startedAt time.Time, ok bool)
 }
 
 // StreamEndNoter stores where a transcode found a media file's media ends
 // (playback.StreamEndRecorder).
 type StreamEndNoter interface {
-	Note(ctx context.Context, mediaFileID int, plannedSeconds, endSeconds float64)
+	Note(ctx context.Context, mediaFileID int, end playback.StreamEnd)
 }
 
 type Options struct {
@@ -390,8 +392,15 @@ func (s *Server) HandleReport(w http.ResponseWriter, r *http.Request) {
 	}
 	if s.opts.StreamEnds != nil {
 		for _, session := range report.Sessions {
-			if session.StreamEndSeconds > 0 && s.runsFile(node.URL, session) {
-				s.opts.StreamEnds.Note(ctx, session.MediaFileID, session.StreamPlannedSeconds, session.StreamEndSeconds)
+			if session.StreamEndSeconds <= 0 {
+				continue
+			}
+			if startedAt, ok := s.runsFile(node.URL, session); ok {
+				s.opts.StreamEnds.Note(ctx, session.MediaFileID, playback.StreamEnd{
+					Seconds:        session.StreamEndSeconds,
+					PlannedSeconds: session.StreamPlannedSeconds,
+					ReadSince:      startedAt,
+				})
 			}
 		}
 	}

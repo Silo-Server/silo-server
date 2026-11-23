@@ -1010,8 +1010,8 @@ func TestSegmentRecoveryAfterFFmpegExits(t *testing.T) {
 				!bytes.Equal(rec.Body.Bytes(), genericTSProgramTables())) {
 				t.Fatalf("end of stream = %d %q (% x), want 200 video/mp2t with a PAT and PMT", rec.Code, rec.Header().Get("Content-Type"), rec.Body.Bytes())
 			}
-			if seconds, planned, ok := s.LearnedStreamEnd(); tt.wantEnd && (!ok || seconds != 149.5 || planned != 160) {
-				t.Fatalf("LearnedStreamEnd() = %v, %v, %v; want 149.5 (the run from 144 s wrote 5.5 s), planned 160", seconds, planned, ok)
+			if end, ok := s.LearnedStreamEnd(); tt.wantEnd && (!ok || end.Seconds != 149.5 || end.PlannedSeconds != 160 || end.ReadSince.IsZero()) {
+				t.Fatalf("LearnedStreamEnd() = %+v, %v; want 149.5 (the run from 144 s wrote 5.5 s), planned 160, read since the run started", end, ok)
 			}
 		})
 	}
@@ -1041,7 +1041,7 @@ func TestEmptyRunsBoundTheStreamEnd(t *testing.T) {
 		if !s.ServePastEndOfStream(rec, name, err) || rec.Code != http.StatusOK {
 			t.Fatalf("err = %v, answer %d; want the end of the stream", err, rec.Code)
 		}
-		if _, _, ok := s.LearnedStreamEnd(); ok {
+		if _, ok := s.LearnedStreamEnd(); ok {
 			t.Fatal("LearnedStreamEnd() ok from a run that wrote nothing, want no seconds")
 		}
 		if _, _, err := s.RestartSegmentSince(context.Background(), 77, time.Time{}); !errors.Is(err, ErrPastEndOfStream) {
@@ -1069,8 +1069,8 @@ func TestEmptyRunsBoundTheStreamEnd(t *testing.T) {
 			t.Fatal(err)
 		}
 		<-s.Done()
-		if seconds, _, ok := s.LearnedStreamEnd(); !ok || math.Abs(seconds-150.8) > 1e-9 {
-			t.Fatalf("LearnedStreamEnd() = %v, %v; want 150.8 (145.3 s plus 5.5 s written)", seconds, ok)
+		if end, ok := s.LearnedStreamEnd(); !ok || math.Abs(end.Seconds-150.8) > 1e-9 {
+			t.Fatalf("LearnedStreamEnd() = %v, %v; want 150.8 (145.3 s plus 5.5 s written)", end.Seconds, ok)
 		}
 	})
 	t.Run("a run from segment 0 that wrote nothing learns nothing", func(t *testing.T) {

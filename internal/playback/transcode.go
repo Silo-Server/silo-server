@@ -414,6 +414,8 @@ type learnedStreamEnd struct {
 	seconds float64
 	// plannedSeconds is the stored duration that run was planned with.
 	plannedSeconds float64
+	// readSince is when that run started: it read the file as it was then.
+	readSince time.Time
 	// audioTrack is the AudioTrackIndex the end was learned with. Another
 	// track can run longer.
 	audioTrack int
@@ -678,15 +680,16 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 
 	// Monitor ffmpeg in background. The process-specific reservation is released
 	// before done closes, so waiters can safely launch a replacement process.
-	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice, opts, inheritedManifest)
+	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice, opts, inheritedManifest, startedAt)
 
 	return s, nil
 }
 
-// monitorFFmpeg waits for one FFmpeg run. run and inherited are that run's
-// options and the playlist an earlier run left when it started: the session's
-// own can already describe a replacement by the time the run exits.
-func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, done chan struct{}, releaseHWDevice func(), run TranscodeOpts, inherited os.FileInfo) {
+// monitorFFmpeg waits for one FFmpeg run. run, inherited and startedAt are
+// that run's options, the playlist an earlier run left when it started, and
+// when it started: the session's own can already describe a replacement by
+// the time the run exits.
+func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, done chan struct{}, releaseHWDevice func(), run TranscodeOpts, inherited os.FileInfo, startedAt time.Time) {
 	var processExited, assemblyFinished chan struct{}
 	var assemblyErr error
 	if groups := s.copyGroups; groups != nil {
@@ -738,7 +741,7 @@ func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, don
 	s.running = false
 	s.waitErr = waitErr
 	if endedCleanly {
-		s.learnStreamEndLocked(run, inherited)
+		s.learnStreamEndLocked(run, inherited, startedAt)
 	}
 	s.mu.Unlock()
 	s.logWaitResult(ctx, waitErr)
@@ -3454,8 +3457,8 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 }
 
 // learnStreamEndLocked records the media's last segment after the FFmpeg run
-// with options opts read its input to the end; inherited is the playlist an
-// earlier run left when it started. Only an encoded transcode learns it: its
+// with options opts, started at startedAt, read its input to the end;
+// inherited is the playlist an earlier run left when it started. Only an encoded transcode learns it: its
 // synthetic playlist lists segments to the stored duration, which can outlast
 // every stream, while copy-video serves FFmpeg's own playlist and a seek there
 // re-cuts the segments at other keyframes.
@@ -3468,7 +3471,7 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 // its first segment; such a run only ever lowers a known end, and one that
 // started at segment 0 shows nothing about the media. Output the session
 // cannot read teaches nothing. Must hold s.mu.
-func (s *TranscodeSession) learnStreamEndLocked(opts TranscodeOpts, inherited os.FileInfo) {
+func (s *TranscodeSession) learnStreamEndLocked(opts TranscodeOpts, inherited os.FileInfo, startedAt time.Time) {
 	if strings.EqualFold(opts.TargetCodecVideo, "copy") || s.copyPlan != nil ||
 		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
 		return
@@ -3505,6 +3508,7 @@ func (s *TranscodeSession) learnStreamEndLocked(opts TranscodeOpts, inherited os
 			segment:        entry.number,
 			seconds:        max(opts.SeekSeconds, 0) + written,
 			plannedSeconds: opts.TotalDuration,
+			readSince:      startedAt,
 			audioTrack:     opts.AudioTrackIndex,
 		}
 		return
@@ -3534,14 +3538,14 @@ func (s *TranscodeSession) pastEndOfStream(segNum int) bool {
 	return end.known && end.audioTrack == s.opts.AudioTrackIndex && segNum > end.segment
 }
 
-// LearnedStreamEnd returns where the media ends, in seconds, when a run of
-// this session wrote its last segment, and the stored duration that run was
-// planned with.
-func (s *TranscodeSession) LearnedStreamEnd() (seconds, plannedSeconds float64, ok bool) {
+// LearnedStreamEnd returns where the media ends, when a run of this session
+// wrote its last segment, with the stored duration that run was planned with
+// and when it started.
+func (s *TranscodeSession) LearnedStreamEnd() (StreamEnd, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	end := s.streamEnd
-	return end.seconds, end.plannedSeconds, end.known && end.seconds > 0
+	return StreamEnd{Seconds: end.seconds, PlannedSeconds: end.plannedSeconds, ReadSince: end.readSince}, end.known && end.seconds > 0
 }
 
 // GenerateFullManifest builds a complete VOD-style HLS manifest that lists
@@ -4434,7 +4438,7 @@ func (s *TranscodeSession) restart(
 	s.saveSubtitleSpans()
 	close(flight.done)
 
-	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice, opts, inheritedManifest)
+	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice, opts, inheritedManifest, startedAt)
 
 	if hook != nil {
 		hookCtx, cancelHook := context.WithTimeout(ctx, restartHookTimeout)

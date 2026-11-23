@@ -12,9 +12,22 @@ import (
 // transcode found its media ends.
 type StreamEndStore interface {
 	// ShortenDuration sets the file's duration to seconds when it is still
-	// from, the duration the transcode was planned with, and longer than
-	// seconds, and reports whether it did.
-	ShortenDuration(ctx context.Context, mediaFileID, from, seconds int) (bool, error)
+	// from, the duration the transcode was planned with, is longer than
+	// seconds, and was last probed before probedBefore, and reports whether
+	// it did.
+	ShortenDuration(ctx context.Context, mediaFileID, from, seconds int, probedBefore time.Time) (bool, error)
+}
+
+// StreamEnd is where a transcode found a media file's media ends.
+type StreamEnd struct {
+	// Seconds is where the media ends.
+	Seconds float64
+	// PlannedSeconds is the stored duration the transcode was planned with.
+	PlannedSeconds float64
+	// ReadSince is no later than when the run that measured the end started
+	// reading the file. A file probed after it may have been replaced since,
+	// even under the same stored duration.
+	ReadSince time.Time
 }
 
 // maxNotedStreamEnds bounds StreamEndRecorder.noted; past it the record
@@ -53,17 +66,17 @@ func NewStreamEndRecorder(store StreamEndStore) *StreamEndRecorder {
 	return &StreamEndRecorder{store: store}
 }
 
-// Note records that mediaFileID's media ends at endSeconds, measured by a
-// transcode planned with the stored duration plannedSeconds. The write applies
-// only while the file still has that duration, so an end measured on a file
-// since replaced or probed again changes nothing.
-func (r *StreamEndRecorder) Note(ctx context.Context, mediaFileID int, plannedSeconds, endSeconds float64) {
-	if r == nil || mediaFileID <= 0 || !(endSeconds > 0) || math.IsInf(endSeconds, 0) || !(plannedSeconds > endSeconds) {
+// Note records where mediaFileID's media ends. The write applies only while
+// the file still has the duration the transcode was planned with and was not
+// probed since the measuring run started reading it, so an end measured on a
+// file since replaced or probed again changes nothing.
+func (r *StreamEndRecorder) Note(ctx context.Context, mediaFileID int, end StreamEnd) {
+	if r == nil || mediaFileID <= 0 || !(end.Seconds > 0) || math.IsInf(end.Seconds, 0) || !(end.PlannedSeconds > end.Seconds) || end.ReadSince.IsZero() {
 		return
 	}
 	// Rounded up, as the scanner stores a span: the last partial second
 	// holds the last segment. The planned duration is a stored whole number.
-	seconds, from := int(math.Ceil(endSeconds)), int(math.Round(plannedSeconds))
+	seconds, from := int(math.Ceil(end.Seconds)), int(math.Round(end.PlannedSeconds))
 	now := time.Now()
 	r.mu.Lock()
 	if last, ok := r.noted[mediaFileID]; ok && last.from == from && last.seconds == seconds && now.Sub(last.at) < notedStreamEndTTL {
@@ -79,7 +92,7 @@ func (r *StreamEndRecorder) Note(ctx context.Context, mediaFileID int, plannedSe
 	go func() {
 		writeCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 		defer cancel()
-		shortened, err := r.store.ShortenDuration(writeCtx, mediaFileID, from, seconds)
+		shortened, err := r.store.ShortenDuration(writeCtx, mediaFileID, from, seconds, end.ReadSince)
 		switch {
 		case err != nil:
 			r.mu.Lock()

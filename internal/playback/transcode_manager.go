@@ -1575,8 +1575,8 @@ func (m *TranscodeManager) ServePastEndOfStream(ctx context.Context, w http.Resp
 	if !session.ServePastEndOfStream(w, name, err) {
 		return false
 	}
-	if end, planned, ok := session.LearnedStreamEnd(); ok && m != nil && m.StreamEndsFn != nil {
-		m.StreamEndsFn().Note(ctx, mediaFileID, planned, end)
+	if end, ok := session.LearnedStreamEnd(); ok && m != nil && m.StreamEndsFn != nil {
+		m.StreamEndsFn().Note(ctx, mediaFileID, end)
 	}
 	return true
 }

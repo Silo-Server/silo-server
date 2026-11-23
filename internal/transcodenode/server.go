@@ -670,8 +670,8 @@ func (s *Server) WithStreamEnds(sessions []nodesessions.SessionInfo) []nodesessi
 	defer s.mu.RUnlock()
 	for i := range sessions {
 		if live, ok := s.sessions[sessions[i].SessionID]; ok {
-			if end, planned, ok := live.LearnedStreamEnd(); ok {
-				sessions[i].StreamEndSeconds, sessions[i].StreamPlannedSeconds = end, planned
+			if end, ok := live.LearnedStreamEnd(); ok {
+				sessions[i].StreamEndSeconds, sessions[i].StreamPlannedSeconds = end.Seconds, end.PlannedSeconds
 			}
 		}
 	}
