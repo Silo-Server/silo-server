@@ -129,6 +129,12 @@ func (w *WatchTime) Credit(position, listened float64, start, now time.Time) {
 	w.pausedAt = time.Time{}
 }
 
+// Latest is where the latest observation put the player, at Until: its
+// position, and whether it was paused there or confirmed a pause since.
+func (w WatchTime) Latest() (position float64, paused bool) {
+	return w.lastPosition, w.lastPaused || !w.pausedAt.IsZero()
+}
+
 // Pause records that the player confirmed a pause at now without reporting
 // where it held. If the next sample is still paused, it supplies that
 // position: the advance to it is judged against the playing time before now,

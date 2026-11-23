@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/gorilla/websocket"
 
@@ -126,6 +127,14 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 		switch record.Name {
 		case playback.CommandStop, playback.CommandTerminate:
 			ctx := context.Background()
+			// A pause or resume the player confirmed before this is applied
+			// to the session in the background. While one is still pending,
+			// the snapshot below misses it, so the stop adds no play past
+			// what the session last saw.
+			sentAt := record.SentAt
+			if h.realtimeResultPending(sessionID) {
+				sentAt = time.Time{}
+			}
 			session, err := func() (*playback.Session, error) {
 				unlock := h.tm.LockSessionLifecycle(sessionID)
 				defer unlock()
@@ -149,7 +158,7 @@ func (h *PlaybackHandler) handleRealtimeClientMessage(sessionID string, data []b
 			// finalization waits for an in-flight pause or resume scrobble.
 			h.runRealtimeResult(sessionID, false, func() {
 				h.cancelPlaybackStartSideEffectsV3(ctx, session.ID)
-				h.recordRealtimeStoppedSession(ctx, session)
+				h.recordRealtimeStoppedSession(ctx, session, sentAt)
 				h.syncSessionsNow(ctx, "stop")
 			})
 		case playback.CommandPause, playback.CommandUnpause:

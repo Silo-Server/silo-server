@@ -1822,8 +1822,15 @@ buffering. The playback session measures it from position samples
 progress report, and the final position the stop carries. A position advance between two
 samples counts as watched when it fits playback at up to twice normal speed plus a short
 allowance for report jitter, and anything larger is a seek. Time after the last sample is
-not counted, so a stop without a final position, such as an administrator stop the
-player confirms, ends the measurement at the last progress report.
+not counted, so a stop without a final position ends the measurement at the last sample.
+An administrator stop the player confirms, once the play has a progress report, is the
+one exception: the confirmation carries no position, so the server adds the time from
+when the session last saw the player playing (a progress report, a confirmed resume, or
+a seek) to when the stop was sent, and moves `end_position_seconds` with it. Nothing is
+added for a paused player, for one last seen more than 12 seconds before the stop, while
+a pause or resume the player confirmed is still being applied, or when the server can't
+place the latest report against what the session measured since, which can happen when
+another server accepted it or the session was rebuilt after a restart.
 
 The measurement survives the session's live copy. The server holding the session saves
 it with the session's lifecycle state when the session starts and on every live-session

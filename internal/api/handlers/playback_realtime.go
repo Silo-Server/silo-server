@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
@@ -15,6 +16,8 @@ import (
 type playbackCommandRecord struct {
 	SessionID string
 	Name      playback.CommandName
+	// SentAt is when the command was sent to the player.
+	SentAt time.Time
 }
 
 // stopPlaybackSession stops a session. reason is PlaybackEndStopped or
@@ -128,9 +131,12 @@ func (h *PlaybackHandler) stopPlaybackSessionByID(ctx context.Context, sessionID
 // recordRealtimeStoppedSession shares native history finalization with the
 // client's HTTP stop for a player-confirmed administrator stop or terminate.
 // Authority is already removed, so the client may have finalized from the
-// attempt row while this provider work was queued.
-func (h *PlaybackHandler) recordRealtimeStoppedSession(ctx context.Context, session *playback.Session) {
-	outcome := h.realtimeStopHistory(ctx, session)
+// attempt row while this provider work was queued. sentAt is when the stop
+// was sent to the player, which played on until it arrived; zero when the
+// session can't tell how the player ended, so nothing is added past what it
+// last saw.
+func (h *PlaybackHandler) recordRealtimeStoppedSession(ctx context.Context, session *playback.Session, sentAt time.Time) {
+	outcome := h.realtimeStopHistory(ctx, session, sentAt)
 	if outcome.adminLog {
 		h.recordAdminStopHistory(ctx, session, outcome.reason)
 	}
@@ -160,7 +166,7 @@ func unarbitratedRealtimeStop(result watchstate.PlaybackStopResult) realtimeStop
 // realtimeStopHistory records the confirmed stop's watch history and reports
 // what its caller still owes: nothing when another stop's finalizer already
 // recorded the end and told providers.
-func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *playback.Session) realtimeStopOutcome {
+func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *playback.Session, sentAt time.Time) realtimeStopOutcome {
 	store, ok := h.PlanStoreV3.(playback.ProgressStoreV3)
 	if !ok {
 		return unarbitratedRealtimeStop(h.persistStopAndHistory(parent, session))
@@ -177,24 +183,28 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	if record == nil {
 		return unarbitratedRealtimeStop(h.persistStopAndHistory(ctx, session)) // Unsequenced bridge play.
 	}
-	var final *playback.ProgressSampleV3
-	if record.LastSample == nil && session.Position > 0 {
-		// A bridge progress report may have updated the live session without
-		// a sequenced native sample. Preserve its final resume position.
-		final = &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: session.Position, IsPaused: session.IsPaused}
-	}
+	final, estimatedFrom, file, fileErr := h.realtimeStopFinal(ctx, session, record, sentAt)
+	// The stop write gets its own budget, whatever the reads above took.
+	writeCtx, cancelWrite := context.WithTimeout(parent, stopFinalizationLease)
+	defer cancelWrite()
 	var receipt playback.StopReceiptV3
 	for range 3 {
 		// The CAS is idempotent for one stop id, so a retry after an
 		// ambiguous failure replays the stored receipt.
-		receipt, _, err = store.StopAttempt(ctx, session.ID, adminStopID(session.ID), final)
-		if err == nil || errors.Is(err, playback.ErrSessionNotFound) || ctx.Err() != nil {
+		receipt, _, err = store.StopAttempt(writeCtx, session.ID, adminStopID(session.ID), final)
+		if err == nil || errors.Is(err, playback.ErrSessionNotFound) || writeCtx.Err() != nil {
 			break
 		}
 	}
 	if err != nil {
 		slog.WarnContext(ctx, "failed to record realtime stop attempt", "session", session.ID, "error", err)
 		return unarbitratedRealtimeStop(watchstate.PlaybackStopResult{})
+	}
+	if final != nil {
+		// The finalizer judges the final sample against the measurement it
+		// was built from, even if a second read of the save fails or finds
+		// nothing newer.
+		session.Watch = estimatedFrom
 	}
 	// An administrator end that finalized the receipt without a history row
 	// (nothing to record, or a failed write) is written from this snapshot.
@@ -229,14 +239,147 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 		}
 	}
 	result := watchstate.PlaybackStopResult{HistoryID: receipt.HistoryID, FinalPositionSeconds: session.Position}
-	file, err := h.loadFileByPreferredID(ctx, requestedMediaFileID(session), session.MediaFileID)
-	if err == nil && file != nil {
+	if file == nil {
+		file, fileErr = h.loadFileByPreferredID(ctx, requestedMediaFileID(session), session.MediaFileID)
+	}
+	if fileErr == nil && file != nil {
 		result.MediaItemID = playbackProgressTarget(file)
 		result.DurationSeconds = float64(file.Duration)
 		result.Completed = result.HistoryID != "" && !session.DisableProgressPersistence && result.DurationSeconds > 0 &&
 			session.Position/result.DurationSeconds > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct)
 	}
 	return realtimeStopOutcome{result: result, reason: endReasonForStop(session.ID, receipt.StopID), notify: notify}
+}
+
+// realtimeStopFinal is the final sample a confirmed stop submits, the
+// measurement it is judged against, and the file an estimate was bounded by,
+// if it was looked up.
+func (h *PlaybackHandler) realtimeStopFinal(ctx context.Context, session *playback.Session, record *playback.AttemptRecordV3, sentAt time.Time) (*playback.ProgressSampleV3, playback.WatchTime, *models.MediaFile, error) {
+	if record.LastSample == nil {
+		if session.Position > 0 {
+			// A bridge progress report may have updated the live session
+			// without a sequenced native sample. Preserve its final resume
+			// position, judged against the play the session measured.
+			return &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: session.Position, IsPaused: session.IsPaused}, session.Watch, nil, nil
+		}
+		return nil, playback.WatchTime{}, nil, nil
+	}
+	// The anchor also brings the copy up to a report another replica
+	// accepted, which the play's history needs even without an estimate,
+	// including when another stop already took the row and this worker
+	// finishes it. Only an open row can still take an estimate.
+	anchor, ok := h.realtimeStopAnchor(ctx, session, record)
+	if !ok || sentAt.IsZero() || record.StoppedAt != nil {
+		return nil, anchor, nil, nil
+	}
+	var file *models.MediaFile
+	var fileErr error
+	duration := session.TimelineDuration
+	if duration <= 0 {
+		// The file bounds the final sample. A short budget keeps a slow
+		// catalog read from holding up the stop write; the result looks it
+		// up again after finalization if this one fails.
+		fileCtx, cancelFile := context.WithTimeout(ctx, realtimeStopReadBudget)
+		file, fileErr = h.loadFileByPreferredID(fileCtx, requestedMediaFileID(session), session.MediaFileID)
+		cancelFile()
+		if fileErr == nil && file != nil {
+			duration = float64(file.Duration)
+		}
+	}
+	return playedSinceLastReport(record, anchor, sentAt, duration), anchor, file, fileErr
+}
+
+// maxPlayedSinceLastReport bounds the play credited after the last progress
+// report: players report every 10 seconds, plus reporting slack. A player
+// whose last report is older than that missed one, so it is not known to have
+// been playing.
+const maxPlayedSinceLastReport = 12 * time.Second
+
+// realtimeStopReadBudget bounds each read a confirmed stop's estimate makes
+// ahead of its write.
+const realtimeStopReadBudget = 2 * time.Second
+
+// realtimeStopAnchor is the measurement a confirmed stop's final sample is
+// judged against: the removed live copy's, or the one saved on the session's
+// lifecycle row when that is newer (as finishStop would choose), brought up
+// to the attempt's latest report when neither saw it. Any replica accepts
+// progress, and only the replica holding the copy applies it there. ok is
+// false when the measurement can't show where the player last was: there is
+// none, the copy says the player is paused, or the unseen report predates
+// what was measured since (a confirmed pause or resume, a seek replan, by
+// another server's clock) or has no time.
+//
+// A report brought into the copy's own measurement stays there, since
+// finishStop carries that measurement to the end. A save is left to
+// finishStop, which chooses it again; the caller carries it instead only
+// when it estimates a final sample from it.
+func (h *PlaybackHandler) realtimeStopAnchor(ctx context.Context, session *playback.Session, record *playback.AttemptRecordV3) (playback.WatchTime, bool) {
+	anchor, seen := session.Watch, record.LastSequence <= session.PositionSequence()
+	var saved playback.WatchTime
+	found := false
+	if reader, ok := h.AdminStore.(sessionWatchReader); ok {
+		readCtx, cancel := context.WithTimeout(ctx, realtimeStopReadBudget)
+		var err error
+		saved, found, err = reader.SessionWatch(readCtx, session.ID)
+		cancel()
+		if err != nil {
+			// The finalizer reads the save again and may find it newer
+			// than the copy; an estimate made without it could be judged
+			// against it.
+			slog.WarnContext(ctx, "failed to read a stopped session's saved watch time", "session", session.ID, "error", err)
+			return anchor, false
+		}
+	}
+	fromSave := found && (!session.Watch.Measured || saved.Until.After(session.Watch.Until))
+	if fromSave {
+		// The save doesn't say which reports it measured.
+		anchor, seen = saved, false
+	}
+	last := record.LastSample
+	switch {
+	case seen:
+		// The measurement records a pause too (playedSinceLastReport checks
+		// it); this keeps a paused copy from estimating even if it doesn't.
+		if session.IsPaused {
+			return anchor, false
+		}
+	case !anchor.Measured || record.SampleAcceptedAt.IsZero() || !record.SampleAcceptedAt.After(anchor.Until):
+		return anchor, false
+	default:
+		anchor.Observe(last.Position, last.IsPaused, record.SampleAcceptedAt)
+		if !fromSave {
+			session.Watch = anchor
+			session.Position, session.IsPaused = last.Position, last.IsPaused
+		}
+	}
+	return anchor, anchor.Measured
+}
+
+// playedSinceLastReport is the final sample of a player that confirmed an
+// administrator's stop: the reply carries no position, and the player kept
+// playing from where the session last saw it until the stop reached it. That
+// is the anchor's latest observation: a progress report, a confirmed resume,
+// or a seek replan. It advances that observation's position by the time from
+// it to when the stop was sent, up to the rest of the file. A paused player,
+// one last seen more than maxPlayedSinceLastReport before the stop, or one
+// with nothing to add gets none, and so does a play no report has reached.
+func playedSinceLastReport(record *playback.AttemptRecordV3, anchor playback.WatchTime, sentAt time.Time, duration float64) *playback.ProgressSampleV3 {
+	if sentAt.IsZero() || record.LastSample == nil || !anchor.Measured {
+		return nil
+	}
+	seen, seenPaused := anchor.Latest()
+	played := sentAt.Sub(anchor.Until)
+	if seenPaused || played <= 0 || played > maxPlayedSinceLastReport {
+		return nil
+	}
+	position := seen + played.Seconds()
+	if duration > 0 {
+		position = min(position, duration)
+	}
+	if position <= seen {
+		return nil
+	}
+	return &playback.ProgressSampleV3{Sequence: record.LastSequence + 1, Position: position}
 }
 
 // finalizeRealtimeStop runs stop finalization for the one queued realtime
@@ -337,6 +480,7 @@ func (h *PlaybackHandler) rememberRealtimeCommand(commandID, sessionID string, n
 	h.realtimeCommands[commandID] = playbackCommandRecord{
 		SessionID: sessionID,
 		Name:      name,
+		SentAt:    time.Now(),
 	}
 	h.realtimeCommandMu.Unlock()
 }
@@ -404,6 +548,14 @@ type realtimeResultQueue struct {
 	pending        []func()
 	done           chan struct{}
 	terminalQueued bool
+}
+
+// realtimeResultPending reports whether a result for the session is still
+// queued or running on its worker.
+func (h *PlaybackHandler) realtimeResultPending(sessionID string) bool {
+	h.realtimeResultMu.Lock()
+	defer h.realtimeResultMu.Unlock()
+	return h.realtimeResultQueues[sessionID] != nil
 }
 
 // runRealtimeResult orders results through one worker per session. When a

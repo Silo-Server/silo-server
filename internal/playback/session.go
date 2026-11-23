@@ -327,6 +327,13 @@ func (c ClientInfo) LogAttrs() []any {
 	return attrs
 }
 
+// PositionSequence is the latest accepted progress sequence the session's
+// position reflects or supersedes: a sample it applied or adopted, or one a
+// seek was planned after.
+func (s *Session) PositionSequence() int64 {
+	return s.positionSequence
+}
+
 // ClientInfo returns the app identity stamped on the session when it was
 // created. Surfaces that only hold a session — expiry logging, route events
 // posted out of band — recover the reporting client through this instead of
