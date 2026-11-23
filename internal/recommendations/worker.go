@@ -212,6 +212,23 @@ func (w *Worker) setRunning(name JobName, v bool) {
 	w.running[name] = v
 }
 
+// finishJob marks a job as no longer running. Its cluster lock is already
+// released, so when an embeddings job ends with a catch-up pass still asked
+// for, which EmbedMissingNow can do after the job last checked, finishJob
+// starts that pass.
+func (w *Worker) finishJob(name JobName) {
+	w.mu.Lock()
+	w.running[name] = false
+	again := name == JobEmbeddings && w.embedMissingAgain
+	if again {
+		w.embedMissingAgain = false
+	}
+	w.mu.Unlock()
+	if again {
+		go w.EmbedMissingNow()
+	}
+}
+
 // tryStart attempts to mark a job as running. Returns false if already running.
 func (w *Worker) tryStart(name JobName) bool {
 	w.mu.Lock()
@@ -282,8 +299,9 @@ func (w *Worker) embedMissingJob() job {
 // by age, so the running pass can have walked past items added since it
 // started. Requests made during one run come to one more pass. When the job
 // runs on another server, the request is dropped; that run and the next
-// catch-up tick cover the items. So is a request that lands as a run here
-// finishes, after it last checked.
+// catch-up tick cover the items. A request that lands as a run here
+// finishes, after it last checked, starts a pass once the run lets go of
+// the job (see finishJob).
 func (w *Worker) EmbedMissingNow() {
 	for {
 		err := w.runJob(w.embedMissingJob(), true)
