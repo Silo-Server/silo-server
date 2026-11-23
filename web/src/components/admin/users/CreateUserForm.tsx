@@ -38,7 +38,7 @@ import {
 } from "@/hooks/queries/admin/users";
 import { useAuth } from "@/hooks/useAuth";
 import { usePasswordPolicy } from "@/hooks/queries/account";
-import { newPasswordPolicyProblem } from "@/lib/newPassword";
+import { newPasswordPolicyProblem, passwordErrorMessage } from "@/lib/newPassword";
 import { useT } from "@/i18n";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import {
@@ -251,7 +251,7 @@ function CreateUserForm({
       createMutation.reset();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("web.admin.users.list.create.saveFailed"));
+      setError(passwordErrorMessage(err, t("web.admin.users.list.create.saveFailed")));
     } finally {
       busy.current = false;
       onBusy(false);

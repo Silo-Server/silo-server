@@ -31,3 +31,13 @@ func TestRegistrationPasswordRejectedAtPasswordMember(t *testing.T) {
 		}
 	}
 }
+
+// The administrator's refusal keeps the rule it broke, so the v2 listener can
+// name it at the password member.
+func TestAdminPasswordRefusalKeepsTheRule(t *testing.T) {
+	t.Parallel()
+	err := (&AdminHandler{}).validateAdminPassword(t.Context(), "short")
+	if message, ok := auth.PasswordRuleMessage(err); !ok || message != "Use at least 8 characters." {
+		t.Fatalf("validateAdminPassword error = %v; want the policy's rule", err)
+	}
+}

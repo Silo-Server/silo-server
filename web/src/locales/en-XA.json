@@ -95149,6 +95149,20 @@
       "value": "⟦Šéţţîñĝ...~~~~⟧"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "⟦Šĥåŕé îţ ŵîţĥ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ýöûŕšéļƒ.~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,

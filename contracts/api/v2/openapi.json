@@ -53564,7 +53564,7 @@
             "type": "string"
           },
           "password": {
-            "description": "Account password; at least 8 characters and at most 72 UTF-8 bytes",
+            "description": "Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it",
             "examples": [
               "correct horse battery staple"
             ],
@@ -53809,7 +53809,7 @@
             "type": "string"
           },
           "password": {
-            "description": "Account password; at least 8 characters and at most 72 UTF-8 bytes",
+            "description": "Account password; at least 8 characters and at most 72 UTF-8 bytes. The server's password policy can require more; getPasswordPolicy describes it",
             "examples": [
               "correct horse battery staple"
             ],

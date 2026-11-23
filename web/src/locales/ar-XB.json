@@ -91993,6 +91993,20 @@
       "value": "\u200F\u202ESetting...\u202C"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShare it with \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E yourself.\u202C"
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,

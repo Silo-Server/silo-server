@@ -9,7 +9,11 @@ import { getAdminUser, type AdminPasswordReset } from "@/api/v2/adminUsers";
 import { V2ProblemError } from "@/api/v2/request";
 import { useIssuePasswordReset, useUpdateUser } from "@/hooks/queries/admin/users";
 import { usePasswordPolicy } from "@/hooks/queries/account";
-import { newPasswordPolicyProblem, newPasswordRuleHint } from "@/lib/newPassword";
+import {
+  newPasswordPolicyProblem,
+  newPasswordRuleHint,
+  passwordErrorMessage,
+} from "@/lib/newPassword";
 import { useT } from "@/i18n";
 import { copyTextToClipboard } from "@/lib/clipboard";
 import { formatDateTime } from "@/lib/datetime";
@@ -104,9 +108,7 @@ export function AdminUserPasswordResetDialog({
       if (err instanceof V2ProblemError && err.status === 412) {
         setError(t("web.admin.users.page.accountChanged"));
       } else {
-        setError(
-          err instanceof Error ? err.message : t("web.admin.users.passwordResetDialog.setFailed"),
-        );
+        setError(passwordErrorMessage(err, t("web.admin.users.passwordResetDialog.setFailed")));
       }
     } finally {
       busy.current = false;

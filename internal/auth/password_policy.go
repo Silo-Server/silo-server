@@ -90,12 +90,6 @@ var passwordPolicyKeys = []string{
 	config.AuthPasswordRequireSpecialSettingKey,
 }
 
-// settingsBatchReader is a settings store that reads several keys in one
-// query, and so as one consistent snapshot.
-type settingsBatchReader interface {
-	GetMany(ctx context.Context, keys ...string) (map[string]string, error)
-}
-
 // LoadPasswordPolicy reads the policy settings. They are read on every
 // check, so a change made on any node applies at once everywhere. A value
 // normalization would refuse reads as its default.
@@ -118,7 +112,8 @@ func LoadPasswordPolicy(ctx context.Context, settings SettingsGetter) (PasswordP
 }
 
 func readPasswordPolicySettings(ctx context.Context, settings SettingsGetter) (map[string]string, error) {
-	if batch, ok := settings.(settingsBatchReader); ok {
+	// One query reads the keys as one consistent snapshot.
+	if batch, ok := settings.(config.ManySettingReader); ok {
 		values, err := batch.GetMany(ctx, passwordPolicyKeys...)
 		if err != nil {
 			return nil, fmt.Errorf("reading password policy settings: %w", err)

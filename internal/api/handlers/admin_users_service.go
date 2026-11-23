@@ -100,7 +100,7 @@ func (h *AdminHandler) validateAdminPassword(ctx context.Context, password strin
 	}
 	err := auth.CheckNewPassword(ctx, settings, password)
 	if message, ok := auth.PasswordRuleMessage(err); ok {
-		return fieldError("password", message)
+		return fieldError("password", message).WithCause(err)
 	}
 	return err
 }

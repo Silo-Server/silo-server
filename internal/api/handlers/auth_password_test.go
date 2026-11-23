@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
@@ -120,8 +121,8 @@ func TestChangePasswordMapsCredentialErrors(t *testing.T) {
 		field  string
 	}{
 		{"wrong current password", auth.ErrCurrentPasswordInvalid, http.StatusBadRequest, "invalid_current_password", "current_password"},
-		{"weak password", auth.ErrPasswordTooShort, http.StatusBadRequest, codeWeakPassword, "new_password"},
-		{"password too long", auth.ErrPasswordTooLong, http.StatusBadRequest, codePasswordTooLong, "new_password"},
+		{"weak password", auth.DefaultPasswordPolicy().Check("short"), http.StatusBadRequest, codeWeakPassword, "new_password"},
+		{"password too long", auth.DefaultPasswordPolicy().Check(strings.Repeat("界", 25)), http.StatusBadRequest, codePasswordTooLong, "new_password"},
 		{"reused temporary password", auth.ErrPasswordUnchanged, http.StatusBadRequest, codeWeakPassword, "new_password"},
 		{"local login disabled", auth.ErrPasswordLoginDisabled, http.StatusConflict, "password_login_disabled", ""},
 		{"repository failure", errors.New("database unavailable"), http.StatusInternalServerError, "internal_error", ""},

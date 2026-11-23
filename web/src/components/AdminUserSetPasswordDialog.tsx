@@ -20,7 +20,7 @@ import { useT } from "@/i18n";
 import { TOUCH_TARGETS } from "@/lib/touchTargets";
 import { cn } from "@/lib/utils";
 import { adminSignInErrorText } from "@/lib/externalSignInAdmin";
-import { newPasswordProblem, passwordErrorMessage } from "@/lib/newPassword";
+import { newPasswordHint, newPasswordProblem, passwordErrorMessage } from "@/lib/newPassword";
 
 /**
  * Sets a Silo password on an account that has no password sign-in, such as
@@ -134,7 +134,8 @@ export function AdminUserSetPasswordDialog({
               onChange={(event) => setPassword(event.target.value)}
             />
             <p id={hintId} className="text-muted-foreground text-xs">
-              {t("web.admin.users.setPasswordDialog.hint", { username: user.username })}
+              {newPasswordHint(passwordPolicy)}
+              <> {t("web.admin.users.setPasswordDialog.shareHint", { username: user.username })}</>
             </p>
           </div>
           <div className="flex items-center gap-2">

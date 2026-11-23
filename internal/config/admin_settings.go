@@ -350,13 +350,13 @@ const (
 	// password may have, from PasswordMinLengthFloor to PasswordMinLengthCeiling.
 	// The password policy settings apply when a password is chosen or
 	// replaced; passwords already stored keep working.
-	AuthPasswordMinLengthSettingKey = "auth.password_min_length" //nolint:gosec // A setting name, not a credential.
+	AuthPasswordMinLengthSettingKey = "auth.password_min_length"
 	// AuthPasswordRequireUppercaseSettingKey asks a new local password for a
 	// capital letter.
-	AuthPasswordRequireUppercaseSettingKey = "auth.password_require_uppercase" //nolint:gosec // A setting name, not a credential.
+	AuthPasswordRequireUppercaseSettingKey = "auth.password_require_uppercase"
 	// AuthPasswordRequireSpecialSettingKey asks a new local password for a
 	// punctuation mark or symbol.
-	AuthPasswordRequireSpecialSettingKey = "auth.password_require_special" //nolint:gosec // A setting name, not a credential.
+	AuthPasswordRequireSpecialSettingKey = "auth.password_require_special"
 	// AuthProviderRecheckIntervalSettingKey is how old an identity's last
 	// provider check may be before a session refresh asks the provider again.
 	AuthProviderRecheckIntervalSettingKey = "auth.provider_recheck_interval"
