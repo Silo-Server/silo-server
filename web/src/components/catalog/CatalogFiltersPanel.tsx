@@ -1,5 +1,5 @@
 import type { PersonalizedSorts } from "@/lib/querySortOptions";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState, type RefObject } from "react";
 
 import {
   createEmptyQueryDefinition,
@@ -65,6 +65,7 @@ export default function CatalogFiltersPanel({
   // Badge labels come from a plain helper; recompute them on a language change.
   const language = useAppLanguage();
   const [sheetOpen, setSheetOpen] = useState(false);
+  const filtersButtonRef = useRef<HTMLButtonElement>(null);
   const [editorMode, setEditorMode] = useState<"guided" | "advanced">("guided");
 
   const isLocked = state.source === "section";
@@ -188,6 +189,7 @@ export default function CatalogFiltersPanel({
         onUpdate={updateToolbar}
         activeFilterCount={activeCount}
         onOpenFilters={() => setSheetOpen(true)}
+        filtersButtonRef={filtersButtonRef}
         showMediaScopeSelector={showMediaScopeSelector}
         allowPersonalizedSorts={allowPersonalizedSorts}
         sortRelevanceScope={sortRelevanceScope}
@@ -214,6 +216,7 @@ export default function CatalogFiltersPanel({
           state={state}
           open={sheetOpen}
           onOpenChange={setSheetOpen}
+          returnFocusRef={filtersButtonRef}
           guidedState={guidedState}
           onUpdate={updateGuided}
           libraries={libraryOptions}
@@ -245,6 +248,7 @@ export function CatalogFilterSheetContainer({
   state,
   open,
   onOpenChange,
+  returnFocusRef,
   guidedState,
   onUpdate,
   libraries,
@@ -264,6 +268,7 @@ export function CatalogFilterSheetContainer({
   state: CatalogSearchState;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   guidedState: GuidedFormState;
   onUpdate: (patch: Partial<GuidedFormState>) => void;
   libraries: Array<{ id: number; name: string }>;
@@ -289,6 +294,7 @@ export function CatalogFilterSheetContainer({
     <CatalogFilterSheet
       open={open}
       onOpenChange={onOpenChange}
+      returnFocusRef={returnFocusRef}
       state={guidedState}
       onUpdate={onUpdate}
       libraries={libraries}
