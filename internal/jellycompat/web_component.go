@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
+	"github.com/Silo-Server/silo-server/internal/nodemetrics"
 )
 
 const (
@@ -539,14 +540,19 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	defer os.RemoveAll(tmpRoot)
+	preloadPath := filepath.Join(tmpRoot, webBuildCPULimitPreload)
 	run := opts.RunCommand
 	if run == nil {
 		// npm caches under HOME by default, and HOME is / when the container
 		// runs silo directly as a uid with no passwd entry. A cache in the
 		// workspace is writable either way and goes away with it.
-		run = webInstallCommandRunner(filepath.Join(tmpRoot, "npm-cache"))
+		run = webInstallCommandRunner(filepath.Join(tmpRoot, "npm-cache"), preloadPath)
 	}
 	if err := os.WriteFile(filepath.Join(tmpRoot, webTempMarker), []byte("silo jellyfin web install workspace\n"), 0o644); err != nil {
+		writeWebInstallError(root, err)
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
+	}
+	if err := os.WriteFile(preloadPath, []byte(webBuildCPULimitScript), 0o600); err != nil {
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
@@ -581,7 +587,15 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
 	reportProgress(WebComponentOperationBuilding, 60, "Building Jellyfin Web production assets")
+	oomKillsBefore := nodemetrics.CgroupOOMKills()
 	if err := run(ctx, srcDir, npm.args("run", "build:production"), ""); err != nil {
+		// An OOM-killed webpack leaves no trace in the output or the exit
+		// status (cross-env turns the signal into exit 1), so the cgroup's
+		// counter is the only sign. It counts every process in the cgroup,
+		// hence "during the build" rather than blaming the build outright.
+		if oomKillsAfter := nodemetrics.CgroupOOMKills(); ctx.Err() == nil && oomKillsBefore != nil && oomKillsAfter != nil && *oomKillsAfter > *oomKillsBefore {
+			err = fmt.Errorf("the system ran out of memory during the build and killed a process; building Jellyfin Web needs about 4.5 GB of free memory on top of what Silo and the other services already use: %w", err)
+		}
 		err = fmt.Errorf("build jellyfin-web production bundle: %w", err)
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
@@ -1487,21 +1501,59 @@ func commandOutput(ctx context.Context, dir, name string, args ...string) (strin
 	return string(out), nil
 }
 
-// webInstallCommandRunner runs install commands with npm's cache in cacheDir.
-func webInstallCommandRunner(cacheDir string) func(context.Context, string, []string, string) error {
+// webBuildCPULimitScript makes every Node process in the install see at most
+// three CPUs. webpack's minimizer (terser-webpack-plugin in Jellyfin Web 10.x,
+// minimizer-webpack-plugin in 12.x) starts one worker per CPU after the first,
+// so on a many-core host the build needs memory in proportion to the core
+// count: about 16 GB with 56 CPUs against about 4.1 GB with this limit, for
+// roughly twice the build time. (The out-of-memory error asks for 4.5 GB, which
+// leaves some headroom.) Older minimizers read os.cpus(), newer ones
+// os.availableParallelism(), so both are capped. It is preloaded through
+// NODE_OPTIONS rather than patched into webpack's config, which differs
+// between Jellyfin Web releases.
+const (
+	webBuildCPULimitPreload = "silo-build-cpu-limit.cjs"
+	webBuildCPULimitScript  = `"use strict";
+const os = require("os");
+const limit = 3;
+const cpus = os.cpus;
+os.cpus = () => cpus().slice(0, limit);
+if (typeof os.availableParallelism === "function") {
+  const availableParallelism = os.availableParallelism;
+  os.availableParallelism = () => Math.min(availableParallelism(), limit);
+}
+`
+)
+
+// webBuildNodeOptions appends the CPU-limit preload to the NODE_OPTIONS the
+// host already sets (the container image sets --use-openssl-ca). Node reads a
+// double-quoted NODE_OPTIONS value with backslash escapes, and the install
+// root is configurable, so the path is quoted.
+func webBuildNodeOptions(existing, preloadPath string) string {
+	quoted := `"` + strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(preloadPath) + `"`
+	return strings.TrimSpace(existing + " --require " + quoted)
+}
+
+// webInstallCommandRunner runs install commands with npm's cache in cacheDir
+// and the CPU-limit preload at preloadPath.
+func webInstallCommandRunner(cacheDir, preloadPath string) func(context.Context, string, []string, string) error {
+	nodeOptions := webBuildNodeOptions(os.Getenv("NODE_OPTIONS"), preloadPath)
 	return func(ctx context.Context, dir string, argv []string, stdin string) error {
 		if len(argv) == 0 {
 			return errors.New("empty command")
 		}
 		cmd := exec.CommandContext(ctx, argv[0], argv[1:]...) //nolint:gosec // G204: argv is the installer's own git and npm commands
 		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "npm_config_cache="+cacheDir)
+		cmd.Env = append(os.Environ(), "npm_config_cache="+cacheDir, "NODE_OPTIONS="+nodeOptions)
 		if stdin != "" {
 			cmd.Stdin = strings.NewReader(stdin)
 		}
 		out, err := cmd.CombinedOutput()
 		if err != nil {
-			return fmt.Errorf("%s: %s", strings.Join(argv, " "), strings.TrimSpace(string(out)))
+			if output := strings.TrimSpace(string(out)); output != "" {
+				return fmt.Errorf("%s: %w: %s", strings.Join(argv, " "), err, output)
+			}
+			return fmt.Errorf("%s: %w", strings.Join(argv, " "), err)
 		}
 		return nil
 	}

@@ -59,3 +59,38 @@ func TestEffectiveMemoryLimitBytesFindsTheBindingAncestor(t *testing.T) {
 		t.Fatalf("effective limit = %d, want 0 for no limit", got)
 	}
 }
+
+// The OOM-kill counter comes from this process's own cgroup: the slice above
+// it also counts its siblings' kills, and a namespaced container reads its own
+// cgroup at the mount root.
+func TestCgroupOOMKillsReadsTheProcessCgroup(t *testing.T) {
+	root := t.TempDir()
+	previousRoot := cgroupMountRoot
+	cgroupMountRoot = root
+	t.Cleanup(func() { cgroupMountRoot = previousRoot })
+	write := func(path, body string) {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatalf("create %s: %v", filepath.Dir(path), err)
+		}
+		if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	procDir := t.TempDir()
+
+	write(filepath.Join(procDir, "self", "cgroup"), "0::/system.slice/silo.service\n")
+	write(filepath.Join(root, "system.slice", "memory.events"), "oom 9\noom_kill 9\n")
+	if got := cgroupOOMKills(procDir); got != nil {
+		t.Fatalf("cgroupOOMKills = %d with no memory.events in the process's cgroup, want nil", *got)
+	}
+	write(filepath.Join(root, "system.slice", "silo.service", "memory.events"), "low 0\nhigh 3\nmax 2\noom 1\noom_kill 2\n")
+	if got := cgroupOOMKills(procDir); got == nil || *got != 2 {
+		t.Fatalf("cgroupOOMKills = %v, want the service's 2", got)
+	}
+
+	write(filepath.Join(procDir, "self", "cgroup"), "0::/\n")
+	write(filepath.Join(root, "memory.events"), "oom 4\noom_kill 4\n")
+	if got := cgroupOOMKills(procDir); got == nil || *got != 4 {
+		t.Fatalf("cgroupOOMKills = %v, want the namespaced root's 4", got)
+	}
+}
