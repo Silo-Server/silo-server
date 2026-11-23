@@ -1,10 +1,6 @@
 package recommendations
 
-import (
-	"context"
-	"log/slog"
-	"math"
-)
+import "math"
 
 // The quality prior lets a title's public rating break near-ties in
 // similarity, so a well-rated title ranks ahead of a poorly rated plot
@@ -92,22 +88,17 @@ func meanSD(values []float64) (mean, sd float64) {
 }
 
 // withQualityPrior applies applyQualityPrior to pool when it holds at least
-// minPool candidates, reading the ratings and media types it needs. A pool
-// whose reads fail keeps its scores.
-func (b rowBuilder) withQualityPrior(ctx context.Context, pool []ScoredItem, minPool int) []ScoredItem {
+// minPool candidates, with the ratings and media types of details. A
+// candidate without details has no rating.
+func withQualityPrior(pool []ScoredItem, details map[string]CandidateDetails, minPool int) []ScoredItem {
 	if len(pool) == 0 || len(pool) < minPool {
 		return pool
 	}
-	ids := scoredItemIDs(pool)
-	ratings, err := b.store.GetItemQualityRatings(ctx, ids)
-	if err != nil {
-		slog.WarnContext(ctx, "quality ratings failed; candidates keep their similarity scores", "component", "recommendations", "error", err)
-		return pool
+	ratings := make(map[string]float64, len(pool))
+	for _, c := range pool {
+		if d, ok := details[c.MediaItemID]; ok && d.Quality != nil {
+			ratings[c.MediaItemID] = *d.Quality
+		}
 	}
-	mediaTypes, err := b.store.GetItemMediaTypes(ctx, ids)
-	if err != nil {
-		slog.WarnContext(ctx, "candidate media types failed; candidates keep their similarity scores", "component", "recommendations", "error", err)
-		return pool
-	}
-	return applyQualityPrior(pool, ratings, mediaTypes)
+	return applyQualityPrior(pool, ratings, candidateMediaTypes(details))
 }

@@ -9,11 +9,14 @@ import (
 	"math/rand/v2"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"text/tabwriter"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
 	"golang.org/x/sync/errgroup"
 )
@@ -30,19 +33,19 @@ import (
 // then builds each persona's rows, which the evaluation reads from the cache
 // in their built order, before the daily rotation a read applies.
 //
-// The catalog adds titles, none of them a target, that put each case a
-// ranking fix targets into the numbers:
+// The catalog adds titles, none of them a target, that each test a ranking
+// rule the numbers should keep honest:
 //
 //   - multi-genre decoys, tagged with four genres and with vectors between
-//     them, which the genre-first sort of the cluster rows' candidate query
-//     ranks above nearer titles of fewer genres (case 1);
-//   - unembedded titles, which MMR ranks by relevance alone (case 2): some
-//     co-watched with the focused persona's latest watch, which score 0.3 ×
-//     Jaccard in Because You Watched and stay below its window here, and some
-//     two of its three peers rate 5 stars, which Similar Users serves;
+//     them, which a cluster row must not rank above nearer titles of fewer
+//     genres (case 1);
+//   - unembedded titles, which MMR must neither lift above embedded titles
+//     nor bury (case 2): some co-watched with the focused persona's latest
+//     watch, for Because You Watched, and some two of its three peers rate 5
+//     stars, which Similar Users serves;
 //   - obscure titles (no logo or keywords) rated 8.8 to 9.4 near four
-//     interests, which the quality prior lifts with no notability gate (case
-//     3);
+//     interests, which the quality prior must not lift over notable titles
+//     (case 3);
 //   - every Horror and Documentary title stored at a length from 0.4 to 3,
 //     so the scaled persona's k-means sees vectors that are not unit length
 //     (case 4).
@@ -592,6 +595,37 @@ func newEvalFixture(t *testing.T) *relevanceFixture {
 	return f
 }
 
+// seedEval writes the evaluation's catalog, its personas' signals and the
+// co-watch pairs, and returns the catalog and the personas.
+func seedEval(t *testing.T, f *relevanceFixture) (*evalCatalog, []*evalPersona) {
+	t.Helper()
+	c := newEvalCatalog(f.prefix)
+	c.seed(t, f)
+	personas := make([]*evalPersona, len(evalPersonaSpecs))
+	for i, spec := range evalPersonaSpecs {
+		personas[i] = newEvalPersona(t, f, c, spec)
+	}
+	seedEvalCowatch(t, f, c, personas[0].latest)
+	return c, personas
+}
+
+// rebuildEvalTasteProfiles builds every persona's taste profile, so each
+// persona's Similar Users row finds its peers. Peers are not measured: they
+// share the focused persona's interest.
+func rebuildEvalTasteProfiles(t *testing.T, f *relevanceFixture, personas []*evalPersona) {
+	t.Helper()
+	ctx := t.Context()
+	started, err := f.repo.Now(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range personas {
+		if _, err := f.engine.rebuildTasteProfile(ctx, p.userID, p.profileID, started); err != nil {
+			t.Fatalf("%s: taste profile: %v", p.spec.name, err)
+		}
+	}
+}
+
 // TestRecommendationHoldoutEvalPostgres runs the holdout evaluation above. It
 // fails when a held-out title reaches the engine's input, a row holds a title
 // its persona engaged with before T or serves one twice, a measured persona
@@ -602,27 +636,9 @@ func TestRecommendationHoldoutEvalPostgres(t *testing.T) {
 	f := newEvalFixture(t)
 	ctx := t.Context()
 	start := time.Now()
-	c := newEvalCatalog(f.prefix)
-	c.seed(t, f)
-	personas := make([]*evalPersona, len(evalPersonaSpecs))
-	for i, spec := range evalPersonaSpecs {
-		personas[i] = newEvalPersona(t, f, c, spec)
-	}
-	seedEvalCowatch(t, f, c, personas[0].latest)
+	c, personas := seedEval(t, f)
 	seeded := time.Since(start)
-
-	// Every taste profile first, so each persona's Similar Users row finds
-	// its peers. Peers are not measured: they share the focused persona's
-	// interest.
-	started, err := f.repo.Now(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, p := range personas {
-		if _, err := f.engine.rebuildTasteProfile(ctx, p.userID, p.profileID, started); err != nil {
-			t.Fatalf("%s: taste profile: %v", p.spec.name, err)
-		}
-	}
+	rebuildEvalTasteProfiles(t, f, personas)
 	var results []evalResult
 	for _, p := range personas {
 		if p.spec.peer > 0 {
@@ -646,5 +662,95 @@ func TestRecommendationHoldoutEvalPostgres(t *testing.T) {
 	}
 	if main := results[0].rows["main"]; len(main) != 1 || main[0].recall < evalFocusedMainRecallFloor {
 		t.Errorf("%s: main row %+v, want Recall@20 of at least %.2f", results[0].name, main, evalFocusedMainRecallFloor)
+	}
+}
+
+// statementLog records the statements a pool sends while it is on, each
+// statement of a batch on its own, leaving out those that set up a new
+// connection: how many connections a run opens varies.
+type statementLog struct {
+	on         atomic.Bool
+	connecting sync.Map // *pgx.Conn in AfterConnect
+	mu         sync.Mutex
+	statements []string
+}
+
+// install makes l cfg's tracer.
+func (l *statementLog) install(cfg *pgxpool.Config) {
+	cfg.ConnConfig.Tracer = l
+	setup := cfg.AfterConnect
+	cfg.AfterConnect = func(ctx context.Context, conn *pgx.Conn) error {
+		if setup == nil {
+			return nil
+		}
+		l.connecting.Store(conn, true)
+		defer l.connecting.Delete(conn)
+		return setup(ctx, conn)
+	}
+}
+
+func (l *statementLog) record(conn *pgx.Conn, sql string) {
+	if _, ok := l.connecting.Load(conn); ok || !l.on.Load() {
+		return
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.statements = append(l.statements, strings.Join(strings.Fields(sql), " "))
+}
+
+func (l *statementLog) TraceQueryStart(ctx context.Context, conn *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
+	l.record(conn, data.SQL)
+	return ctx
+}
+
+func (*statementLog) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func (*statementLog) TraceBatchStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceBatchStartData) context.Context {
+	return ctx
+}
+
+func (l *statementLog) TraceBatchQuery(_ context.Context, conn *pgx.Conn, data pgx.TraceBatchQueryData) {
+	l.record(conn, data.SQL)
+}
+
+func (*statementLog) TraceBatchEnd(context.Context, *pgx.Conn, pgx.TraceBatchEndData) {}
+
+// evalFocusedRefreshStatements is how many statements a refresh of the
+// evaluation's focused persona sends. The candidate scans of the main row's
+// anchors, the cluster rows, the type supplements and Because You Watched
+// return the details ranking reads (embedding, media type, added date and
+// quality rating); reading them per pool instead cost 31 statements more. A
+// deliberate change must update this budget and its comment together.
+const evalFocusedRefreshStatements = 114
+
+// A profile refresh sends evalFocusedRefreshStatements statements for the
+// evaluation's focused persona. Its rows are the evaluation's, the same on
+// every run, so the count is too. It takes a few seconds: it seeds the
+// evaluation's catalog.
+func TestProfileRefreshStatementBudgetPostgres(t *testing.T) {
+	f := newEvalFixture(t)
+	ctx := t.Context()
+	_, personas := seedEval(t, f)
+	rebuildEvalTasteProfiles(t, f, personas)
+
+	cfg := f.pool.Config()
+	log := &statementLog{}
+	log.install(cfg)
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	counted := relevanceFixtureOn(pool, f.prefix)
+
+	focused := personas[0]
+	log.on.Store(true)
+	err = counted.worker.refreshProfile(ctx, nil, focused.userID, focused.profileID)
+	log.on.Store(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := len(log.statements); got != evalFocusedRefreshStatements {
+		t.Fatalf("refresh sent %d statements, want %d:\n%s", got, evalFocusedRefreshStatements, strings.Join(log.statements, "\n"))
 	}
 }

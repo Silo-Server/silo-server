@@ -64,6 +64,10 @@ const (
 	maxCastPerCard      = 4
 	discoverMinPoolSize = 120
 	discoverMaxPoolSize = 500
+	// discoverGenreOverfetch and discoverMaxGenreFetch widen the taste read
+	// when genres are selected; see discoverTasteFetchSize.
+	discoverGenreOverfetch = 5
+	discoverMaxGenreFetch  = 2000
 )
 
 // discoverCardsRepo is the part of *recommendations.Repo discover-mode
@@ -403,7 +407,7 @@ func (h *RecommendationsHandler) buildDiscoverCards(ctx context.Context, userID 
 			embedding,
 			mapKeys(excludeIDs),
 			genres,
-			poolSize,
+			discoverTasteFetchSize(poolSize, len(genres)),
 			filter,
 		)
 		if err != nil {
@@ -436,6 +440,9 @@ func (h *RecommendationsHandler) buildDiscoverCards(ctx context.Context, userID 
 
 	candidates = h.filterRecommendations(ctx, userID, profileID, candidates)
 	candidates = recommendations.FilterAndRankGenreMatches(candidates, genres, genreMap)
+	if len(candidates) > poolSize {
+		candidates = candidates[:poolSize]
+	}
 
 	return recommendationCardItems(candidates, excludeIDs), isCold, nil
 }
@@ -582,6 +589,20 @@ func buildCastSlice(castMap map[string][]models.ItemPerson, lookupID string) []s
 		}
 	}
 	return cast
+}
+
+// discoverTasteFetchSize is how many taste candidates the cards read for a
+// pool of poolSize. The taste query returns the nearest titles sharing a
+// selected genre in distance order, so with genres selected the cards read
+// discoverGenreOverfetch times the pool, up to discoverMaxGenreFetch, and
+// FilterAndRankGenreMatches then keeps the pool's worth that match the most
+// selected genres: a title matching every selected genre a little further
+// out still beats a nearer one matching only one.
+func discoverTasteFetchSize(poolSize int, genreCount int) int {
+	if genreCount == 0 {
+		return poolSize
+	}
+	return max(poolSize, min(poolSize*discoverGenreOverfetch, discoverMaxGenreFetch))
 }
 
 func discoverCandidatePoolSize(limit int, genreCount int) int {
