@@ -50,11 +50,13 @@ export default function CardWatchStatus({ userState }: CardWatchStatusProps) {
   return (
     <div className="@container/card-watch-status pointer-events-none absolute inset-0 z-10">
       {played ? (
+        // A black check: white on this green is 2.5:1, below the 3:1 a
+        // graphic needs; black is 8.5:1, the side readableTextOn picks.
         <span
           role="img"
           aria-label={t("web.common.overlays.watched")}
           data-watched-indicator="poster"
-          className="absolute grid place-items-center rounded-full border border-white/35 bg-emerald-500 text-white shadow-sm"
+          className="absolute grid place-items-center rounded-full border border-white/35 bg-emerald-500 text-black shadow-sm"
           style={style}
         >
           <Check aria-hidden="true" strokeWidth={3.25} style={{ width: "62%", height: "62%" }} />

@@ -2758,3 +2758,58 @@ func TestPruneStopFencesRunsAtMostOncePerInterval(t *testing.T) {
 		t.Fatal("sweep after the interval left an expired fence")
 	}
 }
+
+// The core asks the node whether a transcode's client is waiting on the
+// encoder before it learns a bandwidth limit from a stall. Only the node sees
+// that, and a session it does not run is not an answer.
+func TestOutputBoundRouteAnswersForTheNodesSessions(t *testing.T) {
+	server := newLoopingFFmpegServer(t)
+	// Started and still running with nothing produced: the client is waiting
+	// on the encoder, as it is behind a burn-in slower than real time.
+	startRegisteredSession(t, server, TranscodeStartRequest{
+		SessionID: "waiting", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264",
+		TargetCodecAudio: "aac", SegmentDuration: 2,
+	})
+	server.mu.Lock()
+	server.sessions["finished"] = playback.NewTranscodeSessionForTest(t.TempDir())
+	server.progressiveRemuxes["remux"] = progressiveRemuxRequest{}
+	server.mu.Unlock()
+	handler := server.Handler()
+
+	for _, tc := range []struct {
+		session    string
+		wantStatus int
+		wantBound  bool
+	}{
+		{session: "waiting", wantStatus: http.StatusOK, wantBound: true},
+		{session: "finished", wantStatus: http.StatusOK, wantBound: false},
+		{session: "remux", wantStatus: http.StatusOK, wantBound: false},
+		{session: "unknown", wantStatus: http.StatusNotFound},
+	} {
+		t.Run(tc.session, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, signed(t, httptest.NewRequest(http.MethodGet, "/transcode/"+tc.session+"/output-bound", nil)))
+			if rr.Code != tc.wantStatus {
+				t.Fatalf("status %d body %q, want %d", rr.Code, rr.Body.String(), tc.wantStatus)
+			}
+			if tc.wantStatus != http.StatusOK {
+				return
+			}
+			var body struct {
+				OutputBound *bool `json:"output_bound"`
+			}
+			if err := json.Unmarshal(rr.Body.Bytes(), &body); err != nil || body.OutputBound == nil {
+				t.Fatalf("body %q: %v", rr.Body.String(), err)
+			}
+			if *body.OutputBound != tc.wantBound {
+				t.Fatalf("output_bound = %v, want %v", *body.OutputBound, tc.wantBound)
+			}
+		})
+	}
+
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, httptest.NewRequest(http.MethodGet, "/transcode/waiting/output-bound", nil))
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("unsigned read: status %d, want 401", rr.Code)
+	}
+}

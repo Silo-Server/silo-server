@@ -1,16 +1,20 @@
-# Apple Push Display Token (client integration guide)
+# Push notifications API
 
-The iOS Notification Service extension turns a generic APNs alert into the
-real notification text by fetching compact display metadata from the server.
-The extension runs in its own process and cannot refresh the app's short-lived
-access token, so the server issues it a separate long-lived credential at
-push registration.
+These operations register devices for push and serve what a push needs to render:
+Apple (APNs) installations, Android (FCM) installations, and browser web push
+subscriptions. The [notification inbox API](notifications-api.md) covers the
+notifications themselves, preferences, destinations and administrator test sends.
 
 > **API lifecycle:** the operations below are the stable `/api/v2` native contract,
 > which locks with Silo 1.0. See [the native API contract](architecture/api-contract.md).
 
-Android is unaffected: it fetches `GET /api/v2/notifications/{id}` through the app's
-normal auth path, which refreshes on `401`.
+The iOS Notification Service extension turns a generic APNs alert into the
+real notification text by fetching compact display metadata from the server.
+The extension runs in its own process and cannot refresh the app's short-lived
+access token, so the server issues it a separate long-lived credential, the
+display token, at push registration. Android fetches `GET /api/v2/notifications/{id}`
+through the app's normal auth path, which refreshes on `401`, and needs no display
+token.
 
 ## Discovery
 
@@ -33,7 +37,13 @@ GET /api/v2/notifications/capabilities
 display token. The field is optional and absent means false. `android_push` never
 carries it.
 
-## Registration
+`GET /api/v2/devices/push/apple/capabilities` reports `registration_available`
+(local ordered registration storage and current-login validation are configured;
+it does not assert provider delivery, or that every API node runs the ordered
+writer) and `installation_reset_available` (see
+[Reset after a lost installation key](#reset-after-a-lost-installation-key)).
+
+## Apple registration
 
 ```
 POST /api/v2/devices/push/apple
@@ -82,13 +92,63 @@ the display credential:
 - Both fields are omitted when the server cannot mint a token. Clients must
   fall back to the access token in that case.
 - `registerApplePushDevice` requires a current login session, so an API key
-  (`sa_` prefix) gets `403 permission_denied`. The frozen v1 route registers an
-  API-key caller without a display token.
+  (`sa_` prefix) gets `403 permission_denied`.
 
 Store the token where the extension can read it (the Apple client uses the
 shared Keychain access group) and clear it on sign-out, server removal, or
 profile change. The server revokes it implicitly when the login session is
 revoked or expires.
+
+### Apple registration authority, ordering and replay
+
+Registration requires a current expiring access login session, a verified
+selected profile (including its PIN proof where required), and the demo write
+guard. API keys, display tokens and sessionless access are not registration
+authority. The server checks the current session, account and profile policy
+before registering and again after any database lock wait.
+
+`apns_environment` is `production` or `sandbox`, `apns_topic` is
+`org.siloserver.silo`, and `push_mode` is `off`, `in_app_only` or `private_push`.
+`X-Push-Installation-Key` and `X-Push-Generation` follow the Android rules:
+persist both before sending, keep the installation key across account and profile
+switches, and advance the generation only for a new registration intent. After an
+uncertain response, replay the exact original request; do not read, rebase or
+advance its generation automatically. Neither value belongs in logs or URLs.
+
+The installation record holds the positive generation, a digest of the intent
+(account, profile, token, environment, topic and push mode) and the installation
+key hash, committed atomically with the APNs device row. A first registration
+cannot take over an existing registration that belongs to another account. Later
+writes need the original installation key. A stale generation, or a changed
+intent at the same generation, returns `409`; a key that does not match returns
+`403`; malformed fields or generation return `422`. None of them replaces the
+registration.
+
+An exact replay reads the current row. It keeps a provider-disabled row disabled
+and reports a deleted row as `removed: true`, without restoring it or advancing
+the generation. A newer generation creates a fresh device row identity, and
+cascades retire the old row's queued delivery attempts, so a late provider result
+addressed to the old row cannot disable its replacement. A request already sent
+to a provider cannot be recalled. Profile deletion deletes the device rows but
+keeps the installation's ordering record.
+
+A current enabled registration's receipt may carry `display_token` and
+`display_token_expires_at`; an unchanged accepted intent renews them without
+advancing the generation or rewriting the registration. The server issues the
+token under the installation and device locks, so a newer registration cannot
+overtake it, and returns none when the transaction fails. Disabled or removed
+receipts omit both fields. A signing failure still returns the accepted
+registration without them, and the extension falls back to the access token.
+Responses are `no-store`.
+
+The display token keeps its account, login session and profile scope and
+lifetime. It is not bound to the device, and a replacement registration does not
+revoke tokens issued earlier: the registration is current when the token is
+issued, not for its whole lifetime. The client checks that the account and
+profile it captured are still current before storing a receipt, clears a stored
+display token when the receipt is disabled or removed, and keeps the original
+request for an explicit renewal or retry. The web client does not register Apple
+devices.
 
 ## Delivery follows the login
 
@@ -275,8 +335,13 @@ Authentication rules for this route only:
 | Refresh token or API key | `401` / normal API key handling; neither is a display credential. |
 
 `404` is returned when the delivery does not belong to the
-authenticated profile. The route is rate-limited like other authenticated
-routes.
+authenticated profile. Responses use `Cache-Control: no-store`. Delivery IDs are
+opaque strings: the store mints ULIDs, so clients must not validate them as UUIDs.
+Every other operation rejects a display token. A display token spends rate-limit
+budget once, after its signature checks out and before its login session is looked
+up; a credential that does not validate is refused without spending any. The read
+neither marks the notification read nor sends a push. Jellyfin compatibility has
+no display-token flow.
 
 An administrator test push names the profile's newest notification, so this
 fetch returns that notification's display data. A test sent to a profile with
@@ -384,6 +449,12 @@ installation's stored account/profile:
 
 The server keeps the key hash and owner. To receive pushes again, register
 through `registerPushDevice` with the same key and a higher generation.
+
+## Web push
+
+Browser subscriptions are profile-scoped registrations of a browser's push
+endpoint. The Android installation key and generation and the Apple display token
+do not apply to them.
 
 ### Remove a browser subscription by row ID
 

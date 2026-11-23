@@ -3,6 +3,8 @@ package metadata
 import (
 	"context"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/bookid"
 )
 
 // SearchMatchAdmissionStatus explains why a provider candidate was or was not
@@ -192,8 +194,10 @@ func sharesProviderID(existing, candidate map[string]string) bool {
 		if provider == "" || id == "" {
 			continue
 		}
+		id = bookid.CanonicalProviderID(provider, id)
 		for have, haveID := range existing {
-			if strings.ToLower(strings.TrimSpace(have)) == provider && strings.TrimSpace(haveID) == id {
+			if strings.ToLower(strings.TrimSpace(have)) == provider &&
+				bookid.CanonicalProviderID(provider, strings.TrimSpace(haveID)) == id {
 				return true
 			}
 		}
@@ -211,7 +215,7 @@ func AdmitProviderIDs(ctx context.Context, req ProviderIDAdmissionRequest) (Prov
 	existing := make(map[string]string, len(req.ExistingProviderIDs))
 	for provider, providerID := range req.ExistingProviderIDs {
 		provider = strings.ToLower(strings.TrimSpace(provider))
-		providerID = strings.TrimSpace(providerID)
+		providerID = bookid.CanonicalProviderID(provider, strings.TrimSpace(providerID))
 		if provider != "" && providerID != "" {
 			existing[provider] = providerID
 		}
@@ -219,7 +223,7 @@ func AdmitProviderIDs(ctx context.Context, req ProviderIDAdmissionRequest) (Prov
 
 	for provider, providerID := range req.CandidateProviderIDs {
 		provider = strings.ToLower(strings.TrimSpace(provider))
-		providerID = strings.TrimSpace(providerID)
+		providerID = bookid.CanonicalProviderID(provider, strings.TrimSpace(providerID))
 		if provider == "" || providerID == "" {
 			continue
 		}

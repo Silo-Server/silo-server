@@ -1,4 +1,5 @@
 import type { Library } from "@/api/types";
+import { libraryTypeLabel } from "@/components/admin/libraries/libraryTypes";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -89,7 +90,9 @@ export function LibraryAccessSelector({
                         {t("web.profiles.libraryAccess.disabled")}
                       </Badge>
                     )}
-                    <span className="text-muted-foreground text-xs capitalize">{library.type}</span>
+                    <span className="text-muted-foreground text-xs">
+                      {libraryTypeLabel(library.type)}
+                    </span>
                   </div>
                   <Switch
                     checked={checked}

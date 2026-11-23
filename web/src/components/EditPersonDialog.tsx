@@ -126,6 +126,7 @@ export default function EditPersonDialog({ person, open, onOpenChange }: EditPer
           <div className="space-y-1.5">
             <Label htmlFor="person-homepage">{t("web.item.editPerson.homepage")}</Label>
             <Input
+              dir="ltr"
               id="person-homepage"
               value={form.homepage}
               onChange={(event) => setField("homepage", event.target.value)}

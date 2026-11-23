@@ -1,6 +1,6 @@
 # Notification inbox API
 
-The v2 inbox uses the existing durable delivery rows and preference store. The
+The inbox uses the existing durable delivery rows and preference store. The
 inbox routes in the table below require an authenticated, verified profile and
 retain the demo write guard. Other routes below `/api/v2/notifications` set their
 own authority: the tokenized email links, the Discord link callback and Android
@@ -135,8 +135,8 @@ series, or a series the viewer may not see, is 404.
 
 `DELETE /series/{series_id}/mute` (`unmuteNotificationSeries`) lifts the mute.
 The series notifies again while Next Up is active for it. Fanout reads the mute when it
-evaluates a new episode, after the release settle delay (30 seconds by
-default): an episode it evaluated while the series was muted is not announced
+evaluates a new episode, after the release settle delay (a fixed 30
+seconds): an episode it evaluated while the series was muted is not announced
 later, and one still waiting for fanout when the profile unmutes is announced.
 The same holds the other way: a mute made just after an episode arrives can
 still stop its notification. Unmuting a series that is not muted succeeds. Unmute runs no access check, so a
@@ -197,7 +197,7 @@ scope.
 ## Preference writes
 
 `enabled` (the master toggle) and `notify_next_up` are optional booleans.
-Explicit false is preserved; v2 rejects null and any other field, including
+Explicit false is preserved; the server rejects null and any other field, including
 the retired `notify_favorites`, `notify_watchlist` and
 `notify_continue_watching`, with a 422 `validation_failed` problem. Partial
 fields apply in one database statement, preventing independent concurrent
@@ -208,33 +208,14 @@ The web captures account/profile authority for requests and mutations, validates
 pagination, and surfaces initial and partial failures. It does not automatically
 retry mutations or optimistically mark every cached delivery read.
 
-### API v2 Apple push display
+### Apple push display
 
 `GET /api/v2/notifications/push/apple/display/{delivery_id}`
-(`getNotificationApplePushDisplay`) returns compact display metadata from the
-delivery row and its renderer. The response fields are
-`delivery_id` (string), `title`, optional `body` and `thread_id`, `category`, and
-`url`. Responses use `Cache-Control: no-store`; missing or other-profile
-notifications return a 404 problem. Delivery IDs are opaque strings: the store
-mints ULIDs, so they are not UUIDs and must not be validated as such.
+(`getNotificationApplePushDisplay`) returns the compact display metadata the Apple
+notification extension renders. Its credentials, including the display token, and
+its responses are in the [push reference](notifications-push-api.md#display-fetch).
 
-The route accepts ordinary bearer/API-key authentication with `X-Profile-Id`,
-or the existing Apple display token in the Authorization header. A display
-token binds its own profile, ignores a supplied profile header, and requires a
-valid login session and a still-owned profile. It is rejected by other API v2
-operations. Query-string display credentials are not accepted. A display
-token spends rate-limit budget once, after its signature checks out and before
-its login session is looked up; a credential that
-does not validate is refused without spending any. This read neither marks a notification
-read nor sends a push. Apple registration and display-token issuance use
-`registerApplePushDevice`; see
-[Apple registration and display renewal](#apple-registration-and-display-renewal).
-
-The Apple notification extension is the consumer; Android does not call this
-Apple display endpoint. Jellyfin compatibility has no equivalent display-token
-flow and needs no route change.
-
-### API v2 administrator test push
+### Administrator test push
 
 `POST /api/v2/admin/notifications/push/apple/test`
 (`testAdminApplePushNotification`) and
@@ -273,10 +254,9 @@ automatically because another request creates another test attempt.
 
 Invalid input returns a 422 problem, a missing target a 404, and unavailable
 push delivery a 503. Demo restrictions and no-store responses apply. No current
-web, Apple, or Android caller invokes these administrator test routes; this port
-adds no test-send UI. Jellyfin compatibility has no corresponding operation.
+web, Apple, or Android caller invokes these administrator test routes. Jellyfin compatibility has no corresponding operation.
 
-### API v2 relay administration
+### Relay administration
 
 `POST /api/v2/admin/notifications/push/relay/register`
 (`registerAdminNotificationRelay`) and
@@ -296,7 +276,7 @@ a delayed clear can remove a newer credential. The existing web controls
 capture administrator authority, permit one in-flight command, and disable
 automatic authentication replay. A changed authority discards the response.
 An administrator must explicitly decide whether to repeat an uncertain command.
-This migration does not introduce generation guards or promise safe replay.
+There are no generation guards, and replay is not safe.
 
 Mobile push delivery (`notifications.apple_push_delivery_enabled` and
 `notifications.android_push_delivery_enabled`) defaults to on for new installs.
@@ -341,17 +321,19 @@ until an administrator turns delivery on. Native clients see the effective
 state through `GET /api/v2/notifications/capabilities` and need no change.
 
 Relay errors are problem documents, with `Retry-After` retained when supplied.
-Validation failures are 422 and relay upstream failures are the shared 500
-`internal_error`. Native clients and Jellyfin compatibility do not manage relay
+A `relay_url` that is not a well-formed URI is a 422 (`validation_failed`);
+a well-formed URL the server rejects as a relay origin is a 400
+(`malformed_request`); a deployment the relay rejects is a 422; and relay
+upstream failures are the shared 500 `internal_error`. Native clients and Jellyfin compatibility do not manage relay
 credentials and need no consumer change.
 
-### API v2 email and Discord preferences
+### Email and Discord preferences
 
 `GET` and `PUT /api/v2/notifications/email-preferences` read and set the acting
 profile's email mode. The response retains `mode`, `custom_email`,
 `pending_email`, and `can_edit_address`. Each profile uses its own verified
 address; there is no login-account email fallback. Address verification requests
-and removal are separate v2 operations; see
+and removal are separate operations; see
 [Queued email verification caller](#queued-email-verification-caller) and
 [Clear the custom email address](#clear-the-custom-email-address).
 
@@ -381,13 +363,13 @@ Both mode writes accept only `mode`: `off`, `per_episode`, `daily_digest`, or
 `per_episode_and_digest`. Existing allowance, verified-address, and linked-account
 checks still apply; rejected modes return a 422 problem. Writes call the existing
 setter once and then reread state. They are `non_retryable`: these setters also
-reset delivery backoff and can advance the delivery watermark. The v2 ports do
-not change those effects or present repeated writes as harmless. Web queries use
+reset delivery backoff and can advance the delivery watermark, so repeated writes
+are not harmless. Web queries use
 captured-authority cache keys and mode writes disable automatic retries and
 401 authentication replay. No current native email/Discord preference caller was
 found; Jellyfin compatibility has no equivalent preference surface.
 
-### API v2 destination lists
+### Destination lists
 
 `GET /api/v2/notifications/web-push/subscriptions`,
 `GET /api/v2/notifications/webhooks`, and
@@ -402,18 +384,18 @@ profile-filtered and administrator paging queries.
 Web-push metadata retains the endpoint needed to identify the current browser,
 but excludes subscription keys. Webhook and server-channel metadata exposes only
 `url_host`, never destination URL ciphertext or stored signing secrets. Delivery
-health fields remain readable, with nullable timestamps using the v2 UTC instant
+health fields remain readable, with nullable timestamps using the UTC instant
 format. Reads do not reset backoff, mutate destinations, or dispatch a send.
 
 Existing web lists drain bounded pages under captured authority and use scoped
 cache keys. Missing/repeated continuations and authority changes fail explicitly
 without returning a partial list. The current web display limit is 100 pages of
 100 records; exceeding it is an explicit error. Destination creation, updates,
-deletes, tests, and secret rotation are separate v2 operations, described below.
+deletes, tests, and secret rotation are separate operations, described below.
 No native destination-management caller exists;
 Jellyfin compatibility has no equivalent list surface.
 
-### API v2 administrator Discord credential test
+### Administrator Discord credential test
 
 `POST /api/v2/admin/notifications/discord/test`
 (`testAdminDiscordNotification`) verifies the stored bot token by fetching the
@@ -428,11 +410,11 @@ The operation is `non_retryable`. The existing administrator test button capture
 authority, prevents overlapping tests, disables authentication replay, and refuses
 stale results after an account/profile switch. Apple and Android have no caller;
 Jellyfin compatibility has no corresponding operation. Discord link initiation,
-the OAuth callback and unlinking are separate v2 operations; see
-[API v2 Discord account-link consent and callback](#api-v2-discord-account-link-consent-and-callback)
+the OAuth callback and unlinking are separate operations; see
+[Discord account-link consent and callback](#discord-account-link-consent-and-callback)
 and [Unlink Discord](#unlink-discord).
 
-### API v2 webhook and server-channel test delivery
+### Webhook and server-channel test delivery
 
 `POST /api/v2/notifications/webhooks/{id}/test` (`testNotificationWebhook`)
 requires the acting profile; `POST /api/v2/admin/notifications/server-channels/{id}/test`
@@ -451,11 +433,11 @@ services return 503. Responses are no-store. Both operations are `non_retryable`
 
 Existing web cards capture authority, prevent overlapping test calls, disable
 authentication replay, and suppress stale results. Configuration changes and
-secret rotation are separate v2 operations, described below.
+secret rotation are separate operations, described below.
 Apple and Android have no destination-test callers. Jellyfin compatibility has
 no corresponding operation.
 
-### API v2 tokenized notification email links
+### Tokenized notification email links
 
 Notification verification emails now link to
 `GET /api/v2/notifications/email/verify?token=...`
@@ -469,27 +451,34 @@ They require no Silo login or profile header and accept mail-client HTML
 negotiation and one-click form bodies. Verification consumes the single-use
 proof and promotes the pending address; success is 200, expired/consumed/missing
 proof is 400, an address ownership conflict is 409, and storage errors are 500.
-Unsubscribe retains the existing profile capability token and switches email
-mode off: 200 on success, 400 for invalid/missing proof, and 500 on storage error.
-An unavailable service returns a 503 problem. API v2 adds no-store and
-no-referrer headers; pages never reflect the proof or internal error text.
+Unsubscribe retains the existing profile capability token. GET renders a 200
+confirmation page without reading or changing email preferences, or 400 when
+the token is missing; a nonempty token is checked only on POST. The page's
+Unsubscribe button posts back to the current URL, keeping the token query.
+Both that POST and the RFC 8058 one-click POST switch email mode off: 200 on
+success, 400 for invalid/missing proof, and 500 on storage error. Neither needs
+a login or an Origin header; no-referrer form posts may send `Origin: null`.
+HEAD and other methods return 405 without changing preferences. An unavailable
+service returns a 503 problem. Responses carry no-store and no-referrer
+headers; pages never reflect the proof or internal error text. The GET 500
+response stays documented for contract compatibility.
 
 The one-click POST is `non_retryable`: the existing capability token can turn
-email off again after the profile later re-enables it. This migration adds no
-generation guard or delivery retry. Address requests and clearing are separate
-v2 operations. Links in mail sent before the `/api/v1` retirement point at
+email off again after the profile later re-enables it. There is no generation
+guard or delivery retry. Address requests and clearing are separate
+operations. Links in mail sent before the `/api/v1` retirement point at
 retired routes and answer `410`. Mail clients follow the emitted URLs;
 Apple and Android have no in-app callback consumer, and Jellyfin compatibility
 has no corresponding operation.
 
-### API v2 Discord account-link consent and callback
+### Discord account-link consent and callback
 
 `POST /api/v2/notifications/discord/link/init` (`beginNotificationDiscordLink`)
 starts one consent flow for the authenticated login account. A supplied profile
 still passes viewer/PIN checks, and initiation requires the same household-manager
 authority as Discord mode changes. Demo restrictions apply. The response contains `url`, using Discord's
 consent endpoint, the stored client ID, `identify` scope, a random one-time state,
-and the exact v2 callback URI. This operation is `non_retryable`; web captures
+and the exact callback URI. This operation is `non_retryable`; web captures
 authority, prevents overlapping initiation, disables authentication replay, and
 checks authority again before navigating.
 
@@ -501,15 +490,14 @@ consumption, account lookup, and code exchange. The exchange uses the same
 `<public URL>/api/v2/notifications/discord/link/callback` redirect URI as consent.
 The result is HTTP 302 with Location pointing to notification settings and the
 existing success/error query fields, plus the usual HTML redirect body. It never
-invents a JSON 200 response. API v2 applies no-store/no-referrer headers.
+invents a JSON 200 response. Responses carry no-store/no-referrer headers.
 
-Register the exact v2 redirect URI in the Discord application's OAuth settings.
-This port preserves the existing link-state and account-link write semantics. It
-adds no generation guard for overlapping consent flows or unlinking; see
+Register the exact redirect URI in the Discord application's OAuth settings.
+There is no generation guard for overlapping consent flows or unlinking; see
 [Unlink Discord](#unlink-discord). Apple and Android have no notification
 Discord-link callers, and Jellyfin compatibility has no equivalent operation.
 
-### API v2 destination creation
+### Destination creation
 
 `POST /api/v2/notifications/webhooks` creates a webhook for the active profile.
 `POST /api/v2/admin/notifications/server-channels` creates a server channel for
@@ -559,9 +547,9 @@ The operation is **non-retryable**. A delayed repeat can clear an address reques
 
 ### Delete a personal webhook
 
-`DELETE /api/v2/notifications/webhooks/{id}` (`deleteNotificationWebhook`) requires the original row's strong validator in `If-Match`. The bounded webhook list supplies that quoted validator in each item's `etag`. Authenticated profile authority and the demo guard apply. Missing/foreign resources return `404` before precondition evaluation; an existing resource without `If-Match` returns `428`, a stale validator returns `412` with the current `ETag`, and an exact match returns bodyless `204`. Standard conditional-header grammar applies. The UI never supplies a wildcard.
+`DELETE /api/v2/notifications/webhooks/{id}` (`deleteNotificationWebhook`) requires the original row's strong validator in `If-Match`. The bounded webhook list supplies that quoted validator in each item's `etag`. Authenticated profile authority and the demo guard apply. Missing/foreign resources return `404` before precondition evaluation; an existing resource without `If-Match` returns `428`, a stale validator returns `412` with the current `ETag`, and an exact match returns bodyless `204`. Standard conditional-header grammar applies, so `If-Match: *` also passes for an existing row; the UI never sends it.
 
-A database sequence and insert/update trigger allocate a fresh revision for every row change, including configuration and provider outcome writers. Revision allocation is not based on timestamps and never reuses a deleted identity's validator. Deletion locks the profile-owned row, evaluates its current validator, and deletes within that same transaction; a concurrent editor that commits first is preserved by a stale-delete refusal. Stored delivery attempts cascade only on a successful deletion. Deploy the revision migration before code that reads the new column. This does not change provider delivery or recall an already-dispatched request.
+A database sequence and insert/update trigger allocate a fresh revision for every row change, including configuration and provider outcome writers. Revision allocation is not based on timestamps and never reuses a deleted identity's validator. Deletion locks the profile-owned row, evaluates its current validator, and deletes within that same transaction; a concurrent editor that commits first is preserved by a stale-delete refusal. Stored delivery attempts cascade only on a successful deletion. This does not change provider delivery or recall an already-dispatched request.
 
 The settings confirmation captures the list's original ID and validator when opened, and passes that immutable intent plus captured authority through the mutation's variables. It sends once without authentication replay. A stale/missing/failed response surfaces without a read, rebase, or automatic retry. The user must explicitly reload and reconsider the current row; returned conflict validators are never adopted automatically. Success invalidates only the captured authority's list. Administrator channel deletion remains a separate operation.
 
@@ -575,13 +563,13 @@ Deletion removes the channel and its row-local watermark, last-attempt and outco
 
 `POST /api/v2/notifications/webhooks/{id}/rotate-secret` (`rotateNotificationWebhookSecret`) requires acting-profile authority and the demo guard. Only generic webhooks have signing secrets; a Discord webhook returns `422`, missing/foreign IDs `404`, and unavailable service `503`. A successful `200` returns `signing_secret` once with `Cache-Control: no-store`. The secret is encrypted at rest with the webhook's existing associated-data binding.
 
-The v2 storage path updates only the encrypted secret and timestamp; it does not write a stale configuration snapshot or reset provider failure/disabled state. The revision trigger still advances the row validator. Rotation immediately replaces the signing secret, with no dual-acceptance window or recoverable receipt. Later concurrent rotations or configuration writes can supersede that secret; the response is not a lease guaranteeing continued acceptance.
+The storage path updates only the encrypted secret and timestamp; it does not write a stale configuration snapshot or reset provider failure/disabled state. The revision trigger still advances the row validator. Rotation immediately replaces the signing secret, with no dual-acceptance window or recoverable receipt. Later concurrent rotations or configuration writes can supersede that secret; the response is not a lease guaranteeing continued acceptance.
 
 This operation is non-retryable. The existing settings action captures ID and authority into invocation variables, sends once without authentication replay, checks authority before revealing the secret, and refreshes only the captured webhook list. Failure or uncertainty never causes an automatic read, rebase, repeat rotation or compensating write. No webhook delivery is sent by rotation; in-flight provider work may still use a previously captured secret.
 
 ### Update personal webhook configuration
 
-`PUT /api/v2/notifications/webhooks/{id}` (`updateNotificationWebhook`) requires acting-profile authority, the demo guard and the original strong `If-Match` validator supplied with the listed row. Name, URL, enabled state, `notify_next_up` and `notify_requests` are optional; omitted fields stay unchanged. Type and signing secret are not configuration fields. Missing/foreign rows return `404`, missing preconditions `428`, stale validators `412`, invalid configuration `422`, and an unavailable service `503`. Success returns `200` with the destination and its new validator in both `etag` and `ETag`.
+`PUT /api/v2/notifications/webhooks/{id}` (`updateNotificationWebhook`) requires acting-profile authority, the demo guard and the original strong `If-Match` validator supplied with the listed row. Name, URL, enabled state, `notify_next_up` and `notify_requests` are optional; omitted fields stay unchanged. Type and signing secret are not configuration fields. Missing/foreign rows return `404`, missing preconditions `428`, stale validators `412`, invalid configuration `422`, and an unavailable service `503`. Success returns `200` with the destination and its new validator in both `etag` and `ETag`. As with delete, `If-Match: *` also passes for an existing row; the UI never sends it.
 
 The repository locks the profile's exact row, checks its current revision, applies existing validation and writes configuration in one transaction. URL replacement preserves type restrictions, destination validation and encrypted URL binding. URL changes and re-enabling retain the existing failure-reset behavior. The write does not copy secret, type or delivery outcome fields from an editor. The server-owned revision trigger remains required and covers provider bookkeeping; those changes can conservatively invalidate an editor. Other writers may still change the row after this operation commits. A successful response is an observation, not a lease.
 
@@ -591,7 +579,7 @@ The settings editor retains the row selected when opened, including its original
 
 `POST /api/v2/admin/notifications/server-channels/{id}/rotate-secret` (`rotateAdminNotificationServerChannelSecret`) requires acting-admin authority and the demo guard. It targets the exact global channel ID. Only generic channels have signing secrets; Discord channels return `422`, missing IDs `404`, and unavailable service `503`. Success returns `200` with one-time `signing_secret` and `Cache-Control: no-store`, encrypted at rest with the existing server-channel-specific associated-data binding.
 
-The v2 write updates only the encrypted secret and timestamp. It preserves channel configuration, disabled/failure state and row-local watermark/last-attempt/outcome bookkeeping. It introduces no attempt table, revision protocol or provider send. Replacement is immediate with no dual-acceptance window or recoverable receipt; later rotations or configuration writes can supersede the returned secret, and in-flight delivery may use a previously captured secret.
+The write updates only the encrypted secret and timestamp. It preserves channel configuration, disabled/failure state and row-local watermark/last-attempt/outcome bookkeeping. It introduces no attempt table, revision protocol or provider send. Replacement is immediate with no dual-acceptance window or recoverable receipt; later rotations or configuration writes can supersede the returned secret, and in-flight delivery may use a previously captured secret.
 
 The operation is non-retryable. The existing administrator action captures ID and authority at invocation, refuses stale dispatch/receipt/disclosure, and sends once without authentication replay. It invalidates only the captured administrator channel-list cache after success. Uncertainty never triggers an automatic read, rebase, retry or compensating rotation. This operation does not establish a secret lease or fleet rollout readiness.
 
@@ -599,93 +587,155 @@ The operation is non-retryable. The existing administrator action captures ID an
 
 `PUT /api/v2/admin/notifications/server-channels/{id}` (`updateAdminNotificationServerChannel`) requires acting-admin authority and the demo guard. It updates the exact global channel ID. Name, URL, enabled state and event flags are optional; omitted values stay unchanged. Type and signing secret are not configuration fields. Success returns `200` with the stored channel; missing ID returns `404`, invalid configuration `422`, and unavailable service `503`.
 
-The v2 repository reads the current row under a lock and commits configuration and any required dispatch reset together. It excludes signing secret and type from its write. Existing URL validation, type restrictions and channel-bound encryption remain. Replacing the URL, or moving a stopped/auto-disabled channel into enabled delivery, clears failure backoff and last-attempt state and moves the watermark to the present, avoiding replay of the stopped interval. Editing an enabled but auto-disabled channel also resumes it. A disable or an already-delivering enable leaves the watermark unchanged. Reset time is sampled after any row-lock wait, so an old transaction start cannot rewind the reset watermark. Provider outcome fields remain intact.
+The repository reads the current row under a lock and commits configuration and any required dispatch reset together. It excludes signing secret and type from its write. Existing URL validation, type restrictions and channel-bound encryption remain. Replacing the URL, or moving a stopped/auto-disabled channel into enabled delivery, clears failure backoff and last-attempt state and moves the watermark to the present, avoiding replay of the stopped interval. Editing an enabled but auto-disabled channel also resumes it. A disable or an already-delivering enable leaves the watermark unchanged. Reset time is sampled after any row-lock wait, so an old transaction start cannot rewind the reset watermark. Provider outcome fields remain intact.
 
 This is a non-retryable operation: resubmitting a URL replacement advances the watermark again and can skip intervening events. There is no conditional revision contract for this administrator row. The lock protects the transaction; it does not reject stale editor observations or prevent later configuration writes. The actual editor and enabled toggle capture a copy of input and authority at invocation, send once without authentication replay, refuse stale dispatch/receipt/cache/error publication and invalidate only the captured administrator list after success. No automatic read, rebase, retry or compensating write follows uncertainty.
 
 No provider delivery is sent by the update, and already-dispatched work cannot be recalled. No attempt table, secret lease, fleet rollout or enrollment guarantee is introduced.
 
-## Ordered Apple registration storage
+## Plugin destinations
 
-Apple registration ordering uses a separate retained installation record. Its
-positive generation, canonical intent digest and installation-key hash are
-committed atomically with the APNs device row. The digest binds the account,
-profile, token, environment, topic and push mode. Bootstrap cannot take over an
-existing registration belonging to another account. Subsequent writes require
-the original installation proof; older generations and changed intents at the
-same generation fail without replacing the registration.
+A plugin with a `notification_channel.v1` capability provides a channel,
+such as ntfy or Pushover. A profile adds destinations on that channel next to
+its webhooks, and they receive the same deliveries webhooks do:
+new episodes when `notify_next_up` is on, and request updates and watchlist
+arrivals when `notify_requests` is on. Plugin destinations exist only when the server
+has an at-rest cipher, because their settings hold credentials.
+`GET /api/v2/notifications/capabilities` reports `plugin_destinations.available`
+(an enabled plugin provides at least one channel) and `max_per_profile` (10).
 
-Exact replay reads the current referenced row. It preserves a provider-disabled
-row and reports a missing row as removed, without restoring it or advancing the
-generation. This is required because Apple clients renew display credentials
-while registration intent remains unchanged. Storage alone does not issue or
-validate a display credential; the HTTP caller must validate current login and
-profile authority and refuse credential issuance for a stale or removed intent.
+All operations below are profile-scoped, demo-guarded when mutating, and
+identify the recipient by account and profile together. A destination that
+belongs to another account, including another account's profile with the
+same ID, answers `404`.
 
-A newer generation creates a fresh device row identity. Late provider results
-addressing the retired row cannot disable the replacement. Existing foreign-key
-cascades retire its stored delivery attempts; a request already dispatched to a
-provider cannot be recalled. Modes `off` and `in_app_only` retain existing row
-and enabled-field semantics; delivery eligibility continues to check push mode.
-Profile cleanup deletes device rows but retains installation ordering metadata.
+### List the channels
 
-The migration must precede deployment of guarded writers. Generic deletion
-locks Android ordering before Apple ordering. The migration's Down operation is
-not an online rollback protocol.
+`GET /api/v2/notifications/plugin-channels` (`listNotificationPluginChannels`)
+returns the channels enabled plugins provide now, unpaginated. Each names its
+`plugin_id` and `capability_id`, which stay stable across plugin upgrades, a
+`display_name` and `description`, and `settings_form`
+(`NotificationPluginSettingsForm`): one flat list of `fields`, rendered in
+order. Each field has its `key` in `settings`, its `label`, `control`
+(`text`, `password`, `number`, `switch` or `select`), `type`, the JSON type the
+value is sent as (`string`, `integer`, `number` or `boolean`), `required` and
+`secret`. These members are optional and absent when the plugin declares
+none, never null or empty: `description` and `placeholder` (the plugin's
+text), `default_value` (of the field's `type`), `options` (a select field's
+`value` and `label` pairs, each `value` of the field's `type`, so a number
+for an `integer` or `number` field), and the checks the server applies on
+save: `minimum`/`maximum` (inclusive), `min_length`/`max_length` and
+`pattern`. `pattern` is Go RE2 syntax and matches anywhere in the string
+unless anchored; a client may check a value against it before saving, but
+the server's check is the one that counts. `required` is what the server
+enforces: it refuses a save without that setting, and a stored secret left
+blank on an edit counts as present. A client that meets a `control` it
+doesn't know renders the field by its `type`: a switch for `boolean`, a
+number input for `integer` and `number`, a text input otherwise. The
+SDK's `manifest.ValidateDestinationSchema` keeps a destination form to this
+shape, and the server refuses to install or upgrade a plugin whose form
+breaks it. A setting is write-only (`secret: true`) when the plugin marks
+its form field `secret`, gives it a password control, or gives its schema
+property `format: password`; the SDK refuses `writeOnly` in a destination
+schema.
 
-## Apple registration and display renewal
+### List destinations
 
-`GET /api/v2/devices/push/apple/capabilities` reports local
-`registration_available`. Availability does not assert provider delivery or that
-all serving nodes have completed the guarded-writer rollout.
+`GET /api/v2/notifications/plugin-destinations` (`listNotificationPluginDestinations`)
+is cursor-paginated in creation order. Each item carries its `etag`,
+`notify_next_up` and `notify_requests`, the delivery bookkeeping webhooks carry (`consecutive_failures`,
+`disabled_reason`, `last_success_at`, `last_failure_at`,
+`last_failure_message`), `settings`, and `secret_settings_set`, the secret
+fields that have a stored value. `settings` holds only the fields the channel's
+current schema declares and doesn't mark secret: a stored field the schema no
+longer declares, such as a secret a plugin upgrade renamed, is never returned.
+A setting saved as secret stays write-only after a plugin upgrade drops its
+secret marking: it is listed in `secret_settings_set`, not returned in
+`settings`, until the owner replaces or clears it. Clients treat a field
+named in `secret_settings_set` as secret whatever its form field says.
+`available`
+is false, `channel_name` empty and `settings` empty while no enabled plugin
+provides the destination's channel; nothing is sent or queued then. Whether
+a channel is available is read in the same transaction that queues the
+notification, so enabling, disabling or removing a plugin takes effect for the
+next notification on every server.
 
-`POST /api/v2/devices/push/apple` requires a current expiring access login session,
-a verified selected profile (including its PIN proof where required), and the
-existing demo write guard. API keys, display credentials and sessionless access
-are not registration authority. The server checks current session, account and
-profile policy before registration and again after any database lock wait.
+### Create a destination
 
-Send `X-Push-Installation-Key` as a private canonical base64url 32-byte credential
-and `X-Push-Generation` as a positive canonical decimal int64. Persist both before
-sending. Keep the installation credential across account/profile switches and
-increment generation only for a new registration intent. Capture the account,
-profile and body with that intent. After uncertainty, replay the exact original
-packet; do not automatically read, rebase or advance its generation. Neither
-credential belongs in logs or URLs.
+`POST /api/v2/notifications/plugin-destinations` (`createNotificationPluginDestination`)
+takes `plugin_id`, `capability_id`, `name` (1 to 64 characters, unique per
+account profile), `settings`, and optional `notify_next_up` and
+`notify_requests` (default on); `name` is required and `clear_secrets` isn't
+accepted. The
+server accepts only settings the schema or its form declares. It refuses
+keys a schema allows only through `additionalProperties`, which it could
+neither return nor keep secret. It checks each value against the form's
+JSON Schema: its declared scalar type (an object or array is refused),
+required fields, `enum`, string length and `pattern`, and numeric bounds.
+An `integer` setting is also limited to 2^53-1 (9007199254740991) in
+magnitude, the largest integer a JSON number carries exactly on its way to
+the plugin, and a larger one answers `out_of_range`. Each failing setting answers `422` with a field error at
+`body.settings.<field>` (`unknown_field`, `required`, `invalid_type`,
+`invalid_enum`, `out_of_range` or `invalid`). It then calls the plugin's
+`ValidateDestination`. A refusal answers `422` with the plugin's
+message, with the destination's secret values masked, in the problem's
+error detail at `body.settings`. A profile deleted meanwhile answers `404`.
+A channel no enabled plugin provides answers `422` with a field error at
+`body.capability_id`; so does a channel whose stored form the server can't
+use (its schema doesn't compile), which it treats as not provided. A plugin that provides it but fails to answer (it
+returns an error, times out or can't start) answers `503
+dependency_unavailable` with `Retry-After`; ten destinations answer `422`.
+Success is `201` with the destination and its `ETag`. The operation is
+non-retryable: a replay with the same name answers `422` with the field code
+`duplicate` at `body.name`, since names are unique per profile. A rename to a
+taken name answers the same.
 
-The JSON body contains `device_id`, `apns_token`, `apns_environment` (`production`
-or `sandbox`), `apns_topic` (`org.siloserver.silo`) and optional `push_mode`
-(`off`, `in_app_only`, `private_push`; existing default applies). Success returns
-string `generation`, `id`, `server_device_id`, `push_mode`, `enabled` and `removed`.
-An existing disabled or deleted registration remains so on exact replay. A stale
-or changed same-generation intent returns409; invalid installation proof returns403.
+### Update a destination
 
-For a current enabled registration, success may include `display_token` and UTC
-`display_token_expires_at`. An unchanged accepted intent can renew these fields
-without advancing generation or rewriting registration state. Credential issuance
-runs under the installation and device transaction locks, so a newer registration
-cannot overtake it. No credential is returned on transaction failure. Disabled or
-removed receipts omit credentials. A signing failure still returns the accepted
-registration without credentials, preserving the existing extension access-token
-fallback. Responses are `no-store`.
+`PUT /api/v2/notifications/plugin-destinations/{id}` (`updateNotificationPluginDestination`)
+requires the original `If-Match` validator, like a webhook update. Omitted
+fields stay unchanged. `settings` merges over the stored settings: a
+non-secret field sent as `null` is removed, a secret field sent blank or left
+out keeps its stored value, and `clear_secrets` removes named secrets. A
+stored setting the channel's current form no longer declares, after a plugin
+update, is dropped on the next update. Merged settings are checked as on
+create; a stored secret left blank counts as present for `required`. When
+the server can't decrypt the stored settings, or no enabled plugin provides
+the destination's channel any more, a settings change answers `409
+conflict` and nothing is written; a plugin that fails to answer its check
+answers `503` with `Retry-After`.
+Changed settings are checked by the plugin again and, like a changed webhook
+URL, clear the failure streak and the disable reason; so does re-enabling.
+Missing preconditions answer `428`, stale validators `412`. The validator
+changes on the owner's edits and when the server disables the destination,
+not when a send updates its delivery bookkeeping. The plugin checks
+changed settings before the destination is locked for the write; if the
+destination changes meanwhile, the update answers `412` with the current
+`ETag` and writes nothing, even under `If-Match: *`.
 
-The display credential retains its existing account/login-session/profile scope
-and lifetime; this operation does not introduce device-bound display authorization
-or revoke previously issued display credentials on registration replacement.
-Current registration is guaranteed at issuance, not for the credential's entire
-lifetime. Native code must retain its authority fence before storing a response,
-clear stale display credentials for disabled/removed state, and preserve the
-original registration packet for explicit renewal/retry. Native adoption requires
-its own reviewed persistence and lifecycle implementation; this server packet does
-not enable it. The browser has no Apple-registration caller.
+### Delete and test
 
-## Durable email verification storage prerequisite
+`DELETE /api/v2/notifications/plugin-destinations/{id}` (`deleteNotificationPluginDestination`)
+requires `If-Match` and removes the destination and its queued attempts.
+`POST /api/v2/notifications/plugin-destinations/{id}/test` (`testNotificationPluginDestination`)
+sends one test message now and answers `200` with `ok` and `duration_ms`,
+plus `message` when the send failed or the plugin gave one; a failed send is
+`ok: false`, not retried and not counted. It
+is non-retryable.
 
-The v2 address request (`requestNotificationEmailVerification`) uses durable
+## Apple registration
+
+Apple push registration (`registerApplePushDevice`), its capability, ordering,
+replay and display-token renewal, the owner reset and sessionless retirement are
+in the [push reference](notifications-push-api.md#apple-registration).
+
+## Durable email verification storage
+
+The address request (`requestNotificationEmailVerification`) uses durable
 dispatch, because replacing a pending token and sending inline would invalidate an
 earlier link and send again after a lost HTTP response.
 
-The email repository now supports a client-created verification intent UUID,
+The email repository supports a client-created verification intent UUID,
 bound to its original account, profile and normalized address. Admission locks
 the profile preferences row (creating the default row transactionally when
 absent), then commits both the pending token hash and an encrypted verification
@@ -708,14 +758,12 @@ and notification mode stay unchanged while a new address is pending. Clear and
 verification keep their existing effects; retained intent rows prevent their old
 requests from recreating pending state.
 
-The migration must precede guarded writers on every serving node. The table's
-Down operation is not an online rollback protocol. Dispatch and the HTTP caller
-are described below.
+Dispatch and the HTTP caller are described below.
 
 Dispatch checks the current pending hash, expiry, account/profile authority
 and message ownership under its claim before sending. Queued work cannot authorize
 a send after clear, replacement or profile deletion. Retained receipts must survive
-payload cleanup; no retention or worker lease policy is introduced here. Dispatch
+payload cleanup. Dispatch
 state, retries and recovery are described under
 [Email verification dispatch](#email-verification-dispatch).
 
@@ -769,12 +817,12 @@ demo guards. The service requires a current non-child profile. A new intent need
 a configured HTTP(S) external link base without credentials, query or fragment;
 an exact admitted replay keeps its original link even if configuration disappears.
 
-The200 response is a durable admission receipt: `verification_id`, UTC
+The 200 response is a durable admission receipt: `verification_id`, UTC
 `expires_at`, and `current`. It is not SMTP acceptance or delivery. `current=false`
 means the original pending verification has expired, been cleared or verified, or
 been replaced; it does not initiate a resend. The response contains neither the
-bearer token nor the email message. Conflict returns409, admission rate limits429,
-invalid input422, denied profile403 and unavailable storage503.
+bearer token nor the email message. Conflict returns 409, admission rate limits 429,
+invalid input 422, denied profile 403 and unavailable storage 503.
 
 `GET /api/v2/notifications/email-preferences/address/capabilities` reports
 an opaque `revision`, support `state`, effective caller `allowed`, and separate
@@ -785,24 +833,19 @@ retain the demo exception and still need a non-child profile. The response uses
 checks, so a demo-mode change that changes `allowed` returns a new revision and
 ETag instead of 304.
 `dispatch_available` follows the dispatcher and sender state described under
-"Email verification dispatch"; the ledger row is ratified with the accepted
-duplicate-after-crash retry policy recorded in its retry note. No native Apple or
-Android caller for the address request exists; both lanes' earlier inventories
-recorded exact absence and that closure is tracked separately from this server
-and web packet.
+[Email verification dispatch](#email-verification-dispatch).
 
 The settings web caller captures the email, UUID and render authority synchronously
 before a mutation can pause offline. An uncertain response retains that exact draft
 for explicit retry while the hook remains mounted. Changing the email or authority
 creates another intent; a known receipt completes a draft, and a later explicit
 request creates a new one. There is no automatic authentication replay, rebasing or
-resend. Drafts are not persisted across page reload or unmount; this packet makes
-no browser-crash recovery guarantee.
+resend. Drafts are not persisted across page reload or unmount, so a browser crash
+loses them.
 
 Dispatch, cache invalidation, toast and component callbacks require the original
 acting authority and current mounted draft. The receipt invalidates only that
 profile's email-preferences query rather than asserting a complete preferences
 snapshot. The form reports queued/pending verification and prevents editing the
 submitted address while its request is pending. It does not claim an email was
-sent. The dispatcher and retention policy above close the worker uncertainty and
-receipt/payload retention items; the migration must precede dispatching nodes.
+sent.

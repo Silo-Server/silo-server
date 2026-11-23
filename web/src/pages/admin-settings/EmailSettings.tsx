@@ -97,6 +97,7 @@ export default function EmailSettings() {
             dirty={form.isDirty("email.smtp_host")}
             // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- an example value, not text
             hint="smtp.example.com"
+            dir="ltr"
             value={form.getValue("email.smtp_host")}
             onChange={(v) => form.setValue("email.smtp_host", v)}
             restartRequired={restartKeys.has("email.smtp_host")}
@@ -146,6 +147,9 @@ export default function EmailSettings() {
             onClear={() => form.setValue("email.smtp_password", "")}
             cleared={form.isClearStaged("email.smtp_password")}
             onChange={(v) => form.setValue("email.smtp_password", v)}
+            // Emptying the field takes its draft back, so it holds still while
+            // a save is in flight: the save would still store what was typed.
+            disabled={form.isSaving}
             restartRequired={restartKeys.has("email.smtp_password")}
             managedByEnv={form.envVar("email.smtp_password")}
           />

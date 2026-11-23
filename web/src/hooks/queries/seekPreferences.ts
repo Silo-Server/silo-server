@@ -88,7 +88,12 @@ export function useSeekPreferences(media: SeekMedia, options?: { enabled?: boole
     // check withholds them, so a failed request cannot lock a working player.
     legacyAvailable: !supported && !capabilities.isPending,
     isLoading: capabilities.isPending || (supported && effective.isPending),
-    error: capabilities.error ?? effective.error,
+    // A failed capabilities refetch keeps the last answer as `data` under an
+    // error status. Once that answer has proved support, the error no longer
+    // matters; without it, the failure still reads as unknown, not as an old
+    // server. A failed settings read always counts: after a save, the cached
+    // values may no longer be what the server holds.
+    error: (supported ? null : capabilities.error) ?? effective.error,
     isSaving: importing || writer.isPending || clearer.isPending,
     skipBack: read("back"),
     skipForward: read("forward"),

@@ -85,7 +85,7 @@ affected credentials:
 
 ## Rollout (automatic backfill)
 
-On the first boot after deploying this change, the primary (migration-running)
+On the first boot of a binary with at-rest encryption, the primary (migration-running)
 node runs an idempotent, best-effort startup backfill that encrypts any
 remaining plaintext in place:
 
@@ -110,7 +110,7 @@ whatever the primary encrypted. No manual steps are required.
 
 ## Rollback / downgrade hazard
 
-Downgrading to a binary that predates this change is **not** safe while secrets
+Downgrading to a binary that predates at-rest encryption is **not** safe while secrets
 are encrypted, because the old binary has no read path: it would read
 `enc:v1:auth.jwt_secret` as a literal JWT secret (invalidating all sessions) and
 read `enc:v1:`-prefixed integration keys as garbage credentials. It would also
@@ -156,7 +156,9 @@ Covered: arr (Requests + Autoscan) API keys, S3 keys, all sensitive
 Autoscan webhook endpoint secrets (`autoscan_webhook_endpoints.secret_ref`),
 push device APNs and FCM tokens (`push_devices`), notification webhook and
 server channel URLs and signing secrets (`notification_webhooks`,
-`notification_server_channels`), queued email-verification messages
+`notification_server_channels`), plugin notification destination settings
+(`notification_plugin_destinations.config_ciphertext`, AAD
+`notification_plugin_destination:<id>:config`), queued email-verification messages
 (`notification_email_verifications.payload_ciphertext`), plugin instance state
 (`plugin_instance_state.state_value`),
 history-import admin/session tokens, temporary server-list credentials and

@@ -20,6 +20,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 )
 
 // OAuthClient is the host-side gRPC client surface the OAuth handler needs.
@@ -80,7 +81,7 @@ type OAuthHandlerDeps struct {
 	// the public URL while the browser moves to the public origin.
 	NativeStarts   OAuthNativeStartStore
 	StateSecret    []byte
-	ResolveClient  func(ctx context.Context, installationID int) (OAuthClient, string, error) // returns (client, capabilityID, err)
+	ResolveClient  func(ctx context.Context, installationID int) (OAuthClient, string, string, error) // returns (client, capabilityID, callbackMode, err)
 	LoginCompleter OAuthLoginCompleter
 	HostBaseURL    string
 	StateTTL       time.Duration
@@ -229,8 +230,8 @@ func writeHandshakeError(w http.ResponseWriter, err error) {
 // CallbackURL is the absolute redirect URI of the callback under an API
 // prefix. The provider must have the URI it is handed registered, so the init
 // and callback of one flow share a prefix.
-func (h *OAuthHandler) CallbackURL(prefix string, installID int) string {
-	return h.currentHostBaseURL() + prefix + "/auth/oauth/" + strconv.Itoa(installID) + "/callback"
+func (h *OAuthHandler) CallbackURL(prefix string, installID int, mode string) string {
+	return plugins.OAuthCallbackURL(h.currentHostBaseURL(), prefix, installID, mode)
 }
 
 // PublicURL is path (with query) on the configured public origin; empty
@@ -518,7 +519,7 @@ func (h *OAuthHandler) checkStart(ctx context.Context, req OAuthStartRequest) er
 			return &OAuthHandshakeError{Status: http.StatusBadRequest, Message: "app_state must be 1 to 512 unreserved characters"}
 		}
 	}
-	if _, _, err := h.deps.ResolveClient(ctx, req.InstallID); err != nil {
+	if _, _, _, err := h.deps.ResolveClient(ctx, req.InstallID); err != nil {
 		return &OAuthHandshakeError{Status: http.StatusBadGateway, Message: "auth plugin unavailable"}
 	}
 	return nil
@@ -535,7 +536,7 @@ func (h *OAuthHandler) startFlow(ctx context.Context, req OAuthStartRequest, lin
 	if req.Native {
 		kind = OAuthFlowNative
 	}
-	client, _, err := h.deps.ResolveClient(ctx, req.InstallID)
+	client, capabilityID, callbackMode, err := h.deps.ResolveClient(ctx, req.InstallID)
 	if err != nil {
 		return OAuthStartResult{}, &OAuthHandshakeError{Status: http.StatusBadGateway, Message: "auth plugin unavailable"}
 	}
@@ -551,11 +552,16 @@ func (h *OAuthHandler) startFlow(ctx context.Context, req OAuthStartRequest, lin
 
 	now := time.Now().UTC()
 	state := SignState(h.deps.StateSecret, StatePayload{
-		Nonce:     nonce,
-		InstallID: strconv.Itoa(req.InstallID),
-		ExpiresAt: now.Add(h.deps.StateTTL),
+		Nonce:        nonce,
+		InstallID:    strconv.Itoa(req.InstallID),
+		ExpiresAt:    now.Add(h.deps.StateTTL),
+		CapabilityID: capabilityID,
+		CallbackMode: callbackMode,
 	})
-	redirectURI := h.CallbackURL(req.Prefix, req.InstallID)
+	redirectURI := h.CallbackURL(req.Prefix, req.InstallID, callbackMode)
+	if redirectURI == "" {
+		return OAuthStartResult{}, &OAuthHandshakeError{Status: http.StatusConflict, Message: "public URL required"}
+	}
 
 	initReq := &pluginv1.InitAuthorizeRequest{
 		RedirectUri: redirectURI,
@@ -611,8 +617,11 @@ func (h *OAuthHandler) startFlow(ctx context.Context, req OAuthStartRequest, lin
 // OAuthCallbackInput is the provider redirect as the transport received it.
 type OAuthCallbackInput struct {
 	InstallID int
+	Prefix    string
 	State     string
 	Code      string
+	// ClearBinder clears the flow cookie at its stored redirect URI.
+	ClearBinder func(redirectURI string)
 	// ProviderError is the OAuth error the provider redirected back with
 	// instead of a code.
 	ProviderError string
@@ -643,7 +652,6 @@ func (h *OAuthHandler) ServeCallback(w http.ResponseWriter, r *http.Request, pre
 	binder := ""
 	if cookie, err := r.Cookie(OAuthBinderCookieName(state)); err == nil {
 		binder = cookie.Value
-		http.SetCookie(w, oauthBinderCookie(state, "", h.CallbackURL(prefix, installID), -1))
 	}
 	completionBinder, _, err := newOAuthBinder()
 	if err != nil {
@@ -651,7 +659,12 @@ func (h *OAuthHandler) ServeCallback(w http.ResponseWriter, r *http.Request, pre
 		return
 	}
 	location := h.Callback(r.Context(), OAuthCallbackInput{
-		InstallID: installID, State: state, Code: code, ProviderError: providerError,
+		InstallID: installID, Prefix: prefix, State: state, Code: code, ProviderError: providerError,
+		ClearBinder: func(redirectURI string) {
+			if binder != "" {
+				http.SetCookie(w, oauthBinderCookie(state, "", redirectURI, -1))
+			}
+		},
 		Binder: binder, CompletionBinder: completionBinder, UserAgent: r.UserAgent(), IP: clientIP(r),
 	})
 	if strings.HasPrefix(location, h.webCompletionURL()+"?") {
@@ -785,20 +798,36 @@ func (h *OAuthHandler) addServerID(ctx context.Context, q url.Values) {
 // confirms with CompleteLink. Linking never opens a session. Failures carry
 // a reason code.
 func (h *OAuthHandler) Callback(ctx context.Context, in OAuthCallbackInput) string {
-	installID, state := in.InstallID, in.State
+	state := in.State
 	payload, err := VerifyState(h.deps.StateSecret, state)
 	// An authentic state past its expiry (a slow provider sign-in: MFA
 	// enrolment, a password reset) still loads its flow, so the browser that
 	// started it is sent to its own client's session_expired failure: the
 	// app redirect or the linking page, not the web login.
 	expired := errors.Is(err, ErrStateExpired)
-	if (err != nil && !expired) || payload.InstallID != strconv.Itoa(installID) {
+	if err != nil && !expired {
+		return webFailureLocation(OAuthReasonStateInvalid)
+	}
+	installID, parseErr := strconv.Atoi(payload.InstallID)
+	stable := payload.CallbackMode == plugins.AuthCallbackStable
+	if parseErr != nil || installID <= 0 || stable != (in.InstallID == 0) ||
+		(!stable && installID != in.InstallID) {
 		return webFailureLocation(OAuthReasonStateInvalid)
 	}
 
 	sess, err := h.deps.Store.GetAndDelete(ctx, state)
 	if err != nil {
 		return webFailureLocation(OAuthReasonSessionExpired)
+	}
+	// The proxy may strip the path prefix from the incoming request. The
+	// persisted URI records the public path the browser used for this flow.
+	redirect, err := url.Parse(sess.RedirectURI)
+	if err != nil || sess.InstallID != payload.InstallID ||
+		!strings.HasSuffix(redirect.Path, plugins.OAuthCallbackPath(in.Prefix, installID, payload.CallbackMode)) {
+		return webFailureLocation(OAuthReasonStateInvalid)
+	}
+	if in.ClearBinder != nil {
+		in.ClearBinder(sess.RedirectURI)
 	}
 	// The app redirect names where the native start first arrived.
 	issuer := sess.StartOrigin
@@ -820,8 +849,8 @@ func (h *OAuthHandler) Callback(ctx context.Context, in OAuthCallbackInput) stri
 		return fail(OAuthReasonStateInvalid)
 	}
 
-	client, capabilityID, err := h.deps.ResolveClient(ctx, installID)
-	if err != nil {
+	client, capabilityID, _, err := h.deps.ResolveClient(ctx, installID)
+	if err != nil || (payload.CapabilityID != "" && capabilityID != payload.CapabilityID) {
 		return fail(OAuthReasonProviderUnavailable)
 	}
 
@@ -1068,7 +1097,7 @@ func (h *OAuthHandler) IssueLinkTicket(ctx context.Context, userID, installation
 	if !h.LinkingAvailable() {
 		return OAuthLinkTicket{}, ErrLinkTicketUnavailable
 	}
-	if _, _, err := h.deps.ResolveClient(ctx, installationID); err != nil {
+	if _, _, _, err := h.deps.ResolveClient(ctx, installationID); err != nil {
 		if errors.Is(err, ErrUnknownAuthInstallation) {
 			return OAuthLinkTicket{}, err
 		}
@@ -1124,7 +1153,7 @@ func (h *OAuthHandler) StartLink(ctx context.Context, userID int, prefix, ticket
 			"installation_id", ticket.InstallationID, auditUserID, userID)
 		return OAuthStartResult{}, ErrOAuthLinkTicketInvalid
 	}
-	if _, _, err := h.deps.ResolveClient(ctx, ticket.InstallationID); err != nil {
+	if _, _, _, err := h.deps.ResolveClient(ctx, ticket.InstallationID); err != nil {
 		if errors.Is(err, ErrUnknownAuthInstallation) {
 			return OAuthStartResult{}, err
 		}

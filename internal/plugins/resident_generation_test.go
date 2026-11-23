@@ -2,9 +2,11 @@ package plugins
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
@@ -13,11 +15,110 @@ import (
 	"github.com/Silo-Server/silo-server/internal/pluginhost"
 )
 
+func TestResidentRestartCanCancelWhileReconcileIsInProgress(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		service := &Service{installations: newFakeServiceInstallationStore()}
+		supervisor := newResidentSupervisor(service, ResidentOptions{MaxFailures: 1})
+		supervisor.entries[5] = &residentEntry{id: 5, state: ResidentRunning}
+		supervisor.reconcileMu.Lock()
+		defer supervisor.reconcileMu.Unlock()
+		ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+		defer cancel()
+
+		done := make(chan error, 1)
+		go func() {
+			done <- supervisor.Restart(ctx, 5)
+		}()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("Restart returned %v, want deadline exceeded", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatal("restart waited for reconciliation after its deadline")
+		}
+		if state, tracked := supervisor.State(5); !running(state, tracked) {
+			t.Fatalf("canceled restart changed the resident state: %+v", state)
+		}
+	})
+}
+
+func TestResidentFailedReplacementKeepsPreviouslyRegisteredClient(t *testing.T) {
+	manifest := testPluginManifest(t, "silo.vpn", "1.0.0")
+	manifest.Capabilities = append(manifest.Capabilities, &pluginv1.CapabilityDescriptor{
+		Type: capability.NetworkAccessProvider, Id: "vpn", DisplayName: "VPN",
+		NetworkAccessProvider: &pluginv1.NetworkAccessProviderDescriptor{Provider: "vpn"},
+	})
+	store := installedPluginStore(t, 7, manifest)
+	old := &fakePluginClient{manifest: manifest}
+	host := &countingHerdHost{startResult: old}
+	service := &Service{installations: store, host: host}
+	ctx := t.Context()
+	if _, err := service.Start(ctx, 7); err != nil {
+		t.Fatal(err)
+	}
+	service.resident = newResidentSupervisor(service, ResidentOptions{})
+	service.resident.entries[7] = &residentEntry{id: 7, state: ResidentRunning}
+
+	host.startErr = errors.New("bind process host identity")
+	if _, err := service.Start(ctx, 7); !errors.Is(err, host.startErr) {
+		t.Fatalf("replacement failure = %v, want the host identity bind error", err)
+	}
+	if client, err := service.ensureClient(ctx, 7); err != nil || client != old {
+		t.Fatalf("resident client after failed replacement = %v, %v", client, err)
+	}
+}
+
+// A real resident is required to observe the ingress token revoked by Stop.
+func TestResidentReplacementRevokesOldIngressWhenTheRowReadFails(t *testing.T) {
+	f := newResidentFixture(t, ResidentOptions{MaxFailures: 1})
+	reader := &unavailableResidentRowStore{serviceInstallationStore: f.store}
+	f.service.installations = reader
+	ctx := t.Context()
+	f.service.StartResidents(ctx)
+	waitState(t, f.service, 5, "old resident running", running)
+	if _, ok := f.broker.IngressToken(5); !ok {
+		t.Fatal("old resident had no ingress token")
+	}
+
+	if err := f.store.Update(ctx, 5, UpdateInstallationInput{Restart: true}); err != nil {
+		t.Fatal(err)
+	}
+	reader.unavailable.Store(true)
+	f.service.reconcileLifecycle(ctx, false)
+	waitState(t, f.service, 5, "replacement failed", func(state RuntimeState, tracked bool) bool {
+		return tracked && state.State == ResidentFailed
+	})
+	if _, ok := f.broker.IngressToken(5); ok || f.host.Running(5) {
+		t.Fatal("superseded resident was still serving after the replacement read failed")
+	}
+
+	reader.unavailable.Store(false)
+	if err := f.service.RestartInstallation(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	waitState(t, f.service, 5, "replacement running after administrator restart", running)
+	if _, ok := f.broker.IngressToken(5); !ok {
+		t.Fatal("replacement did not receive an ingress token")
+	}
+}
+
+type unavailableResidentRowStore struct {
+	serviceInstallationStore
+	unavailable atomic.Bool
+}
+
+func (s *unavailableResidentRowStore) GetByID(ctx context.Context, id int) (*Installation, error) {
+	if s.unavailable.Load() {
+		return nil, errors.New("installation row temporarily unavailable")
+	}
+	return s.serviceInstallationStore.GetByID(ctx, id)
+}
+
 // seqFakeHost is a Host whose first Start assigns its start sequence and then
 // parks until the test releases it, without registering the client. That is
 // the window the real host has between spawning a process and completing the
-// handshake, during which a newer supervisor generation can join the
-// in-flight launch through Service.ensureClient's singleflight.
+// handshake, during which the supervisor can observe a newer generation.
 type seqFakeHost struct {
 	mu          sync.Mutex
 	seq         atomic.Uint64
@@ -27,17 +128,19 @@ type seqFakeHost struct {
 	gate        chan struct{}
 	entered     chan struct{}
 	release     sync.Once
-	floorReads  atomic.Int32
 }
 
 type seqFakeClient struct {
 	*pluginhost.Client
 	manifest *pluginv1.PluginManifest
+	config   []*pluginv1.ConfigEntry
 	seq      uint64
 }
 
 func (c *seqFakeClient) Manifest() *pluginv1.PluginManifest { return c.manifest }
-func (c *seqFakeClient) StartSeq() uint64                   { return c.seq }
+func (c *seqFakeClient) AuthProvider(string) (*pluginhost.AuthProviderClient, error) {
+	return nil, nil
+}
 
 func newSeqFakeHost() *seqFakeHost {
 	return &seqFakeHost{clients: map[int]*seqFakeClient{}, gate: make(chan struct{}), entered: make(chan struct{})}
@@ -53,7 +156,7 @@ func (h *seqFakeHost) Start(_ context.Context, req pluginhost.StartRequest) (plu
 		close(h.entered)
 		<-h.gate
 	}
-	client := &seqFakeClient{manifest: req.Manifest, seq: seq}
+	client := &seqFakeClient{manifest: req.Manifest, config: req.Config, seq: seq}
 	h.mu.Lock()
 	h.clients[req.InstallationID] = client
 	h.mu.Unlock()
@@ -82,18 +185,6 @@ func (h *seqFakeHost) Stop(installationID int) error {
 }
 
 func (h *seqFakeHost) Shutdown(context.Context) error { return nil }
-
-// NextStartSeq mirrors pluginhost.Host. The second floor read is the newer
-// generation's runStart, one instruction before it joins the in-flight
-// launch, so releasing the parked leader here makes the join as likely as it
-// can be without a hook inside singleflight. The assertions hold either way:
-// a generation that misses the join relaunches through manifest drift.
-func (h *seqFakeHost) NextStartSeq() uint64 {
-	if h.floorReads.Add(1) == 2 {
-		h.release.Do(func() { close(h.gate) })
-	}
-	return h.seq.Load()
-}
 
 func (h *seqFakeHost) snapshot() (starts int, stopped []uint64) {
 	h.mu.Lock()
@@ -133,6 +224,7 @@ func TestResidentSupervisorNewGenerationNeverAdoptsInFlightOlderLaunch(t *testin
 		t.Fatal(err)
 	}
 	service.OnLifecycleChange(ctx)
+	host.release.Do(func() { close(host.gate) })
 
 	state := waitState(t, service, 5, "generation 2 running", running)
 	if state.LastError != "" || state.RestartCount != 0 {

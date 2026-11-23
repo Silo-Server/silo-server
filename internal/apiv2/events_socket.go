@@ -2,6 +2,7 @@ package apiv2
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"slices"
 	"time"
@@ -73,6 +74,20 @@ func userKeyEventsSocket(ctx context.Context, claims *auth.Claims) bool {
 	return !slices.Contains(claims.APIKeyScopes, auth.ScopeAdminMonitorRead) || declaresProfile(ctx)
 }
 
+// socketAuthorityRetrySeconds is the Retry-After a ticket mint answers when
+// the credential could not be checked.
+const socketAuthorityRetrySeconds = 5
+
+// socketAuthorityUnavailable answers a ticket mint whose credential could not
+// be checked with 503, so the client retries instead of treating the
+// credential as refused; nil for any other outcome.
+func socketAuthorityUnavailable(err error) *Problem {
+	if !errors.Is(err, evt.ErrSocketAuthorityUnavailable) {
+		return nil
+	}
+	return NewProblem(TypeDependencyUnavailable, "Realtime authority could not be checked; retry shortly.").WithRetryAfter(socketAuthorityRetrySeconds)
+}
+
 func registerEventsSocket(reg *Registry) {
 	mint := Operation{Operation: humaOp(http.MethodPost, Prefix+"/events/ws-ticket", "createEventsSocketTicket", "realtime", "Delegate the current login session, or an API key holding admin:monitor:read, catalog:read, watch:read or notifications, for one realtime handshake."), Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, RetrySafety: RetrySafetyNaturalIdempotent}
 	Register(reg, mint, func(ctx context.Context, _ *struct{}) (*EventsSocketTicketOutput, error) {
@@ -86,6 +101,9 @@ func registerEventsSocket(reg *Registry) {
 		}
 
 		ticket, err := svc.Mint(ctx, identity)
+		if p := socketAuthorityUnavailable(err); p != nil {
+			return nil, p
+		}
 		if err != nil {
 			return nil, NewProblem(TypePermissionDenied, "Realtime authority could not be delegated.")
 		}

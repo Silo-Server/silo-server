@@ -75,12 +75,22 @@ export function getSeasonDisplayTitle(season: Season): string {
   if (season.is_specials || season.season_number === 0) {
     return t("web.detail.seasons.specials");
   }
+  return seasonDisplayName(season.season_number, season.title);
+}
 
-  if (season.title && season.title !== `Season ${season.season_number}`) {
-    return season.title;
+/**
+ * A season's name in the interface language: its own title, or the translated
+ * default when it has none or only the English default the server stores
+ * ("Season N", or "Specials" for season 0).
+ */
+export function seasonDisplayName(seasonNumber: number, title?: string): string {
+  const storedDefault = seasonNumber === 0 ? "Specials" : `Season ${seasonNumber}`;
+  if (title && title !== storedDefault) {
+    return title;
   }
-
-  return t("web.detail.seasons.numbered", { season: season.season_number });
+  return seasonNumber === 0
+    ? t("web.detail.seasons.specials")
+    : t("web.detail.seasons.numbered", { season: seasonNumber });
 }
 
 export function formatEpisodeCount(count: number): string {

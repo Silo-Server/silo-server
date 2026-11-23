@@ -206,13 +206,7 @@ func (r *ItemRefreshResolver) resolveMovie(ctx context.Context, item *models.Med
 	if err != nil {
 		return nil, err
 	}
-	// A complete refresh clears the scope's content links, which gives an
-	// audiobook a new content ID and orphans its progress and favorites. An
-	// audiobook's reset already clears its match and reads its tags again, so
-	// a complete refresh of one runs as a reset.
-	if item.Type == itemTypeAudiobook && mode == ItemRefreshModeComplete {
-		mode = ItemRefreshModeReset
-	}
+	mode = bookRefreshMode(item.Type, mode)
 	req := &ItemRefreshRequest{
 		RequestedContentID: item.ContentID,
 		RequestedType:      item.Type,
@@ -621,10 +615,9 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	refreshContentID := req.RefreshContentID
 	detailContentID := req.RequestedContentID
 	audiobook := req.RequestedType == itemTypeAudiobook
-	if audiobook && req.Mode == ItemRefreshModeComplete {
-		// A job queued before complete refreshes of audiobooks became resets.
-		req.Mode = ItemRefreshModeReset
-	}
+	// A job queued before complete refreshes of audiobooks and ebooks became
+	// resets still names complete.
+	req.Mode = bookRefreshMode(req.RequestedType, req.Mode)
 	refreshCtx := ctx
 	if req.CurationScope != nil {
 		refreshCtx = access.WithMetadataCurationAuthorizer(ctx, req.CurationScope.Authorizer())
@@ -822,8 +815,26 @@ func (e *ItemRefreshExecutor) Execute(ctx context.Context, req ItemRefreshReques
 	}, nil
 }
 
-// itemTypeAudiobook is media_items.type for an audiobook.
-const itemTypeAudiobook = "audiobook"
+// media_items.type of an audiobook and an ebook.
+const (
+	itemTypeAudiobook = "audiobook"
+	itemTypeEbook     = "ebook"
+)
+
+// bookRefreshMode runs a complete refresh of an audiobook or an ebook as a
+// reset. A complete refresh clears the scope's content links, and the book
+// scanners find an existing book only through a linked file, so the book
+// would come back under a new content ID while its progress, favorites and
+// provider IDs stayed on the old one. A reset keeps the item: an audiobook's
+// reset reads its tags again and resets its metadata, and an ebook's reset
+// looks the book up again through its providers on the item it already has.
+// Other types and modes pass through.
+func bookRefreshMode(itemType string, mode ItemRefreshMode) ItemRefreshMode {
+	if mode == ItemRefreshModeComplete && (itemType == itemTypeAudiobook || itemType == itemTypeEbook) {
+		return ItemRefreshModeReset
+	}
+	return mode
+}
 
 func (e *ItemRefreshExecutor) prepareCompleteRefresh(ctx context.Context, folder *models.MediaFolder, req ItemRefreshRequest) error {
 	if req.CanonicalRootPath != "" {

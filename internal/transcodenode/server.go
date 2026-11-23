@@ -47,6 +47,10 @@ import (
 // TranscodeStartRequest is the JSON body for POST /transcode/start.
 type TranscodeStartRequest struct {
 	SessionID string `json:"session_id"`
+	// StartID is an opaque id the core picks for this one start. A release
+	// that names it ends the job only while this start's job still runs, so a
+	// late release cannot end a newer start under the same transport id.
+	StartID string `json:"start_id,omitempty"`
 	// PlaybackSessionID, UserID, ProfileID and MediaFileID are the playback
 	// session the transcode serves. The node files its session record and
 	// stream telemetry under them; it reads no stream token to learn them.
@@ -1036,6 +1040,7 @@ func (s *Server) router() chi.Router {
 		r.Get("/transcode/{session_id}/master.m3u8", observeNode(s.telemetry, http.MethodGet, "/transcode/{session_id}/master.m3u8", s.handleManifest))
 		r.Get("/transcode/{session_id}/segment/{name}", observeNode(s.telemetry, http.MethodGet, "/transcode/{session_id}/segment/{name}", s.handleSegment))
 		r.Post("/transcode/{session_id}/segment/{name}/downloaded", s.handleSegmentDownloaded)
+		r.Get("/transcode/{session_id}/output-bound", s.handleOutputBound)
 		r.Post("/admin/force-reload", s.handleForceReload)
 		r.Post("/admin/reload-config", s.handleReloadConfig)
 		r.Post("/admin/reprobe-capabilities", s.handleReprobeCapabilities)
@@ -2692,25 +2697,63 @@ func (s *Server) progressiveRemuxStopped(transportID string) bool {
 	return s.stoppedProgressiveRemuxes[transportID].After(time.Now())
 }
 
+// releaseSupersededLocked reports whether the HLS job under transportID is
+// not the one a release (a stop with fence=0) was sent for, so the release
+// must leave it running. A release that names a start ends only that start's
+// job. One that names none, a retire of the node a transport left, ends the
+// job it found on arrival or a rebuild published while it waited: that
+// rebuild resolved before the move off this node committed, since the core
+// refuses one whose route names another node. It leaves a job a start
+// published while it waited. A stop that ends the session for good is fenced
+// and ends any job. The caller holds mu.
+func (s *Server) releaseSupersededLocked(transportID, startID string, arrived *playback.TranscodeSession) bool {
+	session, ok := s.sessions[transportID]
+	if !ok {
+		return false
+	}
+	identity := s.identities[transportID]
+	if startID != "" {
+		return identity.startID != startID
+	}
+	return session != arrived && !identity.rebuilt
+}
+
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
 	sessionID := chi.URLParam(r, "session_id")
+	fenced := r.URL.Query().Get(playback.TranscodeStopFenceQueryParam) != "0"
+	startID := r.URL.Query().Get(playback.TranscodeStopStartIDQueryParam)
+	// A release is sent in the background and can arrive after a newer start
+	// of the same transport id. Note the job it found on arrival: a start
+	// published while it waits for the lifecycle lock is newer than it.
+	var arrived *playback.TranscodeSession
+	if !fenced && startID == "" {
+		s.mu.RLock()
+		arrived = s.sessions[sessionID]
+		s.mu.RUnlock()
+	}
 
 	// Serialize against in-flight starts and reconstructs. A RequireReady
 	// start registers its job only after the readiness wait; a stop racing
 	// that wait (the API rolling back a timed-out start) would otherwise miss
 	// the map and 404, orphaning the just-spawned ffmpeg until the idle
 	// reaper finds it. Blocking here until the start registers turns that
-	// miss into a normal teardown.
+	// miss into a normal teardown. A release does the same only for the start
+	// it names: one without a start id leaves the job such a start publishes,
+	// though not a rebuild (releaseSupersededLocked).
 	unlock := s.lockSessionLifecycle(sessionID)
 	defer unlock()
 
 	// The core deletes the transport's stored recipe before it calls here;
 	// the node keeps only its in-memory fences.
-	fenced := r.URL.Query().Get(playback.TranscodeStopFenceQueryParam) != "0"
 	s.mu.Lock()
 	now := time.Now()
 	s.pruneStopFencesLocked(now)
 	progressive, progressiveFound := s.progressiveRemuxes[sessionID]
+	if !fenced && !progressiveFound && s.releaseSupersededLocked(sessionID, startID, arrived) {
+		s.mu.Unlock()
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
 	// An HLS job is tracked under the transport id it started with, which for a
 	// native v3 transcode is not its card's SessionID. Only a progressive remux
 	// still running here is tracked under the viewer's playback session id; one
@@ -2875,102 +2918,13 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		session.ServeSubtitleSegment(w, r, name)
 		return
 	}
-	segmentLease, err := session.OpenSegment(name)
-	if errors.Is(err, playback.ErrSegmentNotFound) { //nolint:nestif // pre-existing depth; splitting the segment recovery path is a separate change
-		segNum, parseErr := playback.ParseSegmentNumber(name)
-		if parseErr == nil {
-			now := time.Now()
-			decision := session.SegmentRecoveryDecision(segNum, now)
-			lastProducedAgeMS := int64(-1)
-			if !decision.Progress.LastProducedAt.IsZero() {
-				lastProducedAgeMS = now.Sub(decision.Progress.LastProducedAt).Milliseconds()
-			}
-			slog.InfoContext(r.Context(), "transcode segment missing", "component", "transcodenode",
-				"segment", name,
-				"requested_segment", segNum,
-				"produced_head", decision.Progress.ProducedHead,
-				"last_requested_segment", decision.Progress.LastRequestedSegment,
-				"start_segment_number", decision.Progress.StartSegmentNumber,
-				"last_produced_age_ms", lastProducedAgeMS,
-				"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-				"reason", decision.Reason,
-				"session", sessionID,
-				"playback_session_id", sessionID,
-			)
-			if decision.Wait {
-				slog.InfoContext(r.Context(), "transcode segment wait", "component", "transcodenode",
-					"segment", name,
-					"requested_segment", segNum,
-					"produced_head", decision.Progress.ProducedHead,
-					"last_requested_segment", decision.Progress.LastRequestedSegment,
-					"start_segment_number", decision.Progress.StartSegmentNumber,
-					"last_produced_age_ms", lastProducedAgeMS,
-					"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-					"reason", decision.Reason,
-					"session", sessionID,
-					"playback_session_id", sessionID,
-				)
-				segmentLease, err = session.WaitForOpenSegmentContext(r.Context(), name, decision.WaitTimeout)
-				if errors.Is(err, playback.ErrSegmentNotFound) {
-					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "transcodenode",
-						"segment", name,
-						"requested_segment", segNum,
-						"produced_head", decision.Progress.ProducedHead,
-						"last_requested_segment", decision.Progress.LastRequestedSegment,
-						"start_segment_number", decision.Progress.StartSegmentNumber,
-						"last_produced_age_ms", lastProducedAgeMS,
-						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-						"reason", decision.Reason,
-						"session", sessionID,
-						"playback_session_id", sessionID,
-					)
-				}
-			}
-
-			if errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
-				target, ok, restartErr := s.restartSegmentLocked(
-					r.Context(),
-					sessionID,
-					session,
-					segNum,
-					decision.Progress.GenerationStartedAt,
-				)
-				// A restart skipped because the request ended is not a failure.
-				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
-					slog.ErrorContext(r.Context(), "restart transcode node at missing segment", "component", "transcodenode", "error", restartErr, "segment", name, "session", sessionID, "playback_session_id", sessionID)
-				}
-
-				if restartErr != nil {
-					err = restartErr
-				} else if ok {
-					slog.InfoContext(r.Context(), "transcode node seek restart", "component", "transcodenode",
-						"segment", name,
-						"requested_segment", segNum,
-						"produced_head", decision.Progress.ProducedHead,
-						"last_requested_segment", decision.Progress.LastRequestedSegment,
-						"start_segment_number", decision.Progress.StartSegmentNumber,
-						"last_produced_age_ms", lastProducedAgeMS,
-						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-						"reason", decision.Reason,
-						"seek_seconds", target.SeekSeconds,
-						"stream_origin_seconds", target.StreamOriginSeconds,
-						"resolved_start_segment", target.StartSegmentNumber,
-						"session", sessionID,
-						"playback_session_id", sessionID,
-					)
-
-					segmentLease, err = session.WaitForOpenSegmentContext(r.Context(), name, 30*time.Second)
-				}
-				if !ok && restartErr == nil && session.IsCopyVideo() {
-					err = playback.ErrSegmentNotFound
-				}
-			}
-		} else if session.IsRunning() {
-			// Non-numbered segment (e.g., init.mp4 for fMP4 HLS).
-			// Wait briefly — the init segment is written almost immediately.
-			segmentLease, err = session.WaitForOpenSegmentContext(r.Context(), name, 10*time.Second)
-		}
-	}
+	segmentLease, err := playback.OpenSegmentWithRecovery(r.Context(), session, name, playback.SegmentRecoveryOptions{
+		SessionID: sessionID,
+		Component: "transcodenode",
+		Restart: func(ctx context.Context, segNum int, seenGeneration time.Time) (playback.SegmentRecoveryTarget, bool, error) {
+			return s.restartSegmentLocked(ctx, sessionID, session, segNum, seenGeneration)
+		},
+	})
 	if err != nil {
 		if r.Context().Err() != nil {
 			// net/http also ends the context of a client that only
@@ -3028,6 +2982,36 @@ func (s *Server) handleSegmentDownloaded(w http.ResponseWriter, r *http.Request)
 	}
 	session.ReportSegmentDownloadedForGenerationToken(segmentNumber, generationToken)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// outputBoundResponse is the node's answer to whether a transport's client is
+// waiting on the encoder.
+type outputBoundResponse struct {
+	OutputBound bool `json:"output_bound"`
+}
+
+// handleOutputBound tells the core whether the client of a transport this node
+// runs is waiting on its encoder: a restart is replacing FFmpeg, or the client
+// has fetched all produced segments but at most the newest
+// (playback.TranscodeSession.OutputBoundsClient). A stall the client reports
+// then was paced by this node's encoder, not the link, and the core learns no
+// bandwidth limit from it. A progressive remux has no segment lead to compare
+// and answers false. A transport the node does not run is 404, and the read
+// neither reconstructs one nor counts as client activity.
+func (s *Server) handleOutputBound(w http.ResponseWriter, r *http.Request) {
+	sessionID := chi.URLParam(r, "session_id")
+	s.mu.RLock()
+	session, transcoding := s.sessions[sessionID]
+	_, remuxing := s.progressiveRemuxes[sessionID]
+	s.mu.RUnlock()
+	if !transcoding && !remuxing {
+		http.Error(w, "session not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(outputBoundResponse{OutputBound: transcoding && session.OutputBoundsClient()}); err != nil {
+		slog.WarnContext(r.Context(), "write output-bound response", "component", "transcodenode", "session", sessionID, "error", err)
+	}
 }
 
 // handleReloadConfig re-reads this node's configuration and nothing else.

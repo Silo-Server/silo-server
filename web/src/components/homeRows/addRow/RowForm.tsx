@@ -31,10 +31,12 @@ import { RowPreview } from "./RowPreview";
 import { RuleBuilder, RuleSortField } from "./RuleBuilder";
 import { ShowsSummary } from "./ShowsSummary";
 import { VariantChoice } from "./VariantChoice";
+import type { RowOrigin } from "../RowOriginBadge";
 
 export interface ShowsLine {
   label: string;
   sentence: string;
+  origin?: RowOrigin;
   onChange?: () => void;
 }
 

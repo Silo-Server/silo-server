@@ -1,6 +1,6 @@
 # Library diagnostics API
 
-The native v2 library administration operations are acting-admin operations. Their
+The native library administration operations are acting-admin operations. Their
 complete request and response schemas are generated in `contracts/api/v2/openapi.json`.
 
 `GET /api/v2/libraries/roots`, `GET /api/v2/libraries/skipped-roots`,
@@ -67,7 +67,7 @@ path, so a renamed or moved file comes back as a new unmatched item.
 
 ## Real-time monitoring
 
-The v2 library resource carries `realtime_monitoring`, the library's real-time
+The library resource carries `realtime_monitoring`, the library's real-time
 monitoring switch: scan automatically when files in the library's folders
 change. It appears on every library read, is optional on `createLibrary`
 (omitted means `true`), and is an optional, non-nullable member of the

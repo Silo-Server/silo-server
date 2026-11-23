@@ -24,7 +24,7 @@ func TestBuildPlaybackInfo_MarksProbeRejectedFilesUnreadable(t *testing.T) {
 		{ID: 2, ContentID: "movie-1", FilePath: "/media/new.mkv"},
 		{ID: 3, ContentID: "movie-1", FilePath: "/media/flaky.mkv", ProbeFailedAt: &failedAt, CodecVideo: "h264"},
 		{ID: 4, ContentID: "movie-1", FilePath: "/media/replaced.mkv", ProbeFailedAt: &failedAt, ProbeUpdatedAt: &probedAt},
-	}, AccessFilter{}, "movie-1")
+	}, AccessFilter{}, "movie-1", nil)
 
 	want := map[int]bool{1: true, 2: false, 3: false, 4: false}
 	if len(versions) != len(want) {

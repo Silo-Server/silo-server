@@ -401,6 +401,7 @@ function LinkSource({
     <div className="grid gap-2">
       <Label htmlFor={fieldId}>{mdblistLinkLabel()}</Label>
       <Input
+        dir="ltr"
         id={fieldId}
         value={link}
         placeholder={MDBLIST_LINK_PLACEHOLDER}

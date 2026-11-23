@@ -19,7 +19,7 @@ const config: PlayerConfig = {
   apiBaseUrl: "/api/v2",
   getAccessToken: () => "token",
   getProfileId: () => "profile-1",
-  getDeviceId: () => "device",
+  getDeviceHeaders: () => ({ "X-Silo-Device-Id": "device" }),
 };
 
 const KEY = "stored-7";

@@ -28,17 +28,7 @@ requests to a secret it keeps; see [Session binding](#session-binding).
   link.
 - **Match code:** two English words. Kept on the wire for older clients and the
   LAN setup protocol's consistency check. People compare the user code
-  instead. TV apps released before user codes show only the match words, so
-  until both TV apps display the user code, the `/activate` card also prints
-  the words on a secondary "Older TV apps show ..." line. Remove that line
-  once the TV apps that show user codes have shipped.
-- **The TV side of the same fallback.** Phone apps released before user
-  codes show only the match words when they confirm a LAN pairing, so the
-  TV's LAN pairing confirmation (Apple `TVPairingReceiverView`, Android
-  `TvPairingPanel`) also prints the words on a secondary line, "Older phones
-  show <WORDS> instead.", where `<WORDS>` is the request's `match_code`.
-  The TV's code and QR sign-in screens show no match words. Remove that line
-  once the phone apps that show user codes have shipped.
+  instead; no client displays the match words.
 
 ## Verification link
 

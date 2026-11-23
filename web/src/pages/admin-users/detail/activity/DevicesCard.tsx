@@ -93,6 +93,7 @@ export function DevicesCard({ userId }: { userId: number }) {
               key={device.device_id}
               leading={<PlatformTile kind={classifyPlatform(device.device_platform)} />}
               title={device.device_name || t("web.admin.users.detail.common.unnamedDevice")}
+              titleDir="auto"
               meta={
                 <>
                   {platformLabel(device.device_platform)}

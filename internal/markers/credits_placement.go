@@ -11,7 +11,7 @@ import (
 // Credits placement bounds, validated against frame-checked episodes and
 // movies. Credits start in the file's tail window: the last TailSeconds, or
 // TailFraction of a shorter file. Local detection and every other marker
-// source share these bounds, since players open Up Next at the credits start.
+// source share these bounds, since skipping credits at the end finishes the item.
 const (
 	CreditsMinimumSeconds = 15.0
 
@@ -85,6 +85,26 @@ func (l CreditsLimits) CheckCreditsPlacement(start, end, duration float64, intro
 		return fmt.Errorf("credits must run between %s and %s", formatClock(l.MinSeconds), formatClock(l.MaxSeconds))
 	}
 	return nil
+}
+
+// EndCreditsStart returns where the end credits among segments start, for a
+// file of duration seconds, or 0 when it has none. Reaching that point
+// finishes the item (userstore.ProgressThresholds.CreditsStartSeconds). Only
+// credits starting inside the tail window count, so a misplaced legacy marker
+// never finishes an item early. The last such occurrence wins, which in a
+// file spanning several episodes is the final episode's.
+func (l CreditsLimits) EndCreditsStart(segments []models.MarkerSegment, duration float64) float64 {
+	if duration <= 0 {
+		return 0
+	}
+	windowStart := l.WindowStart(duration)
+	start := 0.0
+	for _, segment := range segments {
+		if segment.Kind == models.MarkerSegmentCredits && segment.StartSeconds >= windowStart && segment.StartSeconds < duration {
+			start = math.Max(start, segment.StartSeconds)
+		}
+	}
+	return start
 }
 
 // KeepPlaced returns the credits in ranges that pass CheckCreditsPlacement.

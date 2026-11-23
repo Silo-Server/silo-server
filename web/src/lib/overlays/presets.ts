@@ -1,4 +1,5 @@
 import { t } from "@/i18n";
+import { readableTextOn } from "./style";
 import type { OverlayPreset, PresetId } from "./types";
 
 // Presets are pure data — no runtime branching, no per-render computation.
@@ -86,7 +87,7 @@ export const OVERLAY_PRESETS: Record<PresetId, OverlayPreset> = {
       "rounded-md px-2 py-0.5 text-[0.625rem] font-bold tracking-wide uppercase leading-none shadow-sm",
     badgeStyle: (accent) => ({
       background: accent ?? "rgba(220,220,220,0.95)",
-      color: accent ? "white" : "black",
+      color: accent ? readableTextOn(accent) : "black",
     }),
     fontSize: 10,
     paddingInline: 8,
