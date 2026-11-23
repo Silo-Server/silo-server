@@ -1,4 +1,5 @@
 import { memo, useRef } from "react";
+import { LineTitle, TitleLineParts } from "@/components/TitleLine";
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import MediaCardArtwork, {
   MEDIA_CARD_CAPTION_CLASS,
@@ -19,9 +20,11 @@ import {
   upcomingBadgeLabel,
 } from "@/lib/upcomingEventPresentation";
 import type { SectionItem } from "@/api/types";
+import { cn } from "@/lib/utils";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import CardPlayOverlay from "@/components/CardPlayOverlay";
 import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
+import { hasArabicScript } from "@/lib/direction";
 
 /**
  * A "next in series" card's book number. The server sends it as the English
@@ -55,7 +58,8 @@ export default memo(function SectionItemCard({
   useAppLanguage();
   const itemHref = buildItemHref({ contentId: item.content_id, libraryId });
   const upcomingEvent = item.upcoming_event;
-  const subtitle = upcomingEvent ? formatUpcomingSubtitle(upcomingEvent) : "";
+  const bookBadge = bookBadgeLabel(t, item.badges);
+  const subtitle = upcomingEvent ? formatUpcomingSubtitle(upcomingEvent, t) : "";
   const airDateLabel = upcomingEvent ? formatUpcomingDate(upcomingEvent.air_date) : "";
   const airTimeLabel = upcomingEvent ? formatUpcomingTime(upcomingEvent.air_time) : null;
   const episodeLabels = !upcomingEvent ? buildEpisodeCardLabels(item) : null;
@@ -133,14 +137,14 @@ export default memo(function SectionItemCard({
         />
       </div>
       <div className={MEDIA_CARD_CAPTION_CLASS}>
-        <ViewTransitionLink to={headingHref} className={MEDIA_CARD_TITLE_CLASS}>
+        <ViewTransitionLink to={headingHref} dir="auto" className={MEDIA_CARD_TITLE_CLASS}>
           {displayTitle}
         </ViewTransitionLink>
         {upcomingEvent ? (
           <ViewTransitionLink to={itemHref} className="block hover:underline">
             {subtitle && (
-              <div className="text-muted-foreground mt-1 truncate text-[0.6875rem] font-medium tracking-[0.14em] uppercase">
-                {subtitle}
+              <div className="text-muted-foreground mt-1 flex flex-wrap overflow-hidden text-[0.6875rem] font-medium tracking-[0.14em] uppercase">
+                <TitleLineParts>{subtitle}</TitleLineParts>
               </div>
             )}
             <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[0.6875rem] font-medium">
@@ -153,7 +157,10 @@ export default memo(function SectionItemCard({
         ) : episodeLabels ? (
           <ViewTransitionLink to={itemHref} className="block hover:underline">
             {episodeLabels.episodeTitle ? (
-              <div className="bidi-text text-muted-foreground mt-1 truncate text-[0.75rem] font-medium">
+              <div
+                dir="auto"
+                className="bidi-text text-muted-foreground mt-1 truncate text-[0.75rem] font-medium"
+              >
                 {episodeLabels.episodeTitle}
               </div>
             ) : null}
@@ -162,8 +169,17 @@ export default memo(function SectionItemCard({
             </div>
           </ViewTransitionLink>
         ) : item.item_source === "next_in_series" && item.series_title ? (
-          <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>
-            {[bookBadgeLabel(t, item.badges), item.series_title].filter(Boolean).join(" · ")}
+          <ViewTransitionLink
+            to={itemHref}
+            className={cn(MEDIA_CARD_META_CLASS, "flex flex-wrap overflow-hidden")}
+            data-cursive={hasArabicScript(item.series_title) || undefined}
+          >
+            <TitleLineParts>
+              {[
+                bookBadge ? `${bookBadge} · ` : null,
+                <LineTitle key="series">{item.series_title}</LineTitle>,
+              ]}
+            </TitleLineParts>
           </ViewTransitionLink>
         ) : (
           <ViewTransitionLink to={itemHref} className={MEDIA_CARD_META_CLASS}>

@@ -374,3 +374,29 @@ func TestPostgresConcurrentProfileDeleteAndCollectionReorder(t *testing.T) {
 		}
 	}
 }
+
+// TestPostgresCollectionsHolding runs the "Also in" membership conformance
+// test against the Postgres backend, then checks that another account's
+// collection holding the same title is never reported. The SQLite backend
+// runs the suite in internal/userdb.
+func TestPostgresCollectionsHolding(t *testing.T) {
+	pool := testPool(t)
+	store := newStore(pool, seedTestUser(t, pool, "conf-holding"))
+	storetest.RunCollectionsHolding(t, store)
+
+	other := newStore(pool, seedTestUser(t, pool, "conf-holding-other"))
+	c, err := other.CreateCollection(t.Context(), userstore.CreateCollectionInput{CreatorProfileID: "owner", Name: "Other account's", CollectionType: "manual"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := other.AddCollectionItem(t.Context(), c.ID, "title", 0); err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.CollectionsHolding(t.Context(), "title")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(got, c.ID) {
+		t.Fatalf("collections holding title = %v, includes another account's %s", got, c.ID)
+	}
+}

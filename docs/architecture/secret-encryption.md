@@ -85,7 +85,7 @@ affected credentials:
 
 ## Rollout (automatic backfill)
 
-On the first boot after deploying this change, the primary (migration-running)
+On the first boot of a binary with at-rest encryption, the primary (migration-running)
 node runs an idempotent, best-effort startup backfill that encrypts any
 remaining plaintext in place:
 
@@ -110,7 +110,7 @@ whatever the primary encrypted. No manual steps are required.
 
 ## Rollback / downgrade hazard
 
-Downgrading to a binary that predates this change is **not** safe while secrets
+Downgrading to a binary that predates at-rest encryption is **not** safe while secrets
 are encrypted, because the old binary has no read path: it would read
 `enc:v1:auth.jwt_secret` as a literal JWT secret (invalidating all sessions) and
 read `enc:v1:`-prefixed integration keys as garbage credentials. It would also

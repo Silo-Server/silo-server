@@ -12,7 +12,7 @@ A logical session is one native session id: the key of the in-memory
 (`playback_session_lifecycle`) and the admin history row (`admin_playback_history`).
 It starts once and ends once; an id never starts again.
 
-- Native (v2 and the v1 bridge): starts when `startPlannedPlaybackV3` commits the
+- Native: starts when `startPlannedPlaybackV3` commits the
   transport; ends when its attempt row is stopped. A stopped attempt never
   reconstructs, and reconstruction after a restart announces nothing. A
   reconstruction from a stream token, whose recipe card carries no client, takes
@@ -54,7 +54,7 @@ transition.
   announced state is therefore always the latest accepted sample's, and a lost update
   is repaired by the next sample. The control socket's confirmed pause does not touch
   it; the player's next sample carries the pause.
-- Jellyfin, Audiobookshelf and v1 bridge reports carry no sequence. Their pause state
+- Jellyfin and Audiobookshelf reports carry no sequence. Their pause state
   follows database arrival order and writes only when it changes.
 - `stopped` is final.
 
@@ -66,8 +66,8 @@ stops the attempt row and claims its finalization lease, so only one caller runs
 non-idempotent writers (watch history, provider events). The admin history row and the
 lifecycle's stop commit in one transaction (`RecordEnd`): the first end sets the reason
 and `lifecycle_seq`, later ends record that reason, and only the first is announced,
-with the history entry as stored. A teardown the client recovers from (encoder exit,
-copy-safety) is not an end: it records its stretch and announces nothing.
+with the history entry as stored. A teardown the client recovers from (an encoder
+exit) is not an end: it records its stretch and announces nothing.
 
 ## Sessions no server holds
 
@@ -120,7 +120,9 @@ The native session list (`ReadAdminPlaybackSessions`) joins the lifecycle row: `
 and `lifecycle_seq` come from it together, ended sessions are excluded, and a native
 session whose attempt is live but that no server has a live row for is listed from its
 start row at the attempt's position. An open Audiobookshelf reported play is listed the
-same way, at its row's position. The frozen v1 snapshot keeps its own query.
+same way, at its row's position. The events socket's `sessions` subscribe snapshot
+and `sessions.replaced` frames carry no rows; monitors re-read this list, as
+[the realtime API](../realtime-api.md) describes.
 
 `worker.SessionSyncRowJSON` renders a session exactly as a sync stores its row, so a
 start event and the start row read through `jsonb_populate_record` match the live list.

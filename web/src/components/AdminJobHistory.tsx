@@ -5,7 +5,8 @@ import { useAllAdminJobs } from "@/hooks/queries/admin/libraries";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
-import { formatJobProgress } from "./adminCatalogMaintenanceFormatters";
+import { formatJobProgress, jobStatusLabel } from "./adminCatalogMaintenanceFormatters";
+import { PathText } from "@/components/PathText";
 import { formatDateTime } from "@/lib/datetime";
 import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
 
@@ -24,19 +25,6 @@ const JOB_TYPE_LABELS: Record<string, MessageKey> = {
 function jobTypeLabel(jobType: string, t: Translate) {
   const key = JOB_TYPE_LABELS[jobType];
   return key ? t(key) : jobType;
-}
-
-const JOB_STATUS_LABELS: Record<string, MessageKey> = {
-  queued: "web.admin.common.taskStatus.queued",
-  running: "web.admin.common.taskStatus.running",
-  completed: "web.admin.common.taskStatus.completed",
-  failed: "web.admin.common.taskStatus.failed",
-  cancelled: "web.admin.common.taskStatus.cancelled",
-};
-
-function jobStatusLabel(status: string, t: Translate) {
-  const key = JOB_STATUS_LABELS[status];
-  return key ? t(key) : status;
 }
 
 function statusVariant(status: string) {
@@ -79,12 +67,17 @@ function jobDescription(job: AdminJob, t: Translate) {
         return t("web.admin.common.jobHistory.target.libraryCount", countValues(ids.length));
       return t("web.admin.common.jobHistory.target.allLibraries");
     }
-    case "catalog_import":
-      return (
-        (payload.source_label as string) ||
-        (payload.source_key as string) ||
+    case "catalog_import": {
+      // The server's label: the remote URL, a file name, or "Export job <id>", untranslated.
+      const label = payload.source_label as string | undefined;
+      return label ? (
+        <bdi dir="ltr">
+          <PathText path={label} />
+        </bdi>
+      ) : (
         t("web.admin.common.jobHistory.target.catalogSeed")
       );
+    }
     default:
       return "";
   }

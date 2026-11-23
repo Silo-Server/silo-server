@@ -16,6 +16,8 @@
 // - utilities under an `rtl:` or `ltr:` variant, which already say which
 //   direction they are for.
 
+import { classParts, classTokenVisitors } from "./class-tokens.js";
+
 const VALUE = String.raw`(?:\d+(?:\.\d+)?|\d+\/\d+|auto|full|px|\[[^\]\s]+\]|\([^)\s]+\))`;
 const RADIUS = String.raw`(?:-(?:none|xs|sm|md|lg|xl|2xl|3xl|4xl|full|\[[^\]\s]+\]|\([^)\s]+\)))?`;
 const BORDER = String.raw`(?:-[\w./#%\[\]()-]+)?`;
@@ -51,12 +53,10 @@ const CENTERING = /^-?(?:left|right)-(?:1\/2|\[50%\])$/;
 const PHYSICAL_VALUE = /safe-area-inset-(?:left|right)/;
 const DIRECTION_VARIANT = /(?:^|:)(?:rtl|ltr):/;
 const COMPILED = MAPPINGS.map(([pattern, replace]) => [new RegExp(`^${pattern}$`), replace]);
-// Variants (`md:`, `data-[state=open]:`), then `!` before or after (v3 and v4 forms).
-const PARTS = /^((?:[^\s:"'`]+:)*)(!?)(.*?)(!?)$/;
 
 /** The logical form of one class token, or null when it isn't physical. */
 function logicalClass(token) {
-  const [, variants, lead, utility, trail] = PARTS.exec(token);
+  const { variants, lead, utility, trail } = classParts(token);
   if (CENTERING.test(utility) || PHYSICAL_VALUE.test(utility) || DIRECTION_VARIANT.test(variants)) {
     return null;
   }
@@ -64,27 +64,6 @@ function logicalClass(token) {
     if (regex.test(utility)) return variants + lead + utility.replace(regex, replace) + trail;
   }
   return null;
-}
-
-// Tokens are separated by whitespace, quotes, or template-literal joints.
-const TOKEN = /(?<=^|[\s"'`}])([^\s"'`${}]+)(?=$|[\s"'`$])/g;
-
-function check(context, node) {
-  const text = context.sourceCode.getText(node);
-  const found = [];
-  const fixed = text.replace(TOKEN, (token) => {
-    const logical = logicalClass(token);
-    if (logical === null) return token;
-    found.push([token, logical]);
-    return logical;
-  });
-  if (found.length === 0) return;
-  context.report({
-    node,
-    messageId: "physical",
-    data: { list: found.map(([from, to]) => `${from} → ${to}`).join(", ") },
-    fix: (fixer) => fixer.replaceText(node, fixed),
-  });
 }
 
 export default {
@@ -101,13 +80,6 @@ export default {
     schema: [],
   },
   create(context) {
-    return {
-      Literal(node) {
-        if (typeof node.value === "string") check(context, node);
-      },
-      TemplateElement(node) {
-        check(context, node);
-      },
-    };
+    return classTokenVisitors(context, logicalClass, "physical");
   },
 };

@@ -758,7 +758,7 @@ export default function AdminCollections() {
     <Button
       type="button"
       size={narrow ? "lg" : "sm"}
-      className={cn(narrow && "h-12 rounded-[14px] text-[15px]")}
+      className={cn(narrow && "h-12 rounded-[14px] text-[0.9375rem]")}
       onClick={() => setPickerOpen(true)}
     >
       <Plus aria-hidden /> {t("web.admin.collections.page.newCollection")}
@@ -974,7 +974,7 @@ export default function AdminCollections() {
                     </>
                   )}
                   {selecting ? null : (
-                    <p className="text-muted-foreground flex items-center gap-2 px-4 pt-2 pb-3 text-[13px]">
+                    <p className="text-muted-foreground flex items-center gap-2 px-4 pt-2 pb-3 text-[0.8125rem]">
                       <Info aria-hidden className="size-4 shrink-0" />
                       <span>
                         {t("web.admin.collections.list.arrangeHint", {
@@ -1170,7 +1170,7 @@ function Segmented<T extends string>({
             aria-pressed={pressed}
             onClick={() => onChange(option.value)}
             className={cn(
-              "focus-visible:ring-ring/50 inline-flex h-8 items-center gap-1.5 rounded-[9px] px-3 text-[13px] font-medium whitespace-nowrap outline-none focus-visible:ring-[3px] max-lg:h-11",
+              "focus-visible:ring-ring/50 inline-flex h-8 items-center gap-1.5 rounded-[9px] px-3 text-[0.8125rem] font-medium whitespace-nowrap outline-none focus-visible:ring-[3px] max-lg:h-11",
               pressed
                 ? "bg-accent text-foreground shadow-sm"
                 : "text-muted-foreground hover:text-foreground",
@@ -1229,7 +1229,7 @@ function ListFilters({
           aria-pressed={state.failed}
           onClick={() => onChange({ failed: !state.failed })}
           className={cn(
-            "focus-visible:ring-ring/50 ms-auto inline-flex h-8 items-center gap-2 rounded-full border px-3 text-[13px] font-medium outline-none focus-visible:ring-[3px] max-lg:h-11",
+            "focus-visible:ring-ring/50 ms-auto inline-flex h-8 items-center gap-2 rounded-full border px-3 text-[0.8125rem] font-medium outline-none focus-visible:ring-[3px] max-lg:h-11",
             state.failed
               ? "border-destructive bg-destructive/15 text-destructive"
               : "border-destructive/40 text-destructive hover:bg-destructive/10",

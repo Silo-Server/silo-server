@@ -48,6 +48,7 @@ import {
   getSessionClientLabelFull,
   getSessionRouteNodes,
   getVideoConversion,
+  isEpisodeSession,
   normalizeContainerDecision,
   normalizeStreamDecision,
   sessionRoutesVary,
@@ -82,7 +83,7 @@ import {
 } from "lucide-react";
 import { formatDateTime, formatTime } from "@/lib/datetime";
 import { formatLocale, joinList } from "@/lib/appLocale";
-import { codeNumber, englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
+import { englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
 
 type SortField = "username" | "media" | "method" | "bitrate" | "node" | "started";
@@ -93,6 +94,46 @@ const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
 const MIDDLE_DOT = "·";
 const SORT_ASC_MARK = "▲";
 const SORT_DESC_MARK = "▼";
+
+/**
+ * Links inside a row that itself toggles details, underlined on hover like the
+ * other admin tables while the row's highlight steps back (ROW_HOVER_CLASS).
+ * The default theme's primary matches its foreground, so the color alone
+ * shows nothing there.
+ */
+const ROW_LINK_CLASS =
+  "rounded-sm decoration-1 underline-offset-3 transition-colors hover:text-primary hover:underline active:underline focus-visible:text-primary focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring";
+/**
+ * A row link's text, truncated with "…" inside the link. The link itself can't
+ * truncate: Firefox and WebKit clip its text to its rounded corners with either
+ * `overflow: hidden` or `overflow-x: clip`, which cuts off a first or last
+ * letter's descender (the "j" in "jordan"). This box has no corners, and the
+ * link keeps its rounded focus ring. It clips only the inline axis: `truncate`'s
+ * `overflow: hidden` would cut the top of "Ẩ" and Arabic vowel marks below the
+ * line. Padding offset by a negative margin, as in `OVERFLOW_CLIP`, moves the clip
+ * past the text's edges, so ink that reaches beyond them (the hook of a leading
+ * "j") stays whole. The box takes no pointer events, so its padding can't catch
+ * a click meant for a neighbouring link or the row; the link's own box still
+ * does. A flex-item link needs `min-w-0` to shrink; a block link needs
+ * `flow-root`, or the negative margins pass through it and stretch its focus
+ * ring.
+ */
+function RowLinkText({ children, className = "" }: { children: ReactNode; className?: string }) {
+  return (
+    <span
+      className={`pointer-events-none -m-[0.25em] block overflow-x-clip p-[0.25em] text-ellipsis whitespace-nowrap ${className}`}
+    >
+      {children}
+    </span>
+  );
+}
+/**
+ * A clickable row's highlight and lit expand chevron, held back while the
+ * pointer is on a link or a button that does something else; the expand
+ * controls keep them. Uses the app's pointer-gated hover variant.
+ */
+const ROW_HOVER_CLASS =
+  "transition-colors hover:[&:not(:has(a:hover,button:not([data-row-toggle]):hover))]:bg-surface-hover hover:[&:not(:has(a:hover,button:not([data-row-toggle]):hover))_[data-row-chevron]]:text-foreground";
 
 /**
  * The stream table's two layouts. Rows and the header share one column
@@ -110,6 +151,15 @@ interface TableLayout {
   panel: string;
   /** Classes that rule off the second and third details columns. */
   panelColumn: string;
+  /**
+   * Classes for the rows' container. In the table layout a control focused
+   * while under the pinned header (Shift+Tab back up the table) scrolls to
+   * 4rem, clear of the header and of the shell's activity control beside it.
+   * `[data-row-scroller]` marks boxes that scroll on their own, which
+   * Chromium and Firefox let the keyboard focus. A root scroll-padding would
+   * also scroll the page when the header's own buttons take focus.
+   */
+  rows: string;
 }
 
 const TABLE_LAYOUT: TableLayout = {
@@ -119,6 +169,7 @@ const TABLE_LAYOUT: TableLayout = {
   stacked: "@min-[62rem]:hidden",
   panel: "@min-[62rem]:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1fr)]",
   panelColumn: "@min-[62rem]:border-border/40 @min-[62rem]:border-s @min-[62rem]:ps-5",
+  rows: "@min-[62rem]:[&_:is(a,button,[tabindex],[data-row-scroller])]:scroll-mt-16",
 };
 
 const TABLE_LAYOUT_WITH_ROUTE: TableLayout = {
@@ -128,6 +179,7 @@ const TABLE_LAYOUT_WITH_ROUTE: TableLayout = {
   stacked: "@min-[70rem]:hidden",
   panel: "@min-[70rem]:grid-cols-[minmax(0,1.7fr)_minmax(0,1fr)_minmax(0,1fr)]",
   panelColumn: "@min-[70rem]:border-border/40 @min-[70rem]:border-s @min-[70rem]:ps-5",
+  rows: "@min-[70rem]:[&_:is(a,button,[tabindex],[data-row-scroller])]:scroll-mt-16",
 };
 
 const STACKED_SORT_FIELDS: [SortField, MessageKey][] = [
@@ -147,7 +199,7 @@ const SEGMENTED_GROUP_CLASS =
   "border-border bg-border inline-flex max-w-full flex-wrap gap-px overflow-hidden rounded-md border";
 
 function segmentClass(active: boolean): string {
-  return `focus-visible:ring-ring inline-flex h-[30px] grow items-center justify-center gap-1.5 px-2.5 text-[12px] font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset ${
+  return `focus-visible:ring-ring inline-flex h-7.5 grow items-center justify-center gap-1.5 px-2.5 text-[0.75rem] font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:outline-none focus-visible:ring-inset ${
     active
       ? "bg-primary/10 text-foreground"
       : "bg-surface text-muted-foreground hover:bg-secondary hover:text-foreground"
@@ -178,7 +230,7 @@ function NodeFilterMenu({
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className={`focus-visible:ring-ring inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-[12px] font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:outline-none ${
+        className={`focus-visible:ring-ring inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border px-2.5 text-[0.75rem] font-medium whitespace-nowrap transition-colors focus-visible:ring-2 focus-visible:outline-none ${
           selectedNode
             ? "border-primary/40 bg-primary/10 text-foreground"
             : "border-border bg-surface text-muted-foreground hover:text-foreground"
@@ -187,7 +239,9 @@ function NodeFilterMenu({
         {selectedNode ? (
           <>
             <span className="text-muted-foreground">{selectedNode.label}</span>
-            <span className="truncate">{selectedNode.name}</span>
+            <span dir="auto" className="truncate">
+              {selectedNode.name}
+            </span>
           </>
         ) : (
           t("web.admin.activity.route.node")
@@ -196,13 +250,16 @@ function NodeFilterMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
+        // The cap and the padding keep a long node name's menu inside the screen with even
+        // margins, so the name is cut instead of pushing the menu past the edge.
+        collisionPadding={16}
         aria-label={t("web.admin.activity.summary.byNode")}
-        className="min-w-56"
+        className="max-w-[calc(100vw-2rem)] min-w-56"
       >
         {groups.map((group, index) => (
           <div key={group[0]!.kind} role="group" aria-label={group[0]!.label}>
             {index > 0 && <DropdownMenuSeparator />}
-            <DropdownMenuLabel className="text-muted-foreground text-[11px] font-medium">
+            <DropdownMenuLabel className="text-muted-foreground text-[0.6875rem] font-medium">
               {group[0]!.label}
             </DropdownMenuLabel>
             {group.map((node) => (
@@ -210,9 +267,11 @@ function NodeFilterMenu({
                 key={node.key}
                 checked={node.key === selected}
                 onCheckedChange={(checked) => onSelect(checked ? node.key : null)}
-                className="text-[13px]"
+                className="text-[0.8125rem]"
               >
-                <span className="truncate">{node.name}</span>
+                <span dir="auto" className="truncate">
+                  {node.name}
+                </span>
                 <span className="text-muted-foreground ms-auto ps-4 tabular-nums">
                   {numberText(node.count)}
                 </span>
@@ -333,8 +392,7 @@ export default function AdminActivity() {
           s.username?.toLowerCase().includes(q) ||
           s.profile_name?.toLowerCase().includes(q) ||
           s.media_title?.toLowerCase().includes(q) ||
-          s.series_name?.toLowerCase().includes(q) ||
-          s.episode_name?.toLowerCase().includes(q) ||
+          s.series_title?.toLowerCase().includes(q) ||
           // Search the exact label, not the compact one: "which sessions are on
           // build 5?" is the question this identity exists to answer, and the
           // compact label deliberately omits the build.
@@ -352,7 +410,15 @@ export default function AdminActivity() {
         getSessionRouteNodes(s).some((node) => node.key === nodeFilter),
       );
     }
-    if (typeFilter) result = result.filter((s) => s.media_type === typeFilter);
+    if (typeFilter) {
+      // A file linked to a show with no matching episode row is reported as
+      // the show itself, so the episode choice keeps both.
+      result = result.filter((s) =>
+        typeFilter === "episode"
+          ? s.media_type === "episode" || s.media_type === "series"
+          : s.media_type === typeFilter,
+      );
+    }
 
     return [...result].sort((a, b) => {
       let cmp = 0;
@@ -483,7 +549,7 @@ export default function AdminActivity() {
             aria-label={t("web.admin.activity.filter.placeholder")}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="h-8 ps-9 pe-8 text-[13px]"
+            className="h-8 ps-9 pe-8 text-[0.8125rem]"
           />
           {search && (
             <button
@@ -531,7 +597,7 @@ export default function AdminActivity() {
           </div>
         )}
         <div className={SEGMENTED_GROUP_CLASS}>
-          {(["movie", "series"] as const).map((type) => (
+          {(["movie", "episode"] as const).map((type) => (
             <button
               key={type}
               type="button"
@@ -556,7 +622,7 @@ export default function AdminActivity() {
               setNodeFilter(null);
               setTypeFilter(null);
             }}
-            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[12px]"
+            className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-[0.75rem]"
           >
             <X className="h-3 w-3" />
             {t("web.admin.activity.filter.clear")}
@@ -566,7 +632,7 @@ export default function AdminActivity() {
 
       {/* Filter status */}
       {(search || activeFilters > 0) && (
-        <div className="text-muted-foreground text-[12px]">
+        <div className="text-muted-foreground text-[0.75rem]">
           {t("web.admin.activity.filter.showing", {
             total: sessions.length,
             shown: filtered.length,
@@ -586,7 +652,7 @@ export default function AdminActivity() {
             aria-label={t("web.admin.activity.sort.group")}
             className={`border-border bg-surface/50 flex flex-wrap items-center gap-x-4 gap-y-1.5 border-b px-4 py-2.5 ${layout.stacked}`}
           >
-            <span className="text-muted-foreground text-[12px]">
+            <span className="text-muted-foreground text-[0.75rem]">
               {t("web.admin.activity.sort.heading")}
             </span>
             {STACKED_SORT_FIELDS.filter(([field]) => showRoute || field !== "node").map(
@@ -604,9 +670,10 @@ export default function AdminActivity() {
             )}
           </div>
 
-          {/* Table header, which stays in view while the page scrolls */}
+          {/* Table header, which stays in view while the page scrolls, below any
+              impersonation banner */}
           <div
-            className={`border-border bg-card/95 sticky top-0 z-10 ${layout.table} ${layout.columns} items-center gap-3 border-b px-3 py-2 backdrop-blur`}
+            className={`border-border bg-card/95 sticky top-(--impersonation-banner-height) z-10 ${layout.table} ${layout.columns} items-center gap-3 border-b px-3 py-2 backdrop-blur`}
           >
             <span />
             <SortHeader field="media" current={sortField} dir={sortDir} onClick={toggleSort}>
@@ -639,7 +706,7 @@ export default function AdminActivity() {
           </div>
 
           {/* Rows */}
-          <div>
+          <div className={layout.rows}>
             {filtered.map((session) => (
               <StreamRow
                 key={session.session_id}
@@ -667,7 +734,7 @@ function RealtimeStatus({ state }: { state: "connecting" | "live" | "disconnecte
     <span
       role="status"
       title={t("web.admin.activity.realtime.heading")}
-      className={`inline-flex items-center gap-1.5 px-1 text-[12px] ${
+      className={`inline-flex items-center gap-1.5 px-1 text-[0.75rem] ${
         state === "live" ? "text-muted-foreground" : "text-warning font-medium"
       }`}
     >
@@ -695,6 +762,8 @@ function StreamRow({
 }) {
   const t = useT();
   const panelId = useId();
+  const username =
+    session.username || t("web.admin.activity.userFallback", { id: session.user_id });
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [ffmpegOpen, setFFmpegOpen] = useState(false);
   const logsHref = `/admin/logs?playback_session_id=${encodeURIComponent(session.session_id)}&focus=playback`;
@@ -770,16 +839,18 @@ function StreamRow({
   const expandButton = (
     <button
       type="button"
+      data-row-toggle
       onClick={toggleDetails}
       aria-expanded={expandedOpen}
       aria-controls={expandedOpen ? panelId : undefined}
       aria-label={t("web.admin.activity.row.details")}
       title={t("web.admin.activity.row.details")}
-      className="text-muted-foreground hover:text-foreground hover:bg-surface flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors"
+      className="text-muted-foreground hover:text-foreground hover:bg-surface-raised flex h-7 w-7 shrink-0 items-center justify-center rounded-md transition-colors"
     >
       <ChevronRight
         aria-hidden="true"
-        className={`h-4 w-4 transition-transform rtl:-scale-x-100 ${expandedOpen ? "rotate-90 rtl:-rotate-90" : ""}`}
+        data-row-chevron
+        className={`h-4 w-4 transition-[transform,color] rtl:-scale-x-100 ${expandedOpen ? "rotate-90 rtl:-rotate-90" : ""}`}
       />
     </button>
   );
@@ -789,7 +860,7 @@ function StreamRow({
       {/* Table row */}
       <div
         onClick={onRowClick}
-        className={`${layout.table} ${layout.columns} hover:bg-surface/40 cursor-pointer items-center gap-3 px-3 py-2 transition-colors`}
+        className={`${layout.table} ${layout.columns} ${ROW_HOVER_CLASS} cursor-pointer items-center gap-3 px-3 py-2`}
       >
         {expandButton}
         <MediaCell session={session} />
@@ -836,25 +907,29 @@ function StreamRow({
       </div>
 
       {/* Stacked card */}
-      <div onClick={onRowClick} className={`${layout.stacked} flex cursor-pointer gap-3 px-3 py-3`}>
+      <div
+        onClick={onRowClick}
+        className={`${layout.stacked} ${ROW_HOVER_CLASS} flex cursor-pointer gap-3 px-3 py-3`}
+      >
         <Poster session={session} size="stacked" />
         <div className="min-w-0 flex-1 space-y-1">
           <div className="flex items-start gap-2">
             <div className="min-w-0 flex-1">
               <TitleLink session={session} />
-              {session.series_name ? (
-                // An episode's own title doesn't say which show it is.
-                <div className="text-muted-foreground truncate text-[12px]">
+              {isEpisodeSession(session) ? (
+                // The episode code and title, under the show's title.
+                <div className="text-muted-foreground truncate text-[0.75rem]">
                   {getPlaybackSessionSubtitle(session)}
                 </div>
               ) : null}
-              <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
+              <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[0.75rem]">
                 <Link
                   to={`/admin/users/${session.user_id}`}
-                  className="hover:text-primary shrink-0 transition-colors"
+                  title={username}
+                  dir="auto"
+                  className={`${ROW_LINK_CLASS} min-w-0`}
                 >
-                  {session.username ||
-                    t("web.admin.activity.userFallback", { id: session.user_id })}
+                  <RowLinkText>{username}</RowLinkText>
                 </Link>
                 <ProfilePill session={session} />
                 <JellyfinSessionPill session={session} />
@@ -863,7 +938,9 @@ function StreamRow({
                     <span aria-hidden="true" className="shrink-0">
                       {MIDDLE_DOT}
                     </span>
-                    <span className="truncate">{getSessionClientLabel(session)}</span>
+                    <span dir="auto" className="truncate">
+                      {getSessionClientLabel(session)}
+                    </span>
                   </>
                 ) : null}
               </div>
@@ -924,17 +1001,18 @@ function Poster({ session, size }: { session: AdminSession; size: "table" | "sta
 function TitleLink({ session }: { session: AdminSession }) {
   const t = useT();
   const title = getDisplayTitle(session, t);
-  const itemHref = session.content_id ? `/item/${session.content_id}` : "";
+  const itemHref = session.media_item_id ? `/item/${session.media_item_id}` : "";
   return itemHref ? (
     <Link
       to={itemHref}
       title={title}
-      className="hover:text-primary block truncate text-[13px] font-medium transition-colors"
+      dir="auto"
+      className={`${ROW_LINK_CLASS} flow-root w-fit max-w-full text-[0.8125rem] font-medium`}
     >
-      {title}
+      <RowLinkText className="bidi-text">{title}</RowLinkText>
     </Link>
   ) : (
-    <div title={title} className="truncate text-[13px] font-medium">
+    <div title={title} dir="auto" className="bidi-text truncate text-[0.8125rem] font-medium">
       {title}
     </div>
   );
@@ -948,7 +1026,7 @@ function MediaCell({ session }: { session: AdminSession }) {
       <div className="min-w-0 flex-1">
         <TitleLink session={session} />
         {subtitle ? (
-          <div className="text-muted-foreground truncate text-[12px]">{subtitle}</div>
+          <div className="text-muted-foreground truncate text-[0.75rem]">{subtitle}</div>
         ) : null}
         <ProgressLine session={session} />
       </div>
@@ -956,16 +1034,23 @@ function MediaCell({ session }: { session: AdminSession }) {
   );
 }
 
-/** Position through the title, with a bar, and whether the viewer paused. */
+/**
+ * Position through the title, with a bar, and whether the viewer paused. The
+ * bar narrows before anything wraps; past that the line wraps, so its end
+ * (usually the pause label) never paints over the next column. When the
+ * position alone is wider than the column (a large minimum font size), it
+ * wraps at the " / ", and a one-word pause label drops below its icon rather
+ * than breaking mid-word.
+ */
 function ProgressLine({ session }: { session: AdminSession }) {
   const t = useT();
   const progress = getPlaybackProgress(session);
   return (
-    <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-[11px]">
+    <div className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[0.6875rem]">
       {progress !== null ? (
         <span
           aria-hidden="true"
-          className="bg-border h-1 w-14 shrink-0 overflow-hidden rounded-full"
+          className="bg-border h-1 max-w-14 min-w-9 flex-1 overflow-hidden rounded-full"
         >
           <span
             className={`block h-full rounded-full ${session.is_paused ? "bg-warning" : "bg-primary"}`}
@@ -973,10 +1058,10 @@ function ProgressLine({ session }: { session: AdminSession }) {
           />
         </span>
       ) : null}
-      <span className="shrink-0 tabular-nums">{formatPlaybackPosition(session)}</span>
+      <span className="max-w-full shrink-0 tabular-nums">{formatPlaybackPosition(session)}</span>
       {session.is_paused ? (
-        <span className="text-warning inline-flex shrink-0 items-center gap-1 font-medium">
-          <Pause aria-hidden="true" className="h-3 w-3" />
+        <span className="text-warning inline-flex max-w-full shrink-0 flex-wrap items-center gap-1 font-medium">
+          <Pause aria-hidden="true" className="h-3 w-3 shrink-0" />
           {t("web.admin.activity.row.paused")}
         </span>
       ) : (
@@ -995,7 +1080,8 @@ function ProfilePill({ session }: { session: AdminSession }) {
   return profile ? (
     <span
       title={profile}
-      className="border-primary/30 bg-primary/10 text-primary max-w-[7rem] shrink-0 truncate rounded border px-1.5 py-0.5 text-[10px] leading-none"
+      dir="auto"
+      className="border-primary/30 bg-primary/10 text-primary max-w-[7rem] shrink-0 truncate rounded border px-1.5 py-0.5 text-[0.625rem] leading-none"
     >
       {profile}
     </span>
@@ -1021,6 +1107,8 @@ function ViewerCell({
     ? `${clientLabelFull || clientLabel} — ${clientUserAgent}`
     : clientLabelFull || clientLabel;
   const clientIP = session.client_ip?.trim() || "";
+  // A long IPv6 address truncates, so the tooltip carries the whole address.
+  const clientIPTitle = `${clientIP} — ${t("web.admin.activity.ipLookup.heading")}`;
   const location =
     session.stream_location === "local"
       ? t("web.player.routeBadge.local")
@@ -1032,22 +1120,24 @@ function ViewerCell({
       <div className="flex min-w-0 items-center gap-1.5">
         <Link
           to={`/admin/users/${session.user_id}`}
-          className="hover:text-primary truncate text-[13px] font-medium transition-colors"
+          title={username}
+          dir="auto"
+          className={`${ROW_LINK_CLASS} min-w-0 text-[0.8125rem] font-medium`}
         >
-          {username}
+          <RowLinkText>{username}</RowLinkText>
         </Link>
         <ProfilePill session={session} />
       </div>
-      <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[12px]">
+      <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[0.75rem]">
         <JellyfinSessionPill session={session} />
         {clientLabel ? (
-          <span title={clientTitle} className="truncate">
+          <span title={clientTitle} dir="auto" className="truncate">
             {clientLabel}
           </span>
         ) : null}
       </div>
       {(location || clientIP) && (
-        <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[11px]">
+        <div className="text-muted-foreground flex min-w-0 items-center gap-1.5 text-[0.6875rem]">
           {location ? <span className="shrink-0">{location}</span> : null}
           {location && clientIP ? (
             <span aria-hidden="true" className="shrink-0">
@@ -1058,10 +1148,10 @@ function ViewerCell({
             <button
               type="button"
               onClick={() => onIPLookup(clientIP)}
-              title={t("web.admin.activity.ipLookup.heading")}
-              className="hover:text-primary shrink-0 tabular-nums transition-colors"
+              title={clientIPTitle}
+              className={`${ROW_LINK_CLASS} min-w-0 tabular-nums`}
             >
-              {clientIP}
+              <RowLinkText>{clientIP}</RowLinkText>
             </button>
           ) : null}
         </div>
@@ -1093,13 +1183,14 @@ function MethodLine({
     <div className="flex min-w-0 items-center gap-2">
       <ActivityMethodBadge method={method} />
       {first ? (
-        <span title={first.description} className="min-w-0 truncate text-[12px]">
+        <span title={first.description} className="min-w-0 truncate text-[0.75rem]">
           {first.label}
         </span>
       ) : null}
       {rest.length > 0 ? (
         <button
           type="button"
+          data-row-toggle
           onClick={onMore}
           aria-expanded={expanded}
           aria-controls={expanded ? panelId : undefined}
@@ -1108,7 +1199,7 @@ function MethodLine({
             count_text: rest.length,
           })}
           title={joinList(rest.map((reason) => reason.label))}
-          className="text-muted-foreground hover:text-foreground border-border shrink-0 rounded border px-1 text-[11px] leading-4 tabular-nums transition-colors"
+          className="text-muted-foreground hover:text-foreground border-border shrink-0 rounded border px-1 text-[0.6875rem] leading-4 tabular-nums transition-colors"
         >
           {t("web.admin.activity.row.moreReasons", { count_text: rest.length })}
         </button>
@@ -1130,7 +1221,7 @@ function ConversionLine({ kind, session }: { kind: "video" | "audio"; session: A
   const mode =
     kind === "video" && conversion.delivered ? formatTranscodeModeSummary(session) : null;
   return (
-    <div className="flex min-w-0 items-center gap-1.5 text-[12px]">
+    <div className="flex min-w-0 items-center gap-1.5 text-[0.75rem]">
       <Icon aria-hidden="true" className="text-muted-foreground h-3 w-3 shrink-0" />
       <span className="sr-only">
         {kind === "video" ? t("web.admin.activity.row.video") : t("web.admin.activity.row.audio")}
@@ -1144,7 +1235,7 @@ function ConversionLine({ kind, session }: { kind: "video" | "audio"; session: A
           : conversion.source}
       </span>
       {mode ? (
-        <span className="border-border text-muted-foreground shrink-0 rounded border px-1 text-[10px] leading-4">
+        <span className="border-border text-muted-foreground shrink-0 rounded border px-1 text-[0.625rem] leading-4">
           {mode}
         </span>
       ) : null}
@@ -1159,7 +1250,7 @@ function SessionCell({ session }: { session: AdminSession }) {
     <div className="min-w-0 text-end">
       <div
         title={t("web.admin.activity.row.sessionActive", { elapsed })}
-        className="inline-flex items-center gap-1 text-[12px] tabular-nums"
+        className="inline-flex items-center gap-1 text-[0.75rem] tabular-nums"
       >
         <Clock aria-hidden="true" className="text-muted-foreground h-3 w-3" />
         <span className="sr-only">{t("web.admin.activity.row.sessionActive", { elapsed })}</span>
@@ -1180,9 +1271,9 @@ function BitrateCell({ session }: { session: AdminSession }) {
   const reference = bitrateReference(t, limit, source);
   return (
     <div className="min-w-0 tabular-nums">
-      {live ? <div className="truncate text-[12px]">{live}</div> : null}
+      {live ? <div className="truncate text-[0.75rem]">{live}</div> : null}
       {reference ? (
-        <div className="text-muted-foreground text-[11px] leading-snug">{reference}</div>
+        <div className="text-muted-foreground text-[0.6875rem] leading-snug">{reference}</div>
       ) : null}
       {share !== null ? (
         <div
@@ -1214,7 +1305,7 @@ function ActivityMethodBadge({ method }: { method: string }) {
     <span
       aria-label={t("web.admin.activity.row.methodBadge", { method: meta.label })}
       title={meta.description}
-      className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[10px] leading-none font-semibold ${meta.badgeClass}`}
+      className={`inline-flex shrink-0 rounded border px-1.5 py-0.5 text-[0.625rem] leading-none font-semibold ${meta.badgeClass}`}
     >
       {meta.label}
     </span>
@@ -1266,7 +1357,7 @@ function PlaybackExpandedPanel({
 
   return (
     <div id={id} className="border-border/40 bg-surface/30 space-y-4 border-t px-4 py-3">
-      <div className={`grid gap-x-5 gap-y-4 text-[12px] ${layout.panel}`}>
+      <div className={`grid gap-x-5 gap-y-4 text-[0.75rem] ${layout.panel}`}>
         <div className="min-w-0 space-y-4">
           <dl className={FACT_LIST_CLASS}>
             <dt className="text-muted-foreground">{t("web.admin.activity.panel.decision")}</dt>
@@ -1363,7 +1454,7 @@ function PlaybackExpandedPanel({
                 <dd className="min-w-0">
                   {devicePlatform ? <div className="break-words">{devicePlatform}</div> : null}
                   {deviceID ? (
-                    <div className="text-muted-foreground font-mono text-[11px] break-all">
+                    <div className="text-muted-foreground font-mono text-[0.6875rem] break-all">
                       {deviceID}
                     </div>
                   ) : null}
@@ -1373,7 +1464,7 @@ function PlaybackExpandedPanel({
             {userAgent ? (
               <>
                 <dt className="text-muted-foreground">{t("web.admin.activity.client.agent")}</dt>
-                <dd className="text-muted-foreground min-w-0 text-[11px] break-words">
+                <dd className="text-muted-foreground min-w-0 text-[0.6875rem] break-words">
                   {userAgent}
                 </dd>
               </>
@@ -1388,7 +1479,8 @@ function PlaybackExpandedPanel({
                 <button
                   type="button"
                   onClick={() => onIPLookup(clientIP)}
-                  className="hover:text-primary ms-1 tabular-nums transition-colors"
+                  title={t("web.admin.activity.ipLookup.heading")}
+                  className={`${ROW_LINK_CLASS} ms-1 tabular-nums`}
                 >
                   {clientIP}
                 </button>
@@ -1424,7 +1516,7 @@ function PlaybackExpandedPanel({
                 : t("web.admin.activity.session.remoteControlUnavailable")}
             </dd>
             <dt className="text-muted-foreground">{t("web.admin.activity.session.id")}</dt>
-            <dd className="text-muted-foreground min-w-0 font-mono text-[11px] break-all">
+            <dd className="text-muted-foreground min-w-0 font-mono text-[0.6875rem] break-all">
               {session.session_id}
             </dd>
           </dl>
@@ -1455,7 +1547,7 @@ function PlaybackExpandedPanel({
 const FACT_LIST_CLASS = "grid grid-cols-[6rem_1fr] gap-y-1 sm:grid-cols-[9rem_1fr] [&>dt]:pe-3";
 const SIDE_FACT_LIST_CLASS =
   "grid grid-cols-[6rem_1fr] gap-y-1 sm:grid-cols-[7rem_1fr] [&>dt]:pe-3";
-const PANEL_HEADING_CLASS = "text-muted-foreground mb-1.5 text-[11px] font-medium";
+const PANEL_HEADING_CLASS = "text-muted-foreground mb-1.5 text-[0.6875rem] font-medium";
 
 function StreamDetailRow({
   label,
@@ -1478,7 +1570,7 @@ function StreamDetailRow({
           <span>{label}</span>
           {decision ? (
             <span
-              className={`inline-flex rounded border px-1 py-0.5 text-[10px] leading-none font-semibold ${decisionBadgeClass(decision)}`}
+              className={`inline-flex rounded border px-1 py-0.5 text-[0.625rem] leading-none font-semibold ${decisionBadgeClass(decision)}`}
             >
               {formatDecisionLabel(decision)}
             </span>
@@ -1491,7 +1583,7 @@ function StreamDetailRow({
         {tags.filter(Boolean).map((tag) => (
           <span
             key={tag}
-            className="border-border text-muted-foreground ms-1.5 inline-block rounded border px-1 text-[10px] leading-4"
+            className="border-border text-muted-foreground ms-1.5 inline-block rounded border px-1 text-[0.625rem] leading-4"
           >
             {tag}
           </span>
@@ -1516,47 +1608,47 @@ function FFmpegConsole({
   return (
     <div className="terminal-surface space-y-2">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-muted-foreground text-[11px]">
+        <span className="text-muted-foreground text-[0.6875rem]">
           {isFetching ? t("web.admin.activity.panel.refreshing") : null}
         </span>
         <Link
           to={logsHref}
-          className="text-[11px] font-medium text-[var(--terminal-fg)] hover:text-[var(--terminal-fg)]/80"
+          className="text-[0.6875rem] font-medium text-[var(--terminal-fg)] hover:text-[var(--terminal-fg)]/80"
         >
           {t("web.admin.activity.panel.openFfmpegLogs")}
         </Link>
       </div>
       <div className="overflow-hidden rounded-xl border border-[var(--terminal-border)] bg-[var(--terminal-bg)]">
         {isLoading ? (
-          <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
+          <div className="px-4 py-6 font-mono text-[0.6875rem] text-[var(--terminal-muted)]">
             {t("web.admin.activity.panel.loadingFfmpeg")}
           </div>
         ) : rows.length === 0 ? (
-          <div className="px-4 py-6 font-mono text-[11px] text-[var(--terminal-muted)]">
+          <div className="px-4 py-6 font-mono text-[0.6875rem] text-[var(--terminal-muted)]">
             {t("web.admin.activity.panel.noFfmpegRows")}
           </div>
         ) : (
-          <div className="max-h-64 overflow-y-auto">
+          <div data-row-scroller className="max-h-64 overflow-y-auto">
             {rows.map((row) => (
               <div
                 key={row.id}
                 className="grid grid-cols-[120px_1fr] gap-3 border-b border-[var(--terminal-border)]/30 px-4 py-2.5 last:border-b-0"
               >
                 <div className="space-y-1">
-                  <div className="font-mono text-[10px] text-[var(--terminal-muted)]">
+                  <div className="font-mono text-[0.625rem] text-[var(--terminal-muted)]">
                     {formatTimeOnly(row.timestamp)}
                   </div>
-                  <div className="text-[10px] text-[var(--terminal-muted)]/60">
+                  <div className="text-[0.625rem] text-[var(--terminal-muted)]/60">
                     {row.message.includes("stderr")
                       ? t("web.admin.activity.panel.stderr")
                       : t("web.admin.activity.panel.event")}
                   </div>
                 </div>
                 <div className="min-w-0">
-                  <div className="font-mono text-[11px] leading-5 break-words text-[var(--terminal-fg)]">
+                  <div className="font-mono text-[0.6875rem] leading-5 break-words text-[var(--terminal-fg)]">
                     {ffmpegRowText(row)}
                   </div>
-                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-[var(--terminal-muted)]/60">
+                  <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[0.625rem] text-[var(--terminal-muted)]/60">
                     {row.node_id && <span>{row.node_id}</span>}
                     {stringAttr(row, "target_resolution") !== "-" && (
                       <span>{stringAttr(row, "target_resolution")}</span>
@@ -1632,9 +1724,10 @@ function IPLookupDialog({
             type="text"
             placeholder={t("web.admin.activity.ipLookup.placeholder")}
             aria-label={t("web.admin.activity.ipLookup.placeholder")}
+            dir={ipSearch ? "ltr" : undefined}
             value={ipSearch}
             onChange={(e) => setIPSearch(e.target.value)}
-            className="max-w-xs font-mono text-sm"
+            className="placeholder:font-ui max-w-xs font-mono text-sm"
           />
           <Button type="submit" variant="outline" size="sm" disabled={!ipSearch.trim()}>
             <Search className="me-1 h-3.5 w-3.5" />
@@ -1729,13 +1822,13 @@ function SortHeader({
     <button
       type="button"
       onClick={() => onClick(field)}
-      className={`text-muted-foreground flex items-center gap-1 text-[12px] font-medium transition-colors ${
+      className={`text-muted-foreground flex items-center gap-1 text-[0.75rem] font-medium transition-colors ${
         active ? "text-foreground" : "hover:text-foreground"
       } ${className}`}
     >
       {children}
       {active && (
-        <span aria-hidden="true" className="text-[9px]">
+        <span aria-hidden="true" className="text-[0.5625rem]">
           {dir === "asc" ? SORT_ASC_MARK : SORT_DESC_MARK}
         </span>
       )}
@@ -1799,14 +1892,8 @@ function getDisplayTitle(
   session: AdminSession,
   t: (id: MessageKey, values?: TextValues) => string,
 ): string {
-  if (session.series_name && session.season_number != null && session.episode_number != null) {
-    return (
-      session.episode_name ||
-      t("web.detail.episodeCode", {
-        season: codeNumber(session.season_number),
-        episode: codeNumber(session.episode_number),
-      })
-    );
+  if (isEpisodeSession(session)) {
+    return session.series_title;
   }
   return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
 }

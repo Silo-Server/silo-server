@@ -125,8 +125,6 @@ func (f *fakeServiceHost) Stop(installationID int) error {
 	return nil
 }
 
-func (f *fakeServiceHost) NextStartSeq() uint64 { return 0 }
-
 func (f *fakeServiceHost) Shutdown(context.Context) error {
 	return nil
 }
@@ -135,6 +133,8 @@ type fakePluginClient struct {
 	manifest              *pluginv1.PluginManifest
 	metadataProviderCalls int
 	markerProvider        *pluginhost.MarkerProviderClient
+	configurationChecks   *pluginhost.ConfigurationChecksClient
+	configurationCheckErr error
 }
 
 func (f *fakePluginClient) Manifest() *pluginv1.PluginManifest {
@@ -192,6 +192,13 @@ func (f *fakePluginClient) NetworkAccessProvider(string) (*pluginhost.NetworkAcc
 
 func (f *fakePluginClient) NotificationChannel(string) (*pluginhost.NotificationChannelClient, error) {
 	return nil, nil
+}
+
+func (f *fakePluginClient) ConfigurationChecks() (*pluginhost.ConfigurationChecksClient, error) {
+	if f.configurationCheckErr != nil {
+		return nil, f.configurationCheckErr
+	}
+	return f.configurationChecks, nil
 }
 
 type fakeServiceInstallationStore struct {
@@ -284,10 +291,11 @@ func (s *fakeServiceInstallationStore) Update(_ context.Context, id int, input U
 	if input.InstallPath != nil {
 		installation.InstallPath = *input.InstallPath
 	}
+	enablementChanged := input.Enabled != nil && *input.Enabled != installation.Enabled
 	if input.Enabled != nil {
 		installation.Enabled = *input.Enabled
 	}
-	if input.Restart {
+	if input.Restart || enablementChanged {
 		installation.RuntimeGeneration++
 	}
 	return nil

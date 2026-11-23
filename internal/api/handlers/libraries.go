@@ -24,6 +24,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/libraryingest"
 	"github.com/Silo-Server/silo-server/internal/metadata"
 	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/notifications"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/rootcheck"
 	"github.com/Silo-Server/silo-server/internal/scanner"
@@ -61,8 +62,11 @@ type LibraryHandler struct {
 	appCtx                context.Context
 	EventBus              cache.EventBus
 	EventsHub             *evt.Hub
-	ScanRegistry          *evt.ScanRegistry
-	ScanQueue             libraryScanQueuer
+	// RealtimeHub, when set, publishes catalog.library.changed when a
+	// library is turned on or off.
+	RealtimeHub  *notifications.Hub
+	ScanRegistry *evt.ScanRegistry
+	ScanQueue    libraryScanQueuer
 	// RealtimeMonitor, when set, reconciles real-time library monitoring
 	// right after a library create, update or delete handled on this node.
 	RealtimeMonitor libraryMonitorPoker

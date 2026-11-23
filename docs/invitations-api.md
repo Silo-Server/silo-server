@@ -1,6 +1,6 @@
 # Invitation API
 
-These v2 operations manage bearer-token invitations: emailed invitations bound
+These operations manage bearer-token invitations: emailed invitations bound
 to one address, and link invitations whose invitee enters an address at accept. Ordinary signup
 invite codes use the separate auth/signup contract. Administrator operations
 require an acting administrator. Public capability, lookup and acceptance requests spend the
@@ -26,8 +26,8 @@ never sends to the server or in a `Referer` header, so reverse proxies in front 
 Silo do not log it. `lookupInvitationLink` and `acceptInvitationLink` take it as
 `token` in the JSON body for the same reason. The path forms, `lookupInvitation`
 and `acceptInvitation`, behave identically but put the token in the request line.
-They are deprecated, send the `Deprecation` and `Link` headers, and will be removed
-before `/api/v2` locks, once released clients use the body forms. A link issued in
+They are deprecated and send the `Deprecation` and `Link` headers; no `Sunset` is
+declared. A link issued in
 the old `/invite/{token}` form still opens.
 
 The capability's `token_in_body` is true on a server that has the body forms. A
@@ -64,7 +64,7 @@ already has an account returns `409 conflict`. Neither consumes the invitation;
 the invitee can correct the address and accept again.
 Its body is `{status: "accepted", login_status, username, tokens?}`:
 
-- `signed_in` includes the ordinary v2 token pair and typed account.
+- `signed_in` includes the ordinary token pair and typed account.
 - `sign_in_required` means acceptance committed but session issuance failed.
   Tokens are absent. Offer ordinary sign-in using the selected password; do not
   submit acceptance again or report that account creation failed.
@@ -148,11 +148,10 @@ edit must add a transactional configuration precondition.
 All three POST operations are **non-retryable**, including authentication-refresh
 replay. Revoke is naturally idempotent. See
 [the storage invariants](architecture/invitations-onboarding.md) for transaction,
-SQLite, expiry, login, and delivery boundaries. Legacy invitation routes remain
-available; consumer migration is reviewed separately.
+SQLite, expiry, login, and delivery boundaries.
 
 
-## V2 signup invite codes
+## Signup invite codes
 
 Signup invite codes are distinct from emailed invitations. Their administrator
 operations are under `/api/v2/admin/invite-codes`:

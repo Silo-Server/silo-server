@@ -49,7 +49,9 @@ function StatTile({
     // loading skeleton has always reserved.
     <div className="surface-panel flex h-full flex-col justify-center overflow-hidden rounded-2xl border-0 p-4 transition-colors duration-150">
       <div className="mb-1.5 flex items-center justify-between">
-        <div className="text-muted-foreground text-[11px] leading-none font-medium">{label}</div>
+        <div className="text-muted-foreground text-[0.6875rem] leading-none font-medium">
+          {label}
+        </div>
         <div className="text-muted-foreground">{icon}</div>
       </div>
       {error ? (
@@ -58,10 +60,10 @@ function StatTile({
         </div>
       ) : (
         <>
-          <div className="mb-0.5 text-[28px] leading-none font-extrabold tracking-tight">
+          <div className="mb-0.5 text-[1.75rem] leading-none font-extrabold tracking-tight">
             {value}
           </div>
-          <div className="text-muted-foreground text-[11px]">{sub}</div>
+          <div className="text-muted-foreground text-[0.6875rem]">{sub}</div>
         </>
       )}
     </div>

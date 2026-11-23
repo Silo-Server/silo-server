@@ -49,10 +49,8 @@ export type SelectModeNoun = keyof typeof SELECT_MODE_TEXT;
  * The floating bar of select mode: how many items are picked and what can be
  * done to them. Actions refuse more than `limit` items at a time.
  *
- * The bar is fixed to the viewport over the content column rather than
- * sticky: AdminLayout clips horizontal overflow, which would hold a sticky bar
- * at the end of the list. The page reserves room at its foot so the last item
- * is never under the bar.
+ * The bar is fixed to the viewport over the content column. The page reserves
+ * room at its foot so the last item is never under the bar.
  */
 export function SelectModeBar({
   count,
@@ -77,7 +75,7 @@ export function SelectModeBar({
   const tooMany = count > limit;
   const disabled = busy || count === 0 || tooMany;
   return (
-    <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex flex-col items-center gap-1.5 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:start-[240px]">
+    <div className="pointer-events-none fixed inset-x-0 bottom-(--playback-bar-clearance,0px) z-30 flex flex-col items-center gap-1.5 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] lg:start-[240px]">
       <div
         role="group"
         aria-label={t(text.group)}
@@ -114,7 +112,7 @@ export function SelectModeBar({
       {note ? (
         <p
           id={noteId}
-          className="text-muted-foreground bg-background/80 rounded-full px-2.5 text-[12.5px] backdrop-blur"
+          className="text-muted-foreground bg-background/80 rounded-full px-2.5 text-[0.78125rem] backdrop-blur"
         >
           {note}
         </p>
@@ -148,7 +146,7 @@ export function SelectAllHeader({
   if (count > 0 && selectedCount === count) checked = true;
   else if (selectedCount > 0) checked = "indeterminate";
   return (
-    <div className="border-border/75 mb-0.5 flex items-center gap-3 border-b py-2.5 ps-2 pe-3.5 text-[13.5px]">
+    <div className="border-border/75 mb-0.5 flex items-center gap-3 border-b py-2.5 ps-2 pe-3.5 text-[0.84375rem]">
       <span className="grid w-7 place-items-center">
         <SelectCheckbox
           ref={ref}
@@ -161,7 +159,7 @@ export function SelectAllHeader({
       <span aria-hidden className="font-medium">
         {t("web.ui.selectMode.selectAll")}
       </span>
-      <span className="text-muted-foreground text-[13px]">
+      <span className="text-muted-foreground text-[0.8125rem]">
         {t(SELECT_MODE_TEXT[noun].limit, { limit })}
       </span>
       <Button size="sm" variant="ghost" className="ms-auto" onClick={onDone}>

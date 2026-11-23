@@ -128,7 +128,7 @@ func APIKeyScopeCatalog() []APIKeyScope {
 		{
 			Name: ScopeAdminMonitorRead, Audience: APIKeyScopeAudienceAdmin,
 			Description: "Monitor the server read-only: live sessions, playback history, activity stats, " +
-				"accounts, devices, downloads, node and host health, and the catalog listing. Never exposes filesystem paths, " +
+				"accounts, devices, downloads, node and host health, the catalog listing, and media requests. Never exposes filesystem paths, " +
 				"node addresses, storage keys, setting values or credentials.",
 		},
 		{

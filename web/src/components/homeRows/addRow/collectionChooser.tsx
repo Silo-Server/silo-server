@@ -82,7 +82,7 @@ export function CollectionSearchBar({
             type="button"
             aria-pressed={filter === name}
             onClick={() => onFilterChange(name)}
-            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 aria-pressed:bg-background aria-pressed:text-foreground h-8 rounded-lg px-2.5 text-[13px] font-medium outline-none focus-visible:ring-[3px] aria-pressed:shadow-sm"
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 aria-pressed:bg-background aria-pressed:text-foreground h-8 rounded-lg px-2.5 text-[0.8125rem] font-medium outline-none focus-visible:ring-[3px] aria-pressed:shadow-sm"
           >
             {t(label)}
           </button>
@@ -96,7 +96,7 @@ export function CollectionSearchBar({
           <SelectTrigger
             size="sm"
             aria-label={t("web.home.addRow.collection.library")}
-            className="max-w-48 text-[13px]"
+            className="max-w-48 text-[0.8125rem]"
           >
             <SelectValue />
           </SelectTrigger>
@@ -140,8 +140,12 @@ export function CollectionOptionBody({
         className="ring-border/60 aspect-[2/3] w-9 rounded-md ring-1 ring-inset"
       />
       <span className="min-w-0">
-        <span className="block truncate text-sm font-semibold">{title}</span>
-        <span aria-hidden className="text-muted-foreground block truncate text-[13px]">
+        {/* A cut name keeps its start in either script; w-fit keeps a short
+            one on the page's start side. */}
+        <span dir="auto" className="block w-fit max-w-full truncate text-sm font-semibold">
+          {title}
+        </span>
+        <span aria-hidden className="text-muted-foreground block truncate text-[0.8125rem]">
           {meta}
         </span>
         <span id={metaId} className="sr-only">

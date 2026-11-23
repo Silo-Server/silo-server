@@ -75,6 +75,8 @@ import { useMotionScrollBehavior } from "@/hooks/usePrefersReducedMotion";
 
 /** Under this width Arrange has no drag: ⋯ opens a sheet that moves the card. */
 const NARROW_QUERY = "(max-width: 1023px)";
+/** From this width (Tailwind's `xl`) the viewer preview is pinned beside the board. */
+const PINNED_PREVIEW_QUERY = "(min-width: 80rem)";
 
 type OrderReads = Awaited<ReturnType<typeof fetchAdminBoardOrderSnapshot>>;
 type OrderRead = Awaited<ReturnType<typeof fetchAdminGroupOrderSnapshot>>;
@@ -169,6 +171,7 @@ export function GroupsBoard({
   const t = useT();
   const queryClient = useQueryClient();
   const narrow = useMediaQuery(NARROW_QUERY);
+  const previewPinned = useMediaQuery(PINNED_PREVIEW_QUERY);
   const { data: capabilities } = useAdminCollectionCapabilities();
   const canEdit = capabilities?.groups === true;
 
@@ -561,10 +564,10 @@ export function GroupsBoard({
       <div className="grid min-w-0 gap-3">
         <div className="flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <h2 className="m-0 text-[16px] font-semibold tracking-[-0.015em]">
+            <h2 className="m-0 text-[1rem] font-semibold tracking-[-0.015em]">
               {arrangeHeading(libraryName)}
             </h2>
-            <p className="text-muted-foreground m-0 mt-0.5 text-[13px]">{arrangeSubtitle()}</p>
+            <p className="text-muted-foreground m-0 mt-0.5 text-[0.8125rem]">{arrangeSubtitle()}</p>
           </div>
           {canEdit ? (
             <Button variant="outline" size="sm" onClick={() => setNaming({ mode: "create" })}>
@@ -625,7 +628,7 @@ export function GroupsBoard({
         </DndContext>
 
         {narrow ? null : (
-          <p className="text-muted-foreground m-0 flex items-start gap-2 px-1 text-[13px] leading-normal">
+          <p className="text-muted-foreground m-0 flex items-start gap-2 px-1 text-[0.8125rem] leading-normal">
             <GripVertical aria-hidden className="mt-0.5 size-4 shrink-0" />
             {arrangeHint()}
           </p>
@@ -633,11 +636,18 @@ export function GroupsBoard({
       </div>
 
       {narrow ? null : (
+        // From xl it sits beside the board, pinned below the admin shell's
+        // activity control and any impersonation banner. A long preview is
+        // taller than the window, so it scrolls inside itself, and takes
+        // keyboard focus there to be scrolled. The cap leaves room for the
+        // 2rem of page padding below the board, or the end of the page would
+        // push the preview back up under the control.
         <ViewerPreview
           libraryName={libraryName}
           shelves={shelves}
           isVisible={isVisible}
-          className="xl:sticky xl:top-6"
+          focusable={previewPinned}
+          className="overlay-scroll xl:sticky xl:top-[calc(4rem+var(--impersonation-banner-height))] xl:max-h-[calc(100dvh-6rem-var(--impersonation-banner-height)-var(--playback-bar-clearance,0px))] xl:overflow-y-auto"
         />
       )}
 

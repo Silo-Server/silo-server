@@ -369,7 +369,9 @@ function LibraryCard({
       <div className="flex flex-col gap-4 px-4 py-4 sm:px-5">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="truncate text-sm font-medium">{library.name}</span>
+            <span dir="auto" className="truncate text-sm font-medium">
+              {library.name}
+            </span>
             <Badge variant="outline" className="shrink-0 capitalize">
               {libraryTypeLabel(library.type)}
             </Badge>

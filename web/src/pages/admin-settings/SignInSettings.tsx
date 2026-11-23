@@ -204,13 +204,15 @@ export default function SignInSettings() {
                 </SettingFieldStatus>
               ) : (
                 <SettingFieldStatus tone="warn">
-                  {t("web.admin.settings.signIn.page.noBreakGlassStatus", {
-                    link: (chunks) => (
-                      <Link to="/admin/users" className="underline underline-offset-4">
-                        {chunks}
-                      </Link>
-                    ),
-                  })}
+                  <span>
+                    {t("web.admin.settings.signIn.page.noBreakGlassStatus", {
+                      link: (chunks) => (
+                        <Link to="/admin/users" className="underline underline-offset-4">
+                          {chunks}
+                        </Link>
+                      ),
+                    })}
+                  </span>
                 </SettingFieldStatus>
               )
             }

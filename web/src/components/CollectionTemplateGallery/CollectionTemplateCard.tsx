@@ -64,19 +64,19 @@ export function PickRow({
       </span>
       <span className="grid min-w-0 gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
-          <span id={`${id}-title`} className="truncate text-[14.5px] font-semibold">
+          <span id={`${id}-title`} className="truncate text-[0.90625rem] font-semibold">
             {title}
           </span>
           {tag ? (
             <span
               id={`${id}-tag`}
-              className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-px text-[10.5px] font-semibold tracking-wide uppercase"
+              className="bg-muted text-muted-foreground shrink-0 rounded px-1.5 py-px text-[0.65625rem] font-semibold tracking-wide uppercase"
             >
               {tag}
             </span>
           ) : null}
         </span>
-        <span id={`${id}-meta`} className="text-muted-foreground truncate text-[12.5px]">
+        <span id={`${id}-meta`} className="text-muted-foreground truncate text-[0.78125rem]">
           {meta}
         </span>
       </span>

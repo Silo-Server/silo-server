@@ -109,6 +109,46 @@ func TestListSortMetricsIncludesEbookReaderProgress(t *testing.T) {
 	}
 }
 
+// TestListSortMetricsDatesSeriesByEpisodeViews checks that a series card in a
+// date viewed sort shows its store rollup's latest episode play, since plays
+// are recorded against episodes (#4638).
+func TestListSortMetricsDatesSeriesByEpisodeViews(t *testing.T) {
+	ctx := context.Background()
+	store := seriesViewedAtStore{UserStore: newProfileTestStore(t), viewedAt: map[string]string{
+		"series-watched": "2026-05-28T10:00:00Z",
+	}}
+	items := []*models.MediaItem{
+		{ContentID: "series-watched", Type: "series", Title: "Watched"},
+		{ContentID: "series-unseen", Type: "series", Title: "Unseen"},
+	}
+
+	metrics := (&ItemsHandler{}).listSortMetrics(ctx, items, "date_viewed", catalog.AccessFilter{}, nil, store, 0, "profile-1")
+	if got := metrics["series-watched"]; got == nil || got.ViewedAt != "2026-05-28T10:00:00Z" {
+		t.Fatalf("series-watched viewed metrics = %#v", got)
+	}
+	if got := metrics["series-unseen"]; got != nil {
+		t.Fatalf("unwatched series was dated: %#v", got)
+	}
+}
+
+// seriesViewedAtStore adds a fixed series rollup to a user store; only
+// SeriesLatestViewedAt answers.
+type seriesViewedAtStore struct {
+	userstore.UserStore
+	userstore.SeriesEpisodeRollupStore
+	viewedAt map[string]string
+}
+
+func (s seriesViewedAtStore) SeriesLatestViewedAt(_ context.Context, _ string, seriesIDs []string) (map[string]string, error) {
+	result := make(map[string]string, len(seriesIDs))
+	for _, id := range seriesIDs {
+		if at, ok := s.viewedAt[id]; ok {
+			result[id] = at
+		}
+	}
+	return result, nil
+}
+
 type fakeEbookReaderProgressLister struct {
 	progress map[string]EbookReaderProgress
 }

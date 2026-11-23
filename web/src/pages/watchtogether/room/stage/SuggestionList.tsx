@@ -91,16 +91,27 @@ function SuggestionRow({
             <span className="text-muted-foreground truncate text-xs">{suggestion.subtitle}</span>
           ) : null}
           {showVotes && rank === 0 && suggestion.vote_count > 0 ? (
-            <span className="rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-amber-300 uppercase">
+            <span className="rounded-full bg-amber-400/15 px-1.5 py-0.5 text-[0.625rem] font-semibold tracking-wide text-amber-300 uppercase">
               {t("web.watchTogether.suggestions.leading")}
             </span>
           ) : null}
         </div>
-        <div className="text-muted-foreground mt-0.5 truncate text-xs">
-          {suggesterName}
+        {/* The name and the note each read in their own direction and are cut
+            at their own end; the note goes first. The note's truncate also
+            folds its line breaks, which pre would keep. */}
+        <div className="text-muted-foreground mt-0.5 flex overflow-hidden text-xs whitespace-pre">
+          <span dir="auto" className="max-w-full shrink-0 truncate">
+            {suggesterName}
+          </span>
           {suggestion.note ? (
-            <span className="italic">
-              {t("web.watchTogether.suggestions.note", { note: suggestion.note })}
+            <span className="flex min-w-0 italic">
+              {t("web.watchTogether.suggestions.note", {
+                note: (
+                  <span dir="auto" className="truncate">
+                    {suggestion.note}
+                  </span>
+                ),
+              })}
             </span>
           ) : null}
         </div>

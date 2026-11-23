@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -218,8 +219,44 @@ func (r *ChainRepository) AppendProviderToAllChainsChecked(
 	capabilityID string,
 	placement func(contentLevel string) (SeedPlacement, error),
 ) error {
+	return appendProviderToAllChainsChecked(ctx, r.pool, pluginInstallationID, capabilityID, placement)
+}
+
+// ApplyProvisionedMetadataPlacement applies one committed fresh install's
+// defaults on the same transaction that acknowledges its pending placement.
+func ApplyProvisionedMetadataPlacement(ctx context.Context, tx pgx.Tx, pluginInstallationID int) error {
+	rows, err := tx.Query(ctx, `SELECT capability_id, metadata FROM plugin_capabilities
+		WHERE plugin_installation_id = $1 AND capability_type = 'metadata_provider.v1' ORDER BY capability_id`, pluginInstallationID)
+	if err != nil {
+		return err
+	}
+	type provider struct {
+		ID       string
+		Metadata []byte
+	}
+	providers, err := pgx.CollectRows(rows, pgx.RowToStructByPos[provider])
+	if err != nil {
+		return err
+	}
+	for _, provider := range providers {
+		if err := appendProviderToAllChainsChecked(ctx, tx, pluginInstallationID, provider.ID, func(level string) (SeedPlacement, error) {
+			return seedPlacementFrom(provider.Metadata, level), nil
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+type chainPlacementDB interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func appendProviderToAllChainsChecked(ctx context.Context, db chainPlacementDB, pluginInstallationID int, capabilityID string, placement func(string) (SeedPlacement, error)) error {
 	// Find every distinct (folder, level) pair that has chain entries.
-	rows, err := r.pool.Query(ctx,
+	rows, err := db.Query(ctx,
 		`SELECT DISTINCT media_folder_id, content_level
 		 FROM library_provider_chains`)
 	if err != nil {
@@ -268,7 +305,7 @@ func (r *ChainRepository) AppendProviderToAllChainsChecked(
 
 		// Check if the provider is already in this chain.
 		var exists bool
-		err := r.pool.QueryRow(ctx,
+		err := db.QueryRow(ctx,
 			`SELECT EXISTS(
 				SELECT 1 FROM library_provider_chains
 				WHERE media_folder_id = $1 AND content_level = $2
@@ -284,7 +321,7 @@ func (r *ChainRepository) AppendProviderToAllChainsChecked(
 
 		// Determine priority position (append after the last entry).
 		var maxPriority int
-		err = r.pool.QueryRow(ctx,
+		err = db.QueryRow(ctx,
 			`SELECT COALESCE(MAX(priority), -1)
 			 FROM library_provider_chains
 			 WHERE media_folder_id = $1 AND content_level = $2`,
@@ -300,7 +337,7 @@ func (r *ChainRepository) AppendProviderToAllChainsChecked(
 		// established libraries the moment it is installed.
 		enabled := p.DefaultPriority > 0 && p.DefaultEnabled
 
-		_, err = r.pool.Exec(ctx,
+		_, err = db.Exec(ctx,
 			`INSERT INTO library_provider_chains (media_folder_id, plugin_installation_id, capability_id, capability_type, content_level, priority, enabled)
 			 VALUES ($1, $2, $3, 'metadata_provider.v1', $4, $5, $6)
 			 ON CONFLICT DO NOTHING`,

@@ -41,7 +41,7 @@ const play = {
   play_method: "direct",
   started_at: "2026-09-28T10:00:00.000Z",
   ended_at: "2026-09-28T11:00:00.000Z",
-  watched_seconds: 3000,
+  end_position_seconds: 3000,
   duration_seconds: null,
   completed: false,
 };

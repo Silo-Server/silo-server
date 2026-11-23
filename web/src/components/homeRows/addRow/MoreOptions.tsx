@@ -57,7 +57,7 @@ export function MoreOptions({
               <SlidersHorizontal aria-hidden className="text-muted-foreground size-4 self-center" />
               {t("web.home.addRow.more.title")}
             </span>
-            <span className="text-muted-foreground text-[13px] font-normal">
+            <span className="text-muted-foreground text-[0.8125rem] font-normal">
               {t("web.home.addRow.more.summary", {
                 has_summary: summary ? "yes" : "no",
                 summary: summary ?? "",
@@ -82,7 +82,7 @@ export function MoreOptions({
           <div className="flex items-center justify-between gap-4">
             <div>
               <Label htmlFor={`${id}-limit`}>{t("web.home.addRow.more.itemLimit")}</Label>
-              <p className="text-muted-foreground mt-1 text-[13px]">
+              <p className="text-muted-foreground mt-1 text-[0.8125rem]">
                 {t("web.home.addRow.more.itemLimitHint")}
               </p>
             </div>
@@ -107,7 +107,7 @@ export function MoreOptions({
             <div className="border-border/70 flex items-center justify-between gap-4 border-t pt-4">
               <div>
                 <Label htmlFor={`${id}-hero`}>{t("web.home.addRow.more.heroBanner")}</Label>
-                <p className="text-muted-foreground mt-1 text-[13px]">
+                <p className="text-muted-foreground mt-1 text-[0.8125rem]">
                   {onWebOnlyChange
                     ? t("web.home.addRow.more.heroHintWeb")
                     : t("web.home.addRow.more.heroHint")}
@@ -124,7 +124,7 @@ export function MoreOptions({
             <div className="border-border/70 ms-4 flex items-center justify-between gap-4 border-s-2 ps-4">
               <div>
                 <Label htmlFor={`${id}-apps`}>{t("web.home.addRow.more.showInApps")}</Label>
-                <p className="text-muted-foreground mt-1 text-[13px]">
+                <p className="text-muted-foreground mt-1 text-[0.8125rem]">
                   {webOnly
                     ? t("web.home.addRow.more.webOnlyHint")
                     : t("web.home.addRow.more.appsHint")}

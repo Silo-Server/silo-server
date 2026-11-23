@@ -57,7 +57,7 @@ export function CollectionPicker({
         {missing ? (
           <p
             role="status"
-            className="border-warning/40 bg-warning/10 border-b px-4 py-2.5 text-[13px]"
+            className="border-warning/40 bg-warning/10 border-b px-4 py-2.5 text-[0.8125rem]"
           >
             {t("web.home.addRow.collection.missing")}
           </p>

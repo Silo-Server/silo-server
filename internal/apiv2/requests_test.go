@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"net/http"
 	"slices"
 	"testing"
 	"time"
@@ -275,5 +276,25 @@ func withSubmissionErrors(r *mediarequests.Request) {
 	r.LastError = `route "Movies" sends to "Radarr", which is disabled`
 	for i := range r.Targets {
 		r.Targets[i].LastError = `Post "http://radarr.lan:7878/api/v3/movie": connection refused`
+	}
+}
+
+func TestListMyRequestsOmitsZeroDownloadEstimate(t *testing.T) {
+	svc := fixtureRequests()
+	svc.requests = svc.requests[:1]
+	zero := time.Time{}
+	svc.requests[0].Targets[0].Download.EstimatedCompletion = &zero
+
+	rec := do(t, NewHandler(requestDeps(svc)), http.MethodGet, Prefix+"/requests/mine", "", requestOwner)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	var body MediaRequestCollection
+	decodeBody(t, rec.Body, &body)
+	if len(body.Items) != 1 || body.Items[0].Download == nil || body.Items[0].Download.EstimatedCompletionAt != nil {
+		t.Fatalf("items = %+v, want progress without estimated_completion_at", body.Items)
+	}
+	if len(body.Items[0].Targets) != 1 || body.Items[0].Targets[0].Download == nil || body.Items[0].Targets[0].Download.EstimatedCompletionAt != nil {
+		t.Fatalf("targets = %+v, want progress without estimated_completion_at", body.Items[0].Targets)
 	}
 }

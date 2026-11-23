@@ -1,0 +1,25 @@
+{
+  "items": [
+    {
+      "id": "01J9Z8C3W4R5T6Y7U8I9O0P1Q2",
+      "source": "library",
+      "title": "Crime classics",
+      "poster_url": "/api/v2/images/collections/01J9Z8C3W4R5T6Y7U8I9O0P1Q2/poster",
+      "poster_is_collage": false,
+      "item_count": 24,
+      "library_id": "1"
+    }
+  ],
+  "preview_items": [
+    {
+      "content_id": "movie:harbor-lights-2019",
+      "type": "movie",
+      "title": "Harbor Lights",
+      "year": 2019,
+      "genres": [],
+      "keywords": [],
+      "status": "",
+      "poster_url": "/api/v2/images/items/movie:harbor-lights-2019/poster"
+    }
+  ]
+}

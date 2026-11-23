@@ -342,7 +342,7 @@ function APIKeyBlock({
           placeholder={t("web.settings.watchProviders.apiKey.placeholder")}
           value={value}
           onChange={(event) => setValue(event.target.value)}
-          className="font-mono"
+          className="placeholder:font-ui font-mono"
         />
         <Button
           type="button"
@@ -650,7 +650,7 @@ function WatchProviderCard({
             </h3>
             <StatusPill variant={statusVariant}>{statusLabel}</StatusPill>
           </div>
-          <p className="text-muted-foreground mt-1 text-[13px] leading-snug">{subtitleText}</p>
+          <p className="text-muted-foreground mt-1 text-[0.8125rem] leading-snug">{subtitleText}</p>
         </div>
         <div className="flex shrink-0 gap-2 sm:justify-end">
           {showAuth || showAPIKey ? null : connection.connected ? (

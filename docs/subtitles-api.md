@@ -51,8 +51,7 @@ longer available. Only provider requests are classified this way; storage,
 database and ffmpeg failures report a generic server reason. Provider responses
 and file details stay in the server log. Jobs that failed before reasons were
 classified report a generic reason or the billing notice. The live
-`subtitle_translation_failed` event carries the same reason, and bridge job
-reads return the same reason as v2. Players show it as-is.
+`subtitle_translation_failed` event carries the same reason. Players show it as-is.
 
 GET `/api/v2/subtitles/ai/quota` returns `limited`, `limit`, `used`, `remaining` and
 `period`. The budget belongs to the account. An admin account acting through a
@@ -62,12 +61,12 @@ a profile, or when no profile store is configured. The web translation modal rea
 this typed quota operation through its captured player configuration.
 
 These operations read persisted state and do not enqueue or cancel jobs. Job
-creation and cancellation are the separate v2 operations described under
-[V2 AI creation and live delivery](#v2-ai-creation-and-live-delivery) and
+creation and cancellation are the separate operations described under
+[AI creation and live delivery](#ai-creation-and-live-delivery) and
 [AI job cancellation](#ai-job-cancellation). Native consumers must
 retain string identifiers and the captured account/profile when following jobs.
 
-The v2 subtitle capability probes are always registered. They require an
+The subtitle capability probes are always registered. They require an
 authenticated account. A supplied profile must belong to that account and pass
 viewer-access checks; a profile header is optional.
 
@@ -82,7 +81,7 @@ are sorted and contain no credentials. `schema_version` remains 1. When the AI
 service is absent, both AI flags are false. These reads do not search providers,
 start jobs, or contact an external engine.
 
-The web subtitle menu uses the typed v2 AI probe with the player's credentials.
+The web subtitle menu uses the typed AI probe with the player's credentials.
 Jellyfin compatibility uses its existing subtitle
 protocol and needs no equivalent native capability route.
 
@@ -154,7 +153,7 @@ language filters return a validation error and never become English. Responses
 always expose canonical BCP 47 tags. Empty and null preference values retain
 their settings semantics and are not language tags.
 
-The web detail dialog and player search use typed v2 requests. The existing web
+The web detail dialog and player search use typed requests. The existing web
 track selector still needs numeric stored IDs; its adapter rejects IDs that it
 cannot represent safely. Native consumers need the string-ID models and new
 paths. Provider download and multipart uploads are described below. Viewer deletion and AI-job mutations are described below; their retry limitations still apply.
@@ -223,7 +222,7 @@ older inventory; the player moves it to the ordinal its stored subtitle holds
 in the newer plan before sending it.
 
 This operation does not change Jellyfin subtitle delivery. Multipart uploads
-and AI job creation and cancellation have their own v2 operations, described
+and AI job creation and cancellation have their own operations, described
 below.
 
 
@@ -282,7 +281,7 @@ before its body is read, so a client can send it again.
 Web detail and player callers use these forms with captured authority and suppress
 stale completions. Jellyfin subtitle delivery is unchanged.
 
-## V2 administrator stored-subtitle list
+## Administrator stored-subtitle list
 
 `GET /api/v2/admin/subtitles` requires an acting administrator. It returns `{items, page, total, uploads,
 provider_downloads}`. Subtitle, media-file and uploader identifiers are decimal
@@ -308,7 +307,7 @@ return a redacted `500 internal_error`.
 
 The bundled administrator page uses cursor history and authority-scoped read
 caches, discards stale account/profile/PIN replies and preserves string IDs in
-its existing controls. Metadata edits, deletion and byte downloads use the v2
+its existing controls. Metadata edits, deletion and byte downloads use the
 operations described below. This list does not add a native client screen or a
 Jellyfin counterpart.
 
@@ -336,7 +335,7 @@ modal is a local UI action. Native callers adopt this operation separately,
 retaining the exact job ID and captured account/profile/PIN authority for
 requests and any completion-driven UI updates.
 
-### V2 AI creation and live delivery
+### AI creation and live delivery
 
 `POST /api/v2/subtitles/ai/translate` accepts a string `media_file_id`, explicit
 `kind` (`translate`, `transcribe`, or `transcribe_translate`), `source_index`,
@@ -348,7 +347,7 @@ requests live cues for the caller's local playback session. File authorization
 and account/profile/session matching precede enqueue; account and quota
 attribution come from authentication, never request fields.
 
-The response is `202` with `job` in the existing v2 job projection (string IDs)
+The response is `202` with `job` in the existing job projection (string IDs)
 and `live_delivery_attached`. That boolean reports whether this request attached
 its live notifier to a newly created job. It does not acknowledge socket delivery.
 An existing active job is returned without attaching another viewer's stream.
@@ -406,7 +405,7 @@ Incremental transcription retries extraction from the beginning only when the
 initial seek produced no audio; a provider failure after audio extraction does
 not restart transcription at another position.
 
-## V2 administrator subtitle metadata edits
+## Administrator subtitle metadata edits
 
 `GET /api/v2/admin/subtitles/{id}` returns canonical metadata and a strong `ETag`.
 It requires the acting administrator, supports conditional reads, and exposes
@@ -437,7 +436,7 @@ validator through save. A failed or uncertain save leaves the draft visible and
 blocks another submission until the user closes and reopens to review current
 metadata. A late result cannot close a replacement editor or publish across an
 authority change. Deletion, provider configuration and byte downloads have their
-own v2 operations, described below. No native administration UI or Jellyfin
+own operations, described below. No native administration UI or Jellyfin
 metadata endpoint is introduced here.
 
 ### Administrator subtitle attachment

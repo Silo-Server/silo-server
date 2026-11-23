@@ -85,7 +85,7 @@ export function LookPanel(props: ComponentProps<typeof ArtworkFields>) {
       {open ? (
         <div id={`${id}-body`} className="grid gap-4 p-5 sm:p-6">
           <div className="flex items-center justify-between gap-3">
-            <h2 id={`${id}-heading`} className="text-[17px] font-semibold">
+            <h2 id={`${id}-heading`} className="text-[1.0625rem] font-semibold">
               {t("web.collections.look.heading")}
             </h2>
             <Button
@@ -125,16 +125,16 @@ export function LookPanel(props: ComponentProps<typeof ArtworkFields>) {
             ))}
           </span>
           <span className="grid min-w-0 gap-0.5">
-            <span id={`${id}-heading`} className="text-[15px] font-semibold">
+            <span id={`${id}-heading`} className="text-[0.9375rem] font-semibold">
               {t("web.collections.look.heading")}
             </span>
-            <span id={`${id}-summary`} className="text-muted-foreground text-[13px]">
+            <span id={`${id}-summary`} className="text-muted-foreground text-[0.8125rem]">
               {summary}
             </span>
           </span>
           <span
             aria-hidden
-            className="border-border inline-flex h-8 items-center gap-1.5 rounded-[10px] border px-3 text-[13.5px] font-medium max-sm:hidden"
+            className="border-border inline-flex h-8 items-center gap-1.5 rounded-[10px] border px-3 text-[0.84375rem] font-medium max-sm:hidden"
           >
             {t("web.collections.look.change")}
             <ChevronDown className="size-3.5 opacity-70" />

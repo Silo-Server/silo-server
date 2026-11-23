@@ -1273,120 +1273,17 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	const compatLogComponent = "jellycompat"
 	segmentName := name + "." + ext
-	segmentLease, err := transcodeSession.OpenSegment(segmentName)
-	if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
-		segNum, parseErr := playback.ParseSegmentNumber(name)
-		if parseErr == nil {
-			now := time.Now()
-			decision := transcodeSession.SegmentRecoveryDecision(segNum, now)
-			lastProducedAgeMS := int64(-1)
-			if !decision.Progress.LastProducedAt.IsZero() {
-				lastProducedAgeMS = now.Sub(decision.Progress.LastProducedAt).Milliseconds()
-			}
-			slog.InfoContext(r.Context(), "transcode segment missing", "component", "jellycompat",
-				"segment", segmentName,
-				"requested_segment", segNum,
-				"produced_head", decision.Progress.ProducedHead,
-				"last_requested_segment", decision.Progress.LastRequestedSegment,
-				"start_segment_number", decision.Progress.StartSegmentNumber,
-				"last_produced_age_ms", lastProducedAgeMS,
-				"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-				"reason", decision.Reason,
-				"play_session", playSessionFingerprint(playSessionID),
-				"session", playSession.UpstreamSessionID,
-				"playback_session_id", playSession.UpstreamSessionID,
-			)
-			if decision.Wait {
-				slog.InfoContext(r.Context(), "transcode segment wait", "component", "jellycompat",
-					"segment", segmentName,
-					"requested_segment", segNum,
-					"produced_head", decision.Progress.ProducedHead,
-					"last_requested_segment", decision.Progress.LastRequestedSegment,
-					"start_segment_number", decision.Progress.StartSegmentNumber,
-					"last_produced_age_ms", lastProducedAgeMS,
-					"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-					"reason", decision.Reason,
-					"play_session", playSessionFingerprint(playSessionID),
-					"session", playSession.UpstreamSessionID,
-					"playback_session_id", playSession.UpstreamSessionID,
-				)
-				segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, decision.WaitTimeout)
-				if err != nil && errors.Is(err, playback.ErrSegmentNotFound) {
-					slog.InfoContext(r.Context(), "transcode segment wait timeout", "component", "jellycompat",
-						"segment", segmentName,
-						"requested_segment", segNum,
-						"produced_head", decision.Progress.ProducedHead,
-						"last_requested_segment", decision.Progress.LastRequestedSegment,
-						"start_segment_number", decision.Progress.StartSegmentNumber,
-						"last_produced_age_ms", lastProducedAgeMS,
-						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-						"reason", decision.Reason,
-						"play_session", playSessionFingerprint(playSessionID),
-						"session", playSession.UpstreamSessionID,
-						"playback_session_id", playSession.UpstreamSessionID,
-					)
-				}
-			}
-
-			if err != nil && errors.Is(err, playback.ErrSegmentNotFound) && decision.RestartOnTimeout {
-				target, ok, restartErr := h.tm.RestartSegmentLocked(
-					r.Context(),
-					playSession.UpstreamSessionID,
-					transcodeSession,
-					segNum,
-					decision.Progress.GenerationStartedAt,
-				)
-				// A restart skipped because the request ended is not a failure.
-				if restartErr != nil && !errors.Is(restartErr, playback.ErrManifestNotReady) && !errors.Is(restartErr, r.Context().Err()) {
-					slog.ErrorContext(r.Context(), "restart transcode at missing segment", "component", "jellycompat",
-						"error", restartErr,
-						"segment", segmentName,
-						"play_session", playSessionFingerprint(playSessionID),
-						"session", playSession.UpstreamSessionID,
-						"playback_session_id", playSession.UpstreamSessionID,
-					)
-				}
-
-				// Copy-mode with an unresolved seek target (ok=false, no error)
-				// means the manifest can't place this segment yet. Don't restart
-				// at a fabricated position; surface ErrSegmentNotFound so the
-				// client retries while the session keeps producing manifest.
-				// Mirrors the transcode-node guard in
-				// internal/transcodenode/server.go.
-				if !ok && restartErr == nil && transcodeSession.IsCopyVideo() {
-					err = playback.ErrSegmentNotFound
-				}
-
-				if restartErr != nil {
-					err = restartErr
-				} else if ok {
-					slog.InfoContext(r.Context(), "transcode seek restart", "component", "jellycompat",
-						"segment", segmentName,
-						"requested_segment", segNum,
-						"produced_head", decision.Progress.ProducedHead,
-						"last_requested_segment", decision.Progress.LastRequestedSegment,
-						"start_segment_number", decision.Progress.StartSegmentNumber,
-						"last_produced_age_ms", lastProducedAgeMS,
-						"wait_timeout_ms", decision.WaitTimeout.Milliseconds(),
-						"reason", decision.Reason,
-						"seek_seconds", target.SeekSeconds,
-						"stream_origin_seconds", target.StreamOriginSeconds,
-						"resolved_start_segment", target.StartSegmentNumber,
-						"play_session", playSessionFingerprint(playSessionID),
-						"session", playSession.UpstreamSessionID,
-						"playback_session_id", playSession.UpstreamSessionID,
-					)
-
-					segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 30*time.Second)
-				}
-			}
-		} else if transcodeSession.IsRunning() {
-			// Non-numbered segment (e.g. init.mp4 for fMP4 HLS).
-			// Wait briefly — the init segment is written almost immediately.
-			segmentLease, err = transcodeSession.WaitForOpenSegmentContext(r.Context(), segmentName, 10*time.Second)
-		}
-	}
+	segmentLease, err := playback.OpenSegmentWithRecovery(r.Context(), transcodeSession, segmentName, playback.SegmentRecoveryOptions{
+		SessionID:         playSession.UpstreamSessionID,
+		Component:         compatLogComponent,
+		PlaySession:       playSessionFingerprint(playSessionID),
+		SegmentNumberName: name,
+		Restart: func(ctx context.Context, segNum int, seenGeneration time.Time) (playback.SegmentRecoveryTarget, bool, error) {
+			return h.tm.RestartSegmentLocked(ctx, playSession.UpstreamSessionID, transcodeSession, segNum, seenGeneration)
+		},
+	})
 	if err != nil {
 		if r.Context().Err() != nil {
 			// net/http also ends the context of a client that only
@@ -2126,12 +2023,15 @@ func (h *PlaybackHandler) teardownPlaySession(
 	}
 }
 
+// compatStopSnapshot returns the native session a stop finishes: the live one,
+// or else a copy of fallbackSession. The copy's MediaFileID is the streamed
+// file only when the play identified it. Otherwise it is 0, and the first
+// listed version goes in RequestedMediaFileID: history still has a file to
+// record, while nothing takes that guess as the streamed version (no credits).
 func (h *PlaybackHandler) compatStopSnapshot(
 	playSession *PlaybackSession,
 	fallbackSession *playback.Session,
-) (*playback.Session, string) {
-	transcodeNodeURL := ""
-	var upstreamSession *playback.Session
+) (upstreamSession *playback.Session, transcodeNodeURL string) {
 	if h.sessionMgr != nil {
 		if current, err := h.sessionMgr.GetSession(playSession.UpstreamSessionID); err == nil {
 			upstreamSession = current
@@ -2141,8 +2041,10 @@ func (h *PlaybackHandler) compatStopSnapshot(
 	if upstreamSession == nil && fallbackSession != nil {
 		copy := *fallbackSession
 		copy.ID = playSession.UpstreamSessionID
-		if source := compatScrobbleSource(playSession, &copy, nil); source != nil {
-			copy.MediaFileID = source.FileID
+		if copy.MediaFileID <= 0 {
+			if source := compatScrobbleSource(playSession, &copy, nil); source != nil {
+				copy.RequestedMediaFileID = source.FileID
+			}
 		}
 		upstreamSession = &copy
 	}
@@ -2764,8 +2666,12 @@ func (h *PlaybackHandler) handlePlaybackReport(w http.ResponseWriter, r *http.Re
 	// point, matching the native playback persistence rule.
 	if positionSeconds > 0 && h.storeProvider != nil && playSession.ItemID != "" {
 		if store, storeErr := h.storeProvider.ForUser(r.Context(), session.StreamAppUserID); storeErr == nil {
-			duration := playedSourceDuration(playSession, req.MediaSourceID)
-			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, duration, h.playbackThresholds(r.Context()))
+			source, identified := reportedSource(playSession, req.MediaSourceID)
+			duration := 0.0
+			if source != nil {
+				duration = float64(source.Version.Duration)
+			}
+			completed, err := userstore.UpdateProgressReportingCompletion(r.Context(), store, session.ProfileID, playSession.ItemID, positionSeconds, duration, h.sourceThresholds(r.Context(), source, identified))
 			if err == nil && completed {
 				refreshTasteProfile = true
 			}
@@ -4185,7 +4091,7 @@ func (h *PlaybackHandler) createStaticPlaySession(ctx context.Context, session *
 		if sourceFromRoute && int64(version.FileID) != routeFileID {
 			continue
 		}
-		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx))}, allow4KTranscode)
+		source := h.buildPlaybackSource(routeID, playSessionID, version, DeviceProfile{}, playbackInfoRequest{serverBitrateCapKbps: serverBitrateCapKbps, streamLocation: string(streamlocation.FromContext(ctx)), episode: detail.Type == compatEpisodeType}, allow4KTranscode)
 		sources = append(sources, source)
 	}
 
@@ -4416,20 +4322,21 @@ func mediaSourceByFileID(session *PlaybackSession, fileID int) *PlaybackMediaSou
 	return nil
 }
 
-// playedSourceDuration returns the runtime in seconds that a progress report
-// is judged against: the played version's (see playedMediaSource), which is 0
-// when that version has none, or the first listed runtime when no version can
-// be identified.
-func playedSourceDuration(session *PlaybackSession, mediaSourceID string) float64 {
+// reportedSource returns the source whose runtime and end credits a progress
+// report is judged against: the played version (see playedMediaSource), whose
+// runtime is 0 when it has none, or the first listed version with a runtime
+// when no version can be identified. identified reports which of the two it
+// is; nil when the play lists neither.
+func reportedSource(session *PlaybackSession, mediaSourceID string) (source *PlaybackMediaSource, identified bool) {
 	if source := playedMediaSource(session, mediaSourceID); source != nil {
-		return float64(source.Version.Duration)
+		return source, true
 	}
 	for _, source := range session.MediaSources {
 		if source.Version.Duration > 0 {
-			return float64(source.Version.Duration)
+			return &source, false
 		}
 	}
-	return 0
+	return nil, false
 }
 
 func findMediaSource(session *PlaybackSession, mediaSourceID string) *PlaybackMediaSource {

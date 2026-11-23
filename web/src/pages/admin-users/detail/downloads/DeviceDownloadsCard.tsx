@@ -268,7 +268,7 @@ export function DeviceDownloadsCard({
       {android && (
         <p
           role="note"
-          className="border-border/60 bg-muted/30 mx-4 mt-3 rounded-lg border px-3 py-2 text-[13px] leading-relaxed sm:mx-5"
+          className="border-border/60 bg-muted/30 mx-4 mt-3 rounded-lg border px-3 py-2 text-[0.8125rem] leading-relaxed sm:mx-5"
         >
           {t("web.admin.users.detail.downloads.device.androidNote")}
         </p>
