@@ -90,16 +90,29 @@ export function useWatchProgress(
     [getProgressSnapshot, sessionId],
   );
 
+  // The session whose reports are live; a flush still in flight when the
+  // session changes must not end the replacement.
+  const liveSessionRef = useRef<string | null>(null);
+
   const flushProgress = useCallback(async () => {
     if (!sessionId) return;
 
-    await reportProgress({ isPaused: true });
+    try {
+      await reportProgress({ isPaused: true });
+    } catch (error) {
+      // A leave flushes first. When the server already ended the session,
+      // say so, as a periodic report would: a minimize then still leaves.
+      const reason = playbackSessionEndReason(error);
+      if (reason && liveSessionRef.current === sessionId) onSessionEndedRef.current?.(reason);
+      throw error;
+    }
     skipCleanupReportRef.current = true;
   }, [reportProgress, sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;
     skipCleanupReportRef.current = false;
+    liveSessionRef.current = sessionId;
     // A report still in flight when the session changes must not end the
     // replacement session.
     let active = true;
@@ -119,6 +132,7 @@ export function useWatchProgress(
 
     return () => {
       active = false;
+      liveSessionRef.current = null;
       pauseEvents.forEach((event) => video?.removeEventListener(event, report));
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = null;

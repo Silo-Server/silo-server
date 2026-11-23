@@ -821,6 +821,9 @@ export function VideoPlayer({
   sessionIdRef.current = sessionId;
   const [isLeaving, setIsLeaving] = useState(false);
   const leaveInProgressRef = useRef(false);
+  // Whether the leave holding leaveInProgressRef is a minimize, which lets go
+  // of the guard when it finishes; every other leave exits.
+  const minimizeInProgressRef = useRef(false);
   const [notice, setNotice] = useState<PlaybackNoticeState | null>(null);
   const noticeRef = useRef(notice);
   useEffect(() => {
@@ -2198,6 +2201,7 @@ export function VideoPlayer({
       if (leaveInProgressRef.current) return;
 
       leaveInProgressRef.current = true;
+      minimizeInProgressRef.current = action === "minimize";
       setIsLeaving(true);
 
       const exitState = buildExitState();
@@ -2227,6 +2231,7 @@ export function VideoPlayer({
         await onExit(exitState);
       } finally {
         if (action === "minimize") {
+          minimizeInProgressRef.current = false;
           resetLeaveState();
         }
       }
@@ -2263,10 +2268,15 @@ export function VideoPlayer({
         });
       }
     }
-    // A leave under way holds the guard handleExit checks. An exit needs
-    // nothing more; a minimize lets go when it finishes, isLeaving clears,
-    // and this runs again to leave the minimized player.
-    if (sessionEndExitStartedRef.current || isLeaving || leaveInProgressRef.current) return;
+    if (sessionEndExitStartedRef.current) return;
+    // A leave under way holds the guard handleExit checks. Any exit already
+    // leaves; a minimize lets go when it finishes, isLeaving clears, and this
+    // runs again to leave the minimized player.
+    if (leaveInProgressRef.current && !minimizeInProgressRef.current) {
+      sessionEndExitStartedRef.current = true;
+      return;
+    }
+    if (isLeaving || leaveInProgressRef.current) return;
     sessionEndExitStartedRef.current = true;
     void handleExit();
   }, [connectionEndReason, connectionStatus, handleExit, isLeaving, progressSessionEnded]);
