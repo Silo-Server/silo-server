@@ -387,3 +387,28 @@ func checkProvisionOfflineReuse(t *testing.T, repositories *RepositoryStore, ins
 		t.Fatalf("unverified package = %v", err)
 	}
 }
+
+// A server on another platform fetches the build of the official release an
+// installation holds even after the official catalog's list moved on to a
+// newer one, from that release's descriptor, with its signature verified.
+func TestPlatformBuildOfAnEarlierOfficialReleaseDB(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	catalog, installer := newProvisionCommitFixture(t, pool)
+	official, err := catalog.OfficialRepository(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoURL, _ := officialPluginRepository(provisionTestPluginID)
+	installation := &Installation{
+		ID: 1, RepositoryID: &official.ID, PluginID: provisionTestPluginID, Version: provisionTestOld,
+		Signature: Signature{State: SignatureStateVerified, SourceRepo: &repoURL},
+	}
+	svc := &Service{catalog: catalog, installer: installer}
+	build, err := svc.fetchPlatformBuild(t.Context(), installation)
+	if err != nil {
+		t.Fatalf("fetchPlatformBuild(%s) = %v", provisionTestOld, err)
+	}
+	if build.manifest.GetVersion() != provisionTestOld || build.signature.State != SignatureStateVerified {
+		t.Fatalf("fetched %s signed %q; want %s, verified", build.manifest.GetVersion(), build.signature.State, provisionTestOld)
+	}
+}
