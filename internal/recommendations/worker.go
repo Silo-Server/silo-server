@@ -112,7 +112,10 @@ type Worker struct {
 	refreshesNow        atomic.Int32 // RefreshProfileNow refreshes running
 	// embedMissingAgain records a catch-up pass EmbedMissingNow asked for
 	// while an embeddings job ran here; the job runs it before it ends.
-	embedMissingAgain    bool
+	embedMissingAgain bool
+	// embedPassFailed records that the last embedding pass here failed, so
+	// a catch-up asked for during it waits for the next catch-up tick.
+	embedPassFailed      bool
 	readRefreshes        refreshThrottle
 	cancelFunc           context.CancelFunc
 	embeddingsJobTimeout time.Duration
@@ -217,18 +220,27 @@ func (w *Worker) setRunning(name JobName, v bool) {
 // finishJob marks a job as no longer running. Its cluster lock is already
 // released, so when an embeddings job ends with a catch-up pass still asked
 // for, which EmbedMissingNow can do after the job last checked, finishJob
-// starts that pass.
+// starts that pass (see releaseJob).
 func (w *Worker) finishJob(name JobName) {
-	w.mu.Lock()
-	w.running[name] = false
-	again := name == JobEmbeddings && w.embedMissingAgain
-	if again {
-		w.embedMissingAgain = false
-	}
-	w.mu.Unlock()
-	if again {
+	if w.releaseJob(name) {
 		go w.EmbedMissingNow()
 	}
+}
+
+// releaseJob marks a job as no longer running and reports whether a
+// catch-up pass asked for during it should start now: only for an embeddings
+// job whose last pass did not fail. A failed pass (a provider error, a quota,
+// the job's timeout) drops the request instead of retrying at once; the
+// catch-up tick tries again later.
+func (w *Worker) releaseJob(name JobName) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.running[name] = false
+	if name != JobEmbeddings || !w.embedMissingAgain {
+		return false
+	}
+	w.embedMissingAgain = false
+	return !w.embedPassFailed
 }
 
 // tryStart attempts to mark a job as running. Returns false if already running.
@@ -670,8 +682,9 @@ func (w *Worker) doEmbedMissing(ctx context.Context, held clusterLock) (embeddin
 
 // embedAsked runs one embedding run, then the catch-up pass again for as long
 // as EmbedMissingNow asked for one during the last pass, and adds up their
-// counts. A pass that fails ends it. A request made before the run started is
-// served by it.
+// counts. A pass that fails ends it, and a request made during it waits for
+// the next catch-up tick (see releaseJob). A request made before the run
+// started is served by it.
 func (w *Worker) embedAsked(ctx context.Context, held clusterLock, includeTextStale bool) (EmbedCounts, error) {
 	w.takeEmbedMissingAgain()
 	counts, err := w.engine.embed(ctx, held, includeTextStale)
@@ -683,6 +696,9 @@ func (w *Worker) embedAsked(ctx context.Context, held clusterLock, includeTextSt
 		counts.Failed += more.Failed
 		counts.Skipped += more.Skipped
 	}
+	w.mu.Lock()
+	w.embedPassFailed = err != nil
+	w.mu.Unlock()
 	return counts, err
 }
 

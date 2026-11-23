@@ -19263,7 +19263,7 @@
             "description": "The newest sweep on any server that rebuilt or failed at least one profile. Absent until one does."
           },
           "pending": {
-            "description": "Profiles whose recommendations wait for a rebuild. The sweep runs every 2 minutes and rebuilds them oldest first for up to a minute; a profile whose rebuild fails stays pending.",
+            "description": "Profiles whose recommendations wait for a rebuild. The sweep starts 2 minutes after the previous one ends and starts rebuilds, oldest first, for up to a minute; a rebuild it started finishes even past that minute. A profile whose rebuild fails stays pending.",
             "format": "int64",
             "type": "integer"
           }
