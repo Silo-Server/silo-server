@@ -750,6 +750,7 @@
 ./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
 ./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
 ./internal/api/handlers TestLifecycleSweepBacksOffFailedEndsDB
+./internal/api/handlers TestPausedTimeoutSweepEndsPausedSessionsDB
 ./internal/api/handlers TestLifecycleSweepKeepsARecordedSubtitleDB
 ./internal/api/handlers TestLifecycleSweepTakesALaterSyncedSubtitleDB
 # A live row names an episode as the history entry its play leaves does.
@@ -1128,6 +1129,7 @@
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
 ./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
 ./internal/playback/planstore TestProgressCommitsLifecycleStateDB
+./internal/playback/planstore TestExpirePausedAttemptDB
 ./internal/playback/planstore TestLatePlaybackProgressCannotOverwriteFinalStopDB
 ./internal/playback/planstore TestPlaybackStopCommitsResumeAndEpisodeSpanOnceDB
 ./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB

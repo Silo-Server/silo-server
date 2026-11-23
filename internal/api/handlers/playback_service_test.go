@@ -462,7 +462,7 @@ func (m liveStopSnapshotRace) GetSession(id string) (*playback.Session, error) {
 // of the ids the server mints for its own ends: it is refused, so a client
 // cannot record its play as terminated, expired or aborted.
 func TestStopPlaybackV2RefusesServerStopIDs(t *testing.T) {
-	for _, minted := range []func(string) string{adminStopID, expiredStopID, abortStopID} {
+	for _, minted := range []func(string) string{adminStopID, expiredStopID, abortStopID, pausedTimeoutStopID} {
 		f := newPlaybackServiceFixture(t)
 		_, err := f.handler.StopPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackStopCommand{StopID: minted(f.session.ID)})
 		assertPlaybackOperationError(t, err, http.StatusBadRequest, "bad_request")
@@ -890,26 +890,28 @@ func TestStopFinalizationRunsOnce(t *testing.T) {
 	}
 }
 
-// An attempt an administrator ended answers 410 on progress and replan, so the
-// player exits; an expired attempt keeps answering 404 so the player renews.
-func TestStoppedAttemptAnswersGoneOnlyWhenAnAdministratorEndedIt(t *testing.T) {
+// An attempt an administrator or the paused timeout ended answers 410 on
+// progress and replan, so the player exits: the paused timeout with its own
+// type for a client that advertised paused_timeout_v1. An expired attempt
+// keeps answering 404 so the player renews.
+func TestStoppedAttemptAnswersGoneWhenThePlayerMustLeave(t *testing.T) {
 	for _, tc := range []struct {
-		name   string
-		stop   func(*PlaybackHandler, string)
-		status int
-		code   string
+		name     string
+		stopID   func(string) string
+		features []string
+		status   int
+		code     string
 	}{
-		{"administrator", func(h *PlaybackHandler, id string) { stopAttemptAs(h, id, adminStopID(id)) }, http.StatusGone, "playback_session_ended"},
-		{"expiry", func(h *PlaybackHandler, id string) { stopAttemptAs(h, id, expiredStopID(id)) }, http.StatusNotFound, "session_not_found"},
+		{"administrator", adminStopID, nil, http.StatusGone, "playback_session_ended"},
+		{"paused timeout", pausedTimeoutStopID, []string{playback.FeaturePausedTimeoutV3}, http.StatusGone, "playback_session_paused_timeout"},
+		{"paused timeout, legacy client", pausedTimeoutStopID, nil, http.StatusGone, "playback_session_ended"},
+		{"expiry", expiredStopID, []string{playback.FeaturePausedTimeoutV3}, http.StatusNotFound, "session_not_found"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newPlaybackServiceFixture(t)
-			record, err := f.handler.PlanStoreV3.GetAttempt(context.Background(), f.session.ID)
-			if err != nil {
-				t.Fatal(err)
-			}
-			tc.stop(f.handler, f.session.ID)
-			_, err = f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 10})
+			record := f.withClientFeatures(t, tc.features...)
+			stopAttemptAs(f.handler, f.session.ID, tc.stopID(f.session.ID))
+			_, err := f.handler.ApplyProgressV2(f.ctx, f.caller, f.session.ID, PlaybackProgressCommand{Sequence: 1, Position: 10})
 			assertPlaybackOperationError(t, err, tc.status, tc.code)
 			_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto"}, Digest: "d"})
 			assertPlaybackOperationError(t, err, tc.status, tc.code)
@@ -951,11 +953,38 @@ func (s *stopAfterFirstReadPlanStoreV3) GetAttempt(ctx context.Context, sessionI
 	return record, err
 }
 
-// An administrator stop that lands after the replan precheck still answers
-// 410, not the 404 the player would renew from.
-func TestReplanAnswersGoneWhenAnAdministratorStopLandsMidReplan(t *testing.T) {
-	f := newPlaybackServiceFixture(t)
-	start := v3HandlerStartRequest()
+// An administrator stop or a paused timeout that lands after the replan
+// precheck still answers 410, not the 404 the player would renew from.
+func TestReplanAnswersGoneWhenAnEndLandsMidReplan(t *testing.T) {
+	for _, tc := range []struct {
+		stopID func(string) string
+		code   string
+	}{
+		{adminStopID, "playback_session_ended"},
+		{pausedTimeoutStopID, "playback_session_paused_timeout"},
+	} {
+		f := newPlaybackServiceFixture(t)
+		start := v3HandlerStartRequest()
+		memory, ok := f.handler.PlanStoreV3.(*playback.MemoryPlanStoreV3)
+		if !ok {
+			t.Fatalf("plan store = %T", f.handler.PlanStoreV3)
+		}
+		record := f.withClientFeatures(t, playback.FeaturePausedTimeoutV3)
+		f.handler.PlanStoreV3 = &stopAfterFirstReadPlanStoreV3{MemoryPlanStoreV3: memory, stop: func() {
+			if err := f.manager.StopSession(f.session.ID); err != nil {
+				t.Fatal(err)
+			}
+			stopAttemptAs(f.handler, f.session.ID, tc.stopID(f.session.ID))
+		}}
+		_, err := f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto", Failure: playback.FailureV3{Classification: "network_error"}, Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext}, Digest: "d"})
+		assertPlaybackOperationError(t, err, http.StatusGone, tc.code)
+	}
+}
+
+// withClientFeatures sets the fixture attempt's durable client features and
+// returns the attempt.
+func (f *playbackServiceFixture) withClientFeatures(t *testing.T, features ...string) *playback.AttemptRecordV3 {
+	t.Helper()
 	memory, ok := f.handler.PlanStoreV3.(*playback.MemoryPlanStoreV3)
 	if !ok {
 		t.Fatalf("plan store = %T", f.handler.PlanStoreV3)
@@ -964,14 +993,9 @@ func TestReplanAnswersGoneWhenAnAdministratorStopLandsMidReplan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.handler.PlanStoreV3 = &stopAfterFirstReadPlanStoreV3{MemoryPlanStoreV3: memory, stop: func() {
-		if err := f.manager.StopSession(f.session.ID); err != nil {
-			t.Fatal(err)
-		}
-		stopAttemptAs(f.handler, f.session.ID, adminStopID(f.session.ID))
-	}}
-	_, err = f.handler.ReplanPlaybackV2(f.ctx, f.caller, f.session.ID, PlaybackReplanCommand{Request: playback.ReplanRequestV3{ProtocolVersion: playback.ProtocolV3, PlaybackAttemptID: record.PlaybackAttemptID, ReplanRequestID: "replan-0123456789", FailedPlanID: "plan-0123456789", PlanAttemptID: "plan-attempt-0123", PlanAttemptKey: "v3:0123456789abcdef", AttemptCount: 1, QualityPreference: "auto", Failure: playback.FailureV3{Classification: "network_error"}, Capabilities: start.Capabilities, ClientPlaybackContext: start.ClientPlaybackContext}, Digest: "d"})
-	assertPlaybackOperationError(t, err, http.StatusGone, "playback_session_ended")
+	record.NormalizedRequest.ClientFeatures = features
+	memory.ReplaceAttempt(context.Background(), *record)
+	return record
 }
 
 // TestStaleCopyExpiryLeavesTheRemoteTransport: a replica reaping a stale copy

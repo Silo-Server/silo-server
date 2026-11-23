@@ -5,6 +5,8 @@ import (
 	"context"
 	"strings"
 	"testing"
+
+	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
 func TestEffectiveAdminSettingsEmptyCanonicalS3ValuesUseLegacyFallbacks(t *testing.T) {
@@ -60,6 +62,9 @@ func TestNormalizeAdminSettingRejectsInvalidValues(t *testing.T) {
 		{key: "theme.catalog_url", value: "https://example.com/catalog.json"},
 		{key: "redis.url", value: "not-a-url"},
 		{key: "playback.segment_retention_seconds", value: "119"},
+		{key: playback.PausedSessionTimeoutSettingKey, value: "-1"},
+		{key: playback.PausedSessionTimeoutSettingKey, value: "1441"},
+		{key: playback.PausedSessionTimeoutSettingKey, value: "15m"},
 		{key: "scanner.max_concurrent_libraries", value: "0"},
 		{key: "scanner.max_concurrent_scoped", value: "-1"},
 		{key: "scanner.empty_trash_after_scan", value: "sometimes"},
@@ -116,6 +121,9 @@ func TestNormalizeAdminSettingAcceptsDirectConnectionValues(t *testing.T) {
 		{key: "direct_connections.stun_servers", value: "[::ffff:192.0.2.53]:3478,192.0.2.53:3478", want: "192.0.2.53:3478"},
 		{key: "direct_connections.stun_servers", value: "192.0.2.53:3478,[::ffff:192.0.2.53]:3478", want: "192.0.2.53:3478"},
 		{key: "direct_connections.stun_servers", value: "[2001:db8::1]:3478,stun.example.com:3478", want: "[2001:db8::1]:3478,stun.example.com:3478"},
+		// Zero turns the paused-session timeout off.
+		{key: playback.PausedSessionTimeoutSettingKey, value: "0", want: "0"},
+		{key: playback.PausedSessionTimeoutSettingKey, value: "1440", want: "1440"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.key, func(t *testing.T) {

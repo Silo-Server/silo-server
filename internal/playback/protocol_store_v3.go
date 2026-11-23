@@ -125,6 +125,17 @@ type ProgressStoreV3 interface {
 	ClaimStopFinalization(ctx context.Context, sessionID string, leaseUntil time.Time) (bool, error)
 }
 
+// PausedAttemptExpirerV3 ends an attempt left paused too long: it stops the
+// live attempt under stopID only while its last accepted sample is paused and
+// the session has been paused for at least timeout, judged under the lock
+// that orders progress, so a resume that lands first keeps it live. It
+// reports whether this call stopped the attempt.
+type PausedAttemptExpirerV3 interface {
+	ExpirePausedAttempt(ctx context.Context, sessionID, stopID string, timeout time.Duration) (bool, error)
+}
+
+var _ PausedAttemptExpirerV3 = (*MemoryPlanStoreV3)(nil)
+
 type AttemptRecordV3 struct {
 	PlaybackAttemptID      string
 	SessionID              string
@@ -185,6 +196,12 @@ type AttemptIdentityV3 struct {
 	ProfileID         string
 	// Stopped reports that the attempt has been stopped (StoppedAt is set).
 	Stopped bool
+	// StopID is the stop id the attempt was stopped under; empty while it is
+	// live. See AttemptRecordV3.StopID.
+	StopID string
+	// ClientFeatures are the attempt's durable client features
+	// (NormalizedRequest.ClientFeatures), which say how its end is answered.
+	ClientFeatures []string
 	// LoginSessionID is the login session that started the attempt, or
 	// empty; see AttemptRecordV3.LoginSessionID.
 	LoginSessionID string
@@ -268,7 +285,10 @@ type MemoryPlanStoreV3 struct {
 	attempts     map[string]AttemptRecordV3
 	replans      map[string]memoryReplanV3
 	stopReceipts map[string]StopReceiptV3
-	events       []RouteEventRecordV3
+	// pausedSince is when each live session's accepted samples turned
+	// paused, the memory store's stand-in for the lifecycle row.
+	pausedSince map[string]time.Time
+	events      []RouteEventRecordV3
 }
 
 func NewMemoryPlanStoreV3() *MemoryPlanStoreV3 {
@@ -337,6 +357,7 @@ func (s *MemoryPlanStoreV3) deleteAttemptLocked(attemptID string) {
 		return
 	}
 	delete(s.stopReceipts, record.SessionID)
+	delete(s.pausedSince, record.SessionID)
 	for key := range s.replans {
 		if strings.HasPrefix(key, record.SessionID+":") {
 			delete(s.replans, key)
@@ -447,7 +468,7 @@ func (s *MemoryPlanStoreV3) GetAttemptIdentity(ctx context.Context, sessionID st
 	if err != nil {
 		return nil, err
 	}
-	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, Stopped: record.StoppedAt != nil, LoginSessionID: record.LoginSessionID}, nil
+	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, Stopped: record.StoppedAt != nil, StopID: record.StopID, ClientFeatures: record.NormalizedRequest.ClientFeatures, LoginSessionID: record.LoginSessionID}, nil
 }
 
 func (s *MemoryPlanStoreV3) GetAttemptIdentityByPlaybackAttemptID(ctx context.Context, attemptID string) (*AttemptIdentityV3, error) {
@@ -455,7 +476,7 @@ func (s *MemoryPlanStoreV3) GetAttemptIdentityByPlaybackAttemptID(ctx context.Co
 	if err != nil {
 		return nil, err
 	}
-	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, Stopped: record.StoppedAt != nil, LoginSessionID: record.LoginSessionID}, nil
+	return &AttemptIdentityV3{PlaybackAttemptID: record.PlaybackAttemptID, SessionID: record.SessionID, UserID: record.UserID, ProfileID: record.ProfileID, Stopped: record.StoppedAt != nil, StopID: record.StopID, ClientFeatures: record.NormalizedRequest.ClientFeatures, LoginSessionID: record.LoginSessionID}, nil
 }
 
 func (s *MemoryPlanStoreV3) RecordRouteEvent(_ context.Context, record RouteEventRecordV3) (bool, error) {
@@ -508,9 +529,19 @@ func (s *MemoryPlanStoreV3) ApplyProgress(_ context.Context, sessionID string, s
 	}
 	if sample.Sequence > record.LastSequence {
 		applied := sample
+		wasPaused := record.LastSample != nil && record.LastSample.IsPaused
 		record.LastSequence, record.LastSample = sample.Sequence, &applied
 		record.LastSampleAt = time.Now()
 		s.attempts[attemptID] = *record
+		switch {
+		case !sample.IsPaused:
+			delete(s.pausedSince, sessionID)
+		case !wasPaused:
+			if s.pausedSince == nil {
+				s.pausedSince = make(map[string]time.Time)
+			}
+			s.pausedSince[sessionID] = record.LastSampleAt
+		}
 		return ProgressReceiptV3{Outcome: ProgressAppliedV3, Accepted: &sample}, nil
 	}
 	return ResolveUnappliedProgressV3(record.LastSequence, record.LastSample, sample)
@@ -559,6 +590,7 @@ func (s *MemoryPlanStoreV3) StopAttempt(_ context.Context, sessionID, stopID str
 	record.StopID = stopID
 	record.LastSampleAt = now
 	s.attempts[attemptID] = *record
+	delete(s.pausedSince, sessionID)
 	receipt := StopReceiptV3{StopID: stopID}
 	if record.LastSample != nil {
 		accepted := *record.LastSample
@@ -569,6 +601,30 @@ func (s *MemoryPlanStoreV3) StopAttempt(_ context.Context, sessionID, stopID str
 	}
 	s.stopReceipts[sessionID] = receipt
 	return receipt, true, nil
+}
+
+func (s *MemoryPlanStoreV3) ExpirePausedAttempt(_ context.Context, sessionID, stopID string, timeout time.Duration) (bool, error) {
+	if _, err := uuid.Parse(stopID); err != nil {
+		return false, ErrInvalidStopIDV3
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	attemptID, record := s.findAttemptLocked(sessionID)
+	since, paused := s.pausedSince[sessionID]
+	if timeout <= 0 || record == nil || record.StoppedAt != nil || record.LastSample == nil || !record.LastSample.IsPaused ||
+		!paused || time.Since(since) < timeout {
+		return false, nil
+	}
+	now := time.Now()
+	record.StoppedAt, record.StopID, record.LastSampleAt = &now, stopID, now
+	s.attempts[attemptID] = *record
+	accepted := *record.LastSample
+	if s.stopReceipts == nil {
+		s.stopReceipts = make(map[string]StopReceiptV3)
+	}
+	s.stopReceipts[sessionID] = StopReceiptV3{StopID: stopID, Accepted: &accepted}
+	delete(s.pausedSince, sessionID)
+	return true, nil
 }
 
 func (s *MemoryPlanStoreV3) RecordStopReceipt(_ context.Context, sessionID string, receipt StopReceiptV3) error {
