@@ -82,6 +82,19 @@ func (p playableTargetPlan) usesIndex(name string) bool {
 	return slices.ContainsFunc(p.Children, func(child playableTargetPlan) bool { return child.usesIndex(name) })
 }
 
+// progressRowsRead counts the progress rows the plan's scans read, including
+// those a filter then discarded.
+func (p playableTargetPlan) progressRowsRead() float64 {
+	var rows float64
+	if p.Relation == "user_watch_progress" {
+		rows = (p.Rows + p.FilterRows) * p.Loops
+	}
+	for _, child := range p.Children {
+		rows += child.progressRowsRead()
+	}
+	return rows
+}
+
 func (p playableTargetPlan) progressRows() float64 {
 	var rows float64
 	if p.Relation == "user_watch_progress" {
@@ -354,7 +367,9 @@ func TestPlayableTargetResolverAnchoredCompletedRangePlan(t *testing.T) {
 		t.Fatalf("completed progress read the completed-cursor index, which rescans the profile's completed history per series\n%s", raw)
 	}
 	// The requested series' completed rows, plus one row per series of slack.
-	if rows, limit := plan.progressRows(), seriesCount*(watched+1); rows > float64(limit) {
+	// Filtered rows count too: a scan that reads the profile and filters it
+	// down to the range returns few rows but reads them all.
+	if rows, limit := plan.progressRowsRead(), seriesCount*(watched+1); rows > float64(limit) {
 		t.Fatalf("%d series cards read %.0f progress rows; want at most %d, the requested series' rows\n%s",
 			seriesCount, rows, limit, raw)
 	}
