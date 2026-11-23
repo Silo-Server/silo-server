@@ -30,19 +30,19 @@ import (
 // then builds each persona's rows, which the evaluation reads from the cache
 // in their built order, before the daily rotation a read applies.
 //
-// The catalog adds titles, none of them a target, that put each case a
-// ranking fix targets into the numbers:
+// The catalog adds titles, none of them a target, that each test a ranking
+// rule the numbers should keep honest:
 //
 //   - multi-genre decoys, tagged with four genres and with vectors between
-//     them, which the genre-first sort of the cluster rows' candidate query
-//     ranks above nearer titles of fewer genres (case 1);
-//   - unembedded titles, which MMR ranks by relevance alone (case 2): some
-//     co-watched with the focused persona's latest watch, which score 0.3 ×
-//     Jaccard in Because You Watched and stay below its window here, and some
-//     two of its three peers rate 5 stars, which Similar Users serves;
+//     them, which a cluster row must not rank above nearer titles of fewer
+//     genres (case 1);
+//   - unembedded titles, which MMR must neither lift above embedded titles
+//     nor bury (case 2): some co-watched with the focused persona's latest
+//     watch, for Because You Watched, and some two of its three peers rate 5
+//     stars, which Similar Users serves;
 //   - obscure titles (no logo or keywords) rated 8.8 to 9.4 near four
-//     interests, which the quality prior lifts with no notability gate (case
-//     3);
+//     interests, which the quality prior must not lift over notable titles
+//     (case 3);
 //   - every Horror and Documentary title stored at a length from 0.4 to 3,
 //     so the scaled persona's k-means sees vectors that are not unit length
 //     (case 4).
