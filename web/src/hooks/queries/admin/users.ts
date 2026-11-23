@@ -143,6 +143,8 @@ export function settingValueFromString(key: string, raw: string): unknown {
   }
 }
 
+type AdminSettingValueRow = Awaited<ReturnType<typeof listAdminSettingValues>>["values"][number];
+
 /** Every explicit canonical value the target user has stored, all scopes. */
 function useAdminUserSettingValues(userId: number) {
   const authority = captureProfileRequestContext();
@@ -168,12 +170,10 @@ function invalidateAdminDeviceCaches(
 ) {
   // Device overrides derive from the canonical values list, which lives under
   // the userSettings key.
-  return Promise.all([
-    queryClient.invalidateQueries({
-      queryKey: [...adminUsersKey(adminUserScope(authority)), "settings", userId],
-    }),
-    queryClient.invalidateQueries({ queryKey: adminKeys.devices() }),
-  ]);
+  queryClient.invalidateQueries({
+    queryKey: [...adminUsersKey(adminUserScope(authority)), "settings", userId],
+  });
+  queryClient.invalidateQueries({ queryKey: adminKeys.devices() });
 }
 
 export const adminUsersKey = (scope = adminUserScope()) => [...adminKeys.users(), scope];
@@ -471,15 +471,49 @@ export function useUpdateAdminUserDeviceSetting() {
         settingValueFromString(key, value),
         authority,
       ),
-    onSuccess: (_data, variables) => {
+    onSuccess: async (_data, variables) => {
       toast.success(t("web.admin.common.users.deviceOverrideUpdated"));
+      // Put the saved value in the cached list before the save settles: the
+      // subtitle appearance editor builds each save on that row, and a
+      // reopened editor starts from it, so it can't wait on a refetch that may
+      // be slow, skipped (the list isn't on screen) or fail.
+      const settingsKey = [
+        ...adminUsersKey(adminUserScope(authority)),
+        "settings",
+        variables.userId,
+      ];
+      await queryClient.cancelQueries({ queryKey: settingsKey });
+      queryClient.setQueryData<AdminSettingValueRow[]>(settingsKey, (rows) => {
+        if (!rows) return rows;
+        const value = settingValueFromString(variables.key, variables.value);
+        const updatedAt = new Date().toISOString();
+        const target = (row: AdminSettingValueRow) =>
+          row.key === variables.key &&
+          row.scope === "profile_device" &&
+          (row.profile_id ?? "") === variables.profileId &&
+          row.device_id === variables.deviceId;
+        return rows.some(target)
+          ? rows.map((row) => (target(row) ? { ...row, value, updated_at: updatedAt } : row))
+          : [
+              ...rows,
+              {
+                key: variables.key,
+                scope: "profile_device",
+                profile_id: variables.profileId,
+                device_id: variables.deviceId,
+                client_family: undefined,
+                library_id: undefined,
+                value,
+                updated_at: updatedAt,
+                // Not known until the refetch reads the stored row.
+                revision: 0,
+              },
+            ];
+      });
+      invalidateAdminDeviceCaches(queryClient, variables.userId, authority);
       queryClient.invalidateQueries({
         queryKey: adminKeys.deviceDetail(variables.userId, variables.deviceId),
       });
-      // Settle once the device rows show the save: the subtitle appearance
-      // editor builds each save on that row, and a reopened editor starts
-      // from it.
-      return invalidateAdminDeviceCaches(queryClient, variables.userId, authority);
     },
     onError: (err) => {
       toastSettingWriteError(err, t("web.admin.common.users.deviceOverrideSaveFailed"));

@@ -41,11 +41,9 @@ afterEach(() => {
 });
 
 // The subtitle appearance editor builds each save on the stored row, and a
-// reopened editor starts from it, so the save may only settle once that row
-// shows it.
-it("settles a device override save once the user's stored values show it", async () => {
-  let releaseRefetch!: () => void;
-  const refetched = new Promise<void>((resolve) => (releaseRefetch = resolve));
+// reopened editor starts from it, so the row must show a save as soon as the
+// save settles, whether or not the list's refetch has come back.
+it("shows a device override save in the user's stored values once it settles", async () => {
   let gets = 0;
   vi.stubGlobal(
     "fetch",
@@ -55,9 +53,8 @@ it("settles a device override save once the user's stored values show it", async
       if (method === "PUT") return json({ value: { fontSize: "medium" } });
       if (url.includes("/settings/values")) {
         gets += 1;
-        if (gets === 1) return valuesPage(null);
-        await refetched;
-        return valuesPage("medium");
+        // The refetch after the save never answers.
+        return gets === 1 ? valuesPage(null) : new Promise<Response>(() => undefined);
       }
       return json({ items: [], page: { has_more: false } });
     }),
@@ -70,24 +67,27 @@ it("settles a device override save once the user's stored values show it", async
     { wrapper },
   );
   await waitFor(() => expect(result.current.stored.isLoading).toBe(false));
+  expect(result.current.stored.data).toEqual([]);
 
-  let settled = false;
-  act(() => {
-    void result.current.save
-      .mutateAsync({
-        userId: 1,
-        profileId: "profile-a",
-        deviceId: "device-a",
+  await act(() =>
+    result.current.save.mutateAsync({
+      userId: 1,
+      profileId: "profile-a",
+      deviceId: "device-a",
+      key: "playback.subtitle_appearance",
+      value: JSON.stringify({ fontSize: "medium" }),
+    }),
+  );
+
+  await waitFor(() =>
+    expect(result.current.stored.data).toMatchObject([
+      {
         key: "playback.subtitle_appearance",
+        scope: "profile_device",
+        profile_id: "profile-a",
+        device_id: "device-a",
         value: JSON.stringify({ fontSize: "medium" }),
-      })
-      .then(() => (settled = true));
-  });
-  await waitFor(() => expect(gets).toBe(2));
-  await act(async () => new Promise((resolve) => setTimeout(resolve, 20)));
-  expect(settled).toBe(false);
-
-  await act(async () => releaseRefetch());
-  await waitFor(() => expect(settled).toBe(true));
-  expect(result.current.stored.data[0]?.value).toContain("medium");
+      },
+    ]),
+  );
 });

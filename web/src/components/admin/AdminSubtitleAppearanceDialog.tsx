@@ -48,7 +48,7 @@ export function AdminSubtitleAppearanceDialog({
   onReset,
 }: AdminSubtitleAppearanceDialogProps) {
   const t = useT();
-  // Keyed by the stored value, so reopening during a save continues from it.
+  // Keyed by the setting's target, so reopening during a save continues from it.
   const draft = useAutosavedDraft(
     parseSubtitleAppearance(setting.value),
     JSON.stringify([setting.user_id, setting.profile_id, setting.device_id, setting.key]),

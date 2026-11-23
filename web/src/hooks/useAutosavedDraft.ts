@@ -21,13 +21,13 @@ interface Machine<T> {
  * save running; one reopened on the same key joins it instead of starting from
  * a stored copy the save hasn't reached yet and racing it with a second queue.
  */
-const saving = new Map<string, unknown>();
+const inFlight = new Map<string, unknown>();
 
 /** Send one patch; when it settles, send whatever queued up meanwhile. */
 function send<T>(m: Machine<T>, patch: Partial<T>, save: Save<T>) {
   const next = { ...m.confirmed, ...patch };
   m.sending = patch;
-  if (m.key !== undefined) saving.set(m.key, m);
+  if (m.key !== undefined) inFlight.set(m.key, m);
   void save(next)
     .then(
       () => {
@@ -41,7 +41,7 @@ function send<T>(m: Machine<T>, patch: Partial<T>, save: Save<T>) {
       m.queued = null;
       m.queuedSave = null;
       if (queued && queuedSave) send(m, queued, queuedSave);
-      else if (m.key !== undefined && saving.get(m.key) === m) saving.delete(m.key);
+      else if (m.key !== undefined && inFlight.get(m.key) === m) inFlight.delete(m.key);
       m.publish?.(m);
     });
 }
@@ -77,7 +77,7 @@ const viewOf = <T>(m: Machine<T>) => ({
 export function useAutosavedDraft<T extends object>(initial: T, key?: string) {
   const [joined] = useState<Machine<T>>(
     () =>
-      (key !== undefined ? (saving.get(key) as Machine<T> | undefined) : undefined) ?? {
+      (key !== undefined ? (inFlight.get(key) as Machine<T> | undefined) : undefined) ?? {
         key,
         confirmed: initial,
         sending: null,

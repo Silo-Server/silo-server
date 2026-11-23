@@ -298,10 +298,9 @@ export interface DeviceOverrideRowProps {
   /**
    * Open the editor for a JSON-shaped setting. The parent decides which
    * editor to render based on `setting.key` (e.g. a custom dialog for
-   * `subtitle_appearance`) — `isOverride` lets the editor decide whether
-   * to surface a "Reset" affordance.
+   * `subtitle_appearance`).
    */
-  onEditJson: (setting: AdminDeviceSetting, isOverride: boolean) => void;
+  onEditJson: (setting: AdminDeviceSetting) => void;
   onReset: (setting: AdminDeviceSetting) => void;
 }
 
@@ -410,7 +409,7 @@ export function DeviceOverrideRow({
 
       <div className="flex flex-col items-stretch gap-2 md:min-w-[220px] md:items-end">
         {isJsonOnly || !definition ? (
-          <Button variant="outline" size="sm" onClick={() => onEditJson(setting, isOverride)}>
+          <Button variant="outline" size="sm" onClick={() => onEditJson(setting)}>
             {setting.key === SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE
               ? t("web.admin.common.deviceOverrides.edit.customize")
               : t("web.admin.common.deviceOverrides.edit.json")}
@@ -506,7 +505,7 @@ export interface DeviceProfileTabsProps {
   deviceStaleDays?: number | null;
   onResetProfile: (profileId: string, profileName: string) => void;
   /** Forwarded to {@link DeviceOverrideRow.onEditJson}. */
-  onEditJson: (setting: AdminDeviceSetting, isOverride: boolean) => void;
+  onEditJson: (setting: AdminDeviceSetting) => void;
   onResetSetting: (setting: AdminDeviceSetting) => void;
   onChangeSetting: (setting: AdminDeviceSetting, value: string) => void;
   updatePending: boolean;
