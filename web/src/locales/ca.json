@@ -74160,7 +74160,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "De 0 a 1440. Finalitza un vídeo que ha estat en pausa aquest temps en una aplicació de Silo, cosa que allibera la transmissió i qualsevol transcodificació; si el tornes a reproduir, continua des del mateix punt. No afecta Veure junts, l’emissió a altres dispositius ni els audiollibres. Amb 0, la reproducció en pausa no finalitza mai."
+      "value": "De 0 a 1440. Finalitza un vídeo que ha estat en pausa aquest temps en una aplicació de Silo, cosa que allibera la transmissió i qualsevol transcodificació; si el tornes a reproduir, continua des del mateix punt. No afecta Veure junts, l’emissió a altres dispositius ni els audiollibres. Amb 0, aquesta opció es desactiva."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

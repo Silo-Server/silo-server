@@ -66658,7 +66658,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 ile 1440 arası. Bir Silo uygulamasında bu kadar süre duraklatılmış bir videoyu sonlandırır, akışını ve varsa kod dönüştürme işlemini serbest bırakır; video yeniden oynatıldığında aynı yerden devam eder. Birlikte izle, yayınlama ve sesli kitaplar etkilenmez. 0, duraklatılmış oynatmayı hiçbir zaman sonlandırmaz."
+      "value": "0 ile 1440 arası. Bir Silo uygulamasında bu kadar süre duraklatılmış bir videoyu sonlandırır, akışını ve varsa kod dönüştürme işlemini serbest bırakır; video yeniden oynatıldığında aynı yerden devam eder. Birlikte izle, yayınlama ve sesli kitaplar etkilenmez. 0 bu özelliği kapatır."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

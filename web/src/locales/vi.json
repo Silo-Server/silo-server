@@ -67474,7 +67474,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 đến 1440. Dừng phát video đã tạm dừng lâu như vậy trong ứng dụng Silo, giải phóng luồng và mọi phiên chuyển mã của video đó; khi phát tiếp, video sẽ tiếp tục từ đúng vị trí cũ. Không ảnh hưởng đến Xem cùng nhau, truyền tới thiết bị khác và sách nói. 0 nghĩa là không bao giờ dừng phát nội dung đang tạm dừng."
+      "value": "0 đến 1440. Dừng phát video đã tạm dừng lâu như vậy trong ứng dụng Silo, giải phóng luồng và mọi phiên chuyển mã của video đó; khi phát tiếp, video sẽ tiếp tục từ đúng vị trí cũ. Không ảnh hưởng đến Xem cùng nhau, truyền tới thiết bị khác và sách nói. 0 để tắt tính năng này."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

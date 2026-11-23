@@ -60487,7 +60487,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 hingga 1440. Mengakhiri video yang dijeda selama ini di aplikasi Silo, sehingga stream dan transkode terkait dibebaskan; memutarnya lagi akan melanjutkan dari posisi yang sama. Tonton bersama, casting, dan buku audio tidak terpengaruh. Dengan 0, pemutaran yang dijeda tidak pernah diakhiri."
+      "value": "0 hingga 1440. Mengakhiri video yang dijeda selama ini di aplikasi Silo, sehingga stream dan transkode terkait dibebaskan; memutarnya lagi akan melanjutkan dari posisi yang sama. Tonton bersama, casting, dan buku audio tidak terpengaruh. 0 menonaktifkan opsi ini."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

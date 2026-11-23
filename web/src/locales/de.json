@@ -67030,7 +67030,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 bis 1440. Beendet ein Video, das in einer Silo-App so lange pausiert ist, gibt seinen Stream frei und beendet, was dafür transkodiert wird; bei erneuter Wiedergabe geht es an derselben Stelle weiter. Gemeinsam schauen, Casting und Hörbücher sind nicht betroffen. Bei 0 wird pausierte Wiedergabe nie beendet."
+      "value": "0 bis 1440. Beendet ein Video, das in einer Silo-App so lange pausiert ist, gibt seinen Stream frei und beendet, was dafür transkodiert wird; bei erneuter Wiedergabe geht es an derselben Stelle weiter. Gemeinsam schauen, Casting und Hörbücher sind nicht betroffen. 0 schaltet diese Option aus."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

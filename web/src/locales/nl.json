@@ -66918,7 +66918,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 tot 1440. Beëindigt een video die zo lang gepauzeerd is in een Silo-app, waardoor de stream en een eventuele transcodering vrijkomen; opnieuw afspelen gaat verder vanaf hetzelfde punt. Samen kijken, casten en luisterboeken worden niet beïnvloed. Bij 0 wordt gepauzeerd afspelen nooit beëindigd."
+      "value": "0 tot 1440. Beëindigt een video die zo lang gepauzeerd is in een Silo-app, waardoor de stream en een eventuele transcodering vrijkomen; opnieuw afspelen gaat verder vanaf hetzelfde punt. Samen kijken, casten en luisterboeken worden niet beïnvloed. Met 0 zet je dit uit."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

@@ -67838,7 +67838,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0–1440. Lõpetab Silo rakenduses nii kaua peatatud video esituse ning vabastab selle voo ja võimaliku transkodeerimise; uuesti esitamisel jätkub video samast kohast. See ei mõjuta funktsiooni „Vaata koos“, ülekandmist ega audioraamatuid. Väärtuse 0 korral peatatud esitust ei lõpetata."
+      "value": "0–1440. Lõpetab Silo rakenduses nii kaua peatatud video esituse ning vabastab selle voo ja võimaliku transkodeerimise; uuesti esitamisel jätkub video samast kohast. See ei mõjuta funktsiooni „Vaata koos“, ülekandmist ega audioraamatuid. Väärtus 0 lülitab selle välja."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

@@ -60939,7 +60939,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0~1440. Silo 앱에서 이 시간 동안 일시정지된 동영상을 종료해 스트림과 트랜스코딩을 해제해요. 다시 재생하면 같은 위치부터 이어서 재생돼요. 함께 보기, 캐스팅, 오디오북에는 적용되지 않아요. 0이면 일시정지된 재생을 종료하지 않아요."
+      "value": "0~1440. Silo 앱에서 이 시간 동안 일시정지된 동영상을 종료해 스트림과 트랜스코딩을 해제해요. 다시 재생하면 같은 위치부터 이어서 재생돼요. 함께 보기, 캐스팅, 오디오북에는 적용되지 않아요. 0이면 이 기능이 꺼져요."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

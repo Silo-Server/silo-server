@@ -67138,7 +67138,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 till 1440. Avslutar en video som har varit pausad så länge i en Silo-app och frigör dess stream och eventuell omkodning. Spelas den upp igen fortsätter den från samma ställe. Titta tillsammans, castning och ljudböcker påverkas inte. 0 avslutar aldrig pausad uppspelning."
+      "value": "0 till 1440. Avslutar en video som har varit pausad så länge i en Silo-app och frigör dess stream och eventuell omkodning. Spelas den upp igen fortsätter den från samma ställe. Titta tillsammans, castning och ljudböcker påverkas inte. 0 stänger av funktionen."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

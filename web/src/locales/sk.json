@@ -81258,7 +81258,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 až 1440. Ukončí video, ktoré je takto dlho pozastavené v aplikácii Silo, a uvoľní jeho stream aj prípadné prekódovanie; po opätovnom spustení prehrávanie pokračuje od rovnakého miesta. Spoločné sledovanie, prenos do iných zariadení a audioknihy to neovplyvní. Hodnota 0 pozastavené prehrávanie nikdy neukončí."
+      "value": "0 až 1440. Ukončí video, ktoré je v aplikácii Silo takto dlho pozastavené, a uvoľní jeho stream aj prípadné prekódovanie; po opätovnom spustení prehrávanie pokračuje od rovnakého miesta. Spoločné sledovanie, prenos do iných zariadení a audioknihy to neovplyvní. Hodnota 0 túto funkciu vypne."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

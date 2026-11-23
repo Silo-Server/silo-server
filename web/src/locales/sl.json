@@ -80969,7 +80969,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "Od 0 do 1440. Konča video, ki je bil v aplikaciji Silo tako dolgo začasno ustavljen, ter sprosti njegov pretok in morebitno prekodiranje; ob ponovnem predvajanju se nadaljuje z istega mesta. To ne vpliva na Skupni ogled, oddajanje v druge naprave in zvočne knjige. Z vrednostjo 0 se začasno ustavljeno predvajanje nikoli ne konča."
+      "value": "Od 0 do 1440. Konča video, ki je bil v aplikaciji Silo tako dolgo začasno ustavljen, ter sprosti njegov pretok in morebitno prekodiranje; ob ponovnem predvajanju se nadaljuje z istega mesta. To ne vpliva na Skupni ogled, oddajanje v druge naprave in zvočne knjige. Vrednost 0 to možnost izklopi."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

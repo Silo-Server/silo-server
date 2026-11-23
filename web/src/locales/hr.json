@@ -74180,7 +74180,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "Od 0 do 1440. Završava reprodukciju videozapisa koji je toliko dugo pauziran u aplikaciji Silo i oslobađa njegov stream i transkodiranje, ako postoji; ponovna reprodukcija nastavlja se s istog mjesta. Ne utječe na Zajedničko gledanje, emitiranje ni audioknjige. Uz 0 pauzirana se reprodukcija nikad ne završava."
+      "value": "Od 0 do 1440. Završava reprodukciju videozapisa koji je toliko dugo pauziran u aplikaciji Silo i oslobađa njegov stream i transkodiranje, ako postoji; ponovna reprodukcija nastavlja se s istog mjesta. Ne utječe na Zajedničko gledanje, emitiranje ni audioknjige. Vrijednost 0 isključuje ovu opciju."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

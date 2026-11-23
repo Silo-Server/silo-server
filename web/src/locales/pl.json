@@ -81808,7 +81808,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "Od 0 do 1440. Kończy odtwarzanie wideo wstrzymanego tak długo w aplikacji Silo, zwalniając jego strumień i ewentualne transkodowanie; ponowne odtworzenie wznawia je od tego samego miejsca. Nie dotyczy to wspólnego oglądania, castingu ani audiobooków. 0 oznacza, że wstrzymane odtwarzanie nigdy nie jest kończone."
+      "value": "Od 0 do 1440. Kończy odtwarzanie wideo wstrzymanego tak długo w aplikacji Silo, zwalniając jego strumień i ewentualne transkodowanie; ponowne odtworzenie wznawia je od tego samego miejsca. Nie dotyczy to wspólnego oglądania, castingu ani audiobooków. 0 wyłącza tę funkcję."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

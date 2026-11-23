@@ -74176,7 +74176,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "Între 0 și 1440. Încheie redarea unui videoclip aflat în pauză atât de mult timp într-o aplicație Silo, eliberând streamul și orice transcodare; la o nouă redare, aceasta continuă din același punct. Vizionarea împreună, proiectarea și cărțile audio nu sunt afectate. Cu 0, redarea în pauză nu se încheie niciodată."
+      "value": "Între 0 și 1440. Încheie redarea unui videoclip aflat în pauză atât de mult timp într-o aplicație Silo, eliberând streamul și orice transcodare; la o nouă redare, aceasta continuă din același punct. Vizionarea împreună, proiectarea și cărțile audio nu sunt afectate. Valoarea 0 dezactivează această opțiune."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

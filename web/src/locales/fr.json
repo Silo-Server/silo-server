@@ -73820,7 +73820,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "De 0 à 1440. Arrête une vidéo restée en pause aussi longtemps dans une application Silo, ce qui libère son flux et tout transcodage ; la reprise de la lecture continue au même endroit. Regarder ensemble, la diffusion sur un autre appareil et les livres audio ne sont pas concernés. 0 n’arrête jamais la lecture en pause."
+      "value": "De 0 à 1440. Arrête une vidéo restée en pause aussi longtemps dans une application Silo, ce qui libère son flux et tout transcodage ; la reprise de la lecture continue au même endroit. Regarder ensemble, la diffusion sur un autre appareil et les livres audio ne sont pas concernés. 0 désactive cette option."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

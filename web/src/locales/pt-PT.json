@@ -74372,7 +74372,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 a 1440. Termina um vídeo que esteja em pausa durante este tempo numa app do Silo, libertando a transmissão e qualquer transcodificação; ao reproduzi-lo novamente, continua no mesmo ponto. O Ver juntos, a transmissão para outros dispositivos e os audiolivros não são afetados. Com 0, a reprodução em pausa nunca termina."
+      "value": "0 a 1440. Termina um vídeo que esteja em pausa durante este tempo numa app do Silo, libertando a transmissão e qualquer transcodificação; ao reproduzi-lo novamente, continua no mesmo ponto. O Ver juntos, a transmissão para outros dispositivos e os audiolivros não são afetados. O valor 0 desativa esta opção."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

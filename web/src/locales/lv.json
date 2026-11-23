@@ -75219,7 +75219,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "No 0 līdz 1440. Beidz video, kas Silo lietotnē ir pauzēts tik ilgi, atbrīvojot tā straumi un jebkādu pārkodēšanu; atskaņojot to vēlreiz, skatīšanās turpinās no tās pašas vietas. Tas neietekmē funkciju „Skatīties kopā”, apraidi un audiogrāmatas. Ja vērtība ir 0, pauzēta atskaņošana nekad netiek beigta."
+      "value": "No 0 līdz 1440. Beidz video, kas Silo lietotnē ir pauzēts tik ilgi, atbrīvojot tā straumi un jebkādu pārkodēšanu; atskaņojot to vēlreiz, skatīšanās turpinās no tās pašas vietas. Tas neietekmē funkciju „Skatīties kopā”, apraidi un audiogrāmatas. Vērtība 0 šo funkciju izslēdz."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

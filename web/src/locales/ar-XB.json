@@ -70914,7 +70914,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "\u200F\u202E0 to 1440. Ends a video paused this long in a Silo app, freeing its stream and any transcode; playing it again continues from the same spot. Watch Together, casting and audiobooks are not affected. 0 never ends paused playback.\u202C"
+      "value": "\u200F\u202E0 to 1440. Ends a video paused this long in a Silo app, freeing its stream and any transcode; playing it again continues from the same spot. Watch Together, casting and audiobooks are not affected. 0 turns this off.\u202C"
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

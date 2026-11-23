@@ -60635,7 +60635,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0～1440。Siloアプリでこの時間一時停止した動画を終了し、そのストリームとトランスコードを解放します。もう一度再生すると同じ位置から続行します。「一緒に見る」、キャスト、オーディオブックは対象外です。0の場合、一時停止中の再生は終了しません。"
+      "value": "0〜1440。Siloアプリでこの時間一時停止した動画を終了し、そのストリームとトランスコードを解放します。もう一度再生すると同じ位置から続行します。「一緒に見る」、キャスト再生、オーディオブックは対象外です。0でオフになります。"
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

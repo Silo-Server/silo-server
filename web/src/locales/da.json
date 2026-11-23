@@ -67190,7 +67190,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 til 1440. Afslutter en video, der har været sat på pause så længe i en Silo-app, og frigør dens stream og eventuel transkodning. Afspilles den igen, fortsætter den fra samme sted. Se sammen, casting og lydbøger påvirkes ikke. 0 afslutter aldrig afspilning på pause."
+      "value": "0 til 1440. Afslutter en video, der har været sat på pause så længe i en Silo-app, og frigør dens stream og eventuel transkodning; afspilles den igen, fortsætter den fra samme sted. Se sammen, casting og lydbøger påvirkes ikke. 0 slår dette fra."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

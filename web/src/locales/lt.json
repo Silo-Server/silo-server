@@ -81897,7 +81897,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "Nuo 0 iki 1440. Tiek laiko „Silo“ programoje pristabdyto vaizdo įrašo atkūrimas baigiamas ir atlaisvinamas jo srautas bei perkodavimas, jei jis vyksta; paleidus įrašą vėl, atkūrimas tęsiamas nuo tos pačios vietos. Funkcijai „Žiūrėti kartu“, perdavimui į kitą įrenginį ir audioknygoms tai netaikoma. Nustačius 0, pristabdytas atkūrimas niekada nebaigiamas."
+      "value": "Nuo 0 iki 1440. Baigia „Silo“ programoje tiek laiko pristabdyto vaizdo įrašo atkūrimą ir atlaisvina jo srautą bei perkodavimą, jei jis vyksta; vėl paleidus įrašą, atkūrimas tęsiamas nuo tos pačios vietos. Funkcijai „Žiūrėti kartu“, perdavimui į kitą įrenginį ir audioknygoms tai netaikoma. Nustačius 0, ši funkcija išjungiama."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

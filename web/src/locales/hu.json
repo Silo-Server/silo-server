@@ -67038,7 +67038,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 és 1440 között. Leállítja az ennyi ideig szüneteltetett videót egy Silo-alkalmazásban, felszabadítva a streamjét és az esetleges átkódolást; újbóli lejátszáskor ugyanonnan folytatódik. A Közös nézést, a kivetítést és a hangoskönyveket nem érinti. 0 esetén a szüneteltetett lejátszás sosem áll le."
+      "value": "0 és 1440 között. Leállítja az ennyi ideig szüneteltetett videót egy Silo-alkalmazásban, és felszabadítja a streamjét és az esetleges átkódolást; újbóli lejátszáskor ugyanonnan folytatódik. A Közös nézést, a kivetítést és a hangoskönyveket nem érinti. A 0 kikapcsolja ezt a funkciót."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

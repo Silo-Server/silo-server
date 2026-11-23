@@ -61141,7 +61141,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 到 1440。在 Silo App 中暫停達此時間的影片會結束播放，以釋放其串流及任何轉碼；再次播放時會從同一位置繼續。一起看、投放和有聲書不受影響。設為 0 則永不結束暫停的播放。"
+      "value": "0 到 1440。在 Silo App 中暫停達此時間的影片會結束播放，以釋放其串流及任何轉碼；再次播放時會從同一位置繼續。一起看、投放和有聲書不受影響。設為 0 即可關閉此功能。"
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

@@ -67246,7 +67246,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0–1440. Lopettaa videon toiston, kun video on ollut Silo-sovelluksessa tauolla näin kauan, ja vapauttaa sen suoratoiston ja mahdollisen transkoodauksen. Kun video toistetaan uudelleen, toisto jatkuu samasta kohdasta. Asetus ei koske Katso yhdessä -toimintoa, suoratoistoa toiseen laitteeseen eikä äänikirjoja. Arvolla 0 tauotettua toistoa ei koskaan lopeteta."
+      "value": "0–1440. Lopettaa videon toiston, kun video on ollut Silo-sovelluksessa tauolla näin kauan, ja vapauttaa sen suoratoiston ja mahdollisen transkoodauksen. Kun video toistetaan uudelleen, toisto jatkuu samasta kohdasta. Asetus ei koske Katso yhdessä -toimintoa, toiseen laitteeseen lähettämistä eikä äänikirjoja. Arvo 0 poistaa asetuksen käytöstä."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

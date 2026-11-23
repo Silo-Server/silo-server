@@ -60475,7 +60475,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "0 hingga 1440. Menamatkan video yang dijeda selama ini dalam apl Silo, lalu membebaskan strim dan sebarang transkod video itu; memainkannya semula akan bersambung dari kedudukan yang sama. Tonton bersama, penghantaran ke peranti lain dan buku audio tidak terjejas. 0 bermaksud main balik dijeda tidak pernah ditamatkan."
+      "value": "0 hingga 1440. Menamatkan video yang dijeda selama ini dalam apl Silo, lalu membebaskan strim dan sebarang transkod video itu; memainkannya semula akan bersambung dari kedudukan yang sama. Tonton bersama, penghantaran ke peranti lain dan buku audio tidak terjejas. 0 mematikan pilihan ini."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [

@@ -73932,7 +73932,7 @@
   "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
     {
       "type": 0,
-      "value": "Da 0 a 1440. Termina un video rimasto in pausa così a lungo in un’app Silo, liberando il suo stream e l’eventuale transcodifica; riprodurlo di nuovo riprende dallo stesso punto. Guarda insieme, la trasmissione e gli audiolibri non sono interessati. Con 0 la riproduzione in pausa non termina mai."
+      "value": "Da 0 a 1440. Termina un video rimasto in pausa così a lungo in un’app Silo, liberando il suo stream e l’eventuale transcodifica; se lo riproduci di nuovo, riprende dallo stesso punto. Guarda insieme, la trasmissione e gli audiolibri non sono interessati. Con 0 l’opzione è disattivata."
     }
   ],
   "web.admin.settings.playback.previews.chapterExecution": [
