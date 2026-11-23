@@ -1,4 +1,4 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { toast } from "sonner";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -45,8 +45,10 @@ describe("useShowThenSave after an online failure", () => {
     for (const step of steps) {
       if (typeof step !== "string") {
         const [i, outcome] = step;
-        settles[i]!(outcome);
-        await settled();
+        await act(async () => {
+          settles[i]!(outcome);
+          await settled();
+        });
         continue;
       }
       result.current({
@@ -139,18 +141,25 @@ describe("useShowThenSave after an online failure", () => {
   });
 
   // Picks each `key` (or `owner:key`, switching to that cache owner first) in
-  // turn, then runs each [i, outcome] step, settling the i-th pick's save with
-  // outcome (an Error rejects); returns how often a reconcile had run after
-  // each step.
-  async function reconcilesAcross(picks: string[], steps: Array<[number, unknown]>) {
-    const { result, rerender } = renderHook(({ owner }) => useShowThenSave(owner), {
-      initialProps: { owner: null as string | null },
-    });
+  // turn, then runs each step: [i, outcome] settles the i-th pick's save with
+  // outcome (an Error rejects); "read failed" and "read ok" say how the
+  // settings read last went. Returns how often a reconcile had run after each
+  // step.
+  async function reconcilesAcross(
+    picks: string[],
+    steps: Array<[number, unknown] | "read failed" | "read ok">,
+  ) {
+    const { result, rerender } = renderHook(
+      ({ owner, readFailed }) => useShowThenSave(owner, readFailed),
+      { initialProps: { owner: null as string | null, readFailed: false } },
+    );
+    let owner: string | null = null;
     const settles: Array<(outcome: unknown) => void> = [];
     let reconciled = 0;
     for (const pick of picks) {
-      const [owner, key] = pick.includes(":") ? pick.split(":") : [null, pick];
-      rerender({ owner });
+      const [pickOwner, key] = pick.includes(":") ? pick.split(":") : [null, pick];
+      owner = pickOwner ?? null;
+      rerender({ owner, readFailed: false });
       result.current({
         key: key!,
         value: "picked",
@@ -166,9 +175,12 @@ describe("useShowThenSave after an online failure", () => {
       });
     }
     const after: number[] = [];
-    for (const [i, outcome] of steps) {
-      settles[i]!(outcome);
-      await settled();
+    for (const step of steps) {
+      await act(async () => {
+        if (typeof step === "string") rerender({ owner, readFailed: step === "read failed" });
+        else settles[step[0]]!(step[1]);
+        await settled();
+      });
       after.push(reconciled);
     }
     return after;
@@ -217,4 +229,22 @@ describe("useShowThenSave after an online failure", () => {
       ).toEqual([0, 1]);
     },
   );
+
+  // The re-read after the failure failed too, so its cached answer is no newer
+  // than the change: the reconcile waits for a read that succeeds, and for any
+  // save started meanwhile.
+  it("waits for a failed settings read to succeed", async () => {
+    expect(
+      await reconcilesAcross(["ui.text_scale"], ["read failed", [0, problem(502)], "read ok"]),
+    ).toEqual([0, 0, 1]);
+  });
+
+  it("waits for a save started before a failed settings read succeeds", async () => {
+    expect(
+      await reconcilesAcross(
+        ["ui.text_scale", "ui.text_weight"],
+        ["read failed", [0, problem(502)], "read ok", [1, "saved"]],
+      ),
+    ).toEqual([0, 0, 0, 1]);
+  });
 });

@@ -380,15 +380,14 @@ describe("appearance cache ownership", () => {
     signedInAs(1);
     const answer = effectiveAnswer({ [SETTING_KEYS.UI_TEXT_SCALE]: { value: "large" } });
     mocks.useEffectiveSettings.mockReturnValue({ ...answer, isError: true });
-    mocks.mutate.mockRejectedValue(v2Problem(502, "bad_gateway", "Bad gateway"));
+    let failSave: (error: unknown) => void = () => {};
+    mocks.mutate.mockReturnValue(new Promise((_resolve, reject) => (failSave = reject)));
     const view = renderAppearance();
 
     act(() => {
       view.captured.setTextScale("x-large");
     });
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await act(async () => failSave(v2Problem(502, "bad_gateway", "Bad gateway")));
     expect(document.documentElement.getAttribute("data-text-scale")).toBe("x-large");
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe("x-large");
 

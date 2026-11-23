@@ -1,8 +1,8 @@
-import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import { createContext, useContext, useEffect, useReducer, useState, useCallback } from "react";
 import type { ReactNode } from "react";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { useProfileDefaultWriter } from "@/hooks/queries/profileDefaults";
-import { useReconcileFromRead, useShowThenSave } from "@/hooks/queries/settingWriteOffline";
+import { useShowThenSave } from "@/hooks/queries/settingWriteOffline";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 import { appearanceCache, storage } from "@/utils/storage";
 import type { StorageKey } from "@/utils/storage";
@@ -146,9 +146,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
   // A setter shows its value before saving it. When the save fails in a way
   // that may have stored it, the settings re-read can come back unchanged, so
-  // the effects below would leave that value shown and cached; this count
-  // re-runs them on what the server holds, once a settings read has succeeded.
-  const [reconciles, reconcile] = useReconcileFromRead(settingsReadFailed);
+  // the effects below would leave that value shown and cached; bumping this
+  // re-runs them on what the server holds.
+  const [reconciles, reconcile] = useReducer((count: number) => count + 1, 0);
 
   // Mirror the server's values into this identity's namespace so the next cold
   // start paints them before the settings request resolves. Without this the
@@ -242,7 +242,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => query.removeEventListener("change", onChange);
   }, [cacheOwner]);
 
-  const showThenSave = useShowThenSave(cacheOwner);
+  const showThenSave = useShowThenSave(cacheOwner, settingsReadFailed);
 
   const setTextScale = useCallback(
     (value: TextScale) =>

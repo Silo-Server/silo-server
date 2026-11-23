@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef } from "react";
 import { onlineManager } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -99,8 +99,9 @@ interface ShownChange<T> {
    * failed in a way that may have stored it, once no save made through this
    * hook is still pending (so after the settings re-read the failure
    * triggers, and without putting back another preference that is still
-   * saving). That re-read can return what the caller already had, so its own
-   * sync from the stored value won't run.
+   * saving) and the settings read last succeeded. That re-read can return
+   * what the caller already had, so its own sync from the stored value won't
+   * run.
    */
   reconcile?: () => void;
 }
@@ -129,8 +130,13 @@ interface UnsettledPreference {
  * the stored value changes, which a failed save never does. When the newest
  * change failed in a way that may have saved, `reconcile` shows what the
  * server holds instead.
+ *
+ * `readFailed` is whether the caller's settings read last failed. A reconcile
+ * waits for it to succeed: when the re-read after the failure failed too, its
+ * cached answer is no newer than the change, which may have been stored, so it
+ * must not replace that change on screen or in the cache.
  */
-export function useShowThenSave(cacheOwner: string | null) {
+export function useShowThenSave(cacheOwner: string | null, readFailed = false) {
   const unsettled = useRef(new Map<string, UnsettledPreference>());
   // Per owner, the reconcile owed for a change that may have saved, run once
   // nothing is saving: a caller reconciles every preference it shows at once.
@@ -141,6 +147,17 @@ export function useShowThenSave(cacheOwner: string | null) {
   useLayoutEffect(() => {
     currentOwner.current = cacheOwner;
   }, [cacheOwner]);
+  // Checked after a render, so `readFailed` reflects the read that a failed
+  // save waited for.
+  const [settleChecks, checkOwedReconcile] = useReducer((count: number) => count + 1, 0);
+  useEffect(() => {
+    if (readFailed || unsettled.current.size > 0) return;
+    // Only the owner showing now, which may not own the save that settled
+    // last; another owner's namespace is refreshed on its next load.
+    const owed = owedReconciles.current.get(currentOwner.current);
+    owedReconciles.current.clear();
+    owed?.();
+  }, [settleChecks, readFailed]);
   return useCallback(
     <T>({
       key,
@@ -176,14 +193,6 @@ export function useShowThenSave(cacheOwner: string | null) {
       const settle = () => {
         if (--pending.saving === 0) unsettled.current.delete(entryKey);
       };
-      const reconcileOnceSettled = () => {
-        if (unsettled.current.size > 0) return;
-        // Only the owner showing now, which may not own the save that settled
-        // last; another owner's namespace is refreshed on its next load.
-        const owed = owedReconciles.current.get(currentOwner.current);
-        owedReconciles.current.clear();
-        owed?.();
-      };
       const showStored = () => {
         // Once another owner holds the appearance, leave it alone: writing the
         // cache would also make this owner the signed-out fallback. This
@@ -207,7 +216,7 @@ export function useShowThenSave(cacheOwner: string | null) {
             // value, with nothing picked since: show what is stored now.
             if (pending.restored) showStored();
           }
-          reconcileOnceSettled();
+          checkOwedReconcile();
         },
         (error: unknown) => {
           settle();
@@ -221,30 +230,10 @@ export function useShowThenSave(cacheOwner: string | null) {
               showStored();
             }
           }
-          reconcileOnceSettled();
+          checkOwedReconcile();
         },
       );
     },
     [cacheOwner],
   );
-}
-
-/**
- * The `reconcile` for useShowThenSave, for a provider that shows what a
- * settings read holds. Returns a count for the provider's sync effects to
- * depend on, which moves when a reconcile is due, and the callback. A
- * reconcile waits until the read last succeeded: when the re-read after the
- * failure failed too, its cached answer is no newer than the change, which
- * may have been stored, so it must not replace it on screen or in the cache.
- */
-export function useReconcileFromRead(readFailed: boolean): [number, () => void] {
-  const [owed, setOwed] = useState(false);
-  const [reconciles, setReconciles] = useState(0);
-  // Adjusted during render, as React re-runs this pass before committing.
-  if (owed && !readFailed) {
-    setOwed(false);
-    setReconciles(reconciles + 1);
-  }
-  const reconcile = useCallback(() => setOwed(true), []);
-  return [reconciles, reconcile];
 }
