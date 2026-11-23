@@ -3,6 +3,7 @@ package recommendations
 import (
 	"container/heap"
 	"context"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -185,8 +186,11 @@ func (h *cowatchNeighbors) offer(n cowatchNeighbor, limit int) {
 
 // blendScores merges embedding-based item scores with co-watch Jaccard scores
 // using the given weights (typically 0.7 embedding, 0.3 co-watch). Items that
-// appear in only one source still surface with their single weighted score.
-// The result is sorted by blended score descending.
+// appear in only one source still surface with their single weighted score;
+// callers first give co-watch neighbors the embedding search missed their
+// real similarity with withCowatchSimilarity, so only a neighbor without an
+// embedding is left with its co-watch share alone. The result is sorted by
+// blended score descending.
 func blendScores(embeddingItems []ScoredItem, cowatchItems map[string]float64, embeddingWeight, cowatchWeight float64) []ScoredItem {
 	blended := make(map[string]ScoredItem, len(embeddingItems)+len(cowatchItems))
 
@@ -229,4 +233,29 @@ func blendScores(embeddingItems []ScoredItem, cowatchItems map[string]float64, e
 	})
 
 	return result
+}
+
+// withCowatchSimilarity returns embCandidates followed by each co-watch
+// neighbor they lack that has an embedding, scored by its cosine similarity
+// to source like the embedding search's candidates. A neighbor falls outside
+// the search when it is farther than its limit, yet it is still that close
+// to the source; without this, blendScores would give it the co-watch share
+// alone and rank it below every embedding candidate however often the two
+// are watched together. A neighbor without an embedding, or with a zero
+// vector, is left out here and keeps its co-watch score.
+func withCowatchSimilarity(embCandidates []ScoredItem, cowatch map[string]float64, source []float32, embeddings map[string][]float32) []ScoredItem {
+	found := make(map[string]struct{}, len(embCandidates))
+	for _, item := range embCandidates {
+		found[item.MediaItemID] = struct{}{}
+	}
+	out := slices.Clip(embCandidates)
+	for id := range cowatch {
+		if _, ok := found[id]; ok {
+			continue
+		}
+		if emb := embeddings[id]; hasDirection(emb) {
+			out = append(out, ScoredItem{MediaItemID: id, Score: cosineSimilarity(source, emb), Reason: "cowatch"})
+		}
+	}
+	return out
 }

@@ -273,8 +273,8 @@ func TestPushSenderRegistersRelayOnFirstSendWithoutCredential(t *testing.T) {
 				"deployment_id": "deployment-auto",
 				"api_key":       "auto-capability",
 				"key_prefix":    "cap_v1_auto",
-				// Well outside the renewal window, so the first send registers and
-				// sends without also renewing.
+				// Well past the renewal window from any run date, so the
+				// first send uses this credential instead of renewing it.
 				"expires_at": time.Now().Add(90 * 24 * time.Hour).UTC().Format(time.RFC3339),
 			})
 		case relayAppleSendPath:
