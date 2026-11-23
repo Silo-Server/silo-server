@@ -653,6 +653,13 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
+	// An install that timed out or was interrupted while staging leaves the
+	// current release in place.
+	if ctx.Err() != nil {
+		err := fmt.Errorf("activate jellyfin-web %s: %w", version, context.Cause(ctx))
+		writeWebInstallError(root, err)
+		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
+	}
 	reportProgress(WebComponentOperationActivating, 94, "Preparing Jellyfin Web activation")
 	if err := ensureCanReplaceWebRelease(releaseDir); err != nil {
 		writeWebInstallError(root, err)
@@ -1559,6 +1566,11 @@ func webInstallCommandRunner(cacheDir, preloadPath string) func(context.Context,
 			cmd.Stdin = strings.NewReader(stdin)
 		}
 		out, err := cmd.CombinedOutput()
+		// npm can exit while its children run on, for example when it alone
+		// is killed. Its children keep the group's id in use, so killing the
+		// group after Wait still reaches only them, and the install does not
+		// finish while they run.
+		_ = procgroup.Kill(cmd)
 		if err != nil {
 			if cause := context.Cause(ctx); cause != nil {
 				err = fmt.Errorf("%w: %w", cause, err)
