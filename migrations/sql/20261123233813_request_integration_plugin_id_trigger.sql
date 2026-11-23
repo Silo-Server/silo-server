@@ -6,17 +6,14 @@
 -- keep the plugin it left, which the rebind would then hand the server and
 -- its API key.
 --
--- An insert records its installation's plugin, keeping the given plugin_id
--- only when that installation is gone (a restored row). A change of
--- installation records the new one's plugin, or none when it is gone. Any
--- other update keeps plugin_id, so a server whose installation was removed
--- still remembers its plugin until the rebind moves it.
+-- An insert, and any change of installation, records the plugin of the
+-- installation the row names, or none when it is gone. Any other update keeps
+-- plugin_id, so a server whose installation was removed still remembers its
+-- plugin until the rebind moves it.
 -- +goose StatementBegin
 CREATE FUNCTION set_request_integration_plugin_id() RETURNS trigger LANGUAGE plpgsql AS $$
 BEGIN
-    IF TG_OP = 'INSERT' THEN
-        NEW.plugin_id := coalesce((SELECT plugin_id FROM plugin_installations WHERE id = NEW.installation_id), NEW.plugin_id);
-    ELSIF NEW.installation_id IS DISTINCT FROM OLD.installation_id THEN
+    IF TG_OP = 'INSERT' OR NEW.installation_id IS DISTINCT FROM OLD.installation_id THEN
         NEW.plugin_id := coalesce((SELECT plugin_id FROM plugin_installations WHERE id = NEW.installation_id), '');
     END IF;
     RETURN NEW;
