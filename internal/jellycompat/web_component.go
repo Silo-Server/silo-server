@@ -1579,6 +1579,9 @@ func webInstallCommandRunner(cacheDir, preloadPath string) func(context.Context,
 		}
 		cmd.Stderr = cmd.Stdout
 		if err := cmd.Start(); err != nil {
+			if cause := context.Cause(ctx); cause != nil && !errors.Is(err, cause) {
+				err = fmt.Errorf("%w: %w", cause, err)
+			}
 			return fmt.Errorf("%s: %w", name, err)
 		}
 		// Read the output to the end before Wait. npm can exit while webpack
