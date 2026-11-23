@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef } from "react";
 import { AudioLines, Check } from "lucide-react";
 import type { PlayerAudioTrack } from "../types";
-import { audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
+import { audioTrackLabel, formatChannels, titleOnlyNamesAudioFormat } from "@/lib/mediaFormat";
 import { formatLanguageName } from "@/pages/ItemDetail/components/versionFormatUtils";
 import { useT, type Translate } from "@/i18n";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
@@ -31,18 +31,15 @@ interface TrackDescriptor {
   isDefault: boolean;
 }
 
-/** A stream title that only restates the format ("DCA (DTS Coherent Acoustics)", "Stereo"). */
-const CODEC_TITLE =
-  /^(?:[\s()·.,-]|dca|dts(?:-hd)?|ma|coherent|acoustics|ac-?3|e-?ac-?3|truehd|atmos|aac|flac|opus|mp3|pcm|dolby|digital|plus|surround|stereo|mono|[257]\.[01])+$/i;
-
 function describeTrack(t: Translate, track: PlayerAudioTrack, index: number): TrackDescriptor {
   const language = formatLanguageName(track.language ?? "");
   // Only a title the stream carries: without one, the language leads rather
   // than a run-together "en aac 5.1".
   const streamTitle = track.title || track.embedded_title || "";
   const title =
-    (streamTitle && !(language && CODEC_TITLE.test(streamTitle)) ? streamTitle : language) ||
-    t("web.player.audioMenu.trackFallback", { number: index + 1 });
+    (streamTitle && !(language && titleOnlyNamesAudioFormat(streamTitle))
+      ? streamTitle
+      : language) || t("web.player.audioMenu.trackFallback", { number: index + 1 });
   // Codec and layout are what tell two tracks in the same language apart; the
   // bitrate and sample detail stay in Playback info.
   const metaParts = [
