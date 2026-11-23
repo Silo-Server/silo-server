@@ -42,9 +42,6 @@ type LogSink interface {
 	InsertNodeBatch(ctx context.Context, nodeID string, entries []opslog.Entry) error
 }
 
-// Options are what the core's node control routes work from. Nodes and
-// Settings are required; each other field disables the route, or the part of
-// one, that needs it when nil.
 // runsFile reports whether session is a remote transcode this server started
 // on the reporting node (at reportingNodeURL) for the media file it names:
 // the playback session it holds runs that transport on that node and plays
@@ -72,6 +69,9 @@ type StreamEndNoter interface {
 	Note(ctx context.Context, mediaFileID int, end playback.StreamEnd)
 }
 
+// Options are what the core's node control routes work from. Nodes and
+// Settings are required; each other field disables the route, or the part of
+// one, that needs it when nil.
 type Options struct {
 	Nodes NodeDirectory
 	// Identities answers the calling node's name and URL for reports and log

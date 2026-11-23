@@ -3458,10 +3458,11 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 
 // learnStreamEndLocked records the media's last segment after the FFmpeg run
 // with options opts, started at startedAt, read its input to the end;
-// inherited is the playlist an earlier run left when it started. Only an encoded transcode learns it: its
-// synthetic playlist lists segments to the stored duration, which can outlast
-// every stream, while copy-video serves FFmpeg's own playlist and a seek there
-// re-cuts the segments at other keyframes.
+// inherited is the playlist an earlier run left when it started. Only an
+// encoded transcode learns it: its synthetic playlist lists segments to the
+// stored duration, which can outlast every stream, while copy-video serves
+// FFmpeg's own playlist and a seek there re-cuts the segments at other
+// keyframes.
 //
 // A run whose own playlist lists a segment with media sets the end to the last
 // such segment, and the media ends where the run started (its seek) plus the
