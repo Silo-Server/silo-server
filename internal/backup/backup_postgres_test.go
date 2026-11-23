@@ -1732,6 +1732,7 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 	oneProvider := `{"version":2,"providers":[{"id":"custom-now","type":"custom","name":"Now","base_url":"http://ai.now.invalid/v1","capabilities":["chat"]}]}`
 	disconnected := `{"active":"","has_connected":true,"accounts":[{"client_id":"c1","refresh_token":"r","needs_login":true}]}`
 	connected := `{"active":"c1","accounts":[{"client_id":"c1","refresh_token":"r"}]}`
+	ineligible := `{"active":"c1","accounts":[{"client_id":"c1","refresh_token":"r","plan_ineligible":true}]}`
 	for _, tc := range []struct {
 		registry, chatGPT string
 		want              []string
@@ -1739,6 +1740,7 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 		{noProviders[config.AIProvidersSettingKey], disconnected, []string{"notifications.web_push.vapid_keypair"}},
 		{oneProvider, disconnected, []string{config.AIProvidersSettingKey, "notifications.web_push.vapid_keypair"}},
 		{noProviders[config.AIProvidersSettingKey], connected, []string{chatgpt.CredentialsKey, "notifications.web_push.vapid_keypair"}},
+		{noProviders[config.AIProvidersSettingKey], ineligible, []string{"notifications.web_push.vapid_keypair"}},
 	} {
 		empty, emptyURL := open()
 		for key, value := range map[string]string{

@@ -167,16 +167,29 @@ func decode(raw string) (credentials, error) {
 }
 
 // Connected reports whether the stored credentials (the CredentialsKey
-// value) hold an active account that can sign in without a new login, as
-// TokenSource needs. A disconnected account's record does not.
+// value) hold an active account TokenSource can sign in with, its plan
+// accepted and no new login needed. A disconnected account's record does
+// not.
 func Connected(raw string) bool {
 	c, err := decode(raw)
 	if err != nil {
 		return false
 	}
-	i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == c.Active })
-	return i >= 0 && !c.Accounts[i].NeedsLogin && c.Accounts[i].RefreshToken != ""
+	a, ok := c.active()
+	return ok && !a.PlanIneligible && a.signedIn()
 }
+
+// active is the active account, if there is one.
+func (c credentials) active() (account, bool) {
+	i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == c.Active })
+	if i < 0 {
+		return account{}, false
+	}
+	return c.Accounts[i], true
+}
+
+// signedIn reports whether the account can get tokens without a new login.
+func (a account) signedIn() bool { return !a.NeedsLogin && a.RefreshToken != "" }
 
 func (s *Service) mutate(ctx context.Context, fn func(*credentials) error) error {
 	return s.store.UpdateValueAtomic(ctx, CredentialsKey, func(raw string) (string, error) {
@@ -561,17 +574,17 @@ func (s *Service) tokenSource(ctx context.Context, recheckUsage bool) (func(cont
 	if err != nil {
 		return nil, err
 	}
-	i := slices.IndexFunc(c.Accounts, func(a account) bool { return a.ClientID == c.Active })
-	if i >= 0 && c.Accounts[i].PlanIneligible {
+	a, ok := c.active()
+	if ok && a.PlanIneligible {
 		return nil, ErrPlanIneligible
 	}
-	if i >= 0 && c.Accounts[i].UsageLimited && !recheckUsage {
+	if ok && a.UsageLimited && !recheckUsage {
 		return nil, ErrUsageLimited
 	}
-	if i < 0 || c.Accounts[i].NeedsLogin || c.Accounts[i].RefreshToken == "" {
+	if !ok || !a.signedIn() {
 		return nil, ErrSignInRequired
 	}
-	clientID := c.Accounts[i].ClientID
+	clientID := a.ClientID
 	return func(ctx context.Context) (string, error) { return s.bearerToken(ctx, clientID, recheckUsage) }, nil
 }
 
