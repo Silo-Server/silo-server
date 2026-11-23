@@ -2258,8 +2258,7 @@ end that stopped the session's lifecycle first sets the reason, and `lifecycle_s
 that end's sequence number on the sessions channel (null on rows recorded before
 lifecycle numbers existed). Every one of these fields is
 null when unknown, which includes every attempt recorded before it existed; `end_reason`
-is also null for a server teardown the client never recovered from (an encoder exit, a
-withdrawn plan).
+is also null for a server teardown the client never recovered from (an encoder exit).
 
 `GET /api/v2/admin/playback-history/capabilities` reports `available`, `ended_before`,
 `watch_measurement`, `client_ip`, `device_identity`, `client_identity`,
