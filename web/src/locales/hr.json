@@ -521,6 +521,12 @@
       "value": "Ova je sesija reprodukcije završila. Ponovno pokrenite reprodukciju."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Ovaj je stream zamijenjen. Reprodukcija se nastavlja na trenutačnom."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -74673,6 +74679,12 @@
     {
       "type": 0,
       "value": "Označi kao pogledano na"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Naslovi s oznakom odjavne špice također se računaju kao pogledani čim reprodukcija dođe do odjavne špice."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -151977,7 +151989,7 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "Povežite se kako biste počeli uvoziti povijest gledanja i bilježiti reprodukciju."
+      "value": "Povežite se, a zatim u Postavkama odaberite što želite sinkronizirati."
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
@@ -151991,7 +152003,7 @@
     },
     {
       "type": 0,
-      "value": " kako biste uvezli povijest gledanja i bilježili reprodukciju."
+      "value": ", a zatim u Postavkama odaberite što želite sinkronizirati."
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [

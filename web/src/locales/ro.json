@@ -521,6 +521,12 @@
       "value": "Această sesiune de redare s-a încheiat. Porniți din nou redarea."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Acest stream a fost înlocuit. Redarea continuă pe streamul curent."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -74669,6 +74675,12 @@
     {
       "type": 0,
       "value": "Marcare ca vizionat la"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titlurile cu un marcaj pentru generic sunt considerate vizionate și atunci când redarea ajunge la generic."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -152074,13 +152086,13 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "Conectați pentru a începe să importați istoricul vizionărilor și să raportați redarea (scrobbling)."
+      "value": "Conectați, apoi alegeți în Setări ce să se sincronizeze."
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
     {
       "type": 0,
-      "value": "Conectați cu cheia dvs. API de la "
+      "value": "Conectați folosind cheia dvs. API de la "
     },
     {
       "type": 1,
@@ -152088,7 +152100,7 @@
     },
     {
       "type": 0,
-      "value": " pentru a importa istoricul vizionărilor și a raporta redarea (scrobbling)."
+      "value": ", apoi alegeți în Setări ce să se sincronizeze."
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [

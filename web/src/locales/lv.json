@@ -521,6 +521,12 @@
       "value": "Šī atskaņošanas sesija ir beigusies. Sāciet atskaņošanu no jauna."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Šī straume tika aizstāta. Atskaņošana turpinās pašreizējā straumē."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -75700,6 +75706,12 @@
     {
       "type": 0,
       "value": "Atzīmēt kā skatītu pie"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Vienumi ar beigu titru marķieri arī tiek uzskatīti par noskatītiem, tiklīdz atskaņošana sasniedz beigu titrus."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -153911,7 +153923,7 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "Savienojiet, lai sāktu importēt skatīšanās vēsturi un ziņot par atskaņošanu."
+      "value": "Savienojiet un pēc tam sadaļā „Iestatījumi” izvēlieties, ko sinhronizēt."
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
@@ -153925,7 +153937,7 @@
     },
     {
       "type": 0,
-      "value": " API atslēgu, lai importētu skatīšanās vēsturi un ziņotu par atskaņošanu."
+      "value": " API atslēgu, un pēc tam sadaļā „Iestatījumi” izvēlieties, ko sinhronizēt."
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [

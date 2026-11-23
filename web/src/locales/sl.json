@@ -521,6 +521,12 @@
       "value": "Ta seja predvajanja se je končala. Znova začnite predvajanje."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Ta pretok je bil zamenjan. Predvajanje se nadaljuje s trenutnim pretokom."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -81494,6 +81500,12 @@
     {
       "type": 0,
       "value": "Označi kot ogledano pri"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Naslovi z oznako za odjavno špico se štejejo za ogledane tudi, ko predvajanje doseže odjavno špico."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -163724,13 +163736,13 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "Povežite se, da začnete uvažati zgodovino ogledov in beležiti predvajanje."
+      "value": "Povežite se, nato v razdelku Nastavitve izberite, kaj želite sinhronizirati."
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
     {
       "type": 0,
-      "value": "Povežite se s ključem API ponudnika "
+      "value": "Povežite se s svojim ključem API ponudnika "
     },
     {
       "type": 1,
@@ -163738,7 +163750,7 @@
     },
     {
       "type": 0,
-      "value": ", da uvozite zgodovino ogledov in beležite predvajanje."
+      "value": ", nato v razdelku Nastavitve izberite, kaj želite sinhronizirati."
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [

@@ -521,6 +521,12 @@
       "value": "यह प्लेबैक सेशन खत्म हो गया है। फिर से चलाना शुरू करें।"
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "इस स्ट्रीम की जगह एक नई स्ट्रीम ने ले ली है। प्लेबैक मौजूदा स्ट्रीम पर जारी है।"
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -67395,6 +67401,12 @@
     {
       "type": 0,
       "value": "इतने पर देखा गया मार्क करें"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "क्रेडिट मार्कर वाले टाइटल तब भी देखे गए माने जाते हैं, जब प्लेबैक क्रेडिट तक पहुँच जाए।"
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -139124,13 +139136,13 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "देखने का इतिहास इंपोर्ट करना और प्लेबैक स्क्रॉबल करना शुरू करने के लिए कनेक्ट करें।"
+      "value": "कनेक्ट करें, फिर सेटिंग में चुनें कि क्या सिंक करना है।"
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
     {
       "type": 0,
-      "value": "देखने का इतिहास इंपोर्ट करने और प्लेबैक स्क्रॉबल करने के लिए अपनी "
+      "value": "अपनी "
     },
     {
       "type": 1,
@@ -139138,7 +139150,7 @@
     },
     {
       "type": 0,
-      "value": " API कुंजी से कनेक्ट करें।"
+      "value": " API कुंजी से कनेक्ट करें, फिर सेटिंग में चुनें कि क्या सिंक करना है।"
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [

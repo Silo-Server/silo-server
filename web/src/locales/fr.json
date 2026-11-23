@@ -521,6 +521,12 @@
       "value": "Cette session de lecture est terminée. Relancez la lecture."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Ce flux a été remplacé. La lecture se poursuit sur le flux actuel."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -74313,6 +74319,12 @@
     {
       "type": 0,
       "value": "Marquer comme vu à"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Les titres dotés d’un marqueur de générique sont aussi considérés comme vus dès que la lecture atteint le générique."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -151266,7 +151278,7 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "Connectez-vous pour commencer à importer l’historique de visionnage et à scrobbler la lecture."
+      "value": "Connectez-vous, puis choisissez les éléments à synchroniser dans Paramètres."
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
@@ -151280,7 +151292,7 @@
     },
     {
       "type": 0,
-      "value": " pour importer l’historique de visionnage et scrobbler la lecture."
+      "value": ", puis choisissez les éléments à synchroniser dans Paramètres."
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [

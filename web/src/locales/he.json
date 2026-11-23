@@ -521,6 +521,12 @@
       "value": "סשן ההפעלה הזה הסתיים. יש להתחיל את ההפעלה מחדש."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "ההזרמה הזו הוחלפה. ההפעלה ממשיכה בהזרמה הנוכחית."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -73985,6 +73991,12 @@
     {
       "type": 0,
       "value": "סימון כנצפה אחרי"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "פריטים עם סימון של כתוביות הסיום נחשבים כנצפו גם כשההפעלה מגיעה לכתוביות הסיום."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -150316,13 +150328,13 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "יש להתחבר כדי להתחיל לייבא היסטוריית צפייה ולדווח על ההפעלה."
+      "value": "יש להתחבר, ואז לבחור בהגדרות מה לסנכרן."
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
     {
       "type": 0,
-      "value": "אפשר להתחבר עם מפתח ה-API של "
+      "value": "יש להתחבר עם מפתח ה-API של "
     },
     {
       "type": 1,
@@ -150330,7 +150342,7 @@
     },
     {
       "type": 0,
-      "value": " כדי לייבא היסטוריית צפייה ולדווח על ההפעלה."
+      "value": ", ואז לבחור בהגדרות מה לסנכרן."
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [

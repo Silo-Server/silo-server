@@ -521,6 +521,12 @@
       "value": "Táto relácia prehrávania sa skončila. Spustite prehrávanie znova."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Tento stream bol nahradený. Prehrávanie pokračuje v aktuálnom streame."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -81783,6 +81789,12 @@
     {
       "type": 0,
       "value": "Označiť ako pozreté pri"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Tituly so značkou záverečných titulkov sa považujú za pozreté aj vtedy, keď prehrávanie dosiahne záverečné titulky."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -164408,7 +164420,7 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "Po pripojení sa začne importovať história sledovania a hlásiť prehrávanie."
+      "value": "Pripojte sa a potom v časti Nastavenia vyberte, čo sa má synchronizovať."
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
@@ -164422,7 +164434,7 @@
     },
     {
       "type": 0,
-      "value": ", aby ste mohli importovať históriu sledovania a hlásiť prehrávanie."
+      "value": " a potom v časti Nastavenia vyberte, čo sa má synchronizovať."
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [

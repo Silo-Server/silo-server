@@ -521,6 +521,12 @@
       "value": "Esta sessão de reprodução terminou. Inicie a reprodução novamente."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Esta transmissão foi substituída. A reprodução continua na transmissão atual."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -74865,6 +74871,12 @@
     {
       "type": 0,
       "value": "Marcar como visto aos"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Os títulos com um marcador de créditos também contam como vistos quando a reprodução chega aos créditos."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -151934,13 +151946,13 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "Estabeleça a ligação para começar a importar o histórico de visualização e a registar a reprodução."
+      "value": "Estabeleça a ligação e, depois, escolha o que sincronizar em Definições."
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
     {
       "type": 0,
-      "value": "Ligue-se com a sua chave de API de "
+      "value": "Estabeleça a ligação com a sua chave de API de "
     },
     {
       "type": 1,
@@ -151948,7 +151960,7 @@
     },
     {
       "type": 0,
-      "value": " para importar o histórico de visualização e registar a reprodução."
+      "value": " e, depois, escolha o que sincronizar em Definições."
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [

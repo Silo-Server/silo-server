@@ -521,6 +521,12 @@
       "value": "Denne avspillingsøkten er avsluttet. Start avspillingen på nytt."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Denne strømmen er erstattet. Avspillingen fortsetter på den gjeldende strømmen."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -67711,6 +67717,12 @@
     {
       "type": 0,
       "value": "Merk som sett ved"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titler med en rulletekstmarkør regnes også som sett når avspillingen når rulleteksten."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -139960,7 +139972,7 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "Koble til for å begynne å importere seerhistorikk og scrobble avspilling."
+      "value": "Koble til, og velg deretter hva som skal synkroniseres under Innstillinger."
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
@@ -139974,7 +139986,7 @@
     },
     {
       "type": 0,
-      "value": " for å importere seerhistorikk og scrobble avspilling."
+      "value": ", og velg deretter hva som skal synkroniseres under Innstillinger."
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [

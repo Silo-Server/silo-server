@@ -521,6 +521,12 @@
       "value": "Ez a lejátszási munkamenet véget ért. Indítsa újra a lejátszást."
     }
   ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Ezt a streamet egy újabb váltotta fel. A lejátszás az aktuális streamen folytatódik."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -67491,6 +67497,12 @@
     {
       "type": 0,
       "value": "Megtekintettnek jelölés ennél:"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "A stáblistajelölővel rendelkező címek akkor is megtekintettnek számítanak, ha a lejátszás eléri a stáblistát."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -139454,13 +139466,13 @@
   "web.settings.watchProviders.subtitle.connect": [
     {
       "type": 0,
-      "value": "Csatlakozzon a megtekintési előzmények importálásához és a lejátszás scrobble-olásához."
+      "value": "Csatlakozzon, majd a Beállítások alatt válassza ki, mit szeretne szinkronizálni."
     }
   ],
   "web.settings.watchProviders.subtitle.connectApiKey": [
     {
       "type": 0,
-      "value": "Csatlakozzon a saját "
+      "value": "Csatlakozzon a(z) "
     },
     {
       "type": 1,
@@ -139468,7 +139480,7 @@
     },
     {
       "type": 0,
-      "value": " API-kulcsával a megtekintési előzmények importálásához és a lejátszás scrobble-olásához."
+      "value": " API-kulccsal, majd a Beállítások alatt válassza ki, mit szeretne szinkronizálni."
     }
   ],
   "web.settings.watchProviders.subtitle.connected": [
