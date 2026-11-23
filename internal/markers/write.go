@@ -386,8 +386,19 @@ func BuildUpdatePayload(result Result) MarkerUpdatePayload {
 	for _, segment := range []*SegmentPayload{&payload.Intro, &payload.Credits, &payload.Recap, &payload.Preview} {
 		sort.SliceStable(segment.Ranges, func(i, j int) bool { return segment.Ranges[i].StartSeconds < segment.Ranges[j].StartSeconds })
 		if len(segment.Ranges) > 0 {
-			segment.Start = &segment.Ranges[0].StartSeconds
-			segment.End = &segment.Ranges[0].EndSeconds
+			// The singular bounds are the compatibility projection onto one
+			// occurrence. Credits project onto the END occurrence (the last by
+			// start): a file can carry an early credits block beside the end
+			// credits, the legacy columns mean "end credits", and that
+			// occurrence is what drives the end-of-file affordance. Every other
+			// kind keeps the first occurrence, which is what those columns have
+			// always named.
+			index := 0
+			if segment.Ranges[0].Kind == models.MarkerSegmentCredits {
+				index = len(segment.Ranges) - 1
+			}
+			segment.Start = &segment.Ranges[index].StartSeconds
+			segment.End = &segment.Ranges[index].EndSeconds
 		}
 	}
 	return payload
@@ -448,20 +459,42 @@ func ApplyResult(file *models.MediaFile, result Result) *models.MediaFile {
 	return &next
 }
 
-// placedCredits drops the credits in incoming that fail
-// CheckCreditsPlacement for file. Dropping them before precedence lets a
-// refresh that returns only misplaced credits clear the provider's stored ones
-// like any other withdrawn range.
+// InBoundsRanges drops the occurrences that run past the file. An occurrence
+// that cannot be stored at all must not take the ones that can down with it:
+// an update is rejected as a whole when any of its ranges is out of bounds, in
+// both the on-demand projection and the stored write.
+func InBoundsRanges(ranges []models.MarkerSegment, duration float64) []models.MarkerSegment {
+	kept := make([]models.MarkerSegment, 0, len(ranges))
+	for _, segment := range ranges {
+		if duration > 0 && segment.EndSeconds > duration+1 {
+			continue
+		}
+		kept = append(kept, segment)
+	}
+	return kept
+}
+
+// placedCredits keeps the whole set of credits occurrences in incoming when at
+// least one of them is placeable, and points the singular bounds at the end
+// credits: the occurrence the shared end-credits window selects
+// (CreditsLimits.EndCreditsOccurrence). A provider answer whose credits are
+// all outside the end-credits window is a withdrawal, not a set of ranges:
+// returning an empty payload lets a refresh that returns only misplaced
+// credits clear the provider's stored ones like any other withdrawn range.
 func placedCredits(incoming SegmentPayload, file *models.MediaFile) SegmentPayload {
 	if incoming.Absent() {
 		return incoming
 	}
-	kept := CreditsLimitsForFile(file).KeepPlaced(incoming.Ranges, float64(file.Duration), file.IntroEnd)
-	if len(kept) == 0 {
+	duration := 0.0
+	if file != nil {
+		duration = float64(file.Duration)
+	}
+	incoming.Ranges = InBoundsRanges(incoming.Ranges, duration)
+	end := CreditsLimitsForFile(file).EndCreditsOccurrence(incoming.Ranges, duration, file.IntroEnd)
+	if end == nil {
 		return SegmentPayload{}
 	}
-	incoming.Ranges = kept
-	incoming.Start, incoming.End = &kept[0].StartSeconds, &kept[0].EndSeconds
+	incoming.Start, incoming.End = &end.StartSeconds, &end.EndSeconds
 	return incoming
 }
 

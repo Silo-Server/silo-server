@@ -224,7 +224,8 @@ occurrence in source-time order. Each entry has `kind` (`intro`, `credits`,
 `recap`, or `preview`), `start_seconds`, and `end_seconds`. The array is empty
 when no markers exist. Several entries may have the same kind; clients must
 treat them as separate ranges and must not skip the gaps between them. The
-four singular objects remain available as compatibility projections. Files
+four singular objects remain available as compatibility projections; for
+credits the singular range is the end credits (the last placeable occurrence), the one that drives the end-of-file affordance. Files
 with only legacy markers contribute those ranges to the collection.
 
 The playback capability `marker_segments_v1` advertises collection support.
@@ -256,10 +257,18 @@ duration is known, credits
 must start in the file's tail window (for an episode the last 450 seconds or
 40% of the file, whichever is shorter; for anything else the last 900 seconds
 or 25%), at or after the end of the intro, and run from 15 seconds up to the
-window's seconds limit (450 or 900). PUT rejects credits that fail this and
-names the rule they broke. Provider, sidecar, and on-demand results drop those
-occurrences instead, and a refreshed provider that returns only misplaced
-credits loses its stored ones. `markers.CreditsLimits` holds the rule, and `markers.CreditsLimitsForFile` picks
+window's seconds limit (450 or 900). PUT rejects a range that fails this and
+names the rule it broke. The window no longer filters provider occurrences: a
+marker kind can occur several times, so a provider may report an early credits
+block beside the end credits (or a movie a post-credits scene), and every
+occurrence it reports is kept as long as at least one is placeable. The
+end-credits occurrence — the last placeable one — drives the
+end-of-file affordance, the legacy singular credits fields, and Jellyfin's
+`Outro` type. Provider, sidecar, and on-demand results drop a payload's credits
+only when none of its occurrences is placeable, and a refreshed provider that
+returns only misplaced credits loses its stored ones. `markers.CreditsLimits`
+holds the rule (`CheckCreditsPlacement` tests one range, `EndCreditsOccurrence`
+selects the end-credits occurrence), and `markers.CreditsLimitsForFile` picks
 the episode or movie bounds for a file.
 
 The existing manual fields address one kind at a time. Setting one replaces
@@ -280,7 +289,10 @@ lost. A failed response can therefore follow a successful save. Read the current
 markers before deciding whether another user-directed update is needed.
 
 Jellyfin does not expose these manual editing routes. Its MediaSegments response
-returns each occurrence separately, with credits represented as `Outro`.
+returns each occurrence separately, except that the credits occurrences collapse
+to a single `Outro` segment naming the end credits: Jellyfin hangs its
+next-episode affordance on `Outro`, so an early credits block beside the end
+credits must not appear as a second one.
 The generated OpenAPI document is the authoritative v2 schema and error contract.
 
 ### Marker preview images
