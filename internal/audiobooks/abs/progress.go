@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // ---------------------------------------------------------------------------
@@ -170,19 +172,31 @@ func (h *Handler) handleGetMyProgress(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if h.deps.ProgressStore == nil {
-		writeJSON(w, http.StatusOK, map[string]any{"mediaProgress": []any{}})
-		return
-	}
-	rows, err := h.deps.ProgressStore.ListProgressForAudiobooks(r.Context(), a.UserID, a.ProfileID, 500)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	access, err := h.accessFilterForAuth(r.Context(), a)
 	if err != nil {
 		http.Error(w, "resolve access: "+err.Error(), http.StatusForbidden)
 		return
+	}
+	out, err := h.accessibleProgress(r.Context(), a, access)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"mediaProgress": out})
+}
+
+// accessibleProgress returns the caller's audiobook progress rows in ABS
+// wire shape, dropping rows whose book is outside access. GET /me/progress
+// and the user object (login, authorize, refresh, /me) share it, so every
+// endpoint reports the same rows.
+func (h *Handler) accessibleProgress(ctx context.Context, a ctxAuth, access catalog.AccessFilter) ([]map[string]any, error) {
+	out := make([]map[string]any, 0)
+	if h.deps.ProgressStore == nil {
+		return out, nil
+	}
+	rows, err := h.deps.ProgressStore.ListProgressForAudiobooks(ctx, a.UserID, a.ProfileID, 500)
+	if err != nil {
+		return nil, err
 	}
 	ids := make([]string, 0, len(rows))
 	for _, p := range rows {
@@ -190,19 +204,17 @@ func (h *Handler) handleGetMyProgress(w http.ResponseWriter, r *http.Request) {
 	}
 	// One batch fetch acts as the access/existence gate (the item itself isn't
 	// rendered here), instead of one query per progress row.
-	byID, err := h.deps.MediaStore.GetAudiobooksByIDs(r.Context(), ids, access)
+	byID, err := h.deps.MediaStore.GetAudiobooksByIDs(ctx, ids, access)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
+		return nil, err
 	}
-	out := make([]map[string]any, 0, len(rows))
 	for _, p := range rows {
 		if byID[p.ContentID] == nil {
 			continue
 		}
 		out = append(out, progressRowToABS(p))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"mediaProgress": out})
+	return out, nil
 }
 
 // handleGetItemProgress — GET /abs/api/me/progress/{libraryItemId}

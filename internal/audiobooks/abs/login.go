@@ -277,13 +277,17 @@ func (h *Handler) handleABSStatus(w http.ResponseWriter, _ *http.Request) {
 // user.accessToken / user.refreshToken; GET /me never carries those.
 // mayDownload is the account's download permission (Handler.mayDownload), so
 // clients that read permissions.download hide offline save when it is false;
-// the /download route enforces it either way.
-func absUserObject(userID, displayName, token, defaultLibraryID string, mayDownload bool, now time.Time) map[string]any {
+// the /download route enforces it either way. mediaProgress is the caller's
+// progress rows (Handler.userMediaProgress); nil emits an empty list.
+func absUserObject(userID, displayName, token, defaultLibraryID string, mayDownload bool, mediaProgress []map[string]any, now time.Time) map[string]any {
 	name := displayName
 	if name == "" {
 		name = userID
 	}
 	nowMs := now.UnixMilli()
+	if mediaProgress == nil {
+		mediaProgress = []map[string]any{}
+	}
 	return map[string]any{
 		"id":                              userID,
 		"username":                        name,
@@ -293,7 +297,7 @@ func absUserObject(userID, displayName, token, defaultLibraryID string, mayDownl
 		"librariesAccessible":             []any{},
 		"itemTagsAccessible":              []any{},
 		"itemTagsSelected":                []any{},
-		"mediaProgress":                   []any{},
+		"mediaProgress":                   mediaProgress,
 		"bookmarks":                       []any{},
 		"seriesHideFromContinueListening": []any{},
 		"isOldToken":                      false,
@@ -338,7 +342,8 @@ func (h *Handler) loginEnvelope(
 	defaultLibraryID := VirtualLibraryID
 	// Fresh authentication has an explicit principal, without bearer middleware
 	// context. Resolve that principal and omit metadata when its scope is unknown.
-	access, err := h.accessFilterForAuth(ctx, a)
+	access, accessErr := h.accessFilterForAuth(ctx, a)
+	err := accessErr
 	var libs []AudiobookLibrary
 	if err == nil {
 		libs, err = h.deps.MediaStore.ListAudiobookLibraries(ctx, access)
@@ -356,7 +361,11 @@ func (h *Handler) loginEnvelope(
 		libraryMaps = append(libraryMaps, audiobookLibraryMap(lib))
 	}
 
-	user := absUserObject(a.UserID, displayName, accessToken, defaultLibraryID, h.mayDownload(ctx, a.UserID), now)
+	var progress []map[string]any
+	if accessErr == nil {
+		progress = h.userMediaProgress(ctx, a, access)
+	}
+	user := absUserObject(a.UserID, displayName, accessToken, defaultLibraryID, h.mayDownload(ctx, a.UserID), progress, now)
 
 	// Real ABS (v2.26+) ALWAYS sets user.accessToken; modern clients read it
 	// from exactly res.user.accessToken. The x-return-tokens header gates ONLY

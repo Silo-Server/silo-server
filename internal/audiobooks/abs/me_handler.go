@@ -1,10 +1,14 @@
 package abs
 
 import (
+	"context"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/catalog"
 )
 
 // handleMe — GET /abs/api/me (and /api/me)
@@ -42,7 +46,21 @@ func (h *Handler) handleMe(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	writeJSON(w, http.StatusOK, absUserObject(a.UserID, name, a.Token, defaultLibID, h.mayDownload(r.Context(), a.UserID), time.Now()))
+	progress := h.userMediaProgress(r.Context(), a, access)
+	writeJSON(w, http.StatusOK, absUserObject(a.UserID, name, a.Token, defaultLibID, h.mayDownload(r.Context(), a.UserID), progress, time.Now()))
+}
+
+// userMediaProgress returns the progress rows for the user object's
+// mediaProgress. A failed read is logged and yields an empty list: the user
+// object also answers login, and a progress outage must not block sign-in.
+func (h *Handler) userMediaProgress(ctx context.Context, a ctxAuth, access catalog.AccessFilter) []map[string]any {
+	progress, err := h.accessibleProgress(ctx, a, access)
+	if err != nil {
+		slog.WarnContext(ctx, "abs user object: media progress unavailable", "component", "audiobooks",
+			"user_id", a.UserID, "profile_id", a.ProfileID, "err", err)
+		return nil
+	}
+	return progress
 }
 
 // audiobookLibraryID returns the ABS-wire library ID string for an

@@ -68,7 +68,30 @@ func (h *Handler) handleItem(w http.ResponseWriter, r *http.Request) {
 	lib := h.resolveDefaultLibrary(r.Context(), access)
 	baseURL := h.absBaseURL(r)
 	result := siloItemToLibraryItemDetail(item, files, lib, baseURL)
-	writeJSON(w, http.StatusOK, result)
+	if !includeHas(r.URL.Query().Get("include"), "progress") {
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
+	// Real ABS LibraryItemController.findOne sets userMediaProgress to the
+	// caller's row for the item, or null when there is none.
+	var progress map[string]any
+	if h.deps.ProgressStore != nil {
+		p, err := h.deps.ProgressStore.GetProgress(r.Context(), a.UserID, a.ProfileID, contentID)
+		if err != nil {
+			http.Error(w, "load progress: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if p != nil {
+			progress = progressRowToABS(*p)
+		}
+	}
+	writeJSON(w, http.StatusOK, libraryItemWithProgress{LibraryItem: result, UserMediaProgress: progress})
+}
+
+// libraryItemWithProgress is the item detail with include=progress.
+type libraryItemWithProgress struct {
+	LibraryItem
+	UserMediaProgress map[string]any `json:"userMediaProgress"`
 }
 
 // handleSimilarItems — GET /abs/api/items/{id}/similar
