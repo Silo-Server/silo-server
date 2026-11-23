@@ -653,15 +653,15 @@ func installWebComponentLocked(ctx context.Context, opts WebComponentInstallOpti
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
-	// An install that timed out or was interrupted while staging leaves the
-	// current release in place.
-	if ctx.Err() != nil {
-		err := fmt.Errorf("activate jellyfin-web %s: %w", version, context.Cause(ctx))
+	reportProgress(WebComponentOperationActivating, 94, "Preparing Jellyfin Web activation")
+	if err := ensureCanReplaceWebRelease(releaseDir); err != nil {
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
-	reportProgress(WebComponentOperationActivating, 94, "Preparing Jellyfin Web activation")
-	if err := ensureCanReplaceWebRelease(releaseDir); err != nil {
+	// An install that timed out or was interrupted before this point leaves
+	// the current release in place.
+	if ctx.Err() != nil {
+		err := fmt.Errorf("activate jellyfin-web %s: %w", version, context.Cause(ctx))
 		writeWebInstallError(root, err)
 		return webComponentStatus(root, ManagedWebInstallPath(root), version, sourceURL), err
 	}
@@ -1560,19 +1560,18 @@ func webInstallCommandRunner(cacheDir, preloadPath string) func(context.Context,
 			return errors.New("empty command")
 		}
 		cmd := procgroup.CommandContext(ctx, argv[0], argv[1:]...)
+		// Wait for the output pipes until every writer has exited. When ctx
+		// ends the group kill closes them at once, and an npm that exits
+		// before its children must not end the install while they still run.
+		cmd.WaitDelay = 0
 		cmd.Dir = dir
 		cmd.Env = append(os.Environ(), "npm_config_cache="+cacheDir, "NODE_OPTIONS="+nodeOptions)
 		if stdin != "" {
 			cmd.Stdin = strings.NewReader(stdin)
 		}
 		out, err := cmd.CombinedOutput()
-		// npm can exit while its children run on, for example when it alone
-		// is killed. Its children keep the group's id in use, so killing the
-		// group after Wait still reaches only them, and the install does not
-		// finish while they run.
-		_ = procgroup.Kill(cmd)
 		if err != nil {
-			if cause := context.Cause(ctx); cause != nil {
+			if cause := context.Cause(ctx); cause != nil && !errors.Is(err, cause) {
 				err = fmt.Errorf("%w: %w", cause, err)
 			}
 			if output := strings.TrimSpace(string(out)); output != "" {
