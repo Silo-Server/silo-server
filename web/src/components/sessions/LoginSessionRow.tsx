@@ -59,12 +59,13 @@ export function LoginSessionRow({
             })}
           </p>
         </div>
-        <div className="ms-auto flex items-center gap-1">
+        <div className="ms-auto flex max-w-full min-w-0 flex-wrap items-center gap-1">
           {onSignOut && (
             <Button
               type="button"
               size="sm"
               variant="outline"
+              className="h-auto min-h-8 max-w-full py-1 text-start wrap-anywhere whitespace-normal"
               aria-label={
                 session.current
                   ? t("web.settings.sessions.row.signOutThisBrowser")
