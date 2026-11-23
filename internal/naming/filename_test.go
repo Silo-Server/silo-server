@@ -485,6 +485,22 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: false,
 		},
 		{
+			// A trailing bare IMDb id tags a show folder as well. The title keeps
+			// the id, as it does under a Season 01 folder; matching uses the id.
+			name:                    "season folder titled differently from a show folder with a bare IMDb id",
+			path:                    "/tv/فوضى tt4565380/Fauda - S01/Fauda - S01E01.mkv",
+			libraryRoots:            []string{"/tv"},
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/فوضى tt4565380",
+			wantTitle:               "فوضى tt4565380",
+			wantSeason:              1,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     true,
+			wantMovieFolderEvidence: false,
+		},
+		{
 			// A season folder with its own provider tag names another show.
 			name:                    "tagged release folder under another tagged show folder keeps its own root",
 			path:                    "/tv/Doctor Who (2005) {tvdb-78804}/Torchwood - S01 tt0485301/Torchwood - S01E01.mkv",
