@@ -519,8 +519,13 @@ function HistoryRow({
           <TaskStatusBadge result={result} />
         </td>
         {/* Wraps at every width, since translated step names run long; the table
-            scrolls sideways when it is wider than its panel. */}
-        <td className="text-muted-foreground max-w-xs min-w-48 px-4 py-2 text-pretty">
+            scrolls sideways when it is wider than its panel. The minimum width
+            applies only to text, so a history without errors still fits a phone. */}
+        <td
+          className={`text-muted-foreground max-w-xs px-4 py-2 text-pretty wrap-anywhere ${
+            errorText === EM_DASH ? "" : "min-w-48"
+          }`}
+        >
           {errorText}
         </td>
       </tr>
