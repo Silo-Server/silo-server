@@ -132,7 +132,7 @@ before the attempt expires, and the existing expiry then ends the session.
   still reports, so the idle expiry above is not the one to end it. Exempt:
   an attempt whose `output.current_sink` is `cast_receiver` (the sender keeps
   a Cast play going without the viewer), a session that is a member of an open
-  Watch Together room (`runtime->'members'`, any phase but `ended`; a runtime
+  Watch Together room (`runtime->'members'`, phase `lobby` or `playing`; a runtime
   whose `members` is not an object lists nobody), and an audio-only effective
   file (`MediaFile.IsAudioOnly`, resolved in Go because it depends on the
   probe). The pause starts when a sample turns the lifecycle

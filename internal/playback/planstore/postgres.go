@@ -619,8 +619,7 @@ func (s *Postgres) ExpirePausedAttempt(ctx context.Context, sessionID, stopID st
 		SELECT true FROM playback_session_lifecycle lc
 		WHERE lc.session_id = $1::uuid AND lc.frontend = 'native' AND lc.state = 'paused'
 		  AND lc.updated_at <= NOW() - make_interval(secs => $2)
-		  AND NOT EXISTS (SELECT 1 FROM watch_together_rooms r, `+playback.WatchTogetherMembersSQL+` m
-			WHERE r.phase <> 'ended' AND m.value->>'session_id' = lc.session_id::text)`, sessionID, timeout.Seconds()).Scan(&paused)
+		  AND `+playback.NotInOpenWatchTogetherRoomSQL, sessionID, timeout.Seconds()).Scan(&paused)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}

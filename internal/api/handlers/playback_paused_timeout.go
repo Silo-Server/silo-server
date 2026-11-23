@@ -210,8 +210,7 @@ func loadPausedTimeoutCandidates(ctx context.Context, pool *pgxpool.Pool, timeou
 		  AND COALESCE(a.normalized_request #>> '{client_playback_context,output,current_sink}', '') <> $4
 		  AND (lc.session_id = ANY($8::uuid[]) OR NOT EXISTS (SELECT 1 FROM playback_sessions_sync s
 				WHERE s.session_id = lc.session_id::text AND s.last_sync_at > NOW() - make_interval(secs => $3)))
-		  AND NOT EXISTS (SELECT 1 FROM watch_together_rooms r, `+playback.WatchTogetherMembersSQL+` m
-			WHERE r.phase <> 'ended' AND m.value->>'session_id' = lc.session_id::text)
+		  AND `+playback.NotInOpenWatchTogetherRoomSQL+`
 		ORDER BY lc.updated_at, lc.session_id
 		LIMIT $5`, timeout.Seconds(), playback.PausedStreamSlotGrace.Seconds(), lifecycleHeldGrace.Seconds(),
 		playback.CastReceiverSinkV3, lifecycleSweepBatch, afterSince, afterID, held)

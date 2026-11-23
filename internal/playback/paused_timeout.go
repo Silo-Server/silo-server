@@ -21,13 +21,15 @@ const (
 // timeout exempts it.
 const CastReceiverSinkV3 = "cast_receiver"
 
-// WatchTogetherMembersSQL lists the members of Watch Together room r, one
-// row per member with the member as value. A room whose runtime holds no
-// members object (JSON null for a nil map, or any other type) has none,
-// instead of failing the whole statement. The paused timeout's sweep and its
-// claim both use it to exempt members.
-const WatchTogetherMembersSQL = `jsonb_each(CASE WHEN jsonb_typeof(r.runtime->'members') = 'object'
-	THEN r.runtime->'members' ELSE '{}'::jsonb END)`
+// NotInOpenWatchTogetherRoomSQL holds for lifecycle row lc when no open
+// Watch Together room lists its session as a member. A room whose runtime
+// holds no members object (JSON null for a nil map, or any other type) has
+// none, instead of failing the whole statement. Open rooms are named by
+// phase so the (phase, created_at) index skips ended rooms, which are kept.
+// The paused timeout's sweep and its claim both use it to exempt members.
+const NotInOpenWatchTogetherRoomSQL = `NOT EXISTS (SELECT 1 FROM watch_together_rooms r,
+	jsonb_each(CASE WHEN jsonb_typeof(r.runtime->'members') = 'object' THEN r.runtime->'members' ELSE '{}'::jsonb END) m
+	WHERE r.phase IN ('lobby', 'playing') AND m.value->>'session_id' = lc.session_id::text)`
 
 // ParsePausedSessionTimeout resolves a stored paused-session timeout. An
 // empty or unreadable value takes the default, so a row the admin never saved
