@@ -147,7 +147,7 @@ export default function Calendar() {
                   type="button"
                   aria-pressed={filter === opt.value}
                   onClick={() => setFilter(opt.value)}
-                  className={`rounded-full px-3 py-1 text-[12px] font-semibold transition-all duration-150 sm:px-4 sm:py-1.5 sm:text-[13px] ${
+                  className={`rounded-full px-3 py-1 text-[0.75rem] font-semibold transition-all duration-150 sm:px-4 sm:py-1.5 sm:text-[0.8125rem] ${
                     filter === opt.value
                       ? "bg-primary text-primary-foreground shadow-sm"
                       : "text-muted-foreground hover:bg-surface-hover hover:text-foreground"
@@ -161,7 +161,7 @@ export default function Calendar() {
             {/* Preset dropdown (smaller displays) */}
             <div className="lg:hidden">
               <Select value={filter} onValueChange={setFilter}>
-                <SelectTrigger className="border-border/50 bg-surface/60 h-9 w-auto min-w-[130px] rounded-full text-[12px] font-semibold backdrop-blur-sm sm:text-[13px]">
+                <SelectTrigger className="border-border/50 bg-surface/60 h-9 w-auto min-w-[130px] rounded-full text-[0.75rem] font-semibold backdrop-blur-sm sm:text-[0.8125rem]">
                   <SelectValue placeholder={t("web.calendar.presetFollowing")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -177,7 +177,7 @@ export default function Calendar() {
             {/* Library filter */}
             {libraries.data && libraries.data.length > 1 && (
               <Select value={libraryId ? String(libraryId) : "all"} onValueChange={setLibrary}>
-                <SelectTrigger className="border-border/50 bg-surface/60 h-9 w-auto min-w-[120px] rounded-full text-[12px] font-semibold backdrop-blur-sm sm:min-w-[140px] sm:text-[13px]">
+                <SelectTrigger className="border-border/50 bg-surface/60 h-9 w-auto min-w-[120px] rounded-full text-[0.75rem] font-semibold backdrop-blur-sm sm:min-w-[140px] sm:text-[0.8125rem]">
                   <SelectValue placeholder={t("web.calendar.allLibraries")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -215,7 +215,7 @@ export default function Calendar() {
       {showSelectedEmpty && (
         <div className="px-4 sm:px-6 lg:px-10 xl:px-12">
           <div
-            className="surface-panel-subtle text-muted-foreground rounded-2xl px-4 py-3 text-[13px]"
+            className="surface-panel-subtle text-muted-foreground rounded-2xl px-4 py-3 text-[0.8125rem]"
             role="status"
           >
             {t("web.calendar.nothingScheduledFor", {

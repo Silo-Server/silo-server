@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 export function StepCount({ step, children }: { step: 1 | 2; children: string }) {
   const t = useT();
   return (
-    <span className="text-muted-foreground inline-flex min-w-0 items-center gap-2 text-[13px]">
+    <span className="text-muted-foreground inline-flex min-w-0 items-center gap-2 text-[0.8125rem]">
       <i aria-hidden className="bg-foreground h-1 w-[18px] shrink-0 rounded-full" />
       <i
         aria-hidden

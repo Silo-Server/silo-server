@@ -338,7 +338,7 @@ export function DeviceOverrideRow({
     >
       <div className="min-w-0 space-y-0.5">
         <div className="flex items-center gap-2">
-          <span className="text-foreground text-[13.5px] leading-tight font-medium">
+          <span className="text-foreground text-[0.84375rem] leading-tight font-medium">
             {definition ? settingLabel(definition) : setting.key}
           </span>
           {isOverride ? (
@@ -349,7 +349,7 @@ export function DeviceOverrideRow({
             />
           ) : (
             <span
-              className="text-muted-foreground border-border/50 rounded-full border px-1.5 py-px text-[9.5px] font-medium tracking-[0.05em] uppercase"
+              className="text-muted-foreground border-border/50 rounded-full border px-1.5 py-px text-[0.59375rem] font-medium tracking-[0.05em] uppercase"
               title={t("web.admin.common.deviceOverrides.override.notSetTitle", {
                 source: inherited
                   ? inheritedSourceText(t, inherited)
@@ -363,7 +363,7 @@ export function DeviceOverrideRow({
           )}
           {anomaly && (
             <span
-              className="text-destructive-label border-destructive/30 bg-destructive/10 inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[9.5px] font-medium tracking-[0.05em] uppercase"
+              className="text-destructive-label border-destructive/30 bg-destructive/10 inline-flex items-center gap-1 rounded-full border px-1.5 py-px text-[0.59375rem] font-medium tracking-[0.05em] uppercase"
               title={anomaly.reason}
             >
               <AlertTriangle className="h-2.5 w-2.5" />
@@ -371,15 +371,15 @@ export function DeviceOverrideRow({
             </span>
           )}
         </div>
-        <div className="text-muted-foreground/80 font-mono text-[11px] leading-tight">
+        <div className="text-muted-foreground/80 font-mono text-[0.6875rem] leading-tight">
           {setting.key}
         </div>
         {definition?.description && (
-          <p className="text-muted-foreground pt-1 text-[12.5px] leading-relaxed">
+          <p className="text-muted-foreground pt-1 text-[0.78125rem] leading-relaxed">
             {settingDescription(definition)}
           </p>
         )}
-        <div className="text-muted-foreground pt-0.5 text-[11.5px]">
+        <div className="text-muted-foreground pt-0.5 text-[0.71875rem]">
           <span className="text-foreground/80">
             {formatSettingValue(setting.key, setting.value)}
           </span>
@@ -401,7 +401,7 @@ export function DeviceOverrideRow({
               )}
         </div>
         {anomaly && (
-          <div className="text-destructive-label flex items-start gap-1.5 pt-1.5 text-[11.5px] leading-relaxed">
+          <div className="text-destructive-label flex items-start gap-1.5 pt-1.5 text-[0.71875rem] leading-relaxed">
             <AlertTriangle className="mt-[1px] h-3 w-3 shrink-0" />
             <span>{anomaly.reason}</span>
           </div>
@@ -427,13 +427,13 @@ export function DeviceOverrideRow({
           <button
             type="button"
             onClick={() => onReset(setting)}
-            className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 self-end text-[11.5px] transition-colors"
+            className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 self-end text-[0.71875rem] transition-colors"
           >
             <RotateCcw className="h-3 w-3" />
             {t("web.admin.common.deviceOverrides.reset")}
           </button>
         ) : (
-          <span className="text-muted-foreground self-end text-[11px] italic">
+          <span className="text-muted-foreground self-end text-[0.6875rem] italic">
             {t("web.admin.common.deviceOverrides.changeToOverride")}
           </span>
         )}
@@ -680,18 +680,18 @@ export function DeviceProfileTabs({
               }
             >
               <span
-                className="border-border/60 bg-surface-raised/70 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[10px] font-semibold"
+                className="border-border/60 bg-surface-raised/70 flex h-5 w-5 shrink-0 items-center justify-center rounded-full border text-[0.625rem] font-semibold"
                 style={{ color: tabAccent }}
                 aria-hidden
               >
                 {initial}
               </span>
-              <span dir="auto" className="max-w-[120px] truncate text-[12.5px] font-medium">
+              <span dir="auto" className="max-w-[120px] truncate text-[0.78125rem] font-medium">
                 {profile.profileName || t("web.admin.common.deviceOverrides.tabs.unnamed")}
               </span>
               <span
                 className={cn(
-                  "rounded-full border px-1.5 py-0.5 text-[10.5px] tabular-nums transition-colors",
+                  "rounded-full border px-1.5 py-0.5 text-[0.65625rem] tabular-nums transition-colors",
                   isActive
                     ? "border-border/70 bg-background/70 text-foreground"
                     : "border-border/40 bg-background/30 text-muted-foreground",
@@ -718,7 +718,7 @@ export function DeviceProfileTabs({
           backgroundImage: `linear-gradient(calc(90deg * var(--dir-sign)), color-mix(in oklab, ${accent} 8%, transparent), transparent 70%)`,
         }}
       >
-        <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-[11px]">
+        <div className="text-muted-foreground flex min-w-0 items-center gap-2 text-[0.6875rem]">
           <span
             aria-hidden
             className="inline-block h-1.5 w-1.5 rounded-full"
@@ -746,7 +746,7 @@ export function DeviceProfileTabs({
             <>
               <span className="text-muted-foreground/40">{DOT}</span>
               <span
-                className="text-destructive-label bg-destructive/10 inline-flex items-center gap-1 rounded px-1.5 py-px text-[10px] font-medium tracking-[0.04em] uppercase"
+                className="text-destructive-label bg-destructive/10 inline-flex items-center gap-1 rounded px-1.5 py-px text-[0.625rem] font-medium tracking-[0.04em] uppercase"
                 title={t("web.admin.common.deviceOverrides.summary.suspectTitle")}
               >
                 <AlertTriangle className="h-2.5 w-2.5" />
@@ -764,7 +764,7 @@ export function DeviceProfileTabs({
           // device with no override yet has no row to read it from.
           onClick={() => onResetProfile(active.profileId, active.profileName)}
           disabled={resetPending || overrideCount === 0}
-          className="text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground inline-flex items-center gap-1 text-[11.5px] transition-colors disabled:opacity-40"
+          className="text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground inline-flex items-center gap-1 text-[0.71875rem] transition-colors disabled:opacity-40"
         >
           <RotateCcw className="h-3 w-3" />
           {t("web.admin.common.deviceOverrides.summary.resetAll")}

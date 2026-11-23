@@ -54,7 +54,7 @@ export function RangeSegmentedControl({
             aria-pressed={active}
             aria-label={t(SHOW_RANGE_LABELS[range])}
             className={cn(
-              "cursor-pointer rounded-full px-1.5 py-0.5 text-[10px] leading-none font-semibold tabular-nums transition-colors",
+              "cursor-pointer rounded-full px-1.5 py-0.5 text-[0.625rem] leading-none font-semibold tabular-nums transition-colors",
               "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
               active
                 ? "border-primary/40 bg-primary/15 text-foreground"

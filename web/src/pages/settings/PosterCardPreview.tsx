@@ -95,7 +95,7 @@ export function PosterCardPreviewView({
     >
       <figcaption className="mb-3 flex items-baseline justify-between gap-3">
         <span className="text-sm font-semibold">{t("web.settings.interface.preview.title")}</span>
-        <span className="text-muted-foreground text-[13px]">
+        <span className="text-muted-foreground text-[0.8125rem]">
           {t("web.settings.interface.preview.caption")}
         </span>
       </figcaption>
@@ -169,7 +169,7 @@ export function PosterCardPreviewView({
         })}
       </div>
       {hasShortcuts ? (
-        <p className="text-muted-foreground mt-3 text-[13px] leading-relaxed">
+        <p className="text-muted-foreground mt-3 text-[0.8125rem] leading-relaxed">
           {t("web.settings.interface.preview.shortcutsHint")}
         </p>
       ) : null}

@@ -126,6 +126,11 @@ creator's order. Clients split the list with `creator_profile_id` and label shar
 with the creator's name from the login's profile list. The web client orders the **Shared with
 me** owners by the login's profile-list order.
 
+`listLibraryUserCollections` and the `user_collections` group of `getLibraryCollections` list
+the collections opted into the library's Collections tab in the same order as
+`listCollections`. The group's `manual` sort mode keeps that order; its other sort modes
+re-sort it.
+
 Each profile has one flat order of its own collections (`sort_order`). `getCollectionOrder`
 returns it with a strong ETag, and `reorderCollections` replaces it under `If-Match`.
 `ordered_ids` must name each of the acting profile's own collections exactly once. Any other ID,

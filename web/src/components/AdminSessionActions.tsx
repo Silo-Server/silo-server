@@ -216,7 +216,7 @@ export function AdminSessionActions({
       size="sm"
       className={
         compact
-          ? "border-destructive/40 text-destructive hover:bg-destructive/10 h-7 gap-1.5 px-2 text-[11px]"
+          ? "border-destructive/40 text-destructive hover:bg-destructive/10 h-7 gap-1.5 px-2 text-[0.6875rem]"
           : "border-destructive/40 text-destructive hover:bg-destructive/10"
       }
       onClick={() => void runAction("terminate")}

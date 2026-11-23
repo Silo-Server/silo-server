@@ -32,7 +32,7 @@ function VersionSpecSheet({ sections }: { sections: MediaSpecSection[] }) {
     <div className="space-y-4">
       {sections.map((section) => (
         <div key={section.title}>
-          <div className="text-muted-foreground/70 mb-1.5 text-[11px] font-semibold tracking-wide uppercase">
+          <div className="text-muted-foreground/70 mb-1.5 text-[0.6875rem] font-semibold tracking-wide uppercase">
             {section.title}
           </div>
           <div className="divide-border/40 bg-background/40 divide-y rounded-lg border">

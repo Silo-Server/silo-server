@@ -62,7 +62,7 @@ export function NowPlayingWidget() {
         </div>
         <Link
           to="/admin/activity"
-          className="text-muted-foreground hover:text-primary shrink-0 text-[11px] transition-colors"
+          className="text-muted-foreground hover:text-primary shrink-0 text-[0.6875rem] transition-colors"
         >
           {t("web.admin.dashboard.widgets.nowPlaying.viewActivity")}
         </Link>
@@ -79,7 +79,7 @@ export function NowPlayingWidget() {
         {sessions.length > 0 && (
           <Link
             to="/admin/activity"
-            className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
+            className="text-muted-foreground hover:text-primary text-[0.6875rem] transition-colors"
           >
             {t("web.admin.dashboard.widgets.nowPlaying.viewAll", {
               count: sessions.length,
@@ -304,7 +304,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             Text Size. */}
         <div className="mb-1.5 flex max-h-[calc(1rem+2px)] flex-wrap gap-1 overflow-hidden leading-3 [&>*]:leading-3">
           <span
-            className={`inline-flex rounded border px-1.5 py-0.5 text-[9px] font-semibold ${methodMeta.badgeClass}`}
+            className={`inline-flex rounded border px-1.5 py-0.5 text-[0.5625rem] font-semibold ${methodMeta.badgeClass}`}
           >
             {methodMeta.label}
           </span>
@@ -312,7 +312,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
           {clientLabel ? (
             <span
               title={session.client_user_agent || clientLabel}
-              className="border-border/60 bg-muted/30 text-muted-foreground inline-flex max-w-[9rem] rounded border px-1.5 py-0.5 text-[9px] font-semibold"
+              className="border-border/60 bg-muted/30 text-muted-foreground inline-flex max-w-[9rem] rounded border px-1.5 py-0.5 text-[0.5625rem] font-semibold"
             >
               <span dir="auto" className="truncate">
                 {clientLabel}
@@ -329,7 +329,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
             the name truncates and the times keep their full width. */}
         <div className="mt-auto flex items-center gap-1.5">
           <div
-            className="text-primary-foreground flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full text-[9px] font-bold"
+            className="text-primary-foreground flex h-5.5 w-5.5 shrink-0 items-center justify-center rounded-full text-[0.5625rem] font-bold"
             style={{ background: `var(--primary)` }}
           >
             {getInitial(username)}
@@ -337,7 +337,7 @@ function StreamCard({ session, showPoster }: { session: AdminSession; showPoster
           <span dir="auto" className="min-w-0 truncate text-xs font-medium">
             {username}
           </span>
-          <span className="text-muted-foreground ms-auto shrink-0 text-[10px] whitespace-nowrap">
+          <span className="text-muted-foreground ms-auto shrink-0 text-[0.625rem] whitespace-nowrap">
             <span className="tabular-nums">{position}</span>
             {/* eslint-disable-next-line formatjs/no-literal-string-in-jsx -- punctuation separating two already-formatted times */}
             <span> · {elapsed}</span>

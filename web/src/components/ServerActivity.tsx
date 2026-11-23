@@ -215,7 +215,7 @@ function ServerActivityContent({ hideWhenEmpty = false, className }: ServerActiv
             }`}
           />
           {totalActive > 0 && (
-            <span className="bg-foreground text-background ring-background absolute -end-0.5 -top-0.5 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[10px] font-bold ring-2">
+            <span className="bg-foreground text-background ring-background absolute -end-0.5 -top-0.5 flex h-4.5 min-w-4.5 items-center justify-center rounded-full px-1 text-[0.625rem] font-bold ring-2">
               {totalActiveLabel}
             </span>
           )}
@@ -237,11 +237,11 @@ function ServerActivityContent({ hideWhenEmpty = false, className }: ServerActiv
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-[color-mix(in_srgb,var(--border)_50%,transparent)] px-4 py-3">
-            <span className="text-[13px] font-bold">
+            <span className="text-[0.8125rem] font-bold">
               {t("web.admin.common.serverActivity.title")}
             </span>
             {connectionState !== "live" && (
-              <span className="text-warning text-[10px] font-medium">
+              <span className="text-warning text-[0.625rem] font-medium">
                 {connectionState === "connecting"
                   ? t("web.admin.common.serverActivity.connecting")
                   : t("web.admin.common.serverActivity.disconnected")}
@@ -383,11 +383,11 @@ function ActivitySection({
     >
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <span className="text-muted-foreground text-[10px] font-semibold tracking-[0.12em] uppercase">
+          <span className="text-muted-foreground text-[0.625rem] font-semibold tracking-[0.12em] uppercase">
             {title}
           </span>
           {count > 0 && (
-            <span className="bg-primary/10 text-primary rounded-md px-1.5 py-0.5 text-[10px] leading-none font-bold">
+            <span className="bg-primary/10 text-primary rounded-md px-1.5 py-0.5 text-[0.625rem] leading-none font-bold">
               {formatBadgeCount(count, countIsLowerBound)}
             </span>
           )}
@@ -395,7 +395,7 @@ function ActivitySection({
         <Link
           to={href}
           onClick={onNavigate}
-          className="text-muted-foreground hover:text-primary flex items-center gap-0.5 text-[10px] font-medium transition-colors"
+          className="text-muted-foreground hover:text-primary flex items-center gap-0.5 text-[0.625rem] font-medium transition-colors"
         >
           {t("web.admin.common.serverActivity.viewAll")}
           <ChevronRight className="h-3 w-3" />
@@ -419,7 +419,7 @@ function StreamCountRow({ method, count }: { method: string; count: number }) {
   return (
     <div className="flex items-center gap-2.5">
       <span className={`h-2 w-2 rounded-full ${meta.swatchClass}`} />
-      <span className="text-[12px] font-medium">
+      <span className="text-[0.75rem] font-medium">
         {t("web.admin.common.serverActivity.streamCount", {
           count,
           count_text: count,
@@ -442,16 +442,16 @@ function TaskRow({ task, onNavigate }: { task: TaskInfo; onNavigate: () => void 
         <Link
           to={`/admin/tasks/${task.key}`}
           onClick={onNavigate}
-          className="hover:text-primary truncate text-[12px] font-medium transition-colors hover:underline"
+          className="hover:text-primary truncate text-[0.75rem] font-medium transition-colors hover:underline"
         >
           {taskText(serverText, task, "name")}
         </Link>
         {hasDeterminateProgress ? (
-          <span className="text-muted-foreground ms-2 shrink-0 text-[10px] font-semibold tabular-nums">
+          <span className="text-muted-foreground ms-2 shrink-0 text-[0.625rem] font-semibold tabular-nums">
             {formatTaskProgress(task.progress)}
           </span>
         ) : (
-          <span className="text-primary ms-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
+          <span className="text-primary ms-2 flex shrink-0 items-center gap-1 text-[0.625rem] font-semibold">
             <Loader className="h-3 w-3 animate-spin" aria-hidden="true" />
             {t("web.admin.common.serverActivity.running")}
           </span>
@@ -511,7 +511,7 @@ function PreparationsSummary({
       {waiting.length > 0 && (
         <div
           className={cn(
-            "text-muted-foreground flex items-center gap-1.5 text-[11px]",
+            "text-muted-foreground flex items-center gap-1.5 text-[0.6875rem]",
             visible.length > 0 &&
               "border-t border-[color-mix(in_srgb,var(--border)_35%,transparent)] pt-1.5",
           )}
@@ -521,13 +521,13 @@ function PreparationsSummary({
         </div>
       )}
       {paused > 0 && (
-        <div className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
+        <div className="text-muted-foreground flex items-center gap-1.5 text-[0.6875rem]">
           <Pause className="h-3 w-3 shrink-0" aria-hidden="true" />
           {t("web.admin.common.serverActivity.paused", localeCount(paused))}
         </div>
       )}
       {failed > 0 && (
-        <div className="text-destructive flex items-center gap-1.5 text-[11px] font-medium">
+        <div className="text-destructive flex items-center gap-1.5 text-[0.6875rem] font-medium">
           <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
           {t("web.admin.common.serverActivity.failedRecent", localeCount(failed))}
         </div>
@@ -559,16 +559,16 @@ function PreparationRow({
         <Link
           to={PREPARATIONS_HREF}
           onClick={onNavigate}
-          className="hover:text-primary truncate text-[12px] font-medium transition-colors hover:underline"
+          className="hover:text-primary truncate text-[0.75rem] font-medium transition-colors hover:underline"
         >
           {preparationCompactTitle(prep)}
         </Link>
         {percent != null ? (
-          <span className="text-muted-foreground ms-2 shrink-0 text-[10px] font-semibold tabular-nums">
+          <span className="text-muted-foreground ms-2 shrink-0 text-[0.625rem] font-semibold tabular-nums">
             {t("web.admin.common.serverActivity.percent", { percent: Math.floor(percent) })}
           </span>
         ) : (
-          <span className="text-primary ms-2 flex shrink-0 items-center gap-1 text-[10px] font-semibold">
+          <span className="text-primary ms-2 flex shrink-0 items-center gap-1 text-[0.625rem] font-semibold">
             <Loader className="h-3 w-3 animate-spin" aria-hidden="true" />
             {preparationRunningLabel(prep)}
           </span>
@@ -591,7 +591,7 @@ function PreparationRow({
           />
         </div>
       )}
-      <div className="text-muted-foreground truncate text-[10px]">{detail}</div>
+      <div className="text-muted-foreground truncate text-[0.625rem]">{detail}</div>
     </div>
   );
 }
@@ -608,21 +608,21 @@ function ScanRow({ scan, libraryName }: { scan: ScanRun; libraryName: string }) 
       )}
       <div className="min-w-0 flex-1 space-y-0.5">
         <div className="flex items-center gap-2">
-          <span dir="auto" className="truncate text-[12px] font-medium">
+          <span dir="auto" className="truncate text-[0.75rem] font-medium">
             {libraryName}
           </span>
-          <span className="text-muted-foreground ms-auto shrink-0 text-[10px]">
+          <span className="text-muted-foreground ms-auto shrink-0 text-[0.625rem]">
             {scan.status === "running"
               ? t("web.admin.common.serverActivity.scanning")
               : t("web.admin.common.serverActivity.scanQueued")}
           </span>
         </div>
-        <div className="text-muted-foreground truncate text-[10px]">
+        <div className="text-muted-foreground truncate text-[0.625rem]">
           {formatScanLabel(scan, t)}
           {scan.path ? DETAIL_SEPARATOR + scan.path : null}
         </div>
         {progressLabel && (
-          <div className="text-muted-foreground/80 truncate text-[10px]">{progressLabel}</div>
+          <div className="text-muted-foreground/80 truncate text-[0.625rem]">{progressLabel}</div>
         )}
       </div>
     </div>
@@ -664,7 +664,7 @@ function formatScanProgress(scan: ScanRun, t: Translate) {
 }
 
 function EmptyRow({ children }: { children: React.ReactNode }) {
-  return <div className="text-muted-foreground py-1 text-[11px]">{children}</div>;
+  return <div className="text-muted-foreground py-1 text-[0.6875rem]">{children}</div>;
 }
 
 function MoreRows({
@@ -676,7 +676,7 @@ function MoreRows({
 }) {
   const t = useT();
   return (
-    <div className="text-muted-foreground border-t border-[color-mix(in_srgb,var(--border)_35%,transparent)] pt-1.5 text-[11px]">
+    <div className="text-muted-foreground border-t border-[color-mix(in_srgb,var(--border)_35%,transparent)] pt-1.5 text-[0.6875rem]">
       {t(
         countIsLowerBound
           ? "web.admin.common.serverActivity.moreScansAtLeast"

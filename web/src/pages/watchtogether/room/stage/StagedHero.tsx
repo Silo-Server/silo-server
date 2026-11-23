@@ -100,7 +100,7 @@ export function StagedHero({
         <div className="flex min-w-0 flex-1 flex-col justify-center gap-3">
           <div className="flex flex-wrap items-center gap-2">
             <span
-              className={`text-[11px] font-semibold tracking-[0.18em] uppercase ${eyebrowClass}`}
+              className={`text-[0.6875rem] font-semibold tracking-[0.18em] uppercase ${eyebrowClass}`}
             >
               {eyebrow}
             </span>

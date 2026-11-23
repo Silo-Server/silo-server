@@ -366,7 +366,8 @@ func (h *LibraryCollectionHandler) withVisibleItemCounts(ctx context.Context, us
 
 // LibraryCollectionsTab answers the library's Collections tab: every
 // curated collection in full and, when groups are configured, the grouped
-// and ungrouped cards including the viewer's opted-in personal collections.
+// and ungrouped cards including the opted-in personal collections the
+// viewer can see: its own plus other profiles' shared ones on the login.
 func (h *LibraryCollectionHandler) LibraryCollectionsTab(ctx context.Context, libraryID, userID int, profileID string) (LibraryCollectionTabView, error) {
 	if err := h.requireViewableLibrary(ctx, libraryID); err != nil {
 		return LibraryCollectionTabView{}, err

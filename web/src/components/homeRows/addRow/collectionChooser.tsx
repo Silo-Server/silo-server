@@ -83,7 +83,7 @@ export function CollectionSearchBar({
             type="button"
             aria-pressed={filter === name}
             onClick={() => onFilterChange(name)}
-            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 aria-pressed:bg-background aria-pressed:text-foreground h-8 rounded-lg px-2.5 text-[13px] font-medium outline-none focus-visible:ring-[3px] aria-pressed:shadow-sm"
+            className="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 aria-pressed:bg-background aria-pressed:text-foreground h-8 rounded-lg px-2.5 text-[0.8125rem] font-medium outline-none focus-visible:ring-[3px] aria-pressed:shadow-sm"
           >
             {t(label)}
           </button>
@@ -97,7 +97,7 @@ export function CollectionSearchBar({
           <SelectTrigger
             size="sm"
             aria-label={t("web.home.addRow.collection.library")}
-            className="max-w-48 text-[13px]"
+            className="max-w-48 text-[0.8125rem]"
           >
             <SelectValue />
           </SelectTrigger>
@@ -147,12 +147,12 @@ export function CollectionOptionBody({
           {title}
         </span>
         {srMeta === undefined ? (
-          <span id={metaId} className="text-muted-foreground block truncate text-[13px]">
+          <span id={metaId} className="text-muted-foreground block truncate text-[0.8125rem]">
             {meta}
           </span>
         ) : (
           <>
-            <span aria-hidden className="text-muted-foreground block truncate text-[13px]">
+            <span aria-hidden className="text-muted-foreground block truncate text-[0.8125rem]">
               {meta}
             </span>
             <span id={metaId} className="sr-only">
