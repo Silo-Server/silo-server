@@ -82304,6 +82304,36 @@
       "value": "Activez d’abord un fournisseur de connexion. Avec la connexion par mot de passe désactivée et aucun fournisseur activé, seuls les administrateurs de secours pourraient se connecter."
     }
   ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "De 8 à 72 caractères. Les règles s’appliquent quand quelqu’un choisit ou modifie un mot de passe ; les mots de passe déjà définis continuent de fonctionner."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Longueur minimale du mot de passe"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Tout signe de ponctuation ou symbole, comme ! ou #. Les lettres, les chiffres et les espaces ne comptent pas."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Exiger un caractère spécial"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Exiger une majuscule"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
     {
       "type": 0,
@@ -94936,6 +94966,20 @@
       "value": "Définition…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Communiquez-le vous-même à "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -97723,10 +97767,80 @@
       "value": " n’autorise pas cet appareil à se connecter à ce serveur."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Au moins "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caractère."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Au moins "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " de caractères."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Au moins "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caractères."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Les mots de passe ne correspondent pas."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Incluez au moins un caractère spécial, comme ! ou #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Incluez au moins une majuscule."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -97739,6 +97853,64 @@
     {
       "type": 0,
       "value": "Utilisez au moins 8 caractères."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Utilisez au moins "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caractère."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Utilisez au moins "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " de caractères."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Utilisez au moins "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caractères."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [

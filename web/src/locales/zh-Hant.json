@@ -69471,6 +69471,36 @@
       "value": "請先開啟登入提供者。若關閉密碼登入且沒有開啟任何提供者，就只有緊急存取管理員能登入。"
     }
   ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "長度須為 8 到 72 個字元。這些規則會在使用者設定或變更密碼時套用；已設定的密碼仍可繼續使用。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "密碼長度下限"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "任何標點符號或符號，例如 ! 或 #。字母、數字和空格不計入。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "必須包含特殊字元"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "必須包含大寫字母"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
     {
       "type": 0,
@@ -80643,6 +80673,20 @@
       "value": "正在設定……"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "請自行將密碼提供給 "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "。"
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -82976,10 +83020,48 @@
       "value": " 不允許此裝置登入此伺服器。"
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "至少 "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " 個字元。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "密碼不一致。"
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "請至少包含一個特殊字元，例如 ! 或 #。"
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "請至少包含一個大寫字母。"
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -82992,6 +83074,32 @@
     {
       "type": 0,
       "value": "請使用至少 8 個字元。"
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "請使用至少 "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " 個字元。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [

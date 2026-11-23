@@ -75915,6 +75915,36 @@
       "value": "Ενεργοποιήστε πρώτα έναν πάροχο σύνδεσης. Με τη σύνδεση με κωδικό πρόσβασης ανενεργή και χωρίς ενεργό πάροχο, μόνο οι διαχειριστές έκτακτης ανάγκης θα μπορούσαν να συνδεθούν."
     }
   ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Από 8 έως 72 χαρακτήρες. Οι κανόνες ισχύουν όταν κάποιος επιλέγει ή αλλάζει κωδικό πρόσβασης. Οι κωδικοί πρόσβασης που έχουν ήδη οριστεί εξακολουθούν να λειτουργούν."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Ελάχιστο μήκος κωδικού πρόσβασης"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Οποιοδήποτε σημείο στίξης ή σύμβολο, όπως ! ή #. Τα γράμματα, τα ψηφία και τα κενά δεν μετράνε."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Απαίτηση ειδικού χαρακτήρα"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Απαίτηση κεφαλαίου γράμματος"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
     {
       "type": 0,
@@ -87839,6 +87869,20 @@
       "value": "Ορισμός…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Κοινοποιήστε τον εσείς στον χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -90395,10 +90439,64 @@
       "value": " δεν επιτρέπει σε αυτήν τη συσκευή να συνδεθεί σε αυτόν τον διακομιστή."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Τουλάχιστον "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " χαρακτήρας."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Τουλάχιστον "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " χαρακτήρες."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Οι κωδικοί πρόσβασης δεν ταιριάζουν."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Συμπεριλάβετε τουλάχιστον έναν ειδικό χαρακτήρα, όπως ! ή #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Συμπεριλάβετε τουλάχιστον ένα κεφαλαίο γράμμα."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -90411,6 +90509,48 @@
     {
       "type": 0,
       "value": "Χρησιμοποιήστε τουλάχιστον 8 χαρακτήρες."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Χρησιμοποιήστε τουλάχιστον "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " χαρακτήρα."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Χρησιμοποιήστε τουλάχιστον "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " χαρακτήρες."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [

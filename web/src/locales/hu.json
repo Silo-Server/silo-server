@@ -75443,6 +75443,36 @@
       "value": "Előbb kapcsoljon be egy bejelentkezési szolgáltatót. Ha a jelszavas bejelentkezés ki van kapcsolva, és egyetlen szolgáltató sincs bekapcsolva, csak a vészhelyzeti rendszergazdák tudnának bejelentkezni."
     }
   ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "8–72 karakter. A szabályok akkor érvényesek, amikor valaki jelszót választ vagy módosít; a már beállított jelszavak továbbra is működnek."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Jelszó minimális hossza"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Bármilyen írásjel vagy szimbólum, például ! vagy #. A betűk, a számjegyek és a szóközök nem számítanak."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Speciális karakter megkövetelése"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Nagybetű megkövetelése"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
     {
       "type": 0,
@@ -87207,6 +87237,20 @@
       "value": "Beállítás…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "A jelszót Önnek kell megosztania a felhasználóval: "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -89787,10 +89831,64 @@
       "value": " szolgáltató nem engedélyezi, hogy ez az eszköz bejelentkezzen erre a szerverre."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Legalább "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " karakter."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Legalább "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " karakter."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "A jelszavak nem egyeznek."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Használjon legalább egy speciális karaktert, például ! vagy #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Használjon legalább egy nagybetűt."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -89803,6 +89901,48 @@
     {
       "type": 0,
       "value": "Legalább 8 karaktert használjon."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Használjon legalább "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " karaktert."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Használjon legalább "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " karaktert."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [

@@ -75895,6 +75895,36 @@
       "value": "Hãy bật một nhà cung cấp đăng nhập trước. Khi tắt đăng nhập bằng mật khẩu và không bật nhà cung cấp nào, chỉ quản trị viên khẩn cấp mới có thể đăng nhập."
     }
   ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Từ 8 đến 72 ký tự. Quy tắc áp dụng khi ai đó chọn hoặc đổi mật khẩu; các mật khẩu đã đặt vẫn tiếp tục hoạt động."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Độ dài mật khẩu tối thiểu"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Bất kỳ dấu câu hoặc ký hiệu nào, chẳng hạn như ! hoặc #. Chữ cái, chữ số và dấu cách không được tính."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Yêu cầu ký tự đặc biệt"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Yêu cầu chữ in hoa"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
     {
       "type": 0,
@@ -87815,6 +87845,20 @@
       "value": "Đang đặt…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Hãy tự chia sẻ mật khẩu này với "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -90363,10 +90407,64 @@
       "value": " không cho phép thiết bị này đăng nhập vào máy chủ này."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tối thiểu "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " ký tự."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Tối thiểu "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " ký tự."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Mật khẩu không khớp."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Bao gồm ít nhất một ký tự đặc biệt, chẳng hạn như ! hoặc #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Bao gồm ít nhất một chữ in hoa."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -90379,6 +90477,48 @@
     {
       "type": 0,
       "value": "Dùng ít nhất 8 ký tự."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dùng ít nhất "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " ký tự."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Dùng ít nhất "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " ký tự."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [

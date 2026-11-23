@@ -69773,6 +69773,36 @@
       "value": "เปิดผู้ให้บริการลงชื่อเข้าใช้ก่อน หากปิดการลงชื่อเข้าใช้ด้วยรหัสผ่านและไม่ได้เปิดผู้ให้บริการใด จะมีเพียงผู้ดูแลระบบฉุกเฉินเท่านั้นที่ลงชื่อเข้าใช้ได้"
     }
   ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "ตั้งแต่ 8 ถึง 72 อักขระ กฎจะมีผลเมื่อมีผู้ตั้งหรือเปลี่ยนรหัสผ่าน รหัสผ่านที่ตั้งไว้แล้วยังใช้งานได้ตามเดิม"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "ความยาวรหัสผ่านขั้นต่ำ"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "เครื่องหมายวรรคตอนหรือสัญลักษณ์ใดก็ได้ เช่น ! หรือ # ตัวอักษร ตัวเลข และการเว้นวรรคไม่นับรวม"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "ต้องมีอักขระพิเศษ"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "ต้องมีตัวพิมพ์ใหญ่"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
     {
       "type": 0,
@@ -80973,6 +81003,20 @@
       "value": "กำลังตั้งรหัสผ่าน…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "แจ้งรหัสผ่านนี้ให้ผู้ใช้ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ทราบด้วยตนเอง"
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -83326,10 +83370,48 @@
       "value": " ไม่อนุญาตให้อุปกรณ์นี้ลงชื่อเข้าใช้เซิร์ฟเวอร์นี้"
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "อย่างน้อย "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " อักขระ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "รหัสผ่านไม่ตรงกัน"
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "ใส่อักขระพิเศษอย่างน้อยหนึ่งตัว เช่น ! หรือ #"
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "ใส่ตัวพิมพ์ใหญ่อย่างน้อยหนึ่งตัว"
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -83342,6 +83424,32 @@
     {
       "type": 0,
       "value": "ใช้อย่างน้อย 8 อักขระ"
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ใช้อย่างน้อย "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " อักขระ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [

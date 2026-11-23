@@ -68725,6 +68725,36 @@
       "value": "Hidupkan pembekal log masuk dahulu. Dengan log masuk kata laluan dimatikan dan tiada pembekal dihidupkan, hanya pentadbir kecemasan boleh log masuk."
     }
   ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Antara 8 hingga 72 aksara. Peraturan ini terpakai apabila seseorang memilih atau menukar kata laluan; kata laluan yang sudah ditetapkan terus berfungsi."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Panjang minimum kata laluan"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Mana-mana tanda baca atau simbol, seperti ! atau #. Huruf, digit dan ruang tidak dikira."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Wajibkan aksara khas"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Wajibkan huruf besar"
+    }
+  ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
     {
       "type": 0,
@@ -79785,6 +79815,20 @@
       "value": "Menetapkan…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Kongsikan kata laluan ini sendiri dengan "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -82090,10 +82134,48 @@
       "value": " tidak membenarkan peranti ini log masuk ke pelayan ini."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sekurang-kurangnya "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " aksara."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Kata laluan tidak sepadan."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Sertakan sekurang-kurangnya satu aksara khas, seperti ! atau #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Sertakan sekurang-kurangnya satu huruf besar."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -82106,6 +82188,32 @@
     {
       "type": 0,
       "value": "Gunakan sekurang-kurangnya 8 aksara."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gunakan sekurang-kurangnya "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " aksara."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
