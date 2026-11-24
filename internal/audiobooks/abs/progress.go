@@ -335,6 +335,9 @@ func (h *Handler) handleSetItemProgress(w http.ResponseWriter, r *http.Request) 
 		ProgressPct:     cur.ProgressPct,
 		IsFinished:      cur.IsFinished,
 		UpdatedAt:       time.Now(),
+		// UpsertProgress keeps the stored flag; carry it so the fallback
+		// reply below reports the same value a fresh read would.
+		HideFromContinue: cur.HideFromContinue,
 	}
 	if body.CurrentTime != nil {
 		next.CurrentSeconds = *body.CurrentTime
