@@ -269,7 +269,8 @@ func (r redisSignInTrust) remember(ctx context.Context, entries []signInTrustEnt
 	pipe := r.client.Pipeline()
 	for _, entry := range entries {
 		key := redisSignInTrustKey(entry.nameKey)
-		pipe.ZAdd(ctx, key, redis.Z{Score: expires, Member: entry.pair})
+		// GT: a write that lands after a later one never shortens the expiry.
+		pipe.ZAddGT(ctx, key, redis.Z{Score: expires, Member: entry.pair})
 		pipe.ZRemRangeByScore(ctx, key, "-inf", strconv.FormatInt(now.UnixMilli(), 10))
 		// Keep the addresses that expire last.
 		pipe.ZRemRangeByRank(ctx, key, 0, -SignInTrustMaxAddresses-1)
