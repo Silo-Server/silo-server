@@ -219,7 +219,7 @@ func queryAdminInsightsActivity(ctx context.Context, pool *pgxpool.Pool, q Admin
 	if err := validateInsightsScope(q); err != nil {
 		return nil, err
 	}
-	tx, done, err := beginInsightsRead(ctx, pool, insightsReadWorkMem)
+	ctx, tx, done, err := beginAdminHistoryRead(ctx, pool, insightsReadWorkMem)
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights activity read: %w", err)
 	}

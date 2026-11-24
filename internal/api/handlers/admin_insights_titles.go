@@ -35,7 +35,7 @@ func queryAdminInsightsTitles(ctx context.Context, pool *pgxpool.Pool, q AdminIn
 	if err := validateInsightsScope(q.AdminInsightsWindowQuery); err != nil {
 		return nil, err
 	}
-	tx, done, err := beginInsightsRead(ctx, pool, insightsReadWorkMem)
+	ctx, tx, done, err := beginAdminHistoryRead(ctx, pool, insightsReadWorkMem)
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights titles read: %w", err)
 	}
@@ -252,7 +252,7 @@ func queryAdminInsightsTitle(ctx context.Context, pool *pgxpool.Pool, q AdminIns
 	if contentID == "" {
 		return nil, fmt.Errorf("%w: content_id is required", ErrInvalidInsightsQuery)
 	}
-	tx, done, err := beginInsightsRead(ctx, pool, insightsReadWorkMem)
+	ctx, tx, done, err := beginAdminHistoryRead(ctx, pool, insightsReadWorkMem)
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights title read: %w", err)
 	}

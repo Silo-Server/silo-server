@@ -33,7 +33,7 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 	if err := validateInsightsScope(q.AdminInsightsWindowQuery); err != nil {
 		return nil, err
 	}
-	tx, done, err := beginInsightsRead(ctx, pool, "")
+	ctx, tx, done, err := beginAdminHistoryRead(ctx, pool, "")
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights devices read: %w", err)
 	}

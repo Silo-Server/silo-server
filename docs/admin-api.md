@@ -2296,6 +2296,7 @@ under the authority captured when the query was created, keyed by an opaque auth
 generation, and refuse a page whose account, server, profile or PIN authority changed while
 it was in flight. The history page pages through results with `cursor` (25, 50 or 100
 entries a page); a view that sets no `limit` asks for the 200-entry page ceiling.
+History pages share the Insights read limit described under [Insights](#insights).
 
 ## Insights
 
@@ -2306,8 +2307,8 @@ Each tab shares the time-window parameters `range` (`7d`, `30d`, `90d`, `1y`, `a
 (ignored for scoped API keys). Out-of-range dates or unknown timezones answer
 `422 validation_failed`. Where a read accepts `profile_id`, it also requires `user_id`:
 profile ids such as `default` repeat across accounts, so `profile_id` alone answers `422`.
-Each node runs at most three Insights reads at a time; further reads wait for a slot, and a
-read stops after two minutes.
+Insights reads and Playback History pages share one limit: each node runs at most three at a
+time, further reads wait for a slot, and a read stops two minutes after it asks for one.
 
 **Plays and sessions.** Every playback history row is one session. Insights groups a
 profile's sessions of one item (a movie or an episode) into viewings: a session continues the

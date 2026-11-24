@@ -457,11 +457,13 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 	}
 	query += " ORDER BY h.ended_at DESC, h.session_id DESC LIMIT $" + strconv.Itoa(len(args))
 
-	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	// A search or a rare filter can scan the whole history before it finds a
+	// page, so pages go through the same gate and deadline as Insights reads.
+	ctx, tx, done, err := beginAdminHistoryRead(ctx, h.pool, "")
 	if err != nil {
 		return out, err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
+	defer done()
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return out, err

@@ -18,7 +18,7 @@ func queryAdminInsightsBandwidth(ctx context.Context, pool *pgxpool.Pool, q Admi
 	if pool == nil {
 		return nil, ErrAdminDashboardUnavailable
 	}
-	tx, done, err := beginInsightsRead(ctx, pool, "")
+	ctx, tx, done, err := beginAdminHistoryRead(ctx, pool, "")
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights bandwidth read: %w", err)
 	}

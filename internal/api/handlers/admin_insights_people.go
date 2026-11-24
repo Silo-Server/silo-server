@@ -18,7 +18,7 @@ func queryAdminInsightsPeopleSnapshot(ctx context.Context, pool *pgxpool.Pool, q
 	if pool == nil {
 		return nil, ErrAdminDashboardUnavailable
 	}
-	tx, done, err := beginInsightsRead(ctx, pool, insightsReadWorkMem)
+	ctx, tx, done, err := beginAdminHistoryRead(ctx, pool, insightsReadWorkMem)
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights people read: %w", err)
 	}
