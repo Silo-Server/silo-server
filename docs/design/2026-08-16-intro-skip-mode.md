@@ -128,7 +128,9 @@ Terminology:
   playback session. A resolved intro never shows a pill again, including if
   the viewer scrubs back into it.
 - **Select** — click/tap on the pill, or Select/OK on a remote while the pill
-  is focused, or Enter/Space on web while focused.
+  is focused, or Enter/Space on web while focused. While the timed pill shows,
+  Select at the player root counts too (on web, Enter/Space with nothing
+  focused); the untimed pill answers only when activated.
 - **Back** — remote Back, the Apple TV remote's Menu button, keyboard Escape, Android
   system back. Touch clients have no Back.
 
@@ -218,8 +220,7 @@ Also:
   That screen still opens `playback.next_up_prompt_seconds` before the end of the file,
   whatever the credits marker says.
 - In a Watch Party the pill shows only to members who may seek.
-- A client that shows a pill for another marker kind, such as the web player's Skip
-  Preview, applies the same table.
+- The web player's Skip Preview pill applies the same table.
 - `playback.auto_skip_recap` and `playback.auto_skip_credits` stay booleans, and an
   automatic skip shows no undo pill.
 
@@ -248,9 +249,10 @@ the credits.
 
 ### Input handling
 
-- Select / Back for the pill are handled at the **player root**, not on the
-  pill widget, so they work whether or not the pill is in the focus tree. TV
-  and keyboard both need this.
+- Select / Back for the timed pill are handled at the **player root**, not on
+  the pill widget, so they work whether or not the pill is in the focus tree. TV
+  and keyboard both need this. The untimed pill that returns with the controls
+  does not claim them (see the `ask` table).
 - While the pill is focused, Select acts on it with a single press — no
   navigate-then-press.
 - The pill must never steal focus during a scrub or from an open menu. If the
