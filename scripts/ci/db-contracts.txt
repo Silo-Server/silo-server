@@ -295,6 +295,10 @@
 # and resolves the rebuilt item (#934).
 ./internal/metadata TestCompleteRefreshRebuildsSeriesDB
 
+# A scheduled refresh uses the provider chain of the item's library, not the
+# all-providers fallback of folder 0 (#4605).
+./internal/metadata TestScheduledRefreshKeepsToTheLibraryChainDB
+
 # A complete metadata refresh that merges onto an item whose match the admin
 # cleared leaves only the providers' current values and keeps locks (#4336).
 ./internal/metadata TestCompleteRefreshDropsAClearedMatchsValuesDB
