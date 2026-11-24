@@ -37,6 +37,17 @@ func (r *fakeWorkerFolderRepo) GetByID(_ context.Context, id int) (*models.Media
 	return nil, fmt.Errorf("folder not found: %d", id)
 }
 
+func (r *fakeWorkerFolderRepo) ListByIDs(_ context.Context, ids []int) ([]*models.MediaFolder, error) {
+	var out []*models.MediaFolder
+	for _, id := range ids {
+		if folder, ok := r.folders[id]; ok && folder.Enabled {
+			cp := *folder
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
 type fakeSeriesQueueRepo struct {
 	jobs             []models.SeriesRootMatchJob
 	errors           map[string]string

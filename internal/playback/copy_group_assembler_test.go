@@ -35,7 +35,7 @@ func TestCopyGroupAssemblerFinishesBeforeProcessDone(t *testing.T) {
 	// wait for its final group to become a segment.
 	a.mu.Lock()
 	exited := make(chan struct{})
-	go s.monitorFFmpeg(t.Context(), cmd, s.done, func() { close(exited) })
+	go s.monitorFFmpeg(t.Context(), cmd, s.done, func() { close(exited) }, s.opts, nil, time.Now())
 	<-exited
 	a.mu.Unlock()
 	select {
@@ -91,7 +91,7 @@ func TestCopyGroupAssemblerLeavesAStoppedRunsBacklog(t *testing.T) {
 	// Hold assembly until FFmpeg is stopped, as a restart stops it.
 	a.mu.Lock()
 	exited := make(chan struct{})
-	go s.monitorFFmpeg(ctx, cmd, s.done, func() { close(exited) })
+	go s.monitorFFmpeg(ctx, cmd, s.done, func() { close(exited) }, s.opts, nil, time.Now())
 	cancel()
 	<-exited
 	a.mu.Unlock()
@@ -130,7 +130,7 @@ func TestCopyGroupAssemblerStopsFFmpegWhenARunBreaks(t *testing.T) {
 	}
 	s := &TranscodeSession{outputDir: dir, opts: plannedOpts(), copyPlan: plan, copyGroups: a, running: true,
 		done: make(chan struct{}), cancel: cancel}
-	go s.monitorFFmpeg(ctx, cmd, s.done, func() {})
+	go s.monitorFFmpeg(ctx, cmd, s.done, func() {}, s.opts, nil, time.Now())
 	select {
 	case <-s.done:
 	case <-time.After(10 * time.Second):

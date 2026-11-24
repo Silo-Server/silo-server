@@ -16,13 +16,8 @@ const aggregateMediaTypeFloorDivisor = 5
 type rowStore interface {
 	GetTasteProfile(ctx context.Context, userID int, profileID string) ([]float32, error)
 	GetTasteClusters(ctx context.Context, userID int, profileID string) ([]TasteCluster, error)
-	FindTasteProfileCandidates(ctx context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, filter catalog.AccessFilter) ([]ScoredItem, map[string][]string, error)
-	FindTasteProfileCandidatesByMediaType(ctx context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, filter catalog.AccessFilter, mediaType string) ([]ScoredItem, map[string][]string, error)
-	GetBatchEmbeddings(ctx context.Context, itemIDs []string) (map[string][]float32, error)
-	GetItemMediaTypes(ctx context.Context, itemIDs []string) (map[string]string, error)
-	GetItemAddedDates(ctx context.Context, itemIDs []string) (map[string]time.Time, error)
+	FindTasteProfileCandidatesWithDetails(ctx context.Context, embedding []float32, excludeIDs []string, genres []string, limit int, filter catalog.AccessFilter, mediaType string) ([]ScoredItem, map[string]CandidateDetails, error)
 	PresentMediaTypes(ctx context.Context, mediaTypes []string, filter catalog.AccessFilter) (map[string]struct{}, error)
-	GetItemQualityRatings(ctx context.Context, itemIDs []string) (map[string]float64, error)
 }
 
 // rowBuilder builds a profile's main and cluster rows.
@@ -53,9 +48,9 @@ func (e *Engine) rowBuilder() rowBuilder {
 }
 
 // clusterRows generates per-cluster recommendation rows. A cluster whose
-// candidates or their embeddings cannot be read is logged and skipped;
-// failed counts them. A cluster
-// with no candidates gets a row without items, so its cached row is dropped.
+// candidates cannot be read is logged and skipped; failed counts them. A
+// cluster with no candidates gets a row without items, so its cached row is
+// dropped.
 func (b rowBuilder) clusterRows(ctx context.Context, userID int, profileID string, limit int, excludeIDs []string, filter catalog.AccessFilter) (rows []ForYouRow, failed int, err error) {
 	clusters, err := b.store.GetTasteClusters(ctx, userID, profileID)
 	if err != nil {
@@ -91,7 +86,7 @@ func (b rowBuilder) clusterRows(ctx context.Context, userID int, profileID strin
 
 		// Fetch after access and genre constraints so filtered-out items do not
 		// consume the candidate headroom before MMR.
-		candidates, _, err := b.store.FindTasteProfileCandidates(ctx, c.Embedding, excludeIDs, c.DominantGenres, clusterLimit*3, filter)
+		candidates, details, err := b.store.FindTasteProfileCandidatesWithDetails(ctx, c.Embedding, excludeIDs, c.DominantGenres, clusterLimit*3, filter, "")
 		if err != nil {
 			failed++
 			slog.WarnContext(ctx, "cluster recommendation candidates failed", "component", "recommendations",
@@ -102,15 +97,8 @@ func (b rowBuilder) clusterRows(ctx context.Context, userID int, profileID strin
 			rows = append(rows, ForYouRow{Type: clusterRowType, Label: clusterTitle(c.Label), ClusterIndex: c.ClusterIdx})
 			continue
 		}
-		candidates = b.withRecencyBoost(ctx, b.withQualityPrior(ctx, candidates, qualityMinSmallPool))
-		embMap, err := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(candidates))
-		if err != nil {
-			// Ranked without embeddings, MMR could not spread the row.
-			failed++
-			slog.WarnContext(ctx, "cluster recommendation embeddings failed", "component", "recommendations",
-				"user_id", userID, "profile_id", profileID, "cluster_idx", c.ClusterIdx, "error", err)
-			continue
-		}
+		candidates = b.withRecencyBoost(withQualityPrior(candidates, details, qualityMinSmallPool), details)
+		embMap := candidateEmbeddings(details)
 		candidates, averse := b.withAversion(candidates, embMap, c.Embedding)
 		if averse.interestShare(c.TotalWeight) < aversionInterestFloor {
 			// The profile turned away enough of this interest's titles that
@@ -138,17 +126,17 @@ func (b rowBuilder) clusterRows(ctx context.Context, userID int, profileID strin
 	return rows, failed, nil
 }
 
-// withRecencyBoost applies applyRecencyBoost to a candidate pool with its
-// candidates' added dates. A pool whose dates cannot be read keeps its
-// scores.
-func (b rowBuilder) withRecencyBoost(ctx context.Context, pool []ScoredItem) []ScoredItem {
+// withRecencyBoost applies applyRecencyBoost to a candidate pool with the
+// added dates of details.
+func (b rowBuilder) withRecencyBoost(pool []ScoredItem, details map[string]CandidateDetails) []ScoredItem {
 	if len(pool) == 0 {
 		return pool
 	}
-	added, err := b.store.GetItemAddedDates(ctx, scoredItemIDs(pool))
-	if err != nil {
-		slog.WarnContext(ctx, "candidate added dates failed; candidates keep their scores", "component", "recommendations", "error", err)
-		return pool
+	added := make(map[string]time.Time, len(pool))
+	for _, c := range pool {
+		if d, ok := details[c.MediaItemID]; ok {
+			added[c.MediaItemID] = d.AddedAt
+		}
 	}
 	return applyRecencyBoost(pool, added, b.now)
 }
@@ -210,9 +198,10 @@ func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, l
 	}
 
 	var row, pool []ScoredItem
+	var details map[string]CandidateDetails
 	if anchors := mainRowAnchors(clusters); len(anchors) > 0 {
 		var allAverted bool
-		if row, pool, allAverted, err = b.anchoredRow(ctx, anchors, limit, excludeIDs, filter); err != nil {
+		if row, pool, details, allAverted, err = b.anchoredRow(ctx, anchors, limit, excludeIDs, filter); err != nil {
 			return nil, err
 		}
 		if allAverted {
@@ -223,23 +212,19 @@ func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, l
 		}
 	}
 	if len(row) == 0 {
-		var genreMap map[string][]string
-		pool, genreMap, err = b.store.FindTasteProfileCandidates(ctx, embedding, excludeIDs, nil, limit*3, filter)
+		pool, details, err = b.store.FindTasteProfileCandidatesWithDetails(ctx, embedding, excludeIDs, nil, limit*3, filter, "")
 		if err != nil {
 			return nil, fmt.Errorf("find similar for aggregated: %w", err)
 		}
-		pool = b.withRecencyBoost(ctx, b.withQualityPrior(ctx, pool, 0))
-		embMap, err := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(pool))
-		if err != nil {
-			return nil, fmt.Errorf("main row embeddings: %w", err)
-		}
+		pool = b.withRecencyBoost(withQualityPrior(pool, details, 0), details)
+		embMap := candidateEmbeddings(details)
 		pool, _ = b.withAversion(pool, embMap, embedding)
-		row = applyGenreCap(applyMMR(pool, embMap, b.lambda, limit), genreMap)
+		row = applyGenreCap(applyMMR(pool, embMap, b.lambda, limit), candidateGenres(details))
 	}
 	if len(row) == 0 {
 		return nil, nil
 	}
-	row = b.addTypeSupplements(ctx, embedding, excludeIDs, filter, pool, row, limit)
+	row = b.addTypeSupplements(ctx, embedding, excludeIDs, filter, pool, details, row, limit)
 
 	for i := range row {
 		row[i].Reason = "Personalized for you"
@@ -255,26 +240,24 @@ func (b rowBuilder) mainRow(ctx context.Context, userID int, profileID string, l
 // addTypeSupplements gives row at least mediaTypeFloor(len(row)) items of
 // each media type the viewer can see, so a library section, which scopes the
 // whole cached row to its libraries, still fills. The extra items come from
-// pool, the candidates the row was ranked from, and from a per-type candidate
-// query for a type pool is short of; placeTypeSupplements puts them after the
-// served window. A type the viewer has no titles of is not queried.
+// pool, the candidates the row was ranked from, whose details are details,
+// and from a per-type candidate query for a type pool is short of;
+// placeTypeSupplements puts them after the served window. A type the viewer
+// has no titles of is not queried.
 func (b rowBuilder) addTypeSupplements(
 	ctx context.Context,
 	embedding []float32,
 	excludeIDs []string,
 	filter catalog.AccessFilter,
 	pool []ScoredItem,
+	details map[string]CandidateDetails,
 	row []ScoredItem,
 	limit int,
 ) []ScoredItem {
 	if len(row) <= ServedRowSize {
 		return row
 	}
-	mediaTypes, err := b.store.GetItemMediaTypes(ctx, scoredItemIDs(pool))
-	if err != nil {
-		slog.WarnContext(ctx, "main row media types failed; row left without type supplements", "component", "recommendations", "error", err)
-		return row
-	}
+	mediaTypes := candidateMediaTypes(details)
 
 	floor := mediaTypeFloor(len(row))
 	var short []string
@@ -296,23 +279,15 @@ func (b rowBuilder) addTypeSupplements(
 			if _, ok := present[mediaType]; !ok {
 				continue
 			}
-			extra, _, err := b.store.FindTasteProfileCandidatesByMediaType(ctx, embedding, excludeIDs, nil, limit, filter, mediaType)
+			extra, extraDetails, err := b.store.FindTasteProfileCandidatesWithDetails(ctx, embedding, excludeIDs, nil, limit, filter, mediaType)
 			if err != nil {
 				slog.WarnContext(ctx, "main row type supplement failed", "component", "recommendations", "media_type", mediaType, "error", err)
 				continue
 			}
-			extra = b.withQualityPrior(ctx, extra, 0)
-			if !b.aversion.empty() {
-				// Supplements rank against the turned-away titles like the
-				// rest of the row; a type whose embeddings cannot be read is
-				// not supplemented rather than supplemented unranked.
-				embMap, err := b.store.GetBatchEmbeddings(ctx, scoredItemIDs(extra))
-				if err != nil {
-					slog.WarnContext(ctx, "main row type supplement embeddings failed", "component", "recommendations", "media_type", mediaType, "error", err)
-					continue
-				}
-				extra, _ = b.withAversion(extra, embMap, embedding)
-			}
+			extra = withQualityPrior(extra, extraDetails, 0)
+			// Supplements rank against the turned-away titles like the rest
+			// of the row.
+			extra, _ = b.withAversion(extra, candidateEmbeddings(extraDetails), embedding)
 			pool = mergeScoredCandidates(pool, extra)
 			for _, item := range extra {
 				mediaTypes[item.MediaItemID] = mediaType
@@ -437,9 +412,13 @@ func sortScoredItems(items []ScoredItem) {
 }
 
 // BecauseYouWatched returns items similar to a specific item the user has
-// watched. Blends embedding similarity (70%) with co-watch data (30%). Titles
-// in the profile's recommendation exclusion set, and those filter does not
-// admit, are left out before ranking.
+// watched. Blends embedding similarity (70%) with co-watch data (30%). Unlike
+// SimilarItems it does not validate candidates against the source: the genre
+// gate empties or shortens the row on a small library, where few of the
+// nearest titles share a genre with the source, and a co-watched title of
+// another genre is still a fair suggestion on Home. Titles in the profile's
+// recommendation exclusion set, and those filter does not admit, are left out
+// before ranking.
 func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID string, sourceItemID string, limit int, filter catalog.AccessFilter) ([]ScoredItem, error) {
 	excluded, err := e.recommendationExclusionSet(ctx, userID, profileID)
 	if err != nil {
@@ -455,60 +434,67 @@ func (e *Engine) BecauseYouWatched(ctx context.Context, userID int, profileID st
 // becauseYouWatched is BecauseYouWatched with the exclusion set given, ranked
 // by builder, whose aversion it applies.
 func (e *Engine) becauseYouWatched(ctx context.Context, builder rowBuilder, sourceItemID string, limit int, excluded map[string]struct{}, filter catalog.AccessFilter) ([]ScoredItem, error) {
-	embedding, err := e.repo.GetEmbedding(ctx, sourceItemID)
+	// The source's embedding and the metadata validation compares against,
+	// in one read.
+	embedding, sourceMeta, err := e.repo.GetSimilarSource(ctx, sourceItemID)
 	if err != nil {
-		return nil, fmt.Errorf("get embedding for item %s: %w", sourceItemID, err)
+		return nil, err
 	}
 	if embedding == nil {
 		return nil, nil
 	}
-
 	// Constrain to the source item's media type so "Because you watched" never
 	// mixes movies, series, and audiobooks in one rail.
-	sourceMeta, _ := e.repo.GetItemMetadata(ctx, sourceItemID)
-	sourceType := ""
-	if sourceMeta != nil {
-		sourceType = sourceMeta.Type
-	}
+	sourceType := sourceMeta.Type
 
-	// Get embedding-based candidates (3x for MMR). Excluded titles and those
-	// the viewer cannot see are left out in the query, so they do not take
-	// the candidates' places.
+	// Get embedding-based candidates (3x for MMR), with the details
+	// validation and MMR read. Excluded titles and those the viewer cannot
+	// see are left out in the query, so they do not take the candidates'
+	// places.
 	excludeIDs := append([]string{sourceItemID}, scoredItemIDsFromSet(excluded)...)
-	embCandidates, err := e.repo.FindSimilar(ctx, embedding, excludeIDs, sourceType, limit*3, filter)
+	found, err := e.repo.FindSimilarCandidates(ctx, embedding, excludeIDs, sourceType, limit*3, filter)
 	if err != nil {
 		return nil, fmt.Errorf("find similar for because watched: %w", err)
+	}
+	embCandidates := make([]ScoredItem, len(found))
+	details := make(map[string]CandidateDetails, len(found))
+	for i, c := range found {
+		embCandidates[i] = c.ScoredItem
+		details[c.MediaItemID] = c.Details
 	}
 
 	// Get co-watch neighbors the viewer can see, of the source item's media
 	// type like the embedding candidates: co-watch counts ebook reading too,
 	// and a movie's row would otherwise take series its viewers also watched.
-	cowatchPairs, _ := e.repo.GetCowatchNeighbors(ctx, sourceItemID, limit*3)
+	cowatchPairs, err := e.repo.GetCowatchNeighbors(ctx, sourceItemID, limit*3)
+	if err != nil {
+		slog.WarnContext(ctx, "reading co-watch neighbors failed; ranking by embedding similarity alone", "component", "recommendations", "item_id", sourceItemID, "error", err)
+		cowatchPairs = nil
+	}
 	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, filter, cowatchMediaTypes(sourceType, recommendableMediaTypes))
 	if err != nil {
 		return nil, fmt.Errorf("filter co-watch neighbors for because watched: %w", err)
 	}
-
-	// Blend scores, then drop excluded titles before MMR so they do not take
-	// the row's places.
-	blended := blendScores(embCandidates, cowatchMap, 0.7, 0.3)
-	blended = excludeScoredItems(blended, excluded)
-	blended = builder.withQualityPrior(ctx, blended, qualityMinSmallPool)
-
-	// Apply MMR re-ranking.
-	candidateIDs := make([]string, len(blended))
-	for i, item := range blended {
-		candidateIDs[i] = item.MediaItemID
+	for id := range excluded {
+		delete(cowatchMap, id)
 	}
-	embMap, err := e.repo.GetBatchEmbeddings(ctx, candidateIDs)
-	if err != nil {
+
+	// The details of the co-watch neighbors the embedding search did not
+	// return, read before blending so they are scored by their similarity
+	// too, and used again by validation, aversion and MMR.
+	if err := e.addCowatchDetails(ctx, details, cowatchMap); err != nil {
 		if !builder.aversion.empty() {
-			// Without embeddings the row could not rank against the
-			// profile's turned-away titles.
-			return nil, fmt.Errorf("because watched embeddings: %w", err)
+			// Without their embeddings the row could not rank them against
+			// the profile's turned-away titles.
+			return nil, fmt.Errorf("because watched co-watch details: %w", err)
 		}
-		embMap = nil
+		slog.WarnContext(ctx, "reading co-watch candidate details failed; ranking them without", "component", "recommendations", "item_id", sourceItemID, "error", err)
 	}
+	embMap := candidateEmbeddings(details)
+
+	// Blend scores, then apply the quality prior, aversion and MMR.
+	blended := blendScores(withCowatchSimilarity(embCandidates, cowatchMap, embedding, embMap), cowatchMap, 0.7, 0.3)
+	blended = withQualityPrior(blended, details, qualityMinSmallPool)
 	blended, _ = builder.withAversion(blended, embMap, embedding)
 	result := applyMMR(blended, embMap, builder.lambda, limit)
 

@@ -51,6 +51,7 @@
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestScannedGroupForItemDB
+./internal/scanner TestShortenDurationOnlyForTheFileTheRunReadDB
 ./internal/scanner TestListMarkerEditAuditClientIPHasNoNetmaskDB
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
@@ -295,6 +296,10 @@
 # and resolves the rebuilt item (#934).
 ./internal/metadata TestCompleteRefreshRebuildsSeriesDB
 
+# A scheduled refresh uses the provider chain of the item's library, not the
+# all-providers fallback of folder 0 (#4605).
+./internal/metadata TestScheduledRefreshKeepsToTheLibraryChainDB
+
 # A complete metadata refresh that merges onto an item whose match the admin
 # cleared leaves only the providers' current values and keeps locks (#4336).
 ./internal/metadata TestCompleteRefreshDropsAClearedMatchsValuesDB
@@ -336,6 +341,7 @@
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetireLeavesMovedPlay
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetryAfterFailedStatement
 ./internal/jellycompat TestDurableCompatPlaybackStoreRetireHidesCopyWhenReplayFails
+./internal/jellycompat TestDurablePutNegotiatedReplacesRowStoredWithDashedRouteID
 ./internal/jellycompat TestPseudoUserOwnerAcrossReplicasPostgres
 ./internal/invitations TestLinkInvitationLifecycleDB
 ./internal/invitations TestEmailedInvitationLinkReplacementDB
@@ -490,6 +496,10 @@
 # one that has it without counting attempts.
 ./internal/metadata TestLocalArtworkCopiedOnDiscoveryDB
 ./internal/metadata TestLocalArtworkRetriesWithoutLibraryRootDB
+
+# A manual refresh of a job waiting for a full artwork store starts its wait
+# over at the short delay, whether or not the wait has run out.
+./internal/metadata TestLocalArtworkWaitsForStorageSpaceDB
 
 # A re-cached sidecar leaves its old copy to the reference-checked revision
 # GC, which keeps a copy published again since the re-cache.
@@ -754,6 +764,12 @@
 ./internal/api/handlers TestLifecycleSweepSelectsWhatItCanEndDB
 ./internal/api/handlers TestLifecycleSweepPassesLiveJellyfinPlaysDB
 ./internal/api/handlers TestLifecycleSweepBacksOffFailedEndsDB
+./internal/api/handlers TestPausedTimeoutSweepEndsPausedSessionsDB
+./internal/api/handlers TestPausedTimeoutSweepDropsCopyItCannotFinishDB
+./internal/api/handlers TestPausedTimeoutSweepDropsCopiesStoppedElsewhereDB
+./internal/api/handlers TestPausedTimeoutSweepDropsCopiesFinalizedElsewhereDB
+./internal/api/handlers TestPausedTimeoutSweepPagesPastSkippedRowsDB
+./internal/api/handlers TestPausedTimeoutSweepWaitsForTheSettingDB
 ./internal/api/handlers TestLifecycleSweepKeepsARecordedSubtitleDB
 ./internal/api/handlers TestLifecycleSweepTakesALaterSyncedSubtitleDB
 # A live row names an episode as the history entry its play leaves does.
@@ -933,6 +949,18 @@
 ./internal/plugins TestProvisionPackageCommitAndRollbackDB
 ./internal/plugins TestAutoUpdateClearsWithdrawnNoticeDB
 
+# An update check records its offer only while the plugin still holds the
+# release it read, so a stale offer can't land on a newer install.
+./internal/plugins TestNotifyPluginUpdateDropsAnOfferForAReplacedReleaseDB
+
+# A plugin build stored for another platform is served only for the package it
+# was fetched for, and a fetch that an update overtook stores nothing.
+./internal/plugins TestPlatformArchiveFollowsTheInstalledPackageDB
+
+# A server on another platform fetches its build of an official release the
+# catalog's list no longer names, from the release's descriptor.
+./internal/plugins TestPlatformBuildOfAnEarlierOfficialReleaseDB
+
 # Cleaning up duplicate installations keeps a break-glass account's local
 # credentials and moves a deleted duplicate's marker provider settings.
 ./migrations TestUniquePluginInstallationCleanupPostgres
@@ -983,9 +1011,11 @@
 ./internal/recommendations TestProfileAccessFilterMatchesTheResolverPostgres
 ./internal/recommendations TestRecentCompletedItemIDsSkipDeletedItemsPostgres
 ./internal/recommendations TestRecommendationJobRunsOnOneServerPostgres
+./internal/recommendations TestEmbedMissingNowDuringARunEmbedsAgainPostgres
 ./internal/recommendations TestJobLocksShareOneConnectionPostgres
 ./internal/recommendations TestCacheJobPurgesAProfileDeletedWhileItWritesPostgres
 ./internal/recommendations TestStaleSweepRecordsFailedRefreshesPostgres
+./internal/recommendations TestStaleSweepDrainsEveryMarkOncePostgres
 ./internal/recommendations TestMarkAllProfilesStaleForPolicyMarksOncePerGenerationPostgres
 ./internal/recommendations TestRefreshWaitsForThePolicyChangePostgres
 ./internal/policy TestSystemAnnouncesAChangeLoadedByALaterReload
@@ -1011,15 +1041,18 @@
 
 # Recommendation ranking and rows: default rows, Popular floor, genre rows, picker
 # order, taste levels, per-interest anchors, quality prior, rubric leakage,
-# media types of personal rows, Because You Watched anchors per library.
+# media types of personal rows, Because You Watched anchors per library,
+# Similar Users likes and peer ceilings, the holdout evaluation's leakage
+# checks and recall floor.
 ./internal/recommendations TestBecauseYouWatchedAnchorsEachLibraryOnItsOwnWatchesPostgres
 ./internal/recommendations TestCacheUserRowsDoNotAnchorOnDislikedTitlesPostgres
+./internal/recommendations TestCandidateQualityRatingsPostgres
 ./internal/recommendations TestCatalogRankLeadsWithNotableTrustedRatingsPostgres
+./internal/recommendations TestCowatchedTitleBeyondTheEmbeddingSearchKeepsItsSimilarityPostgres
 ./internal/recommendations TestDefaultRowsLeaveOutASeriesRatedThroughAnEpisodePostgres
 ./internal/recommendations TestCachedRowsLeaveOutASeriesRatedThroughAnEpisodePostgres
 ./internal/recommendations TestDefaultRowsServeEachViewerLivePostgres
 ./internal/recommendations TestGenreSamplerIsRatingLedPostgres
-./internal/recommendations TestGetItemQualityRatingsPostgres
 ./internal/recommendations TestHighlyRatedRowBalancesMediaTypesPostgres
 ./internal/recommendations TestHighlyRatedRowPostgres
 ./internal/recommendations TestHighlyRatedReusesTitleCountsPostgres
@@ -1028,12 +1061,14 @@
 ./internal/recommendations TestPopularNeedsACrowdOfAccountsPostgres
 ./internal/recommendations TestPresentMediaTypesPostgres
 ./internal/recommendations TestRecentlyAddedRowPostgres
+./internal/recommendations TestRecommendationHoldoutEvalPostgres
 ./internal/recommendations TestRefreshCountsPositiveTitlesForTheLevelPostgres
 ./internal/recommendations TestRefreshWeighsAThreeStarCompletionBelowAnUnratedOnePostgres
 ./internal/recommendations TestRelevanceRubricLeakagePostgres
 ./internal/recommendations TestRelevanceRubricNewProfileGetsRowsPostgres
 ./internal/recommendations TestRelevanceRubricProfilesOnOneAccountDifferPostgres
 ./internal/recommendations TestSimilarItemsValidateEveryCandidatePostgres
+./internal/recommendations TestSimilarUsersReadsEveryLikePostgres
 ./internal/recommendations TestTasteProfileSummaryGenresComeFromTheClustersPostgres
 ./internal/recommendations TestTasteSeedPickerInterleavesGenresPostgres
 ./internal/recommendations TestTopGenresRankByCrowdThenCatalogPostgres
@@ -1132,6 +1167,9 @@
 ./internal/playback/planstore TestSummaryResolvesReplacedPlanDelivery
 ./internal/playback/planstore TestAttemptDesiredTracksRoundTrip
 ./internal/playback/planstore TestProgressCommitsLifecycleStateDB
+./internal/playback/planstore TestExpirePausedAttemptDB
+./internal/playback/planstore TestExpirePausedAttemptExemptionsDB
+./internal/playback/planstore TestExpirePausedAttemptRechecksTheSelectionDB
 ./internal/playback/planstore TestLatePlaybackProgressCannotOverwriteFinalStopDB
 ./internal/playback/planstore TestPlaybackStopCommitsResumeAndEpisodeSpanOnceDB
 ./internal/api/handlers TestSlowPlanDeliveryLookupKeepsTheSummaryDB

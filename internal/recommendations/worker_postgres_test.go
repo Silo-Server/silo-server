@@ -7,6 +7,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -937,5 +938,76 @@ func TestTasteProfileJobStopsWhenItsLockSessionDiesPostgres(t *testing.T) {
 	}
 	if res.Profiles < 2 || res.Remaining != res.Profiles || res.Failed != 0 {
 		t.Fatalf("taste job = %+v, want it stopped at the first profile", res)
+	}
+}
+
+// A catch-up request made while an embedding run holds the job on this server
+// runs another pass after it, before the job ends: an item added during the
+// run, with a content ID the run's cursor has already passed, is embedded.
+func TestEmbedMissingNowDuringARunEmbedsAgainPostgres(t *testing.T) {
+	pool := newEngineTestPool(t)
+	ctx := t.Context()
+	snapshotEmbeddingLock(t, pool)
+	if _, err := pool.Exec(ctx, `DELETE FROM server_settings WHERE key = $1`, embeddingLockSettingKey); err != nil {
+		t.Fatal(err)
+	}
+	// Content IDs that sort ahead of the rest, so the first page holds them.
+	const prefix = "0embed-again-"
+	cleanupRecoMediaItems(t, pool, prefix)
+	early, late := prefix+"b", prefix+"a"
+	seedRecoMediaItem(t, pool, early, "movie", "matched")
+
+	engine := NewEngine(pool, nil, catalog.NewItemRepository(pool), catalog.NewPersonRepository(pool), nil,
+		config.RecommendationsConfig{EmbeddingBaseURL: "http://embed.test", EmbeddingModel: backfillTestModel})
+	started, resume := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	engine.embClient = quotaTestEmbedder(func(_ context.Context, texts []string) ([][]float32, error) {
+		once.Do(func() {
+			close(started)
+			<-resume
+		})
+		vectors := make([][]float32, len(texts))
+		for i := range vectors {
+			vectors[i] = []float32{1, 0, 0, 0}
+		}
+		return vectors, nil
+	})
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = engine
+	w.embeddingsJobTimeout = time.Minute
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.runEmbedMissing()
+	}()
+	select {
+	case <-started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the catch-up pass did not reach the provider")
+	}
+	// The pass has listed its page; late sorts before early, behind its cursor.
+	seedRecoMediaItem(t, pool, late, "movie", "matched")
+	w.EmbedMissingNow()
+	close(resume)
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the catch-up job did not finish")
+	}
+
+	var embedded []string
+	rows, err := pool.Query(ctx, `SELECT media_item_id FROM media_item_embeddings WHERE media_item_id LIKE $1 ORDER BY 1`, prefix+"%")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if embedded, err = pgx.CollectRows(rows, pgx.RowTo[string]); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(embedded, []string{late, early}) {
+		t.Fatalf("embedded items = %v; want both, including the one added during the run", embedded)
+	}
+	if w.IsRunning(JobEmbeddings) {
+		t.Fatal("the catch-up job still holds its claim")
 	}
 }

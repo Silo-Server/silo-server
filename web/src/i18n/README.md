@@ -221,6 +221,12 @@ computed direction (`isRightToLeft` and `readingArrowKey` in `src/lib/direction.
   carries the separator's negative margin keeps the page's direction and takes its `dir`
   on an inner span, as above. `AccountRow` in `src/pages/admin-backups/RestoreUsers.tsx`
   does this.
+- A line of details joined with " · " that stays on one line and is cut short (a
+  collection's library, count and "by" owner) renders through `MetaLine`
+  (`src/components/MetaLine.tsx`), never as one joined string. User text in a
+  translated part (a name, a note) goes to `t()` as a `LineName`. Each part is cut
+  with its own "…" and keeps a letter of it, the part at the line's end is cut first,
+  and screen readers read the line as one string.
 - Lucide icons that point along the reading direction (chevrons, arrows, undo,
   sign in/out, send) mirror through one rule in `app.css`; play, skip, rotate, clock
   and brand icons don't. Add `no-mirror` to keep one physical. A caret that also

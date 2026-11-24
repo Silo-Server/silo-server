@@ -208,6 +208,16 @@ func ProgressiveRangeRefusalV3(request StartRequestV3) bool {
 	return deliverySupportsFeatureV3(request, DeliveryClassProgressiveV3, FeatureProgressiveRangeRefusalV3)
 }
 
+// FeaturePausedTimeoutV3 is the client's statement that it handles the
+// playback_session_paused_timeout problem: a session the server ended after
+// it stayed paused past the administrator's timeout answers progress, replan
+// and control-ticket requests 410 with that type, and the client leaves the
+// player the way an administrator stop makes it, with its paused-timeout
+// notice. A client without it gets playback_session_ended for the same end.
+// It is attempt-sticky (see AttemptStickyFeaturesV3). It exists only on
+// /api/v2 (see NativeServerFeaturesV3).
+const FeaturePausedTimeoutV3 = "paused_timeout_v1"
+
 // FeatureCodecChannelCeilingsV3 tells a client that the server honors a
 // delivery's max_channels_by_codec. /api/v2 advertises it in the capabilities
 // features list.
@@ -342,7 +352,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3, FeatureProgressiveRangeRefusalV3, FeatureSurroundBitstreamConversionV3, FeatureParallelRangeOriginV1)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3, FeatureProgressiveRangeRefusalV3, FeatureSurroundBitstreamConversionV3, FeatureParallelRangeOriginV1, FeaturePausedTimeoutV3)
 }
 
 // HLSVariableSubstitutionV3 reports whether the request's hls delivery
@@ -1797,10 +1807,14 @@ func HasFeatureV3(features []string, wanted string) bool {
 //     remux, and hls_subtitle_renditions_all_v1 whether it lists every
 //     embedded text track. A reused HLS transport keeps the shape it was
 //     built with, so the attempt has to keep the same answer.
+//   - paused_timeout_v1 picks which problem the attempt's end answers when it
+//     stayed paused too long. The server reads it from the durable normalized
+//     request, which a replan rewrites, so a replan that omitted it would
+//     turn the client's notice into the legacy answer.
 //
 // Stop/start is the explicit boundary for changing any of them.
 func AttemptStickyFeaturesV3() []string {
-	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSSubtitleRenditionsAllV3}
+	return []string{FeatureHeaderAuthenticatedMediaV3, FeatureAuthorizedMediaOriginsV3, FeatureSoftwareVideoDecodeV3, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSSubtitleRenditionsAllV3, FeaturePausedTimeoutV3}
 }
 
 // PinAttemptStickyFeaturesV3 returns requested with every attempt-sticky

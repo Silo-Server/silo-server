@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useId } from "react";
 import { Lock, Unlock } from "lucide-react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -331,7 +331,13 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                     label={t("web.item.dialog.fieldTitle")}
                     lockIcon={renderLockIcon("title")}
                   >
-                    <Input value={form.title} onChange={(e) => setField("title", e.target.value)} />
+                    {(id) => (
+                      <Input
+                        id={id}
+                        value={form.title}
+                        onChange={(e) => setField("title", e.target.value)}
+                      />
+                    )}
                   </FieldRow>
 
                   <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -340,20 +346,26 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                         label={t("web.item.editMetadata.sortTitle")}
                         lockIcon={renderLockIcon("sort_title")}
                       >
-                        <Input
-                          value={form.sort_title}
-                          onChange={(e) => setField("sort_title", e.target.value)}
-                        />
+                        {(id) => (
+                          <Input
+                            id={id}
+                            value={form.sort_title}
+                            onChange={(e) => setField("sort_title", e.target.value)}
+                          />
+                        )}
                       </FieldRow>
                     )}
                     <FieldRow
                       label={t("web.item.editMetadata.originalTitle")}
                       lockIcon={renderLockIcon("original_title")}
                     >
-                      <Input
-                        value={form.original_title}
-                        onChange={(e) => setField("original_title", e.target.value)}
-                      />
+                      {(id) => (
+                        <Input
+                          id={id}
+                          value={form.original_title}
+                          onChange={(e) => setField("original_title", e.target.value)}
+                        />
+                      )}
                     </FieldRow>
                   </div>
 
@@ -361,23 +373,29 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                     label={t("web.item.editMetadata.overview")}
                     lockIcon={renderLockIcon("overview")}
                   >
-                    <Textarea
-                      value={form.overview}
-                      onChange={(e) => setField("overview", e.target.value)}
-                      rows={4}
-                      className="resize-y"
-                    />
+                    {(id) => (
+                      <Textarea
+                        id={id}
+                        value={form.overview}
+                        onChange={(e) => setField("overview", e.target.value)}
+                        rows={4}
+                        className="resize-y"
+                      />
+                    )}
                   </FieldRow>
 
                   <FieldRow
                     label={t("web.item.editMetadata.tagline")}
                     lockIcon={renderLockIcon("tagline")}
                   >
-                    <Input
-                      value={form.tagline}
-                      onChange={(e) => setField("tagline", e.target.value)}
-                      placeholder={t("web.item.editMetadata.noTagline")}
-                    />
+                    {(id) => (
+                      <Input
+                        id={id}
+                        value={form.tagline}
+                        onChange={(e) => setField("tagline", e.target.value)}
+                        placeholder={t("web.item.editMetadata.noTagline")}
+                      />
+                    )}
                   </FieldRow>
 
                   {["movie", "series", "season", "episode"].includes(item.type) && (
@@ -390,10 +408,13 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                         label={t("web.item.editMetadata.contentRating")}
                         lockIcon={renderLockIcon("content_rating")}
                       >
-                        <Input
-                          value={form.content_rating}
-                          onChange={(e) => setField("content_rating", e.target.value)}
-                        />
+                        {(id) => (
+                          <Input
+                            id={id}
+                            value={form.content_rating}
+                            onChange={(e) => setField("content_rating", e.target.value)}
+                          />
+                        )}
                       </FieldRow>
                     )}
 
@@ -402,34 +423,43 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                         label={t("web.item.editMetadata.runtime")}
                         lockIcon={renderLockIcon("runtime")}
                       >
-                        <Input
-                          type="number"
-                          value={form.runtime || ""}
-                          onChange={(e) => setField("runtime", parseInt(e.target.value) || 0)}
-                        />
+                        {(id) => (
+                          <Input
+                            id={id}
+                            type="number"
+                            value={form.runtime || ""}
+                            onChange={(e) => setField("runtime", parseInt(e.target.value) || 0)}
+                          />
+                        )}
                       </FieldRow>
                     )}
 
                     {item.type === "season" && (
                       <FieldRow label={t("web.item.editMetadata.seasonNumber")}>
-                        <Input
-                          type="number"
-                          value={form.season_number ?? ""}
-                          onChange={(e) =>
-                            setField("season_number", parseInt(e.target.value) || undefined)
-                          }
-                        />
+                        {(id) => (
+                          <Input
+                            id={id}
+                            type="number"
+                            value={form.season_number ?? ""}
+                            onChange={(e) =>
+                              setField("season_number", parseInt(e.target.value) || undefined)
+                            }
+                          />
+                        )}
                       </FieldRow>
                     )}
 
                     {item.type === "episode" && (
                       <FieldRow label={t("web.item.editMetadata.seasonNumber")}>
-                        <Input
-                          type="number"
-                          value={form.season_number ?? ""}
-                          disabled
-                          className="opacity-50"
-                        />
+                        {(id) => (
+                          <Input
+                            id={id}
+                            type="number"
+                            value={form.season_number ?? ""}
+                            disabled
+                            className="opacity-50"
+                          />
+                        )}
                       </FieldRow>
                     )}
                   </div>
@@ -437,23 +467,29 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                   {item.type === "episode" && (
                     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                       <FieldRow label={t("web.item.editMetadata.episodeNumber")}>
-                        <Input
-                          type="number"
-                          value={form.episode_number ?? ""}
-                          onChange={(e) =>
-                            setField("episode_number", parseInt(e.target.value) || undefined)
-                          }
-                        />
+                        {(id) => (
+                          <Input
+                            id={id}
+                            type="number"
+                            value={form.episode_number ?? ""}
+                            onChange={(e) =>
+                              setField("episode_number", parseInt(e.target.value) || undefined)
+                            }
+                          />
+                        )}
                       </FieldRow>
                       <FieldRow
                         label={t("web.item.editMetadata.runtime")}
                         lockIcon={renderLockIcon("runtime")}
                       >
-                        <Input
-                          type="number"
-                          value={form.runtime || ""}
-                          onChange={(e) => setField("runtime", parseInt(e.target.value) || 0)}
-                        />
+                        {(id) => (
+                          <Input
+                            id={id}
+                            type="number"
+                            value={form.runtime || ""}
+                            onChange={(e) => setField("runtime", parseInt(e.target.value) || 0)}
+                          />
+                        )}
                       </FieldRow>
                     </div>
                   )}
@@ -470,11 +506,14 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                         label={t("web.item.dialog.fieldYear")}
                         lockIcon={renderLockIcon("year")}
                       >
-                        <Input
-                          type="number"
-                          value={form.year || ""}
-                          onChange={(e) => setField("year", parseInt(e.target.value) || 0)}
-                        />
+                        {(id) => (
+                          <Input
+                            id={id}
+                            type="number"
+                            value={form.year || ""}
+                            onChange={(e) => setField("year", parseInt(e.target.value) || 0)}
+                          />
+                        )}
                       </FieldRow>
 
                       {(item.type === "movie" || item.type === "audiobook") && (
@@ -482,11 +521,14 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                           label={t("web.item.editMetadata.releaseDate")}
                           lockIcon={renderLockIcon("release_date")}
                         >
-                          <Input
-                            type="date"
-                            value={form.release_date}
-                            onChange={(e) => setField("release_date", e.target.value)}
-                          />
+                          {(id) => (
+                            <Input
+                              id={id}
+                              type="date"
+                              value={form.release_date}
+                              onChange={(e) => setField("release_date", e.target.value)}
+                            />
+                          )}
                         </FieldRow>
                       )}
 
@@ -495,11 +537,14 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                           label={t("web.item.editMetadata.firstAirDate")}
                           lockIcon={renderLockIcon("first_air_date")}
                         >
-                          <Input
-                            type="date"
-                            value={form.first_air_date}
-                            onChange={(e) => setField("first_air_date", e.target.value)}
-                          />
+                          {(id) => (
+                            <Input
+                              id={id}
+                              type="date"
+                              value={form.first_air_date}
+                              onChange={(e) => setField("first_air_date", e.target.value)}
+                            />
+                          )}
                         </FieldRow>
                       )}
                     </div>
@@ -511,37 +556,48 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                         label={t("web.item.editMetadata.lastAirDate")}
                         lockIcon={renderLockIcon("last_air_date")}
                       >
-                        <Input
-                          type="date"
-                          value={form.last_air_date}
-                          onChange={(e) => setField("last_air_date", e.target.value)}
-                        />
+                        {(id) => (
+                          <Input
+                            id={id}
+                            type="date"
+                            value={form.last_air_date}
+                            onChange={(e) => setField("last_air_date", e.target.value)}
+                          />
+                        )}
                       </FieldRow>
                       <FieldRow
                         label={t("web.item.editMetadata.airTime")}
                         lockIcon={renderLockIcon("air_time")}
                       >
-                        <Input
-                          type="time"
-                          value={form.air_time}
-                          onChange={(e) => setField("air_time", e.target.value)}
-                        />
+                        {(id) => (
+                          <Input
+                            id={id}
+                            type="time"
+                            value={form.air_time}
+                            onChange={(e) => setField("air_time", e.target.value)}
+                          />
+                        )}
                       </FieldRow>
                       <FieldRow
                         label={t("web.item.editMetadata.airTimezone")}
                         lockIcon={renderLockIcon("air_timezone")}
                       >
-                        <Input
-                          list="air-timezone-options"
-                          value={form.air_timezone}
-                          placeholder={EXAMPLE_TIMEZONE}
-                          onChange={(e) => setField("air_timezone", e.target.value)}
-                        />
-                        <datalist id="air-timezone-options">
-                          {AIR_TIMEZONES.map((timezone) => (
-                            <option key={timezone} value={timezone} />
-                          ))}
-                        </datalist>
+                        {(id) => (
+                          <>
+                            <Input
+                              id={id}
+                              list="air-timezone-options"
+                              value={form.air_timezone}
+                              placeholder={EXAMPLE_TIMEZONE}
+                              onChange={(e) => setField("air_timezone", e.target.value)}
+                            />
+                            <datalist id="air-timezone-options">
+                              {AIR_TIMEZONES.map((timezone) => (
+                                <option key={timezone} value={timezone} />
+                              ))}
+                            </datalist>
+                          </>
+                        )}
                       </FieldRow>
                     </div>
                   )}
@@ -551,11 +607,14 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                       label={t("web.item.editMetadata.airDate")}
                       lockIcon={renderLockIcon("air_date")}
                     >
-                      <Input
-                        type="date"
-                        value={form.air_date}
-                        onChange={(e) => setField("air_date", e.target.value)}
-                      />
+                      {(id) => (
+                        <Input
+                          id={id}
+                          type="date"
+                          value={form.air_date}
+                          onChange={(e) => setField("air_date", e.target.value)}
+                        />
+                      )}
                     </FieldRow>
                   )}
 
@@ -569,71 +628,83 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                           label={t("web.item.editMetadata.imdbRating")}
                           lockIcon={renderLockIcon("rating_imdb")}
                         >
-                          <Input
-                            type="number"
-                            step="0.1"
-                            min="0"
-                            max="10"
-                            value={form.rating_imdb ?? ""}
-                            onChange={(e) =>
-                              setField(
-                                "rating_imdb",
-                                e.target.value ? parseFloat(e.target.value) : null,
-                              )
-                            }
-                          />
+                          {(id) => (
+                            <Input
+                              id={id}
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              max="10"
+                              value={form.rating_imdb ?? ""}
+                              onChange={(e) =>
+                                setField(
+                                  "rating_imdb",
+                                  e.target.value ? parseFloat(e.target.value) : null,
+                                )
+                              }
+                            />
+                          )}
                         </FieldRow>
                         <FieldRow
                           label={t("web.item.editMetadata.tmdbRating")}
                           lockIcon={renderLockIcon("rating_tmdb")}
                         >
-                          <Input
-                            type="number"
-                            step="0.1"
-                            min="0"
-                            max="10"
-                            value={form.rating_tmdb ?? ""}
-                            onChange={(e) =>
-                              setField(
-                                "rating_tmdb",
-                                e.target.value ? parseFloat(e.target.value) : null,
-                              )
-                            }
-                          />
+                          {(id) => (
+                            <Input
+                              id={id}
+                              type="number"
+                              step="0.1"
+                              min="0"
+                              max="10"
+                              value={form.rating_tmdb ?? ""}
+                              onChange={(e) =>
+                                setField(
+                                  "rating_tmdb",
+                                  e.target.value ? parseFloat(e.target.value) : null,
+                                )
+                              }
+                            />
+                          )}
                         </FieldRow>
                         <FieldRow
                           label={t("web.item.editMetadata.rtCritic")}
                           lockIcon={renderLockIcon("rating_rt_critic")}
                         >
-                          <Input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={form.rating_rt_critic ?? ""}
-                            onChange={(e) =>
-                              setField(
-                                "rating_rt_critic",
-                                e.target.value ? parseInt(e.target.value) : null,
-                              )
-                            }
-                          />
+                          {(id) => (
+                            <Input
+                              id={id}
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={form.rating_rt_critic ?? ""}
+                              onChange={(e) =>
+                                setField(
+                                  "rating_rt_critic",
+                                  e.target.value ? parseInt(e.target.value) : null,
+                                )
+                              }
+                            />
+                          )}
                         </FieldRow>
                         <FieldRow
                           label={t("web.item.editMetadata.rtAudience")}
                           lockIcon={renderLockIcon("rating_rt_audience")}
                         >
-                          <Input
-                            type="number"
-                            min="0"
-                            max="100"
-                            value={form.rating_rt_audience ?? ""}
-                            onChange={(e) =>
-                              setField(
-                                "rating_rt_audience",
-                                e.target.value ? parseInt(e.target.value) : null,
-                              )
-                            }
-                          />
+                          {(id) => (
+                            <Input
+                              id={id}
+                              type="number"
+                              min="0"
+                              max="100"
+                              value={form.rating_rt_audience ?? ""}
+                              onChange={(e) =>
+                                setField(
+                                  "rating_rt_audience",
+                                  e.target.value ? parseInt(e.target.value) : null,
+                                )
+                              }
+                            />
+                          )}
                         </FieldRow>
                       </div>
                     </>
@@ -647,22 +718,28 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                     label={t("web.item.editMetadata.genres")}
                     lockIcon={renderLockIcon("genres")}
                   >
-                    <TagInput
-                      value={form.genres}
-                      onChange={(v) => setField("genres", v)}
-                      placeholder={t("web.item.editMetadata.addGenre")}
-                    />
+                    {(id) => (
+                      <TagInput
+                        id={id}
+                        value={form.genres}
+                        onChange={(v) => setField("genres", v)}
+                        placeholder={t("web.item.editMetadata.addGenre")}
+                      />
+                    )}
                   </FieldRow>
 
                   <FieldRow
                     label={t("web.item.editMetadata.studios")}
                     lockIcon={renderLockIcon("studios")}
                   >
-                    <TagInput
-                      value={form.studios}
-                      onChange={(v) => setField("studios", v)}
-                      placeholder={t("web.item.editMetadata.addStudio")}
-                    />
+                    {(id) => (
+                      <TagInput
+                        id={id}
+                        value={form.studios}
+                        onChange={(v) => setField("studios", v)}
+                        placeholder={t("web.item.editMetadata.addStudio")}
+                      />
+                    )}
                   </FieldRow>
 
                   {item.type === "series" && (
@@ -670,11 +747,14 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                       label={t("web.item.editMetadata.networks")}
                       lockIcon={renderLockIcon("networks")}
                     >
-                      <TagInput
-                        value={form.networks}
-                        onChange={(v) => setField("networks", v)}
-                        placeholder={t("web.item.editMetadata.addNetwork")}
-                      />
+                      {(id) => (
+                        <TagInput
+                          id={id}
+                          value={form.networks}
+                          onChange={(v) => setField("networks", v)}
+                          placeholder={t("web.item.editMetadata.addNetwork")}
+                        />
+                      )}
                     </FieldRow>
                   )}
 
@@ -682,11 +762,14 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
                     label={t("web.item.editMetadata.countries")}
                     lockIcon={renderLockIcon("countries")}
                   >
-                    <TagInput
-                      value={form.countries}
-                      onChange={(v) => setField("countries", v)}
-                      placeholder={t("web.item.editMetadata.addCountry")}
-                    />
+                    {(id) => (
+                      <TagInput
+                        id={id}
+                        value={form.countries}
+                        onChange={(v) => setField("countries", v)}
+                        placeholder={t("web.item.editMetadata.addCountry")}
+                      />
+                    )}
                   </FieldRow>
                 </div>
               )}
@@ -694,23 +777,32 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
               {effectiveActiveSection === "ids" && (
                 <div className="space-y-4">
                   <FieldRow label={t("web.item.dialog.imdbId")}>
-                    <Input
-                      value={form.imdb_id}
-                      onChange={(e) => setField("imdb_id", e.target.value)}
-                      placeholder={EXAMPLE_IMDB_ID}
-                    />
+                    {(id) => (
+                      <Input
+                        id={id}
+                        value={form.imdb_id}
+                        onChange={(e) => setField("imdb_id", e.target.value)}
+                        placeholder={EXAMPLE_IMDB_ID}
+                      />
+                    )}
                   </FieldRow>
                   <FieldRow label={t("web.item.dialog.tmdbId")}>
-                    <Input
-                      value={form.tmdb_id}
-                      onChange={(e) => setField("tmdb_id", e.target.value)}
-                    />
+                    {(id) => (
+                      <Input
+                        id={id}
+                        value={form.tmdb_id}
+                        onChange={(e) => setField("tmdb_id", e.target.value)}
+                      />
+                    )}
                   </FieldRow>
                   <FieldRow label={t("web.item.dialog.tvdbId")}>
-                    <Input
-                      value={form.tvdb_id}
-                      onChange={(e) => setField("tvdb_id", e.target.value)}
-                    />
+                    {(id) => (
+                      <Input
+                        id={id}
+                        value={form.tvdb_id}
+                        onChange={(e) => setField("tvdb_id", e.target.value)}
+                      />
+                    )}
                   </FieldRow>
                 </div>
               )}
@@ -783,6 +875,8 @@ function EditMetadataForm({ item, open, onOpenChange }: EditMetadataDialogProps)
   );
 }
 
+// The row gives its control an id, so the label names the control and
+// clicking the label focuses it.
 function FieldRow({
   label,
   lockIcon,
@@ -790,15 +884,18 @@ function FieldRow({
 }: {
   label: string;
   lockIcon?: React.ReactNode;
-  children: React.ReactNode;
+  children: (id: string) => React.ReactNode;
 }) {
+  const id = useId();
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between">
-        <Label className="text-muted-foreground text-[0.75rem] font-medium">{label}</Label>
+        <Label htmlFor={id} className="text-muted-foreground text-[0.75rem] font-medium">
+          {label}
+        </Label>
         {lockIcon}
       </div>
-      {children}
+      {children(id)}
     </div>
   );
 }

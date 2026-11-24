@@ -521,6 +521,12 @@
       "value": "Sesi main balik ini telah tamat. Mulakan main semula."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Main balik dihentikan kerana dijeda terlalu lama. Mulakan main semula."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -60454,6 +60460,24 @@
       "value": "Simpan ke pustaka"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Main balik dijeda"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Tamatkan main balik dijeda selepas"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 hingga 1440. Menamatkan video yang dijeda selama ini dalam apl Silo, lalu membebaskan strim dan sebarang transkod video itu; memainkannya semula akan bersambung dari kedudukan yang sama. Tonton bersama, penghantaran ke peranti lain dan buku audio tidak terjejas. 0 mematikan pilihan ini."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -60892,6 +60916,12 @@
     {
       "type": 0,
       "value": "hari"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minit"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -66719,6 +66749,12 @@
       "value": "Dayakan Pemetaan Ton HDR Perisian"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Tamatkan main balik dijeda selepas (minit)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -66777,6 +66813,12 @@
     {
       "type": 0,
       "value": "Sumber penanda"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Main balik dijeda"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -68723,6 +68765,36 @@
     {
       "type": 0,
       "value": "Hidupkan pembekal log masuk dahulu. Dengan log masuk kata laluan dimatikan dan tiada pembekal dihidupkan, hanya pentadbir kecemasan boleh log masuk."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Antara 8 hingga 72 aksara. Peraturan ini terpakai apabila seseorang memilih atau menukar kata laluan; kata laluan yang sudah ditetapkan terus berfungsi."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Panjang minimum kata laluan"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Mana-mana tanda baca atau simbol, seperti ! atau #. Huruf, digit dan ruang tidak dikira."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Wajibkan aksara khas"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Wajibkan huruf besar"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -79785,6 +79857,20 @@
       "value": "Menetapkan…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Kongsikan kata laluan ini sendiri dengan "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -82090,10 +82176,48 @@
       "value": " tidak membenarkan peranti ini log masuk ke pelayan ini."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Sekurang-kurangnya "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " aksara."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Kata laluan tidak sepadan."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Sertakan sekurang-kurangnya satu aksara khas, seperti ! atau #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Sertakan sekurang-kurangnya satu huruf besar."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -82106,6 +82230,32 @@
     {
       "type": 0,
       "value": "Gunakan sekurang-kurangnya 8 aksara."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gunakan sekurang-kurangnya "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " aksara."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -113393,6 +113543,12 @@
     {
       "type": 0,
       "value": "Pentadbir telah menamatkan sesi main balik ini."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Main balik dihentikan kerana dijeda terlalu lama."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

@@ -121,6 +121,7 @@ func (h *PlaybackHandler) sweepLifecycle(ctx context.Context, pool *pgxpool.Pool
 		}
 		h.sweepLifecycleCandidate(ctx, pool, c, deliveries[c.sessionID], now)
 	}
+	h.sweepPausedTimeouts(ctx, pool)
 }
 
 func loadLifecycleCandidates(ctx context.Context, pool *pgxpool.Pool, now time.Time) ([]lifecycleCandidate, error) {

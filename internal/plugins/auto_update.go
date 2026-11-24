@@ -275,7 +275,11 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 		if existing.IsBuiltin() {
 			continue
 		}
-		if version := existing.AvailableVersion; version != nil && snapshot.withdrawn(*existing.RepositoryID, existing.PluginID, *version) {
+		// Clear a notice for a withdrawn release, and one that isn't newer
+		// than the installed release: applying that is refused, and a stale
+		// check recorded it before writes were fenced on the package (#4518).
+		if version := existing.AvailableVersion; version != nil && *version != "" &&
+			(snapshot.withdrawn(*existing.RepositoryID, existing.PluginID, *version) || compareVersions(*version, existing.Version) <= 0) {
 			err := s.installations.Update(ctx, existing.ID, UpdateInstallationInput{
 				automatic:          true,
 				AvailableVersion:   new(""),
@@ -288,7 +292,7 @@ func (s *AutoUpdateService) Check(ctx context.Context, opts AutoUpdateOptions) (
 				clearedNotice = true
 			case isVersionManaged(err), errors.Is(err, ErrInstallationChanged), errors.Is(err, ErrInstallationNotFound), errors.Is(err, errProvisionRestoreHeld):
 			default:
-				summary.recordFailuref("clear withdrawn update notice for %s: %v", existing.PluginID, err)
+				summary.recordFailuref("clear stale update notice for %s: %v", existing.PluginID, err)
 			}
 		}
 		entry, ok := latestByRepositoryPlugin[repositoryPluginKey{
@@ -530,7 +534,8 @@ func (s *AutoUpdateService) handleExistingPlugin(ctx context.Context, existing *
 		return autoUpdateOutcomeUpdated, err
 	case "notify":
 		err := s.notifyPluginUpdate(ctx, existing, entry)
-		if isVersionManaged(err) || errors.Is(err, errProvisionRestoreHeld) {
+		// A dropped stale offer recorded nothing, so it is no update found.
+		if isVersionManaged(err) || errors.Is(err, errProvisionRestoreHeld) || errors.Is(err, ErrInstallationChanged) {
 			return autoUpdateOutcomeNone, nil
 		}
 		return autoUpdateOutcomeNotified, err
@@ -587,10 +592,19 @@ func (s *AutoUpdateService) autoUpdatePlugin(ctx context.Context, existing *Inst
 func (s *AutoUpdateService) notifyPluginUpdate(ctx context.Context, existing *Installation, entry CatalogEntry) error {
 	newVersion := entry.Manifest.GetVersion()
 
-	if err := s.installations.Update(ctx, existing.ID, UpdateInstallationInput{
+	// The offer was decided against existing's release. Another install that
+	// landed meanwhile, possibly of a newer release, makes it stale (#4518).
+	err := s.installations.Update(ctx, existing.ID, UpdateInstallationInput{
 		automatic:        true,
 		AvailableVersion: &newVersion,
-	}); err != nil {
+		IfInstallPath:    &existing.InstallPath,
+	})
+	if errors.Is(err, ErrInstallationChanged) {
+		s.logger.InfoContext(ctx, "dropped stale plugin update offer: the plugin was replaced meanwhile",
+			"plugin_id", existing.PluginID, "available_version", newVersion)
+		return err
+	}
+	if err != nil {
 		return fmt.Errorf("record available version for plugin %s: %w", existing.PluginID, err)
 	}
 

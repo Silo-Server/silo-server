@@ -41,7 +41,9 @@ Jellyfin serializes a Guid: 32 lowercase hex digits without dashes, in the user
 DTO, `SessionInfo.UserId`, `/Sessions`, and `UserDataChanged` socket messages.
 Seerr's avatar proxy rejects any other shape. Routes and queries that take a
 user ID also accept the dashed form, which clients that signed in before this
-format still send. Item, library, and server IDs keep the dashed form.
+format still send. Media-source IDs take the same form (see
+[Playback negotiation and media](#playback-negotiation-and-media)). Item,
+library, and server IDs keep the dashed form.
 
 The user DTO carries `PrimaryImageTag` when the profile has an uploaded avatar
 and the caller signed in (a session for an `sa_` API key is never stored, so
@@ -461,8 +463,15 @@ media-source id there and resolve it to the item that owns its file (the
 episode for an episode file). On `PlaybackInfo` the id selects that version
 unless the body names a `MediaSourceId`. A stale body `MediaSourceId` falls back
 to the route's version, and a route version the item no longer has answers
-`404`. The negotiated session keeps the client's id as its route item id, so the
-stream URLs it hands out and later session reports can carry that id.
+`404`. The negotiated session keeps that media-source id as its route item id,
+in the form Silo sends it, so the stream URLs it hands out and later session
+reports can carry that id.
+
+Media-source ids take Jellyfin's Guid form, 32 lowercase hex digits without
+dashes, like user ids. Infuse cuts a dashed `MediaSourceId` at its first dash
+when it sends it back in a `PlaybackInfo` body, which made that body name no
+version. Every route and body still accepts the dashed form that clients stored
+earlier.
 
 Every compat user is a non-administrator, and only a viewer who may curate
 metadata sees where a file lives or what it is called (see
@@ -661,16 +670,30 @@ VP9 get no entry. When Silo cannot name every format a variant carries (an
 unknown level, another AV1 or VP9 profile or color, or copied audio with no
 entry), that variant has no `CODECS` or `SUPPLEMENTAL-CODECS`, where Jellyfin
 writes a partial list or a short form. For Dolby Vision without a compatible
-base layer (HEVC profile 5, AV1 profile 10), a client whose device profile lists
-`DOVI` in a `VideoRangeType` condition also gets Jellyfin 12's `dvh1`/`dav1`
-variant, listed before the fallback variant, unless the copied audio has no
-entry. MPEG-TS remuxes keep the single variant. Audio and subtitle streams
+base layer (HEVC profile 5, AV1 profile 10.0) and with a known level, a client
+whose device profile lists `DOVI` in a `VideoRangeType` condition also gets
+Jellyfin 12's `dvh1`/`dav1` variant, listed before the fallback variant, unless
+the copied audio has no entry. AV1 profile 10.1 and 10.4 get the `dav1`
+variant on the same terms, with their base layer's `VIDEO-RANGE`. Jellyfin
+adds `SUPPLEMENTAL-CODECS` to the `av01` variant for them instead, which Silo
+cannot do because HDR AV1 has no `CODECS` entry. As in Jellyfin, AV1 profile
+10.2, whose base layer is SDR, gets no Dolby Vision variant or
+`SUPPLEMENTAL-CODECS`. MPEG-TS remuxes keep the single variant. Audio and subtitle streams
 carry `LocalizedLanguage`, and audio streams carry `LocalizedOriginal`, in
 English. `LocalizedLanguage` and `DisplayTitle` name a tag with a region or
 script by its CLDR name, such as "Brazilian Portuguese" for `pt-BR` or
 "Portuguese (Angola)" for `pt-AO`; `Language` keeps the stored tag. A tag
 with any other subtag, or a script or region CLDR has no name for, keeps the
 title-cased tag ("Ca ES Valencia"), so distinct tags never share a label.
+A video stream's `VideoRangeType` follows Jellyfin's for Dolby Vision profile
+10: compatibility ID 1 is `DOVIWithHDR10` (`DOVIWithHDR10Plus` with HDR10+
+metadata), 2 is `DOVIWithSDR`, 4 is `DOVIWithHLG`, and 0 is `DOVI`. Silo
+reports `DOVI` for any other ID, where Jellyfin writes `DOVIInvalid`. Silo
+trusts the compatibility ID, as it does for profile 8; Jellyfin also writes
+`DOVIInvalid` when the base layer's colour tags contradict the ID, such as an
+HLG transfer on ID 1. Profile 10 files scanned before Silo mapped profile 10
+store `DOVI`, and this API labels them from their stored compatibility ID.
+`DOVIWithSDR` has `VideoRange` `SDR`, for profile 8 as well.
 A video stream's `DisplayTitle` follows Jellyfin's: resolution, upper-cased
 codec, then the Dolby Vision profile or the video range ("4K HEVC Dolby Vision
 Profile 8.1 (HDR10)", "1080p H264 SDR"). Silo also names HDR10+ ("4K HEVC
