@@ -8,7 +8,7 @@ export const MARKER_LAZY_PLAYBACK_KEY = "markers.lazy_playback";
 
 type MarkerForm = Pick<
   ReturnType<typeof useSettingsForm>,
-  "getValue" | "getPersistedValue" | "setValue" | "resetValue" | "isDirty"
+  "getValue" | "getPersistedValue" | "setValue" | "isDirty"
 >;
 
 /** What `markers.lazy_playback` held before source edits staged it. */
@@ -93,8 +93,13 @@ export function useMarkerSourceDraft(
     const before = lazyBefore.current;
     if (!before) return;
     lazyBefore.current = null;
-    if (before.dirty) form.setValue(MARKER_LAZY_PLAYBACK_KEY, before.value);
-    else form.resetValue(MARKER_LAZY_PLAYBACK_KEY);
+    // Through setValue rather than resetValue: taken back while a save is in
+    // flight, the value stays staged, so the next save undoes what that save
+    // wrote.
+    form.setValue(
+      MARKER_LAZY_PLAYBACK_KEY,
+      before.dirty ? before.value : form.getPersistedValue(MARKER_LAZY_PLAYBACK_KEY),
+    );
   }
 
   return {

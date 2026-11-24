@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -164,6 +164,34 @@ describe("marker settings kept for an unsaved change", () => {
 
     expect(screen.getByRole("switch", { name: "Find markers on playback" })).not.toBeChecked();
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+  });
+
+  it("keeps lazy playback taken back during a save staged for the next save", async () => {
+    settings.current["markers.mode"] = "both";
+    let finishSave!: (result: { values: Record<string, string> }) => void;
+    save.mockReset();
+    save.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const { rerender } = render(page);
+    await pick("Save online markers", "Fetch when needed");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    // Taken back while the save that carries on-demand storage is in flight.
+    await pick("Save online markers", "Save to library");
+    const written = { "markers.online_storage": "on_demand", "markers.lazy_playback": "true" };
+    await act(async () => finishSave({ values: written }));
+    settings.current = { ...settings.current, ...written };
+    rerender(
+      <MemoryRouter>
+        <PlaybackSettings />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("switch", { name: "Find markers on playback" })).not.toBeChecked();
+    expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
   });
 
   it("keeps an edited detection worker count in view under online-only markers", async () => {
