@@ -407,7 +407,8 @@ function MatcherQueueDetail({
             <div
               className={cn(
                 "flex gap-2",
-                touch ? "flex-col items-start" : "items-center justify-between",
+                // Baseline keeps the badges on the path's first line when it wraps.
+                touch ? "flex-col items-start" : "items-baseline justify-between",
               )}
             >
               <CardPath
