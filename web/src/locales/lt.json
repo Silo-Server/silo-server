@@ -521,6 +521,18 @@
       "value": "Šis atkūrimo seansas baigėsi. Pradėkite leisti iš naujo."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Atkūrimas sustabdytas, nes per ilgai buvo pristabdytas. Pradėkite leisti iš naujo."
+    }
+  ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Šis srautas pakeistas kitu. Atkūrimas tęsiamas dabartiniu srautu."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -3726,7 +3738,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "Leisti dabar"
+      "value": "Leisti kitą epizodą"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -28855,6 +28867,16 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.common.catalogImportSource.exportJob": [
+    {
+      "type": 0,
+      "value": "Eksportavimo darbas "
+    },
+    {
+      "type": 1,
+      "value": "id"
     }
   ],
   "web.admin.common.connectionCheck.check": [
@@ -81870,6 +81892,24 @@
       "value": "Išsaugoti bibliotekoje"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pristabdytas atkūrimas"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Baigti pristabdytą atkūrimą po"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "Nuo 0 iki 1440. Baigia „Silo“ programoje tiek laiko pristabdyto vaizdo įrašo atkūrimą ir atlaisvina jo srautą bei perkodavimą, jei jis vyksta; vėl paleidus įrašą, atkūrimas tęsiamas nuo tos pačios vietos. Funkcijai „Žiūrėti kartu“, perdavimui į kitą įrenginį ir audioknygoms tai netaikoma. Nustačius 0, ši funkcija išjungiama."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -82390,6 +82430,12 @@
       "value": "d."
     }
   ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "min."
+    }
+  ],
   "web.admin.settings.playback.unitSeconds": [
     {
       "type": 0,
@@ -82406,6 +82452,12 @@
     {
       "type": 0,
       "value": "Pažymėti kaip žiūrėtą ties"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Elementai su titrų žyme taip pat laikomi peržiūrėtais, kai atkūrimas pasiekia titrus."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -88442,6 +88494,12 @@
       "value": "Įjungti programinį HDR tonų atvaizdavimą"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Baigti pristabdytą atkūrimą po (min.)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -88500,6 +88558,12 @@
     {
       "type": 0,
       "value": "Žymių šaltinis"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pristabdytas atkūrimas"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -90562,6 +90626,36 @@
     {
       "type": 0,
       "value": "Pirmiausia įjunkite prisijungimo teikėją. Jei prisijungimas slaptažodžiu išjungtas ir neįjungtas joks teikėjas, prisijungti galėtų tik avariniai administratoriai."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Nuo 8 iki 72 simbolių. Taisyklės taikomos, kai kas nors pasirenka ar keičia slaptažodį; jau nustatyti slaptažodžiai toliau veikia."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Mažiausias slaptažodžio ilgis"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Bet kuris skyrybos ženklas ar simbolis, pvz., ! arba #. Raidės, skaitmenys ir tarpai neįskaičiuojami."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Reikalauti specialiojo simbolio"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Reikalauti didžiosios raidės"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -104188,6 +104282,20 @@
       "value": "Nustatoma…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Patys perduokite jį naudotojui "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -107238,10 +107346,96 @@
       "value": "“ neleidžia šiam įrenginiui prisijungti prie šio serverio."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolis."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simboliai."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolio."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolių."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Slaptažodžiai nesutampa."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Įtraukite bent vieną specialųjį simbolį, pvz., ! arba #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Įtraukite bent vieną didžiąją raidę."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -107254,6 +107448,80 @@
     {
       "type": 0,
       "value": "Naudokite bent 8 simbolius."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Naudokite bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolį."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Naudokite bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolius."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Naudokite bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolio."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Naudokite bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolių."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -123232,6 +123500,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -129352,6 +129634,104 @@
     {
       "type": 1,
       "value": "type"
+    }
+  ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "Išvalyti"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "Jūsų įvertinimas"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "Jūsų serialo įvertinimas"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "Neįvertinta"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "Įvertinti"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "Įvertinti"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "Įvertinti serialą"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "Įvertinimas pašalintas"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "Anuliuoti"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " iš 5"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "Jūs"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "Jūsų įvertinimas: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " iš 5"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "Jūsų serialo įvertinimas: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " iš 5"
     }
   ],
   "web.detail.request.cancelRequest": [
@@ -147200,7 +147580,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "Leisti dabar"
+      "value": "Leisti kitą epizodą"
     }
   ],
   "web.player.nextEpisode.regionLabel": [
@@ -148109,6 +148489,12 @@
     {
       "type": 0,
       "value": "Administratorius užbaigė šį atkūrimo seansą."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Atkūrimas sustabdytas, nes per ilgai buvo pristabdytas."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

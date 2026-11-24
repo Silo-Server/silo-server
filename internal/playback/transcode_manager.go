@@ -1,9 +1,12 @@
 package playback
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -98,6 +101,9 @@ type TranscodeManager struct {
 	// restart or on another server keeps measuring the same play. ok is false
 	// when none was saved. No-op when nil.
 	RestoreReconstructedWatch func(ctx context.Context, sessionID string) (watch WatchTime, ok bool)
+	// StreamEndsFn returns the recorder that stores where a transcode found a
+	// file's media ends. Nil, or a nil result, stores nothing.
+	StreamEndsFn func() *StreamEndRecorder
 
 	// Package-private execution seams keep reconstruction lifecycle tests
 	// deterministic without invoking a host FFmpeg binary. Production always
@@ -982,9 +988,11 @@ func (m *TranscodeManager) registerReconstructedSession(ctx context.Context, s *
 // affinity, each front-end that misses the in-memory session will reconstruct its
 // OWN local ffmpeg — a split-brain with divergent segment dirs. Integrated
 // transcode is therefore only safe single-front-end or with session affinity at
-// the load balancer. Remote transcode-node sessions are unaffected: their
-// non-empty TranscodeNodeURL routes every front-end to the same ffmpeg via the
-// proxy path, so ReconstructTranscode is never reached for them.
+// the load balancer. Remote transcode-node sessions are served by relaying to
+// their node. A front-end whose own copy of the session is stale (another
+// front-end replanned it onto a node) can still reach this with the node's
+// card, so a card with a TranscodeNodeURL is refused here rather than started
+// locally.
 //
 // This constraint is currently documented, not enforced: a robust fix needs a
 // per-session owning-instance claim in a store shared across front-ends (e.g.
@@ -1016,6 +1024,16 @@ func (m *TranscodeManager) ReconstructTranscodeWithError(ctx context.Context, se
 	// directly so we never enter single-flight only to discard a duplicate.
 	if existing := m.GetTranscodeSession(sessionID); existing != nil {
 		return existing, nil
+	}
+	// A card whose committed route runs on a node is served by relaying to that
+	// node, never by an FFmpeg on this server. Without session affinity a
+	// replica can hold a stale copy of a session that another replica replanned
+	// onto a node, and must not start a second, local encode for it (#4601).
+	// Moving a transcode here clears the node from the card before calling.
+	if card.TranscodeNodeURL != "" {
+		slog.WarnContext(ctx, "refusing to rebuild a node transcode on this server", "component", "playback",
+			"session", sessionID, "playback_session_id", sessionID, "requested_segment", requestedSegment)
+		return nil, nil
 	}
 
 	v, err, _ := m.reconstructGroup.Do(sessionID, func() (interface{}, error) {
@@ -1452,6 +1470,44 @@ var remoteTranscodeControlClient = func() *http.Client {
 	return &http.Client{Transport: transport, CheckRedirect: nodepool.RefuseRedirects}
 }()
 
+// remoteOutputBoundTimeout bounds the output-bound read a replan makes. The
+// replan waits on it, and a node that cannot answer this quickly is no
+// evidence for either cause of a stall.
+const remoteOutputBoundTimeout = 2 * time.Second
+
+// RemoteOutputBound asks the transcode node at transcodeNodeURL whether the
+// client of transportID has fetched every segment the node produced but at
+// most the newest, so the node's encoder paces playback
+// (TranscodeSession.OutputBoundsClient on the node). Any failure, including a
+// node that does not run the transport (404), is an error: the caller decides
+// what an unknown answer means.
+func (m *TranscodeManager) RemoteOutputBound(ctx context.Context, transportID, transcodeNodeURL string) (bool, error) {
+	readCtx, cancel := context.WithTimeout(ctx, remoteOutputBoundTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(readCtx, http.MethodGet, transcodeNodeURL+"/transcode/"+url.PathEscape(transportID)+"/output-bound", nil)
+	if err != nil {
+		return false, fmt.Errorf("build output-bound read: %w", err)
+	}
+	if err := nodeauth.SignTranscode(req, transcodeNodeURL, m.nodeKeys()); err != nil {
+		return false, fmt.Errorf("sign output-bound read: %w", err)
+	}
+	resp, err := telemetry.DoTrustedNode(remoteTranscodeControlClient, req, "output_bound")
+	if err != nil {
+		return false, fmt.Errorf("send output-bound read: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("output-bound read returned status %d", resp.StatusCode)
+	}
+	var answer struct {
+		OutputBound *bool `json:"output_bound"`
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 4<<10)).Decode(&answer); err != nil || answer.OutputBound == nil {
+		return false, fmt.Errorf("decode output-bound answer: %w", cmp.Or(err, errors.New("output_bound missing")))
+	}
+	return *answer.OutputBound, nil
+}
+
 // deleteRemoteTranscode sends DELETE to the assigned transcode node with a
 // bounded timeout. A missing process is already canceled and therefore
 // succeeds; other transport and HTTP failures remain retryable by the caller.
@@ -1522,4 +1578,17 @@ func (m *TranscodeManager) CleanupOrphanedTranscodes() (int, error) {
 	m.inFlightMu.Unlock()
 
 	return CleanupOrphanedTranscodeDirs(m.runtimeConfig().TranscodeDir, active, MaxTokenTTL)
+}
+
+// ServePastEndOfStream answers a segment request past the media's end
+// (TranscodeSession.ServePastEndOfStream) and records where mediaFileID's
+// media ends (StreamEndRecorder), and reports whether it answered.
+func (m *TranscodeManager) ServePastEndOfStream(ctx context.Context, w http.ResponseWriter, session *TranscodeSession, mediaFileID int, name string, err error) bool {
+	if !session.ServePastEndOfStream(w, name, err) {
+		return false
+	}
+	if end, ok := session.LearnedStreamEnd(); ok && m != nil && m.StreamEndsFn != nil {
+		m.StreamEndsFn().Note(ctx, mediaFileID, end)
+	}
+	return true
 }

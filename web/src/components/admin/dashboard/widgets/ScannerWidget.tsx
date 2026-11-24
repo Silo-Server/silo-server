@@ -98,7 +98,7 @@ export function ScannerWidget() {
         </CardTitle>
         <Link
           to="/admin/autoscan"
-          className="text-muted-foreground hover:text-primary text-[11px] transition-colors"
+          className="text-muted-foreground hover:text-primary text-[0.6875rem] transition-colors"
         >
           {t("web.admin.dashboard.widgets.scanner.activity")}
         </Link>
@@ -113,7 +113,7 @@ export function ScannerWidget() {
             {/* The queue counters lead: they are the widget's stable summary,
                 while the per-library list below grows and shrinks with the
                 scans that happen to be running. */}
-            <div className="text-muted-foreground grid grid-cols-3 gap-2 text-[11px]">
+            <div className="text-muted-foreground grid grid-cols-3 gap-2 text-[0.6875rem]">
               <QueueCount
                 label={t("web.admin.dashboard.widgets.scanner.running")}
                 value={status?.running_scans}
@@ -128,7 +128,7 @@ export function ScannerWidget() {
               />
             </div>
 
-            <div className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 text-[11px]">
+            <div className="text-muted-foreground flex flex-wrap items-center gap-x-1.5 text-[0.6875rem]">
               <AutoscanState enabled={status?.enabled} />
               {status?.enabled ? (
                 <>
@@ -157,20 +157,20 @@ export function ScannerWidget() {
                     >
                       <div
                         dir="auto"
-                        className="w-fit max-w-full truncate text-[13px] font-semibold"
+                        className="w-fit max-w-full truncate text-[0.8125rem] font-semibold"
                       >
                         {libraryNames.get(group.libraryID) ??
                           t("web.admin.dashboard.widgets.scanner.libraryFallback", {
                             id: group.libraryID,
                           })}
                       </div>
-                      <div className="text-muted-foreground mt-0.5 truncate text-[11px] tabular-nums">
+                      <div className="text-muted-foreground mt-0.5 truncate text-[0.6875rem] tabular-nums">
                         {formatDashboardLibraryScanProgress(group.primary, group.count)}
                       </div>
                     </div>
                   ))}
                   {hiddenGroups > 0 ? (
-                    <div className="text-muted-foreground text-[11px]">
+                    <div className="text-muted-foreground text-[0.6875rem]">
                       {t("web.admin.dashboard.widgets.scanner.moreLibraries", {
                         count: hiddenGroups,
                         count_text: hiddenGroups,
@@ -190,7 +190,7 @@ export function ScannerWidget() {
 function QueueCount({ label, value }: { label: string; value: number | undefined }) {
   return (
     <div>
-      <div className="text-foreground text-[18px] leading-none font-extrabold tabular-nums">
+      <div className="text-foreground text-[1.125rem] leading-none font-extrabold tabular-nums">
         {value === undefined ? EM_DASH : value.toLocaleString(formatLocale())}
       </div>
       <div className="mt-1 font-medium">{label}</div>

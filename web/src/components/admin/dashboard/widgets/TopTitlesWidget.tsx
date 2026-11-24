@@ -52,7 +52,7 @@ export function TopTitlesWidget() {
         </Link>
         <Link
           to="/admin/history"
-          className="text-muted-foreground hover:text-primary text-[11px] whitespace-nowrap transition-colors"
+          className="text-muted-foreground hover:text-primary text-[0.6875rem] whitespace-nowrap transition-colors"
         >
           {t("web.admin.dashboard.widgets.topTitles.allHistory")}
         </Link>

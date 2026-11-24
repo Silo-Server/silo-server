@@ -36,6 +36,11 @@ type clusterLock interface {
 // fullMetadataRefreshAdvisoryLock spells "SILOFULR".
 const fullMetadataRefreshAdvisoryLock int64 = 0x53494C4F46554C52
 
+// advisoryClusterLock holds a session-level advisory lock on a database
+// session of its own, outside the pool (pglock.TryAcquireSession). The guarded
+// task runs its queries through the pool, and a lock that pinned one of the
+// pool's connections would leave a pool of database.max_connections=1 nothing
+// for them: the task and every other query on the node would wait forever.
 type advisoryClusterLock struct {
 	pool *pgxpool.Pool
 	key  int64
@@ -44,7 +49,7 @@ type advisoryClusterLock struct {
 }
 
 func (l advisoryClusterLock) TryAcquire(ctx context.Context) (func(), bool, error) {
-	lock, acquired, err := pglock.TryAcquire(ctx, l.pool, l.key)
+	lock, acquired, err := pglock.TryAcquireSession(ctx, l.pool, l.key)
 	if err != nil || !acquired {
 		return nil, false, err
 	}

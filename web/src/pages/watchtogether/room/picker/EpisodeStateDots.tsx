@@ -76,7 +76,7 @@ function describe(
 export function DotsLegend() {
   const t = useT();
   return (
-    <span className="text-muted-foreground flex items-center gap-3 text-[11px]">
+    <span className="text-muted-foreground flex items-center gap-3 text-[0.6875rem]">
       <span className="flex items-center gap-1">
         <span className="inline-block size-2 rounded-full bg-white/70" />
         {t("web.watchTogether.dots.watched")}

@@ -37,7 +37,7 @@ export function ChartLegend({
   return (
     <div
       className={cn(
-        "text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]",
+        "text-muted-foreground flex flex-wrap items-center gap-x-3 gap-y-1 text-[0.6875rem]",
         className,
       )}
     >
@@ -89,7 +89,7 @@ export function ChartTooltip({
       style={{ left: `${ratio * 100}%`, transform: `translateX(${shift})` }}
     >
       <div className="border-border bg-popover/95 text-popover-foreground rounded-md border px-2.5 py-1.5 shadow-md">
-        <div className="text-muted-foreground mb-1 text-[10px] whitespace-nowrap tabular-nums">
+        <div className="text-muted-foreground mb-1 text-[0.625rem] whitespace-nowrap tabular-nums">
           {title}
         </div>
         {children}
@@ -112,7 +112,7 @@ export function ChartTooltipRow({
   value: string;
 }) {
   return (
-    <div className="flex items-center gap-2 text-[11px] whitespace-nowrap">
+    <div className="flex items-center gap-2 text-[0.6875rem] whitespace-nowrap">
       {color ? (
         <span
           aria-hidden="true"

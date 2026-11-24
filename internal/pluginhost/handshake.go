@@ -20,10 +20,11 @@ const (
 	// sources return quickly, but filesystem-backed sources may need a longer
 	// bounded window for an initial baseline; cooperative plugins should still
 	// checkpoint progress and return before this deadline.
-	DefaultScanSourceTimeout = 5 * time.Minute
-	DefaultEventTimeout      = 10 * time.Second
-	DefaultAuthTimeout       = 10 * time.Second
-	DefaultRouteTimeout      = 10 * time.Second
+	DefaultScanSourceTimeout         = 5 * time.Minute
+	DefaultEventTimeout              = 10 * time.Second
+	DefaultAuthTimeout               = 10 * time.Second
+	DefaultRouteTimeout              = 10 * time.Second
+	DefaultConfigurationCheckTimeout = 20 * time.Second
 	// Watch-sync providers may resolve cold external metadata before applying
 	// an event. Bound that work without cutting off valid slow provider calls.
 	DefaultWatchSyncTimeout = 2 * time.Minute

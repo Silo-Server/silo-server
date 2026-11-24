@@ -1,8 +1,8 @@
-# Playback API (v2)
+# Playback API
 
 `/api/v2/playback` is the native playback contract. Protocol version 3 decides
 the route ([playback protocol v3](architecture/playback-protocol-v3.md)); this
-document covers the v2 envelope around it: the installation check, sequenced
+document covers the envelope around it: the installation check, sequenced
 progress and stop, delivery, and revocation. Every operation requires an
 authenticated account and an active profile. Validation failures are `422`; an
 unavailable store is `503`.
@@ -135,7 +135,7 @@ artwork is omitted; clients can retain their catalog-detail fallback.
 
 ## Marker ranges
 
-V2 watch detail includes `marker_segments` on each file version, including
+Watch detail includes `marker_segments` on each file version, including
 versions nested in playback variants. Each entry is
 `{kind, start_seconds, end_seconds}`, with kind `intro`, `credits`, `recap`, or
 `preview`. The collection is ordered by source time and is empty when the file
@@ -294,6 +294,7 @@ receipt is `{outcome, accepted?}`, where `accepted` is the latest committed
 | Equal sequence, different payload | 409 `progress_conflict` |
 | Session owned by another profile | 403 |
 | Attempt ended by an administrator | 410 `playback_session_ended` |
+| Attempt ended after it stayed paused too long | 410 `playback_session_paused_timeout` when the start listed `paused_timeout_v1`, otherwise 410 `playback_session_ended` |
 | Attempt already stopped otherwise, or unknown | 404 |
 
 An applied sample is persisted through the shared progress writers (resume
@@ -347,6 +348,19 @@ session at the same position, which is how it recovers from the `404` of an
 expired session or a server restart. A stop the client made first keeps its
 own receipt.
 
+A session left paused longer than the administrator's
+`playback.paused_session_timeout_minutes` (default 15, `0` turns it off) is
+stopped under a fourth server-minted `stop_id` and recorded as `expired`. Its
+progress, replan and control-ticket requests answer `410`: with
+`playback_session_paused_timeout` when the start listed client feature
+`paused_timeout_v1`, and with `playback_session_ended` otherwise. A player that
+gets either leaves playback as it does after an administrator's end; one that
+listed the feature says the pause ran too long instead of naming an
+administrator. Watch Together members, Cast receivers and audio-only files are
+never ended this way, and neither is a client that stopped reporting progress,
+which the idle expiry ends instead
+([playback lifecycle](architecture/playback-lifecycle.md#paused-timeout)).
+
 ## Replan and route events
 
 `replanPlayback` covers failure recovery, seek re-anchor, and track, quality and
@@ -354,8 +368,10 @@ output changes, with the v3 body plus `installation_id`. It is idempotent on `re
 plus the body digest: the same request replays its committed decision; a reused
 id with different input, a superseded plan, or an identical replan still in
 progress is `409`; a session owned by another profile is `403`; a session an
-administrator ended is `410 playback_session_ended`; any other ended session is
-`404`.
+administrator ended is `410 playback_session_ended`; a session ended after it
+stayed paused too long is `410 playback_session_paused_timeout` for an attempt
+that listed `paused_timeout_v1` and `410 playback_session_ended` otherwise; any
+other ended session is `404`.
 
 Route events take the v3 event plus `installation_id` and a client-minted
 `event_id`. `202` acknowledges queueing, not a durable write. A retry with the
@@ -372,7 +388,17 @@ id); clients never retry automatically and treat `429` as drop.
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
 
-These reuse the shared byte-delivery handlers behind the v2 listener, as the raw
+An encoded transcode's playlist can list video segments past the end of the
+media. Once an FFmpeg run of the session has exited 0 without a demux error, or a
+run started past the end and wrote nothing, a request for such a segment answers
+`200` with the segment's media type and a segment that holds no media: an
+MPEG-TS PAT and PMT, or an fMP4 fragment whose tracks have no samples. It does
+not restart FFmpeg. How far a player steps over such segments depends on the
+player; the conditions and the duration correction that follows are in the
+[protocol](architecture/playback-protocol-v3.md). Transcode nodes and the
+Jellyfin-compatible transcode answer it the same way.
+
+These reuse the shared byte-delivery handlers behind the native API listener, as the raw
 playback registry allows. The plan's URLs
 carry the signed stream reference `st`; a media element that cannot set headers
 may send the account bearer as the `token` query parameter, and the viewer
@@ -396,14 +422,15 @@ lists `progressive_range_refusal_v1` in `deliveries.progressive.features` gets
 `remux_range=refuse` on that URL, and a GET whose range starts past byte 0, or
 is a suffix range such as `bytes=-500`, is then `409` before the remux starts;
 the client reopens the stream at its current position. The API answers it as a
-v2 `conflict` problem and a proxy as plain text, so a client should act on the
+`conflict` problem and a proxy as plain text, so a client should act on the
 status. A proxy that does not advertise `remux_range_refusal_v1` would ignore
 the parameter, so the plan leaves it off that proxy's URL and the stream keeps
 the `200`. The web video player opts in on Chromium browsers only. The web
 audiobook player, which has no reopen at the current position, Firefox, Safari
 and native players keep the `200`; native players skip the bytes they already
-have. A failure before the first
-byte is a v2 problem; a failure after it ends the stream. A stopped, expired or
+have. An audio-only remux (`audio/mp4`) arrives as MP4 fragments of about 2
+seconds each, so a player can start on the first one. A failure before the first
+byte is a Problem Details response; a failure after it ends the stream. A stopped, expired or
 terminated session answers `410 playback_session_ended`. A subtitle sidecar the
 node has no room to read yet answers `503` with `Retry-After`; retry it then.
 
@@ -449,7 +476,7 @@ Three kinds of response are readable from another origin. Each carries
 - Subtitle sidecars, from their handler. A refusal before the handler runs
   carries no CORS header.
 
-Subtitle inventory URLs in v2 playback responses use the `/api/v2/stream/`
+Subtitle inventory URLs in playback responses use the `/api/v2/stream/`
 mount, including relative `/stream/` values produced by the shared inventory
 builder. The web player applies the same mapping to realtime subtitle URLs.
 Absolute delivery URLs from distributed nodes retain their origin and path;
@@ -538,7 +565,7 @@ player offers no sequential next or previous episode.
 
 ## Marker preview delivery
 
-Native v2 playback capabilities also advertise `marker_thumbnails_v1`. The web
+Native playback capabilities also advertise `marker_thumbnails_v1`. The web
 player opts into that feature at playback start to receive `marker_thumbnail_ready`
 updates; negotiation stays fixed for the attempt. Canonical watch reads return
 the same durable optional preview fields on `marker_segments`, so reconnects
@@ -551,7 +578,7 @@ Jellyfin chapter names, ticks and image mappings continue to represent embedded
 chapters; marker images are not projected as invented Jellyfin chapters. Offline
 marker inventories do not include these remotely served preview images.
 
-## Buffering quality (native v2)
+## Buffering quality
 
 `buffering_quality_v1` adds the start and replan fields, learned limits and
 `playback_plan.bandwidth_limit` described in

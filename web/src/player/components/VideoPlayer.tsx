@@ -28,6 +28,7 @@ import { MarkerEditPanel } from "./MarkerEditPanel";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
 import type { PlaybackConnectionStatus } from "../hooks/usePlaybackSession";
+import type { PlaybackSessionEndReason } from "../player-fetch";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { usePlayerFullscreenRoot } from "../context/PlayerFullscreenContext";
 import { isNativeVideoFullscreen, isPlayerFullscreen, toggleFullscreen } from "../utils/fullscreen";
@@ -299,6 +300,8 @@ interface VideoPlayerProps {
   /** Why reconnecting gave up, while `connectionStatus` is `lost`. */
   connectionErrorTitle?: string | null;
   connectionError?: string | null;
+  /** Why the server ended the session, while `connectionStatus` is `ended`. */
+  connectionEndReason?: PlaybackSessionEndReason | null;
   /**
    * Replan for a plan the server invalidated over the realtime
    * `plan_invalidated` command. Resolving false rejects the command, which is
@@ -335,6 +338,8 @@ interface VideoPlayerProps {
    * change, so the controller starts over and drops its kept estimate.
    */
   bandwidthCapKbps?: number | null;
+  /** Bumped when a network-tier quality replan is adopted, even at an equal cap. */
+  networkTierRevision?: number;
   onBufferingSummary?: (
     plan: BufferingPlan,
     summary: BufferingSummary,
@@ -561,6 +566,7 @@ export function VideoPlayer({
   connectionStatus = "connected",
   connectionErrorTitle = null,
   connectionError = null,
+  connectionEndReason = null,
   onPlanInvalidated,
   onReanchorSeek,
   onSeek,
@@ -574,6 +580,7 @@ export function VideoPlayer({
   showMarkerSource = false,
   bufferingMode = "always",
   bandwidthCapKbps,
+  networkTierRevision = 0,
   bufferingTitleId,
   onBufferingSummary,
   playbackAttemptId,
@@ -814,6 +821,9 @@ export function VideoPlayer({
   sessionIdRef.current = sessionId;
   const [isLeaving, setIsLeaving] = useState(false);
   const leaveInProgressRef = useRef(false);
+  // Whether the leave holding leaveInProgressRef is a minimize, which lets go
+  // of the guard when it finishes; every other leave exits.
+  const minimizeInProgressRef = useRef(false);
   const [notice, setNotice] = useState<PlaybackNoticeState | null>(null);
   const noticeRef = useRef(notice);
   useEffect(() => {
@@ -1053,6 +1063,10 @@ export function VideoPlayer({
     const video = videoRef.current;
     if (!onConnectionLost || !video || !streamFramedRef.current) return false;
     if (connectionStatusRef.current === "connected") {
+      // The transport is gone. When the session recovers the route instead of
+      // reconnecting (a progressive remux that drops again at the same point),
+      // a refusal of that recovery is this revision's to show.
+      transportFailedForPlanRevisionRef.current = planRevisionRef.current;
       // A seek still in flight is where the viewer wants to be.
       const positionSeconds =
         pendingSeekTimeRef.current ?? toMediaTime(video.currentTime, timelineOffsetRef.current);
@@ -1615,7 +1629,12 @@ export function VideoPlayer({
     if (reportedPlanFailureKeyRef.current === failureKey) {
       reportedPlanFailureKeyRef.current = null;
     }
-    if (transportFailedForPlanRevisionRef.current === planRevision || !isPlayerReady) {
+    // While the session reconnects, its own status says what happened.
+    if (
+      (transportFailedForPlanRevisionRef.current === planRevision &&
+        connectionStatusRef.current === "connected") ||
+      !isPlayerReady
+    ) {
       setError(replanError);
     }
   }, [isPlayerReady, plan.plan_attempt_key, planRevision, replanError, replanning, sessionId]);
@@ -2039,8 +2058,13 @@ export function VideoPlayer({
   useMediaSkipHandlers(displayMode !== "postroll", skipActions.back, skipActions.forward);
 
   // -- Watch progress reporting --
-  const [progressSessionEnded, setProgressSessionEnded] = useState(false);
-  const markSessionEnded = useCallback(() => setProgressSessionEnded(true), []);
+  const [progressSessionEnded, setProgressSessionEnded] = useState<PlaybackSessionEndReason | null>(
+    null,
+  );
+  const markSessionEnded = useCallback(
+    (reason: PlaybackSessionEndReason) => setProgressSessionEnded(reason),
+    [],
+  );
   const flushWatchProgress = useWatchProgress(
     sessionId,
     videoRef,
@@ -2176,7 +2200,10 @@ export function VideoPlayer({
     async (action: "exit" | "minimize") => {
       if (leaveInProgressRef.current) return;
 
+      // A replaced room's minimize exits instead.
+      const minimizes = action === "minimize" && !!onMinimize && !watchTogether.replacementReason;
       leaveInProgressRef.current = true;
+      minimizeInProgressRef.current = minimizes;
       setIsLeaving(true);
 
       const exitState = buildExitState();
@@ -2198,7 +2225,7 @@ export function VideoPlayer({
         // room page (WatchPlaybackChrome navigates there when no destination
         // is given). Ending the party is the room page's decision, not a side
         // effect of closing the player.
-        if (action === "minimize" && onMinimize && !watchTogether.replacementReason) {
+        if (minimizes && onMinimize) {
           await onMinimize(exitState);
           return;
         }
@@ -2206,6 +2233,7 @@ export function VideoPlayer({
         await onExit(exitState);
       } finally {
         if (action === "minimize") {
+          minimizeInProgressRef.current = false;
           resetLeaveState();
         }
       }
@@ -2218,20 +2246,42 @@ export function VideoPlayer({
   }, [handleLeave]);
 
   // The server ended the session for good (an administrator stopped it while
-  // this player could not be told directly): leave instead of reconnecting.
-  const sessionEndedHandledRef = useRef(false);
+  // this player could not be told directly, or it stayed paused too long):
+  // leave instead of reconnecting.
+  const sessionEndNoticeShownRef = useRef(false);
+  const sessionEndExitStartedRef = useRef(false);
   // Set when an administrator's stop or terminate already showed the notice,
   // with its reason; the exit below must still run.
   const adminEndNoticeShownRef = useRef(false);
   useEffect(() => {
-    if (connectionStatus !== "ended" && !progressSessionEnded) return;
-    if (sessionEndedHandledRef.current) return;
-    sessionEndedHandledRef.current = true;
-    if (!adminEndNoticeShownRef.current) {
-      toast.info(tRef.current("web.player.session.endedByAdmin"), { id: SESSION_ENDED_TOAST_ID });
+    const endReason =
+      progressSessionEnded ??
+      (connectionStatus === "ended" ? (connectionEndReason ?? "ended") : null);
+    if (!endReason) return;
+    if (!sessionEndNoticeShownRef.current) {
+      sessionEndNoticeShownRef.current = true;
+      if (endReason === "paused_timeout") {
+        toast.info(tRef.current("web.player.session.endedPausedTimeout"), {
+          id: SESSION_ENDED_TOAST_ID,
+        });
+      } else if (!adminEndNoticeShownRef.current) {
+        toast.info(tRef.current("web.player.session.endedByAdmin"), {
+          id: SESSION_ENDED_TOAST_ID,
+        });
+      }
     }
+    if (sessionEndExitStartedRef.current) return;
+    // A leave under way holds the guard handleExit checks. Any exit already
+    // leaves; a minimize lets go when it finishes, isLeaving clears, and this
+    // runs again to leave the minimized player.
+    if (leaveInProgressRef.current && !minimizeInProgressRef.current) {
+      sessionEndExitStartedRef.current = true;
+      return;
+    }
+    if (isLeaving || leaveInProgressRef.current) return;
+    sessionEndExitStartedRef.current = true;
     void handleExit();
-  }, [connectionStatus, handleExit, progressSessionEnded]);
+  }, [connectionEndReason, connectionStatus, handleExit, isLeaving, progressSessionEnded]);
 
   const handleMinimize = useCallback(async () => {
     await handleLeave("minimize");
@@ -5175,14 +5225,22 @@ export function VideoPlayer({
     },
     [answerBufferingPill],
   );
-  // A new cap on the session's replans is a quality change (see the prop).
+  // A new cap or adopted network-tier replan (including equal-cap Wi-Fi
+  // restoration) is a quality change for the buffering controller.
   const capForBuffering = bandwidthCapKbps ?? null;
-  const capForBufferingRef = useRef(capForBuffering);
+  const bufferingQualityTriggerRef = useRef({
+    cap: capForBuffering,
+    tierRevision: networkTierRevision,
+  });
   useEffect(() => {
-    if (capForBufferingRef.current === capForBuffering) return;
-    capForBufferingRef.current = capForBuffering;
+    const prev = bufferingQualityTriggerRef.current;
+    if (prev.cap === capForBuffering && prev.tierRevision === networkTierRevision) return;
+    bufferingQualityTriggerRef.current = {
+      cap: capForBuffering,
+      tierRevision: networkTierRevision,
+    };
     answerBufferingPill("quality_changed");
-  }, [answerBufferingPill, capForBuffering]);
+  }, [answerBufferingPill, capForBuffering, networkTierRevision]);
   // An answer removes the pill; focus that was on it moves to the transport.
   const answerBuffering = useCallback(
     (answer: BufferingAnswer) => {
@@ -5508,6 +5566,7 @@ export function VideoPlayer({
     onCommand: executeRealtimeCommand,
     onEvent: handleRealtimeEvent,
     supportedCommands: VIDEO_PLAYBACK_COMMANDS,
+    onSessionEnded: markSessionEnded,
   });
 
   useEffect(() => {

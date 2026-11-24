@@ -207,7 +207,7 @@ export function RuleBuilder({
             ? t("web.home.addRow.rules.whatCollectionShows")
             : t("web.home.addRow.rules.whatRowShows")
         }
-        className="flex flex-wrap items-center gap-x-2 gap-y-2 text-[15px]"
+        className="flex flex-wrap items-center gap-x-2 gap-y-2 text-[0.9375rem]"
       >
         {t(
           summaryShowsAName
@@ -374,7 +374,7 @@ export function RuleSortField({
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div>
         <span className="text-sm font-medium">{t("web.home.addRow.order")}</span>
-        <p className="text-muted-foreground mt-1 text-[13px]">
+        <p className="text-muted-foreground mt-1 text-[0.8125rem]">
           {t("web.home.addRow.rules.orderHint")}
         </p>
       </div>

@@ -38,6 +38,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/lang"
 	"github.com/Silo-Server/silo-server/internal/logredact"
+	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/netaccess"
 	"github.com/Silo-Server/silo-server/internal/nodepool"
@@ -65,7 +66,10 @@ const (
 )
 
 type playbackInfoRequest struct {
-	serverBitrateCapKbps                int
+	serverBitrateCapKbps int
+	// episode says the item is an episode, which picks its end-credits
+	// window (see PlaybackMediaSource.EndCreditsStart).
+	episode                             bool
 	streamLocation                      string
 	SiloSeekReanchor                    bool            `json:"SiloSeekReanchor"`
 	UserID                              string          `json:"UserId"`
@@ -466,6 +470,19 @@ func (h *PlaybackHandler) playbackThresholds(ctx context.Context) userstore.Prog
 		if pct, err := strconv.Atoi(v); err == nil && pct > 0 {
 			t.MinResumePct = pct
 		}
+	}
+	return t
+}
+
+// sourceThresholds is playbackThresholds with the end credits of source, the
+// version whose runtime a report's position is measured against. identified
+// is false when source is only a guess at what plays (the first listed one),
+// whose credits could belong to another cut; the percentage rule alone
+// applies then.
+func (h *PlaybackHandler) sourceThresholds(ctx context.Context, source *PlaybackMediaSource, identified bool) userstore.ProgressThresholds {
+	t := h.playbackThresholds(ctx)
+	if identified && source != nil {
+		t.CreditsStartSeconds = source.EndCreditsStart
 	}
 	return t
 }
@@ -2512,6 +2529,7 @@ func (h *PlaybackHandler) HandlePlaybackInfo(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusBadRequest, "PlaybackUnavailable", "Item does not have playable media")
 		return
 	}
+	req.episode = detail.Type == compatEpisodeType
 
 	routeItemID := h.codec.EncodeStringID(EncodedIDItem, detail.ContentID)
 	if pathMediaSourceID != "" {
@@ -3096,6 +3114,7 @@ func (h *PlaybackHandler) buildPlaybackSource(
 	return PlaybackMediaSource{
 		ServerBitrateCapKbps:       req.serverBitrateCapKbps,
 		StreamLocation:             req.streamLocation,
+		EndCreditsStart:            markers.CreditsLimitsFor(!req.episode).EndCreditsStart(version.EffectiveMarkerSegments(), float64(version.Duration)),
 		CanBurnSubtitle:            enableTranscoding && (maxBitrate <= 0 || targetBitrateKbps >= compatMinEncodeKbps) && (allow4KTranscode || !is4KResolution(version.Resolution)) && canEncodeOutput,
 		TargetBitrateKbps:          max(targetBitrateKbps, 0),
 		TargetResolution:           targetResolution,
@@ -3462,11 +3481,14 @@ func appendSubtitleMediaStreams(streams []mediaStreamDTO, routeItemID, mediaSour
 	return streams
 }
 
+// compatNegotiationVariant writes source ids in their canonical spelling, so a
+// negotiation stored while media-source ids still had dashes is replaced by the
+// same negotiation made after the upgrade.
 func compatNegotiationVariant(sources []PlaybackMediaSource) string {
 	var variant strings.Builder
 	for _, source := range sources {
 		fmt.Fprintf(&variant, "%s|a=%s|s=%s|r=%t|ts=%t|ta=%t|dv=%t;",
-			source.ID,
+			canonicalCompatID(source.ID),
 			compatOptionalIndex(source.SelectedAudioStreamIndex),
 			compatOptionalIndex(source.SelectedSubtitleStreamIndex),
 			source.HLSRemux,
@@ -3880,8 +3902,8 @@ func videoTrackDisplayTitle(track models.VideoTrack, versionHDR bool) string {
 	hdr10Plus := strings.HasSuffix(rangeType, compatRangeHDR10Plus)
 	dolbyVision := ""
 	if strings.HasPrefix(rangeType, compatRangeDOVI) {
-		// The range type has no HDR10+ form for profiles other than 7 and 8,
-		// so read the track's own flag as well.
+		// The range type has no HDR10+ form for profiles other than 7, 8 and
+		// 10, so read the track's own flag as well.
 		dolbyVision = compatDolbyVisionTitle(track, hdr10Plus || track.HDR10Plus)
 	}
 	switch {

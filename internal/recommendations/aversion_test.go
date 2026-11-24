@@ -161,7 +161,7 @@ func TestAversionRefillsTheMainRowAfterDroppingAnInterest(t *testing.T) {
 	for _, id := range marked {
 		b.aversion.titles = append(b.aversion.titles, aversionTitle{embedding: c.byID[id].vec, weight: 1})
 	}
-	row, _, allAverted, err := b.anchoredRow(t.Context(), anchors, CacheCandidateLimit, append(exclude, marked...), catalog.AccessFilter{})
+	row, _, _, allAverted, err := b.anchoredRow(t.Context(), anchors, CacheCandidateLimit, append(exclude, marked...), catalog.AccessFilter{})
 	if err != nil {
 		t.Fatal(err)
 	}

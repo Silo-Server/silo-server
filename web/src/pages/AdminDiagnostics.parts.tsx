@@ -19,7 +19,7 @@ export function FilterField({
     <div className={cn("flex flex-col gap-1.5", className)}>
       <Label
         htmlFor={htmlFor}
-        className="text-muted-foreground text-[11px] font-medium tracking-wide uppercase"
+        className="text-muted-foreground text-[0.6875rem] font-medium tracking-wide uppercase"
       >
         {label}
       </Label>

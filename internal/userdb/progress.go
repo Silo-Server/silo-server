@@ -600,7 +600,7 @@ func progressStatusPredicate(status string) string {
 // Valid status values: "in_progress", "completed", "all" (or empty string for all).
 func ListProgress(db *sql.DB, profileID string, status string, limit, offset int) ([]WatchProgress, error) {
 	query := progressListSelect + progressStatusPredicate(status) + `
-		ORDER BY updated_at DESC
+		ORDER BY updated_at DESC, media_item_id
 		LIMIT ? OFFSET ?`
 	return queryProgressRows(db, query, profileID, limit, offset)
 }

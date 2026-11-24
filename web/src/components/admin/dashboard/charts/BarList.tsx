@@ -77,7 +77,7 @@ export function BarList({
                 opacity: 0.18,
               }}
             />
-            <span className="text-muted-foreground relative w-4 shrink-0 text-[11px] tabular-nums">
+            <span className="text-muted-foreground relative w-4 shrink-0 text-[0.6875rem] tabular-nums">
               {index + 1}
             </span>
             <span className="relative min-w-0 flex-1 truncate" title={item.label}>
@@ -89,11 +89,11 @@ export function BarList({
                 item.label
               )}
             </span>
-            <span className="relative shrink-0 text-[13px] font-semibold tabular-nums">
+            <span className="relative shrink-0 text-[0.8125rem] font-semibold tabular-nums">
               {formatValue(value)}
             </span>
             {item.secondary ? (
-              <span className="text-muted-foreground relative shrink-0 text-[11px] tabular-nums">
+              <span className="text-muted-foreground relative shrink-0 text-[0.6875rem] tabular-nums">
                 {item.secondary}
               </span>
             ) : null}

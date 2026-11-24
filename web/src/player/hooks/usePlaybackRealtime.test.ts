@@ -116,6 +116,30 @@ it.each([
   expect(result.current.connectionState).toBe("disconnected");
 });
 
+// Only a paused timeout's 410 tells the player to leave: the server answers
+// playback_session_ended for every stopped attempt, an expiry included.
+it.each([
+  ["playback_session_paused_timeout", ["paused_timeout"]],
+  ["playback_session_ended", []],
+])("reports a %s ticket refusal as the session's end: %j", async (type, ends) => {
+  vi.useFakeTimers();
+  mocks.mint.mockRejectedValue(
+    new V2ProblemError("createPlaybackControlSocketTicket", {
+      type: `https://siloserver.org/docs/api/v2/problems/${type}`,
+      title: "Gone",
+      status: 410,
+    } as never),
+  );
+  const onSessionEnded = vi.fn();
+  renderHook(
+    () => usePlaybackRealtime({ sessionId: "session", onCommand: vi.fn(), onSessionEnded }),
+    { wrapper },
+  );
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(510);
+  });
+  expect(onSessionEnded.mock.calls).toEqual(ends.map((reason) => [reason]));
+});
 it("waits at least the Retry-After a rebuilding session's refusal names", async () => {
   vi.useFakeTimers();
   mocks.mint.mockRejectedValue(

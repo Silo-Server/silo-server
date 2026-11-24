@@ -99,7 +99,7 @@ export function LibraryStatusBadges({
           <button
             type="button"
             className={cn(
-              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium tabular-nums transition-colors",
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[0.6875rem] font-medium tabular-nums transition-colors",
               runningScanCount > 0
                 ? "border-success/35 bg-success/10 text-success hover:bg-success/20"
                 : "border-border bg-secondary text-secondary-foreground hover:bg-accent",
@@ -136,7 +136,7 @@ export function LibraryStatusBadges({
               <button
                 type="button"
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[11px] font-medium transition-colors",
+                  "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-[0.6875rem] font-medium transition-colors",
                   refreshRunning
                     ? "border-primary/30 bg-primary/10 text-primary hover:bg-primary/20"
                     : "border-border bg-secondary text-secondary-foreground hover:bg-accent",
@@ -219,7 +219,7 @@ export function LibraryLastScanned({ row }: { row: LibraryRow }) {
         </div>
       )}
       {library.scan_warning_at ? (
-        <div className="text-destructive text-[11px]">
+        <div className="text-destructive text-[0.6875rem]">
           {t("web.admin.libraries.list.warningAt", {
             time: formatDateTime(library.scan_warning_at),
           })}

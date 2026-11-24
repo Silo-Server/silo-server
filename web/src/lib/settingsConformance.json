@@ -1,6 +1,6 @@
 {
   "fixture_version": 1,
-  "manifest_revision": 29,
+  "manifest_revision": 30,
   "description": "Cross-platform conformance cases for settings resolution. Every case runs against the shipped manifest in this directory: definitions are referenced by key, never restated, so an expectation can only be satisfied by resolving the real contract. Each platform's resolver (Go in internal/settingsresolve, TypeScript in web/src/lib/settingsResolve.ts, Kotlin and Swift in the client repos) runs every case through a hand-written runner; a runner must fail on any fixture field it does not know, because schema drift in the fixture itself is drift. A case's constraint_bindings attach a constraint to a copy of a real definition so constraint semantics stay testable even while no shipped definition carries that constraint kind. In expected entries, constrained:true requires stored_value and constraint_kind to be present, and stored_value may be null to mean the authored value was JSON null.",
   "cases": [
     {
@@ -1183,6 +1183,17 @@
       "expected": [
         {"key": "playback.show_marker_confidence", "value": false, "source": "profile_device"},
         {"key": "playback.show_marker_source", "value": true, "source": "profile"}
+      ]
+    },
+    {
+      "name": "cellular_quality_defaults_to_auto_10mbps",
+      "description": "From revision 30 the cellular quality pair defaults to Auto with a 10 Mbps cap, allowing direct play up to 10 Mbps on mobile data while still supporting profile and device overrides.",
+      "keys": ["playback.cellular_preferred_quality", "playback.cellular_max_bitrate_kbps"],
+      "context": {"profile_id": "p1", "device_id": "phone"},
+      "stored": [],
+      "expected": [
+        {"key": "playback.cellular_preferred_quality", "value": "auto", "source": "default"},
+        {"key": "playback.cellular_max_bitrate_kbps", "value": 10000, "source": "default"}
       ]
     }
   ]

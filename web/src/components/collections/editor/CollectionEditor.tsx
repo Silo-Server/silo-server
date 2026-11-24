@@ -821,7 +821,7 @@ export function CollectionEditor<Raw extends WireCollection>({
                 untickWarning ? (
                   <p
                     role="note"
-                    className="border-warning/50 bg-warning/10 flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-[13px]"
+                    className="border-warning/50 bg-warning/10 flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-[0.8125rem]"
                   >
                     <AlertTriangle aria-hidden className="text-warning mt-0.5 size-4 shrink-0" />
                     {untickWarning}
@@ -855,7 +855,7 @@ export function CollectionEditor<Raw extends WireCollection>({
             posterUrl={posterUrl}
             meta={
               newList ? (
-                <p className="text-muted-foreground text-[14px]">{syncedCreateSubtitle()}</p>
+                <p className="text-muted-foreground text-[0.875rem]">{syncedCreateSubtitle()}</p>
               ) : view ? (
                 <CollectionMetaLine
                   libraryNames={

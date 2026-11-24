@@ -401,7 +401,8 @@ func TestStartPlaybackV2HeaderAuthenticatedResponseCarriesNoStreamToken(t *testi
 
 // software_video_decode_v1 is attempt-sticky like header-authenticated media: a
 // replan that sends an explicit feature list cannot drop it and silently
-// convert a direct route into a transcode.
+// convert a direct route into a transcode. paused_timeout_v1 is too, or the
+// replan would turn the client's paused-timeout answer into the legacy one.
 func TestReplanPlaybackV2PinsAttemptStickyFeatures(t *testing.T) {
 	file := v3HandlerFixtureFile(t)
 	handler := newKeyedPlaybackHandler(playback.NewSessionManager(0, 0), testPlaybackFileResolver{file: file})
@@ -411,7 +412,7 @@ func TestReplanPlaybackV2PinsAttemptStickyFeatures(t *testing.T) {
 	handler.ItemAccess = allowAllPlaybackItemAccess{}
 
 	start := v3HandlerStartRequest()
-	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureSoftwareVideoDecodeV3)
+	start.ClientFeatures = append(start.ClientFeatures, playback.FeatureSoftwareVideoDecodeV3, playback.FeaturePausedTimeoutV3)
 	started := startPlayableDecisionV2(t, handler, marshalV3StartRequest(t, start))
 
 	nextContext := start.ClientPlaybackContext
@@ -438,7 +439,9 @@ func TestReplanPlaybackV2PinsAttemptStickyFeatures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, playback.FeatureSoftwareVideoDecodeV3) {
-		t.Fatalf("durable client features = %v, the software-decode opt-in was dropped", record.NormalizedRequest.ClientFeatures)
+	for _, feature := range []string{playback.FeatureSoftwareVideoDecodeV3, playback.FeaturePausedTimeoutV3} {
+		if !playback.HasFeatureV3(record.NormalizedRequest.ClientFeatures, feature) {
+			t.Fatalf("durable client features = %v, the %s opt-in was dropped", record.NormalizedRequest.ClientFeatures, feature)
+		}
 	}
 }

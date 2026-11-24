@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -83,7 +84,7 @@ func (p *staleTestProfile) staleAt() *time.Time {
 // pending reports whether the stale sweep would refresh the profile.
 func (p *staleTestProfile) pending() bool {
 	p.t.Helper()
-	stale, err := p.repo.GetStaleProfiles(context.Background(), 1000)
+	stale, err := p.repo.GetStaleProfiles(context.Background(), StaleProfilesPage{Limit: 1000})
 	if err != nil {
 		p.t.Fatalf("get stale profiles: %v", err)
 	}
@@ -175,6 +176,60 @@ func TestStaleSweepRecordsFailedRefreshesPostgres(t *testing.T) {
 	}
 	if status.Pending == 0 || status.LastRun == nil || status.LastRun.TaskKey != staleSweepTaskKey || !p.pending() {
 		t.Fatalf("stale sweep status = %+v; want the failed profile pending and the run reported", status)
+	}
+}
+
+// One sweep takes every profile marked before it started, beyond one batch,
+// and steps past a profile already queued on its server, whose mark stays at
+// the front until the queue clears it. A refresh that fails marks its profile
+// again; the sweep leaves that newer mark to the next sweep instead of taking
+// the profile again.
+func TestStaleSweepDrainsEveryMarkOncePostgres(t *testing.T) {
+	p := newStaleTestProfile(t)
+	ctx := t.Context()
+	const profiles = staleSweepBatch + 10
+	if _, err := p.pool.Exec(ctx, `
+		INSERT INTO user_taste_profiles (user_id, profile_id, embedding, updated_at, stale_at)
+		SELECT $1, 'drain-' || lpad(g::text, 3, '0'), NULL, to_timestamp(0),
+		       NOW() - interval '1 hour' + g * interval '1 millisecond'
+		FROM   generate_series(1, $2) g`, p.userID, profiles); err != nil {
+		t.Fatal(err)
+	}
+	engine := NewEngine(p.pool, nil, nil, nil, failingStoreProvider{}, config.RecommendationsConfig{})
+	w := newJobTestWorker(&fakeLocker{}, nil)
+	w.engine = engine
+	w.staleMarker = engine.repo
+	// The oldest mark is already queued on this server.
+	if !w.claimProfileRefresh(profileRefreshKey(p.userID, "drain-001")) {
+		t.Fatal("could not queue drain-001")
+	}
+	pending, err := p.repo.StaleProfileCount(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	sweepStart := p.now()
+	res, err := w.sweepStaleProfiles(ctx, nil, time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Stale != pending || res.Queued != 1 || res.Failed != pending-1 || res.OutOfTime {
+		t.Fatalf("sweep = %+v with %d pending; want each pending profile taken once, one of them queued", res, pending)
+	}
+	rows, err := p.pool.Query(ctx, `
+		SELECT profile_id FROM user_taste_profiles
+		WHERE  user_id = $1 AND profile_id LIKE 'drain-%' AND stale_at <= $2`, p.userID, sweepStart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	untaken, err := pgx.CollectRows(rows, pgx.RowTo[string])
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every refresh failed and marked its profile again, after the sweep
+	// started; only the queued profile keeps its old mark.
+	if len(untaken) != 1 || untaken[0] != "drain-001" {
+		t.Fatalf("profiles the sweep did not refresh = %v; want only the queued drain-001", untaken)
 	}
 }
 

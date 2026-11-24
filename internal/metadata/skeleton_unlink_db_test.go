@@ -44,6 +44,10 @@ func (r *interveningFolderRepo) GetByID(ctx context.Context, id int) (*models.Me
 	return &disabled, nil
 }
 
+func (r *interveningFolderRepo) ListByIDs(ctx context.Context, ids []int) ([]*models.MediaFolder, error) {
+	return r.folders.ListByIDs(ctx, ids)
+}
+
 // TestSkeletonUndoFollowsTheLinkDB checks the undo createOrFindSkeleton runs
 // when a step after its skeleton link fails: it clears exactly the link this
 // call made, even after a scan moved the row with its links (a same-title

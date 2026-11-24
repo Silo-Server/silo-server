@@ -158,6 +158,10 @@ type ImpersonationService interface {
 // AdminHandler handles admin-only HTTP endpoints for user management,
 // session listing, unmatched files, and system stats.
 type AdminHandler struct {
+	// BaseContext is the server's lifetime context for background work the
+	// handler starts, such as a Jellyfin Web install. Nil means
+	// context.Background().
+	BaseContext        context.Context //nolint:containedctx // The handler starts background work that must stop with the server, not with the request.
 	ChatGPT            *chatgpt.Service
 	userRepo           UserRepository
 	pool               *pgxpool.Pool

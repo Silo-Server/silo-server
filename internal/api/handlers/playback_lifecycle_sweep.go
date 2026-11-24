@@ -121,6 +121,7 @@ func (h *PlaybackHandler) sweepLifecycle(ctx context.Context, pool *pgxpool.Pool
 		}
 		h.sweepLifecycleCandidate(ctx, pool, c, deliveries[c.sessionID], now)
 	}
+	h.sweepPausedTimeouts(ctx, pool)
 }
 
 func loadLifecycleCandidates(ctx context.Context, pool *pgxpool.Pool, now time.Time) ([]lifecycleCandidate, error) {
@@ -382,6 +383,13 @@ func (h *PlaybackHandler) endLifecycleWith(ctx context.Context, pool *pgxpool.Po
 		}
 		return
 	}
+	// Without the attempt, the subtitle is the one the row last synced, and
+	// counts from then, or from the play's start when the row has no sync
+	// time: a finalization that ended later keeps its own.
+	subtitleAt := session.UpdatedAt
+	if subtitleAt.IsZero() {
+		subtitleAt = session.StartedAt
+	}
 	// The attempt's last accepted sample is the play's position, including a
 	// seek back past where the shared row last saw it.
 	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record != nil {
@@ -392,6 +400,7 @@ func (h *PlaybackHandler) endLifecycleWith(ctx context.Context, pool *pgxpool.Po
 		// holds the plan and frozen recipe its last replan committed.
 		if record.CurrentPlanID != "" {
 			applyAttemptPlanFacts(session, record, fromLiveRow)
+			subtitleAt = time.Time{}
 		}
 	}
 	if fill != nil {
@@ -402,7 +411,7 @@ func (h *PlaybackHandler) endLifecycleWith(ctx context.Context, pool *pgxpool.Po
 		// credits its own listening instead.
 		session.Watch.Restore(watch)
 	}
-	if err := h.recordAdminStopHistory(ctx, session, reason); err != nil {
+	if err := h.recordAdminEnd(ctx, session, reason, subtitleAt); err != nil {
 		recordLifecycleActivity(ctx, pool, sessionID, now)
 	}
 }

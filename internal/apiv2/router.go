@@ -6,12 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log/slog"
 	"maps"
 	"net/http"
 	"net/textproto"
 	"net/url"
-	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -782,11 +780,7 @@ func bufferResponse(next http.Handler) http.Handler {
 				if rec == http.ErrAbortHandler { //nolint:errorlint // sentinel compared by identity, as net/http does
 					panic(rec)
 				}
-				slog.ErrorContext(r.Context(), "apiv2 handler panic",
-					"component", "apiv2",
-					"request_id", requestIDFrom(r.Context()),
-					"panic", fmt.Sprint(rec),
-					"stack", string(debug.Stack()))
+				logHandlerPanic(r, rec)
 				bw.discard()
 				writeProblem(bw, r, NewProblem(TypeInternalError, "An unexpected error occurred."))
 			}

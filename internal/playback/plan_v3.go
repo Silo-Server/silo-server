@@ -1012,6 +1012,10 @@ type QualityResultV3 struct {
 	// ExplicitRung marks a user-selected fixed rung, as opposed to an
 	// automatic reduction from device limits, bandwidth evidence, or caps.
 	ExplicitRung bool
+	// SourceExceedsCap reports whether the original source exceeds the
+	// request's explicit bandwidth cap (or has an unknown video bitrate under
+	// one), independent of whether another limit lowered the selected rung.
+	SourceExceedsCap bool
 	// Class is the resolution class a reduction encodes at, which its frame
 	// alone does not give: a 2.67:1 film's 720p High rung and its 1080p class
 	// fitted to the box are both 1920x720. 0 when the quality keeps the
@@ -1051,7 +1055,9 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 	// cannot be shown to fit it, as with the server cap.
 	capExceededBySource := capKbps > 0 && (source.BitrateKbps > capKbps || source.BitrateKbps <= 0 && source.VideoCodec != "")
 	if rung, ok := ladderRungForLabelV3(quality); ok {
-		return compoundRungQualityResultV3(rung, source, capKbps, warnings)
+		res := compoundRungQualityResultV3(rung, source, capKbps, warnings)
+		res.SourceExceedsCap = capExceededBySource
+		return res
 	}
 	targetHeight := source.Height
 	reason := "quality_auto_source"
@@ -1172,7 +1178,7 @@ func ResolveQualityPolicyV3(request StartRequestV3, source SourceDescriptorV3) Q
 		// is a hard delivery ceiling, never advisory.
 		bitrate = capKbps
 	}
-	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, Class: class.Height, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, BudgetKbps: budgetKbps, Reason: reason, Warnings: warnings}
+	result := QualityResultV3{Label: label, Width: width, Height: effectiveHeight, Class: class.Height, BitrateKbps: bitrate, PreservesSource: !capApplied && !overEstimate && source.Height > 0 && effectiveHeight >= source.Height, ExplicitRung: explicitRung, SourceExceedsCap: capExceededBySource, BudgetKbps: budgetKbps, Reason: reason, Warnings: warnings}
 	result.RequiresTranscode = !result.PreservesSource
 	return result
 }

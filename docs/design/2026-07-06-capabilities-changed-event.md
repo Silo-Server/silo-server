@@ -2,7 +2,13 @@
 
 **Date:** 2026-07-06
 **Requested by:** Apple client team (silo-apple)
-**Status:** Proposed — server implementation needed
+**Status:** Historical — not implemented. The server does not emit
+`account.capabilities_changed`.
+
+The `/api/v1` routes this proposal names (`/api/v1/events/ws`,
+`/api/v1/downloads/capability`) are retired. The current events transport is the ticketed
+`GET /api/v2/events/ws` socket in [realtime-api.md](../realtime-api.md), which also
+documents the `access_changed` signal a socket receives when the viewer's access changes.
 
 **Note (2026-10-25):** The event hub's delivery rules have changed since this was
 written. `user_state` now reaches a connection only when the event carries both the
@@ -66,7 +72,7 @@ when in doubt publish `"all"`.
   connections receive it.
 - Server-wide setting change → publish once with no `UserID` (fan-out to all
   connected users). Verify `allowsEventForClaims` passes envelopes with
-  `UserID == 0` to non-admins — it does today (`env.UserID > 0` guard).
+  `UserID == 0` to non-admins — it did when this was written (`env.UserID > 0` guard).
 
 ## Publish sites
 

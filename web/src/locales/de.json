@@ -521,6 +521,18 @@
       "value": "Diese Wiedergabesitzung ist beendet. Starte die Wiedergabe erneut."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Die Wiedergabe wurde beendet, weil sie zu lange pausiert war. Starte die Wiedergabe erneut."
+    }
+  ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Dieser Stream wurde ersetzt. Die Wiedergabe läuft mit dem aktuellen Stream weiter."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -3652,7 +3664,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "Jetzt abspielen"
+      "value": "Nächste Folge abspielen"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -23821,6 +23833,16 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.common.catalogImportSource.exportJob": [
+    {
+      "type": 0,
+      "value": "Exportauftrag "
+    },
+    {
+      "type": 1,
+      "value": "id"
     }
   ],
   "web.admin.common.connectionCheck.check": [
@@ -67003,6 +67025,24 @@
       "value": "In Mediathek speichern"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pausierte Wiedergabe"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Pausierte Wiedergabe beenden nach"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 bis 1440. Beendet ein Video, das in einer Silo-App so lange pausiert ist, gibt seinen Stream frei und beendet, was dafür transkodiert wird; bei erneuter Wiedergabe geht es an derselben Stelle weiter. Gemeinsam schauen, Casting und Hörbücher sind nicht betroffen. 0 schaltet diese Option aus."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67475,6 +67515,12 @@
       "value": "Tage"
     }
   ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "Minuten"
+    }
+  ],
   "web.admin.settings.playback.unitSeconds": [
     {
       "type": 0,
@@ -67491,6 +67537,12 @@
     {
       "type": 0,
       "value": "Als gesehen markieren bei"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titel mit Abspann-Markierung gelten auch als gesehen, sobald die Wiedergabe den Abspann erreicht."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -73405,6 +73457,12 @@
       "value": "Software-HDR-Tone-Mapping aktivieren"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Pausierte Wiedergabe beenden nach (Minuten)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73463,6 +73521,12 @@
     {
       "type": 0,
       "value": "Markerquelle"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pausierte Wiedergabe"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -75445,6 +75509,36 @@
     {
       "type": 0,
       "value": "Aktiviere zuerst einen Anmeldeanbieter. Wäre die Anmeldung mit Passwort aus und kein Anbieter aktiv, könnten sich nur Notfall-Admins anmelden."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "8 bis 72 Zeichen. Die Regeln gelten, wenn jemand ein Passwort festlegt oder ändert; bereits festgelegte Passwörter funktionieren weiterhin."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Mindestlänge des Passworts"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Jedes Satz- oder Sonderzeichen, etwa ! oder #. Buchstaben, Ziffern und Leerzeichen zählen nicht."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Sonderzeichen verlangen"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Großbuchstaben verlangen"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -87291,6 +87385,20 @@
       "value": "Wird festgelegt…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Teile es "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " selbst mit."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -89815,10 +89923,64 @@
       "value": " erlaubt diesem Gerät nicht, sich bei diesem Server anzumelden."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mindestens "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " Zeichen."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mindestens "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " Zeichen."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Die Passwörter stimmen nicht überein."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Verwende mindestens ein Sonderzeichen, etwa ! oder #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Verwende mindestens einen Großbuchstaben."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -89831,6 +89993,48 @@
     {
       "type": 0,
       "value": "Verwende mindestens 8 Zeichen."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Verwende mindestens "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " Zeichen."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Verwende mindestens "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " Zeichen."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -102290,6 +102494,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -107520,6 +107738,104 @@
     {
       "type": 1,
       "value": "type"
+    }
+  ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "Entfernen"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "Deine Bewertung"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "Deine Bewertung der Serie"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "Keine Bewertung"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "Bewerten"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "Diesen Titel bewerten"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "Serie bewerten"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "Bewertung entfernt"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "Rückgängig"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " von 5"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "Du"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "Deine Bewertung, "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " von 5"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "Deine Bewertung der Serie, "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " von 5"
     }
   ],
   "web.detail.request.cancelRequest": [
@@ -122960,7 +123276,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "Jetzt abspielen"
+      "value": "Nächste Folge abspielen"
     }
   ],
   "web.player.nextEpisode.regionLabel": [
@@ -123781,6 +124097,12 @@
     {
       "type": 0,
       "value": "Ein Administrator hat diese Wiedergabesitzung beendet."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Die Wiedergabe wurde beendet, weil sie zu lange pausiert war."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

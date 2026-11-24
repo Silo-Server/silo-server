@@ -1,7 +1,8 @@
 import type { AdminSession } from "@/api/types";
 import { codeNumber, englishText, t, type TextValues } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
-import { formatCodecLabel } from "@/lib/mediaFormat";
+import { formatLanguage } from "@/lib/languageNames";
+import { formatCodecLabel, titleOnlyNamesAudioFormat } from "@/lib/mediaFormat";
 import { formatDecimal } from "@/lib/numberFormat";
 import { formatClock } from "@/pages/adminDownloadPreparationPresentation";
 
@@ -526,7 +527,12 @@ export function formatDeliveredVideoSummary(session: AdminSession): string {
 }
 
 export function formatAudioSummary(session: AdminSession): string {
-  const lead = session.source_audio_title?.trim() || session.source_audio_language?.trim();
+  const title = session.source_audio_title?.trim();
+  // A title that only names the format (FFprobe's codec name, stored when the
+  // stream has no title tag) repeats the format below; the language leads then.
+  const lead =
+    (title && !titleOnlyNamesAudioFormat(title) ? title : "") ||
+    formatLanguage(session.source_audio_language ?? "");
   const format = [
     formatCodec(session.source_audio_codec),
     formatChannelLayout(session.source_audio_channels),
@@ -700,26 +706,39 @@ function formatContainer(container?: string): string | null {
   return trimmed ? trimmed.toUpperCase() : null;
 }
 
+type EpisodeSession = AdminSession & {
+  series_title: string;
+  season_number: number;
+  episode_number: number;
+};
+
+export function isEpisodeSession(session: AdminSession): session is EpisodeSession {
+  return Boolean(
+    session.series_title && session.season_number != null && session.episode_number != null,
+  );
+}
+
+/**
+ * The stream's main line: the show for an episode, as other media apps do, since
+ * an episode's own title doesn't say which show it is. The subtitle carries the
+ * episode.
+ */
 export function getPlaybackSessionTitle(session: AdminSession): string {
-  if (session.series_title && session.season_number != null && session.episode_number != null) {
-    return session.media_title || `S${session.season_number}E${session.episode_number}`;
+  if (isEpisodeSession(session)) {
+    return session.series_title;
   }
   return session.media_title || t("web.common.activity.title.file", { id: session.media_file_id });
 }
 
 export function getPlaybackSessionSubtitle(session: AdminSession): string | null {
-  if (session.series_title && session.season_number != null && session.episode_number != null) {
+  if (isEpisodeSession(session)) {
     const code = t("web.detail.episodeCode", {
       season: codeNumber(session.season_number),
       episode: codeNumber(session.episode_number),
     });
-    return t("web.common.activity.subtitle.episode", {
-      code,
-      series: session.series_title,
-    });
-  }
-  if (session.media_type === "movie") {
-    return t("web.common.activity.subtitle.movie");
+    return session.media_title
+      ? t("web.common.activity.subtitle.episodeTitle", { code, title: session.media_title })
+      : code;
   }
   if (session.media_type === "series" || session.media_type === "episode") {
     return t("web.common.activity.subtitle.series");

@@ -521,6 +521,18 @@
       "value": "Deze afspeelsessie is beëindigd. Start het afspelen opnieuw."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Het afspelen is gestopt omdat het te lang gepauzeerd was. Start het afspelen opnieuw."
+    }
+  ],
+  "error.playback_transport_superseded": [
+    {
+      "type": 0,
+      "value": "Deze stream is vervangen. Het afspelen gaat verder op de huidige stream."
+    }
+  ],
   "error.precondition_failed": [
     {
       "type": 0,
@@ -3648,7 +3660,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "Nu afspelen"
+      "value": "Volgende afspelen"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -23793,6 +23805,16 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.common.catalogImportSource.exportJob": [
+    {
+      "type": 0,
+      "value": "Exportjob "
+    },
+    {
+      "type": 1,
+      "value": "id"
     }
   ],
   "web.admin.common.connectionCheck.check": [
@@ -66891,6 +66913,24 @@
       "value": "Opslaan in bibliotheek"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Gepauzeerd afspelen"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Gepauzeerd afspelen beëindigen na"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 tot 1440. Beëindigt een video die zo lang gepauzeerd is in een Silo-app, waardoor de stream en een eventuele transcodering vrijkomen; opnieuw afspelen gaat verder vanaf hetzelfde punt. Samen kijken, casten en luisterboeken worden niet beïnvloed. Met 0 zet je dit uit."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67363,6 +67403,12 @@
       "value": "dagen"
     }
   ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minuten"
+    }
+  ],
   "web.admin.settings.playback.unitSeconds": [
     {
       "type": 0,
@@ -67379,6 +67425,12 @@
     {
       "type": 0,
       "value": "Als bekeken markeren bij"
+    }
+  ],
+  "web.admin.settings.playback.watch.markWatchedDescription": [
+    {
+      "type": 0,
+      "value": "Titels met een aftitelingsmarkering tellen ook als bekeken zodra het afspelen de aftiteling bereikt."
     }
   ],
   "web.admin.settings.playback.watch.minResume": [
@@ -73233,6 +73285,12 @@
       "value": "Softwarematige HDR-tone mapping inschakelen"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Gepauzeerd afspelen beëindigen na (minuten)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73291,6 +73349,12 @@
     {
       "type": 0,
       "value": "Bron van markeringen"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Gepauzeerd afspelen"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -75277,6 +75341,36 @@
     {
       "type": 0,
       "value": "Zet eerst een provider voor inloggen aan. Met inloggen met wachtwoord uit en geen provider aan, kunnen alleen break-glass-admins inloggen."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Van 8 tot 72 tekens. De regels gelden wanneer iemand een wachtwoord kiest of wijzigt; bestaande wachtwoorden blijven werken."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Minimale wachtwoordlengte"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Elk leesteken of symbool, zoals ! of #. Letters, cijfers en spaties tellen niet mee."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Speciaal teken vereisen"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Hoofdletter vereisen"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -87107,6 +87201,20 @@
       "value": "Instellen…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Deel het zelf met "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -89623,10 +89731,64 @@
       "value": " staat niet toe dat dit apparaat inlogt op deze server."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Minimaal "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " teken."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Minimaal "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tekens."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Wachtwoorden komen niet overeen."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Gebruik minimaal één speciaal teken, zoals ! of #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Gebruik minimaal één hoofdletter."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -89639,6 +89801,48 @@
     {
       "type": 0,
       "value": "Gebruik minstens 8 tekens."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gebruik minimaal "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " teken."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gebruik minimaal "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tekens."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -102118,6 +102322,20 @@
       "value": "series"
     }
   ],
+  "web.common.activity.subtitle.episodeTitle": [
+    {
+      "type": 1,
+      "value": "code"
+    },
+    {
+      "type": 0,
+      "value": " · "
+    },
+    {
+      "type": 1,
+      "value": "title"
+    }
+  ],
   "web.common.activity.subtitle.movie": [
     {
       "type": 0,
@@ -107304,6 +107522,104 @@
     {
       "type": 1,
       "value": "type"
+    }
+  ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "Wissen"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "Je beoordeling"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "Je beoordeling van de serie"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "Geen beoordeling"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "Beoordelen"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "Dit beoordelen"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "De serie beoordelen"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "Beoordeling verwijderd"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "Ongedaan maken"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " van 5"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "Jij"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "Je beoordeling, "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " van 5"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "Je beoordeling van de serie, "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " van 5"
     }
   ],
   "web.detail.request.cancelRequest": [
@@ -122738,7 +123054,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "Nu afspelen"
+      "value": "Volgende afspelen"
     }
   ],
   "web.player.nextEpisode.regionLabel": [
@@ -123559,6 +123875,12 @@
     {
       "type": 0,
       "value": "Een beheerder heeft deze afspeelsessie beëindigd."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Het afspelen is gestopt omdat het te lang gepauzeerd was."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

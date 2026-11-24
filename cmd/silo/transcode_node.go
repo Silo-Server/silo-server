@@ -233,7 +233,9 @@ func runTranscodeNode() {
 	if streamTelemetry.Enabled() {
 		telemetrySweep = streamTelemetry.Sweep
 	}
-	reporter := nodecontrol.NewReporter(client, tracker.Snapshot, telemetrySweep)
+	reporter := nodecontrol.NewReporter(client, func() []nodesessions.SessionInfo {
+		return srv.WithStreamEnds(tracker.Snapshot())
+	}, telemetrySweep)
 	reporting := make(chan struct{})
 	go func() {
 		defer close(reporting)

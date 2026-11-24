@@ -266,17 +266,6 @@ func (w *taskWorker) reserve(ctx context.Context, maxRuntime time.Duration) (con
 	return execCtx, cancel, nil
 }
 
-// run executes the task. Returns ErrTaskAlreadyRunning if already running.
-func (w *taskWorker) run(ctx context.Context, maxRuntime time.Duration) (*ExecutionResult, error) {
-	w.scheduleMu.Lock()
-	execCtx, cancel, err := w.reserve(ctx, maxRuntime)
-	w.scheduleMu.Unlock()
-	if err != nil {
-		return nil, err
-	}
-	return w.executeReserved(execCtx, cancel), nil
-}
-
 func (w *taskWorker) executeReserved(execCtx context.Context, cancel context.CancelFunc) *ExecutionResult {
 	w.notify()
 	defer cancel()

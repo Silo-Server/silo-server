@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from "react";
 import { useEffectiveSettings } from "@/hooks/queries/settingValues";
 import { SETTING_KEYS } from "@/lib/settingsContract";
-import { onMeteredConnection } from "@/player/bandwidth-probe";
+import { playbackNetworkTier, type PlaybackNetworkTier } from "@/player/bandwidth-probe";
 import { networkInformation } from "@/player/network-information";
 import { normalizeQualityPreferenceV3 } from "@/player/protocol-v3";
 import { playbackQualitySettings } from "@/playback/playbackQualitySettings";
@@ -40,8 +40,12 @@ function subscribeToNetworkChanges(onChange: () => void): () => void {
  * Whether the current link is metered, as the player decides it at start,
  * updated when the browser reports a network or Data Saver change.
  */
-function useMeteredConnection(): boolean {
-  return useSyncExternalStore(subscribeToNetworkChanges, onMeteredConnection, () => false);
+export function usePlaybackNetworkTier(): PlaybackNetworkTier {
+  return useSyncExternalStore(
+    subscribeToNetworkChanges,
+    playbackNetworkTier,
+    () => "unmetered" as const,
+  );
 }
 
 /**
@@ -51,14 +55,14 @@ function useMeteredConnection(): boolean {
  * after the first successful settings read.
  */
 export function useQualityPreferenceState(fallback?: string | null) {
-  const metered = useMeteredConnection();
+  const tier = usePlaybackNetworkTier();
   const { data } = useEffectiveSettings({
     keys: [
       SETTING_KEYS.PLAYBACK_PREFERRED_QUALITY,
       SETTING_KEYS.PLAYBACK_CELLULAR_PREFERRED_QUALITY,
     ],
   });
-  const resolved = playbackQualitySettings(data, metered).qualityPreference;
+  const resolved = playbackQualitySettings(data, tier).qualityPreference;
   return {
     preference:
       typeof resolved === "string"

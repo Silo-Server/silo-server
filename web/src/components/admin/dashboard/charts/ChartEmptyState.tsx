@@ -46,7 +46,7 @@ export function ChartEmptyState({
       style={fill ? undefined : { minHeight: height }}
     >
       <div className="text-sm">{headline}</div>
-      {sub ? <div className="text-[11px] opacity-80">{sub}</div> : null}
+      {sub ? <div className="text-[0.6875rem] opacity-80">{sub}</div> : null}
     </div>
   );
 }

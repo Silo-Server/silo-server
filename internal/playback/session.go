@@ -1797,8 +1797,7 @@ func (m *SessionManager) EndTransport(sessionID string) error {
 // A progressive remux is a single HTTP response whose ffmpeg is owned by the
 // serving handler and canceled only by that request's context, so removing the
 // session from this manager does not reach it: an unnegotiated client would go
-// on consuming a stream the server has already disowned — for a copy-unsafe
-// source, corrupt bytes its decoder cannot recover from. This is the smallest
+// on consuming a stream the server has already disowned. This is the smallest
 // handle that lets a stop interrupt one. Segmented transports (HLS, transcode)
 // do not need it: each of their requests is short, and the next one is refused
 // once the session is gone.
@@ -1994,7 +1993,7 @@ func (m *SessionManager) FinishDetached(ctx context.Context, s Session) {
 const PositionUnknown = -1
 
 // EndReasonReplaced is the end reason of a session another one replaced
-// mid-play: a Jellyfin client switched play method.
+// mid-play: a Jellyfin client switched play method or media source.
 const EndReasonReplaced = "replaced"
 
 type endReasonKey struct{}
@@ -2032,6 +2031,31 @@ func (m *SessionManager) GetSession(sessionID string) (*Session, error) {
 	// Return a copy to avoid races.
 	cp := *s
 	return &cp, nil
+}
+
+// RemoteTranscode returns the node URL, media file and start time of the
+// session whose remote transcode runs as transportID (its
+// TranscodeTransportID, or its ID when that is empty), when this server holds
+// it. A transport ID begins with
+// its session's 36-character UUID (see transportGenerationV3 in
+// internal/api/handlers).
+func (m *SessionManager) RemoteTranscode(transportID string) (nodeURL string, mediaFileID int, startedAt time.Time, ok bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, id := range []string{transportID, transportID[:min(len(transportID), 36)]} {
+		s, found := m.sessions[id]
+		if !found || s.TranscodeNodeURL == "" {
+			continue
+		}
+		transport := s.TranscodeTransportID
+		if transport == "" {
+			transport = s.ID
+		}
+		if transport == transportID {
+			return s.TranscodeNodeURL, s.MediaFileID, s.StartedAt, true
+		}
+	}
+	return "", 0, time.Time{}, false
 }
 
 // GetUserSessions returns all active sessions for a user.

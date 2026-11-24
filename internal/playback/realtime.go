@@ -67,10 +67,11 @@ const (
 	CommandSetSubtitleTrack   CommandName = "set_subtitle_track"
 	// CommandPlanInvalidated tells a playing client that the plan it is running
 	// can no longer serve this source, so it must replan off that plan. It is
-	// the first server-initiated control push in the v3 protocol, and it is only
-	// sent to a session whose attempt negotiated FeaturePlanInvalidatedV3 and
-	// which has a live realtime connection; every other session is stopped
-	// instead. See CopySafetyNotifier.
+	// the first server-initiated control push in the v3 protocol, and it may
+	// only be sent to a session whose attempt negotiated
+	// FeaturePlanInvalidatedV3 and which has a live realtime connection; every
+	// other session is stopped instead. No server path sends it today (see
+	// §6.1 of the v3 protocol doc).
 	CommandPlanInvalidated CommandName = "plan_invalidated"
 )
 
@@ -499,9 +500,9 @@ type CommandIssuedBy struct {
 
 // PlanInvalidationReason values a plan_invalidated command can carry.
 const (
-	// PlanInvalidatedVideoCopyUnsafe means the asynchronous H.264 copy-safety
-	// scan came back multi-PPS after the plan was already playing, so the video
-	// stream-copy route it named cannot serve this source.
+	// PlanInvalidatedVideoCopyUnsafe means the H.264 copy-safety scan came back
+	// multi-PPS after the plan was already playing. The server no longer
+	// withdraws a copy for it; the value stays part of the wire contract.
 	PlanInvalidatedVideoCopyUnsafe = "video_copy_unsafe"
 )
 

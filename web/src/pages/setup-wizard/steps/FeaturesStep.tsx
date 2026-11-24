@@ -11,6 +11,7 @@ import { MARKER_SHARING_DISCLOSURE_KEY } from "@/lib/markers";
 import { EmbeddingProviderField } from "@/pages/admin-settings/AIProviders";
 import { ModelField } from "@/pages/admin-settings/AIModelField";
 import { SettingField } from "@/pages/admin-settings/SettingField";
+import { markerSources, useMarkerSourceDraft } from "@/pages/admin-settings/useMarkerSourceDraft";
 
 import { StepFrame, StepSection, StepSkeleton } from "../StepFrame";
 import { useStepSubmit, useStepSummary } from "../useStep";
@@ -27,10 +28,12 @@ const MARKER_KEYS = [
   SHARE_MARKERS_KEY,
 ];
 
+const SERVER_BANDWIDTH_KEY = "download.server_bandwidth_mbps";
+const USER_BANDWIDTH_KEY = "download.user_bandwidth_mbps";
 const DOWNLOAD_KEYS = [
   "download.enabled",
-  "download.server_bandwidth_mbps",
-  "download.user_bandwidth_mbps",
+  SERVER_BANDWIDTH_KEY,
+  USER_BANDWIDTH_KEY,
   "download.max_concurrent_per_user",
 ];
 
@@ -64,11 +67,20 @@ export function FeaturesStep() {
   const pushEnabled =
     form.getValue(APPLE_PUSH_KEY) === "true" || form.getValue(ANDROID_PUSH_KEY) === "true";
   const downloadsEnabled = form.getValue("download.enabled") === "true";
+  // A field hidden by the switch above it stays in view, marked as changed,
+  // while it holds an unsaved edit, so Continue never saves a value the admin
+  // can't see.
+  const serverBandwidthKept = !downloadsEnabled && form.isDirty(SERVER_BANDWIDTH_KEY);
+  const userBandwidthKept = !downloadsEnabled && form.isDirty(USER_BANDWIDTH_KEY);
   const recsEnabled = form.getValue("recommendations.enabled") === "true";
+  const embeddingProviderKept = !recsEnabled && form.isDirty(EMBEDDING_PROVIDER_KEY);
+  const embeddingModelKept = !recsEnabled && form.isDirty(EMBEDDING_MODEL_KEY);
   const markerMode = form.getValue("markers.mode");
-  const onlineMarkersEnabled = markerMode === "online" || markerMode === "both";
-  const localMarkersEnabled = markerMode === "local" || markerMode === "both";
+  const { online: onlineMarkersEnabled, local: localMarkersEnabled } = markerSources(markerMode);
   const onlineMarkerStorage = form.getValue("markers.online_storage") || "stored";
+  // The storage choice stays in view while it holds an edit, after online
+  // markers are turned off.
+  const onlineStorageKept = !onlineMarkersEnabled && form.isDirty("markers.online_storage");
   // Unset reads as on, the default the effect above stages.
   const shareMarkers = form.getValue(SHARE_MARKERS_KEY) !== "false";
 
@@ -85,23 +97,32 @@ export function FeaturesStep() {
     enabledFeatures.length ? enabledFeatures.join(", ") : t("web.setup.features.summaryNone"),
   );
 
+  // Switching back to how the switch read when saved takes both keys back,
+  // rather than writing a platform whose saved value differs.
+  const savedPushEnabled =
+    form.getPersistedValue(APPLE_PUSH_KEY) === "true" ||
+    form.getPersistedValue(ANDROID_PUSH_KEY) === "true";
   function setPush(value: boolean) {
-    form.setValue(APPLE_PUSH_KEY, String(value));
-    form.setValue(ANDROID_PUSH_KEY, String(value));
+    for (const key of [APPLE_PUSH_KEY, ANDROID_PUSH_KEY]) {
+      if (value === savedPushEnabled) form.resetValue(key);
+      else form.setValue(key, String(value));
+    }
   }
+
+  // This step has no lazy playback row: the value only ever comes with a
+  // marker switch or the storage choice, and is taken back with them.
+  const markerDraft = useMarkerSourceDraft(form, { modeStagesLazyPlayback: true });
 
   function setOnlineMarkers(enabled: boolean) {
     let nextMode = enabled ? "online" : "off";
     if (localMarkersEnabled) nextMode = enabled ? "both" : "local";
-    form.setValue("markers.mode", nextMode);
-    if (enabled || !localMarkersEnabled) form.setValue("markers.lazy_playback", String(enabled));
+    markerDraft.setMarkerMode(nextMode);
   }
 
   function setLocalMarkers(enabled: boolean) {
     let nextMode = enabled ? "local" : "off";
     if (onlineMarkersEnabled) nextMode = enabled ? "both" : "online";
-    form.setValue("markers.mode", nextMode);
-    if (enabled || !onlineMarkersEnabled) form.setValue("markers.lazy_playback", String(enabled));
+    markerDraft.setMarkerMode(nextMode);
   }
 
   if (form.isPending) return <StepSkeleton rows={4} />;
@@ -140,9 +161,10 @@ export function FeaturesStep() {
           value={onlineMarkersEnabled ? "true" : "false"}
           onChange={(value) => setOnlineMarkers(value === "true")}
         />
-        {onlineMarkersEnabled ? (
+        {onlineMarkersEnabled || onlineStorageKept ? (
           <SettingField
             label={t("web.setup.features.storageLabel")}
+            dirty={onlineStorageKept}
             type="select"
             description={
               onlineMarkerStorage === "stored"
@@ -154,10 +176,7 @@ export function FeaturesStep() {
               { value: "on_demand", label: t("web.setup.features.storageOnDemand") },
             ]}
             value={onlineMarkerStorage}
-            onChange={(value) => {
-              form.setValue("markers.online_storage", value);
-              if (value === "on_demand") form.setValue("markers.lazy_playback", "true");
-            }}
+            onChange={markerDraft.setOnlineStorage}
           />
         ) : null}
         <SettingField
@@ -207,26 +226,28 @@ export function FeaturesStep() {
           value={downloadsEnabled ? "true" : "false"}
           onChange={(v) => form.setValue("download.enabled", v)}
         />
-        {downloadsEnabled ? (
-          <>
-            <SettingField
-              label={t("web.setup.features.serverBandwidthLabel")}
-              type="number"
-              unit={t("web.setup.features.mbps")}
-              description={t("web.setup.features.serverBandwidthDescription")}
-              value={form.getValue("download.server_bandwidth_mbps")}
-              onChange={(v) => form.setValue("download.server_bandwidth_mbps", v)}
-            />
-            <SettingField
-              label={t("web.setup.features.userBandwidthLabel")}
-              type="number"
-              unit={t("web.setup.features.mbps")}
-              description={t("web.setup.features.userBandwidthDescription")}
-              value={form.getValue("download.user_bandwidth_mbps")}
-              onChange={(v) => form.setValue("download.user_bandwidth_mbps", v)}
-            />
-          </>
-        ) : null}
+        {(downloadsEnabled || serverBandwidthKept) && (
+          <SettingField
+            label={t("web.setup.features.serverBandwidthLabel")}
+            dirty={serverBandwidthKept}
+            type="number"
+            unit={t("web.setup.features.mbps")}
+            description={t("web.setup.features.serverBandwidthDescription")}
+            value={form.getValue(SERVER_BANDWIDTH_KEY)}
+            onChange={(v) => form.setValue(SERVER_BANDWIDTH_KEY, v)}
+          />
+        )}
+        {(downloadsEnabled || userBandwidthKept) && (
+          <SettingField
+            label={t("web.setup.features.userBandwidthLabel")}
+            dirty={userBandwidthKept}
+            type="number"
+            unit={t("web.setup.features.mbps")}
+            description={t("web.setup.features.userBandwidthDescription")}
+            value={form.getValue(USER_BANDWIDTH_KEY)}
+            onChange={(v) => form.setValue(USER_BANDWIDTH_KEY, v)}
+          />
+        )}
         <SettingField
           label={t("web.setup.features.recommendations")}
           type="toggle"
@@ -237,30 +258,38 @@ export function FeaturesStep() {
         />
       </StepSection>
 
-      {recsEnabled ? (
+      {recsEnabled || embeddingProviderKept || embeddingModelKept ? (
         <StepSection title={t("web.setup.features.providerTitle")}>
-          <EmbeddingProviderField
-            value={embeddingProviderID}
-            onChange={(id) => form.setValue(EMBEDDING_PROVIDER_KEY, id)}
-            managedByEnv={form.envVar(EMBEDDING_PROVIDER_KEY)}
-          />
-          <ModelField
-            label={t("web.setup.features.modelLabel")}
-            providerID={embeddingProviderID}
-            kind="embeddings"
-            value={form.getValue(EMBEDDING_MODEL_KEY)}
-            onChange={(v) => form.setValue(EMBEDDING_MODEL_KEY, v)}
-            managedByEnv={form.envVar(EMBEDDING_MODEL_KEY)}
-            // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- example model identifier
-            placeholder="gemini-embedding-001"
-          />
-          <ConnectionCheckAction
-            onClick={recsCheck.run}
-            result={recsCheck.result}
-            isPending={recsCheck.isPending}
-            disabled={busy}
-            label={t("web.setup.wizard.checkConnection")}
-          />
+          {(recsEnabled || embeddingProviderKept) && (
+            <EmbeddingProviderField
+              value={embeddingProviderID}
+              dirty={embeddingProviderKept}
+              onChange={(id) => form.setValue(EMBEDDING_PROVIDER_KEY, id)}
+              managedByEnv={form.envVar(EMBEDDING_PROVIDER_KEY)}
+            />
+          )}
+          {(recsEnabled || embeddingModelKept) && (
+            <ModelField
+              label={t("web.setup.features.modelLabel")}
+              dirty={embeddingModelKept}
+              providerID={embeddingProviderID}
+              kind="embeddings"
+              value={form.getValue(EMBEDDING_MODEL_KEY)}
+              onChange={(v) => form.setValue(EMBEDDING_MODEL_KEY, v)}
+              managedByEnv={form.envVar(EMBEDDING_MODEL_KEY)}
+              // eslint-disable-next-line formatjs/no-literal-string-in-jsx -- example model identifier
+              placeholder="gemini-embedding-001"
+            />
+          )}
+          {recsEnabled ? (
+            <ConnectionCheckAction
+              onClick={recsCheck.run}
+              result={recsCheck.result}
+              isPending={recsCheck.isPending}
+              disabled={busy}
+              label={t("web.setup.wizard.checkConnection")}
+            />
+          ) : null}
         </StepSection>
       ) : null}
     </StepFrame>

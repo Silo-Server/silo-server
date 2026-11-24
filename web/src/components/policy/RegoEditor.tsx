@@ -12,7 +12,7 @@ import { useT } from "@/i18n";
 
 const editorTheme = EditorView.theme({
   "&": {
-    fontSize: "13px",
+    fontSize: "0.8125rem",
   },
   ".cm-content": {
     fontFamily:

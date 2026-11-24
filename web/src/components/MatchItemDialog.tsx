@@ -169,6 +169,7 @@ export default function MatchItemDialog({
 
   const searchMutation = useSearchItemMatchCandidates(item.content_id);
   const applyMutation = useApplyItemMatch();
+  const searchDisabled = searchMutation.isPending || searchBlocked || hintsLoading;
 
   // Results found under another library's settings do not apply to this one,
   // e.g. after a split left the item in a single library.
@@ -295,7 +296,7 @@ export default function MatchItemDialog({
                 {t("web.item.dialog.yearInParens", { year: item.year })}
               </span>
             ) : null}
-            <Badge variant="secondary" className="ms-2 text-[10px]">
+            <Badge variant="secondary" className="ms-2 text-[0.625rem]">
               {item.type}
             </Badge>
           </div>
@@ -321,123 +322,128 @@ export default function MatchItemDialog({
             ))}
 
           {/* Search inputs */}
-          <div className="grid shrink-0 grid-cols-2 gap-3">
-            <div className="col-span-2">
-              <Label htmlFor="match-title">{t("web.item.dialog.fieldTitle")}</Label>
-              <Input
-                id="match-title"
-                value={title}
-                onChange={editField(setTitle)}
-                placeholder={t("web.item.dialog.fieldTitle")}
-              />
-            </div>
-            <div>
-              <Label htmlFor="match-year">{t("web.item.dialog.fieldYear")}</Label>
-              <Input
-                id="match-year"
-                value={year}
-                onChange={editField(setYear)}
-                placeholder={t("web.item.dialog.fieldYear")}
-                type="number"
-              />
-            </div>
-            {showVideoExternalIds ? (
-              <>
-                <div>
-                  <Label htmlFor="match-imdb">{t("web.item.dialog.imdbId")}</Label>
-                  <Input
-                    id="match-imdb"
-                    value={imdbId}
-                    onChange={editField(setImdbId)}
-                    placeholder={EXAMPLE_IMDB_ID}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="match-tmdb">{t("web.item.dialog.tmdbId")}</Label>
-                  <Input
-                    id="match-tmdb"
-                    value={tmdbId}
-                    onChange={editField(setTmdbId)}
-                    placeholder={EXAMPLE_NUMERIC_ID}
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="match-tvdb">{t("web.item.dialog.tvdbId")}</Label>
-                  <Input
-                    id="match-tvdb"
-                    value={tvdbId}
-                    onChange={editField(setTvdbId)}
-                    placeholder={EXAMPLE_NUMERIC_ID}
-                  />
-                </div>
-              </>
-            ) : (
-              <div className="col-span-2 space-y-2">
-                <Label>{t("web.item.match.providerIds")}</Label>
-                {providerIdInputs.map((entry, index) => (
-                  <div
-                    key={entry.id}
-                    className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_2rem] gap-2"
-                  >
+          <form
+            className="contents"
+            noValidate
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!searchDisabled) handleSearch();
+            }}
+          >
+            <div className="grid shrink-0 grid-cols-2 gap-3">
+              <div className="col-span-2">
+                <Label htmlFor="match-title">{t("web.item.dialog.fieldTitle")}</Label>
+                <Input
+                  id="match-title"
+                  value={title}
+                  onChange={editField(setTitle)}
+                  placeholder={t("web.item.dialog.fieldTitle")}
+                />
+              </div>
+              <div>
+                <Label htmlFor="match-year">{t("web.item.dialog.fieldYear")}</Label>
+                <Input
+                  id="match-year"
+                  value={year}
+                  onChange={editField(setYear)}
+                  placeholder={t("web.item.dialog.fieldYear")}
+                  type="number"
+                />
+              </div>
+              {showVideoExternalIds ? (
+                <>
+                  <div>
+                    <Label htmlFor="match-imdb">{t("web.item.dialog.imdbId")}</Label>
                     <Input
-                      value={entry.provider}
-                      onChange={(e) => updateProviderIdInput(index, "provider", e.target.value)}
-                      placeholder={EXAMPLE_PROVIDER}
-                      aria-label={t("web.item.match.provider")}
+                      id="match-imdb"
+                      value={imdbId}
+                      onChange={editField(setImdbId)}
+                      placeholder={EXAMPLE_IMDB_ID}
                     />
-                    <Input
-                      value={entry.value}
-                      onChange={(e) => updateProviderIdInput(index, "value", e.target.value)}
-                      placeholder={EXAMPLE_PROVIDER_ID}
-                      aria-label={t("web.item.match.providerId")}
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="h-9 w-9"
-                      onClick={() => removeProviderIdInput(index)}
-                      disabled={providerIdInputs.length === 1 && !entry.provider && !entry.value}
-                      aria-label={t("web.item.match.removeProviderId")}
-                      title={t("web.item.match.removeProviderId")}
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
                   </div>
-                ))}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-9 w-9"
-                  onClick={addProviderIdInput}
-                  aria-label={t("web.item.match.addProviderId")}
-                  title={t("web.item.match.addProviderId")}
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
+                  <div>
+                    <Label htmlFor="match-tmdb">{t("web.item.dialog.tmdbId")}</Label>
+                    <Input
+                      id="match-tmdb"
+                      value={tmdbId}
+                      onChange={editField(setTmdbId)}
+                      placeholder={EXAMPLE_NUMERIC_ID}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="match-tvdb">{t("web.item.dialog.tvdbId")}</Label>
+                    <Input
+                      id="match-tvdb"
+                      value={tvdbId}
+                      onChange={editField(setTvdbId)}
+                      placeholder={EXAMPLE_NUMERIC_ID}
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="col-span-2 space-y-2">
+                  <Label>{t("web.item.match.providerIds")}</Label>
+                  {providerIdInputs.map((entry, index) => (
+                    <div
+                      key={entry.id}
+                      className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_2rem] gap-2"
+                    >
+                      <Input
+                        value={entry.provider}
+                        onChange={(e) => updateProviderIdInput(index, "provider", e.target.value)}
+                        placeholder={EXAMPLE_PROVIDER}
+                        aria-label={t("web.item.match.provider")}
+                      />
+                      <Input
+                        value={entry.value}
+                        onChange={(e) => updateProviderIdInput(index, "value", e.target.value)}
+                        placeholder={EXAMPLE_PROVIDER_ID}
+                        aria-label={t("web.item.match.providerId")}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9"
+                        onClick={() => removeProviderIdInput(index)}
+                        disabled={providerIdInputs.length === 1 && !entry.provider && !entry.value}
+                        aria-label={t("web.item.match.removeProviderId")}
+                        title={t("web.item.match.removeProviderId")}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-9 w-9"
+                    onClick={addProviderIdInput}
+                    aria-label={t("web.item.match.addProviderId")}
+                    title={t("web.item.match.addProviderId")}
+                  >
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+              )}
+            </div>
+
+            {needsLibraryPick && (
+              <div className="shrink-0">
+                <ItemLibraryPicker
+                  libraryIds={itemLibraryIds}
+                  value={currentPick}
+                  onChange={pickLibrary}
+                />
               </div>
             )}
-          </div>
 
-          {needsLibraryPick && (
-            <div className="shrink-0">
-              <ItemLibraryPicker
-                libraryIds={itemLibraryIds}
-                value={currentPick}
-                onChange={pickLibrary}
-              />
-            </div>
-          )}
-
-          <Button
-            onClick={handleSearch}
-            disabled={searchMutation.isPending || searchBlocked || hintsLoading}
-            className="w-full shrink-0 gap-2"
-          >
-            <Search className={cn("h-4 w-4", searchMutation.isPending && "animate-spin")} />
-            {t("web.item.dialog.search")}
-          </Button>
+            <Button type="submit" disabled={searchDisabled} className="w-full shrink-0 gap-2">
+              <Search className={cn("h-4 w-4", searchMutation.isPending && "animate-spin")} />
+              {t("web.item.dialog.search")}
+            </Button>
+          </form>
 
           {searchResults?.truncated && (
             <p className="text-muted-foreground text-sm">{t("web.item.match.truncated")}</p>
@@ -524,19 +530,19 @@ export default function MatchItemDialog({
                           </div>
                           <div className="mt-1 flex min-w-0 flex-wrap gap-1">
                             {candidate.match_score !== undefined ? (
-                              <Badge variant="secondary" className="text-[10px] tabular-nums">
+                              <Badge variant="secondary" className="text-[0.625rem] tabular-nums">
                                 {t("web.item.match.score", {
                                   score: formatDecimal(candidate.match_score, 1),
                                 })}
                               </Badge>
                             ) : null}
                             {candidate.sources.map((source) => (
-                              <Badge key={source} variant="outline" className="text-[10px]">
+                              <Badge key={source} variant="outline" className="text-[0.625rem]">
                                 {source}
                               </Badge>
                             ))}
                             {candidate.sources.length > 1 && (
-                              <Badge variant="secondary" className="text-[10px]">
+                              <Badge variant="secondary" className="text-[0.625rem]">
                                 {t("web.item.match.sourcesAgree", {
                                   count: candidate.sources.length,
                                 })}
@@ -650,7 +656,7 @@ function FolderPathsList({ paths }: { paths: string[] }) {
       <div className="bg-background/70 rounded-lg border">
         {folderData.rootPath ? (
           <div className="border-b px-3 py-2">
-            <div className="text-muted-foreground mb-1 text-[11px] font-medium tracking-[0.08em] uppercase">
+            <div className="text-muted-foreground mb-1 text-[0.6875rem] font-medium tracking-[0.08em] uppercase">
               {t("web.item.match.rootPath")}
             </div>
             <div className="flex items-center gap-2">

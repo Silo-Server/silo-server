@@ -40,8 +40,8 @@ function when(iso: string) {
 function Cell({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div className="grid content-start gap-1 px-4 py-3">
-      <span className="text-muted-foreground text-[12.5px]">{label}</span>
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[14px]">{children}</div>
+      <span className="text-muted-foreground text-[0.78125rem]">{label}</span>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[0.875rem]">{children}</div>
     </div>
   );
 }
@@ -88,7 +88,7 @@ export function SyncStatusBlock({
           className={cn("size-2 rounded-full", STATUS_DOT[sync.status] ?? "bg-muted-foreground")}
         />
         <b className="font-semibold">{syncedAgo(sync.lastAt)}</b>
-        <span className="text-muted-foreground text-[12.5px]">
+        <span className="text-muted-foreground text-[0.78125rem]">
           {t("web.collections.metaLine.titleCount", {
             count: itemCount,
             shown: itemCount.toLocaleString(formatLocale()),
@@ -127,7 +127,7 @@ export function SyncStatusBlock({
       <p
         id={`${id}-why`}
         hidden={!explaining}
-        className="bg-muted/50 rounded-xl px-3 py-2.5 text-[13px]"
+        className="bg-muted/50 rounded-xl px-3 py-2.5 text-[0.8125rem]"
       >
         {skippedExplanation(skipped, libraryNames, canSync)}
       </p>
@@ -159,7 +159,7 @@ export function SyncFailedCallout({
   return (
     <div
       role="alert"
-      className="border-destructive/50 bg-destructive/10 flex flex-wrap items-start gap-3 rounded-xl border px-3.5 py-3 text-[13.5px]"
+      className="border-destructive/50 bg-destructive/10 flex flex-wrap items-start gap-3 rounded-xl border px-3.5 py-3 text-[0.84375rem]"
     >
       <AlertCircle aria-hidden className="text-destructive mt-0.5 size-4 shrink-0" />
       <p className="min-w-0 flex-1">
@@ -178,7 +178,7 @@ export function SyncFailedCallout({
         </Button>
       ) : null}
       {onSyncNow && saveFirst ? (
-        <p className="text-muted-foreground w-full text-[12.5px]">{saveBeforeSync()}</p>
+        <p className="text-muted-foreground w-full text-[0.78125rem]">{saveBeforeSync()}</p>
       ) : null}
     </div>
   );

@@ -11,6 +11,7 @@ import {
 import type { VideoFitMode } from "../types";
 import { PlayerMenuSurface } from "./PlayerMenuSurface";
 import { numberText, useT } from "@/i18n";
+import { cn } from "@/lib/utils";
 
 /** Decorative separator between values; not text, so not translated. */
 const SEPARATOR = "·";
@@ -39,22 +40,30 @@ export function TitleBlock({
    */
   times?: { elapsed: string; total?: string };
 }) {
-  const meta = [subtitleLabel, chapterTitle, times ? null : endsAt].filter((part): part is string =>
-    Boolean(part),
-  );
+  // The chapter title is metadata and reads in its own direction.
+  const meta = [
+    { text: subtitleLabel },
+    { text: chapterTitle, isTitle: true },
+    { text: times ? null : endsAt },
+  ].filter((part): part is { text: string; isTitle?: boolean } => Boolean(part.text));
   return (
     <div className="player-compact-metadata flex min-w-0 flex-1 flex-col gap-1">
       {title ? (
-        <div className="hud-title truncate" title={title}>
+        <div dir="auto" className="hud-title bidi-text truncate" title={title}>
           {title}
         </div>
       ) : null}
       {meta.length > 0 ? (
-        <div className="hud-meta" title={meta.join(` ${SEPARATOR} `)}>
+        <div className="hud-meta" title={meta.map((part) => part.text).join(` ${SEPARATOR} `)}>
           {meta.map((part, index) => (
             <span key={index} className="flex min-w-0 items-center gap-2">
               {index > 0 ? <span aria-hidden="true" className="hud-dot" /> : null}
-              <span className={index === 0 ? "shrink-0" : "truncate"}>{part}</span>
+              <span
+                dir={part.isTitle ? "auto" : undefined}
+                className={cn(index === 0 ? "shrink-0" : "truncate", part.isTitle && "bidi-text")}
+              >
+                {part.text}
+              </span>
             </span>
           ))}
         </div>

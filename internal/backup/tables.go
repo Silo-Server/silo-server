@@ -36,9 +36,15 @@ var liveTables = []string{"policy_documents", "policy_document_versions"}
 var loggedTables = []string{"activity_log", "operational_logs", "policy_decisions", "catalog_search_index_events", tableIntroFingerprints,
 	// Upload sessions: their parts live outside the backup.
 	"backup_uploads", "backup_upload_parts", "backup_upload_attempts",
+	// Leases of task runs in progress, the backup's own among them: a
+	// restored lease would record a run of the backed-up server as interrupted.
+	"task_execution_leases",
 	// Provisioning status and placement from the current deployment must not
 	// be replayed by a restored backup.
-	tablePluginProvisionStatus, "plugin_provision_placement"}
+	tablePluginProvisionStatus, "plugin_provision_placement",
+	// Plugin builds for other platforms: a server fetches its own again
+	// from the catalog.
+	"plugin_platform_archives"}
 
 const tableIntroFingerprints = "media_intro_fingerprints"
 
@@ -78,7 +84,7 @@ var restoredDataTables = strings.Fields(`
 
 // serverStateTables describe the running server rather than its data.
 var serverStateTables = strings.Fields(`
-	abs_author_counts_refresh admin_dashboard_layout_revisions audiobook_group_stats_refresh admin_jobs anime_ids_refresh backup_restore_items
+	abs_author_counts_refresh admin_dashboard_layout_revisions attachment_bitrate_backfill_state audiobook_group_stats_refresh admin_jobs anime_ids_refresh backup_restore_items
 	api_client_usage_hourly artwork_revision_gc_candidates artwork_revision_gc_dormant_cursor
 	audiobook_item_file_stats autoscan_events autoscan_webhook_deliveries blob_gc_queue
 	catalog_item_change_drain catalog_item_change_events catalog_search_index_state

@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { RefreshCw } from "lucide-react";
 import { formatJobProgress, jobStatusLabel } from "./adminCatalogMaintenanceFormatters";
+import { PathText } from "@/components/PathText";
 import { formatDateTime } from "@/lib/datetime";
 import { numberText, useT, type MessageKey, type Translate } from "@/i18n";
 
@@ -66,12 +67,17 @@ function jobDescription(job: AdminJob, t: Translate) {
         return t("web.admin.common.jobHistory.target.libraryCount", countValues(ids.length));
       return t("web.admin.common.jobHistory.target.allLibraries");
     }
-    case "catalog_import":
-      return (
-        (payload.source_label as string) ||
-        (payload.source_key as string) ||
+    case "catalog_import": {
+      // The server's label: the remote URL, a file name, or "Export job <id>", untranslated.
+      const label = payload.source_label as string | undefined;
+      return label ? (
+        <bdi dir="ltr">
+          <PathText path={label} />
+        </bdi>
+      ) : (
         t("web.admin.common.jobHistory.target.catalogSeed")
       );
+    }
     default:
       return "";
   }

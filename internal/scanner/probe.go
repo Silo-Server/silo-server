@@ -484,12 +484,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 		pd.Duration = duration
 	}
 
-	// Parse bitrate from format (bps to kbps).
-	if raw.Format.BitRate != "" {
-		if br, err := strconv.Atoi(raw.Format.BitRate); err == nil {
-			pd.Bitrate = br / 1000
-		}
-	}
+	pd.Bitrate = formatBitrateKbps(raw)
 
 	for _, s := range raw.Streams {
 		switch s.CodecType {
@@ -644,7 +639,37 @@ const (
 	// container rounds to its last block, which can differ by a few seconds.
 	trackSpanToleranceSeconds  = 5
 	trackSpanRelativeTolerance = 0.01
+	// trackSpanShortfallSeconds is how far video and audio may fall short of
+	// the container before their span replaces it. It is far below the
+	// tolerance: a transcode's playlist lists two-second segments to the
+	// stored duration, and every one past the streams' end is a segment
+	// FFmpeg never writes.
+	trackSpanShortfallSeconds = 1
 )
+
+// formatBitrateKbps is the container's overall bitrate without attachments.
+// Matroska has no bitrate field, so FFmpeg derives bit_rate from the file
+// size and duration, which counts attached files such as the fonts fansub
+// releases embed. Those are read once at load, not streamed, and counting
+// them can double a file's rate and push it past a client's bandwidth limit.
+func formatBitrateKbps(raw *ffprobeOutput) int {
+	bps, err := strconv.ParseInt(raw.Format.BitRate, 10, 64)
+	if err != nil || bps <= 0 {
+		return 0
+	}
+	var attachmentBytes int64
+	for _, s := range raw.Streams {
+		if s.CodecType == "attachment" && s.ExtradataSize > 0 {
+			attachmentBytes += s.ExtradataSize
+		}
+	}
+	if duration := parseFloat(raw.Format.Duration); attachmentBytes > 0 && durationIsPositiveFinite(duration) {
+		if streamBps := bps - int64(float64(attachmentBytes)*8/duration); streamBps > 0 {
+			bps = streamBps
+		}
+	}
+	return int(bps / 1000)
+}
 
 func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	if raw == nil {
@@ -658,7 +683,10 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 	}
 	if durationIsReasonable(formatDuration) && !durationLooksImplausible(raw, formatDuration) {
 		if span, ok := audioVideoSpan(raw, formatDuration); ok && !durationLooksImplausible(raw, span) {
-			return truncatedDuration(span), true
+			// Rounded up: the container's length no longer covers a partial
+			// last second, and truncating it would drop that segment from a
+			// transcode's playlist.
+			return int(math.Ceil(span)), true
 		}
 		return truncatedDuration(formatDuration), true
 	}
@@ -695,8 +723,8 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 // previews, runtime, progress) then reaches past the end of the video.
 //
 // It answers only when every primary video and audio track reports a
-// length, the longest falls short of formatDuration by more than the
-// tolerance, and another track's own length accounts for formatDuration. A
+// length, the longest falls short of formatDuration by more than a second,
+// and another track that ends after them accounts for formatDuration. A
 // missing or unparseable length is unknown, not short, and the last
 // condition keeps track lengths that understate the media (stale Matroska
 // statistics tags) from shortening a file on their own: with nothing else
@@ -710,8 +738,11 @@ func durationFromProbeMetadata(raw *ffprobeOutput) (int, bool) {
 func audioVideoSpan(raw *ffprobeOutput, formatDuration float64) (float64, bool) {
 	tolerance := max(trackSpanToleranceSeconds, formatDuration*trackSpanRelativeTolerance)
 	formatStart := parseFloat(raw.Format.StartTime)
-	var audioVideo float64
-	hasVideo, accounted := false, false
+	// accountedEnd is the latest end among the tracks that account for the
+	// container duration, and nearEnd the latest among those that end within
+	// trackSpanToleranceSeconds of it.
+	var audioVideo, accountedEnd, nearEnd float64
+	hasVideo := false
 	for _, stream := range raw.Streams {
 		length, known := trackLength(stream)
 		end := max(0, parseFloat(stream.StartTime)-formatStart) + length
@@ -724,12 +755,23 @@ func audioVideoSpan(raw *ffprobeOutput, formatDuration float64) (float64, bool) 
 			audioVideo = max(audioVideo, end)
 		case stream.CodecType == "video":
 			// Attached pictures carry no timeline.
-		case known:
-			accounted = accounted || math.Abs(formatDuration-length) <= tolerance ||
-				math.Abs(formatDuration-end) <= tolerance
+		case known && (math.Abs(formatDuration-length) <= tolerance || math.Abs(formatDuration-end) <= tolerance):
+			accountedEnd = max(accountedEnd, end)
+			if math.Abs(formatDuration-end) <= trackSpanToleranceSeconds {
+				nearEnd = max(nearEnd, end)
+			}
 		}
 	}
-	if !hasVideo || !accounted || !durationIsPositiveFinite(audioVideo) || formatDuration-audioVideo <= tolerance {
+	shortfall := formatDuration - audioVideo
+	if !hasVideo || accountedEnd <= audioVideo || !durationIsPositiveFinite(audioVideo) || shortfall <= trackSpanShortfallSeconds {
+		return 0, false
+	}
+	// A shortfall inside the tolerance needs a track that ends with the
+	// container, within 5 s before or after it, not just within the relative
+	// tolerance (72 s on a two-hour file): otherwise video and audio tags
+	// that understate a long file by seconds would shorten it whenever a
+	// subtitle ends a little after them.
+	if shortfall <= tolerance && nearEnd <= audioVideo {
 		return 0, false
 	}
 	return audioVideo, true

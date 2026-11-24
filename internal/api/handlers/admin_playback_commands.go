@@ -52,8 +52,21 @@ const (
 	AdminPlaybackCommandApplied  = "applied"
 	AdminPlaybackCommandReplayed = "replayed"
 
+	// AdminPlaybackDeliveryDispatched means the command was written to the
+	// session's realtime connection. It does not say whether the player
+	// confirmed it; a connection whose peer died without closing still takes
+	// the write.
 	AdminPlaybackDeliveryDispatched        = "dispatched"
 	AdminPlaybackDeliveryFallbackScheduled = "fallback_scheduled"
+	// AdminPlaybackDeliveryAcknowledged means the player answered a message
+	// with a completed result. A player may answer before showing it.
+	AdminPlaybackDeliveryAcknowledged = "acknowledged"
+
+	// adminPlaybackMessageResultWait bounds how long a message waits for the
+	// player's result after the write. A connected player answers in
+	// milliseconds. A relayed message adds this wait to the relay's reply
+	// timeout (ControlRelay.ForwardWaiting, admin_playback_relay.go).
+	adminPlaybackMessageResultWait = 3 * time.Second
 
 	// adminPlaybackCommandLedgerLimit bounds the receipts remembered per
 	// session; the oldest sequence is evicted first.
@@ -126,6 +139,18 @@ type adminPlaybackCommandReceipt struct {
 	name     playback.CommandName
 	actorID  int
 	payload  string
+	delivery string
+	// answer is set for a message: its wait for the player's result, which
+	// decides the delivery a replay reports.
+	answer *adminPlaybackMessageAnswer
+}
+
+// adminPlaybackMessageAnswer is the outcome of one message's wait for the
+// player's result. delivery is written once, before done closes, and read
+// only after done closes, so the request that sent the message and every
+// replay of it report the same answer without taking the ledger lock.
+type adminPlaybackMessageAnswer struct {
+	done     chan struct{}
 	delivery string
 }
 
@@ -205,13 +230,21 @@ func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in Admin
 	// dispatcher only performs one bounded lane write, so holding the lock
 	// through dispatch costs nothing and means a concurrent duplicate or stale
 	// command can never be dispatched alongside the winner, nor observe a
-	// receipt whose delivery is still unknown: it either waits and replays the
-	// completed receipt, or the dispatch failed, the slot was released, and
+	// receipt before its dispatch finished: it either waits and replays the
+	// recorded receipt, or the dispatch failed, the slot was released, and
 	// the duplicate is admitted on its own. Failures are never recorded. The
 	// lookup is under the lock too, so a session that ends between lookup and
 	// admission cannot be given a fresh ledger after its own was dropped.
+	// A message then waits for the player's result after the lock is
+	// released, so one unresponsive player never delays other commands; a
+	// replay of it waits for the same answer, also outside the lock.
 	h.commandMu.Lock()
-	defer h.commandMu.Unlock()
+	locked := true
+	defer func() {
+		if locked {
+			h.commandMu.Unlock()
+		}
+	}()
 	session, err := h.playback.sessionMgr.GetSession(in.SessionID)
 	if err != nil {
 		if errors.Is(err, playback.ErrSessionNotFound) {
@@ -232,7 +265,19 @@ func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in Admin
 		if prior.sequence != receipt.sequence || prior.name != receipt.name || prior.actorID != receipt.actorID || prior.payload != receipt.payload {
 			return AdminPlaybackCommandView{}, ErrAdminPlaybackCommandConflict
 		}
-		return AdminPlaybackCommandView{CommandID: in.CommandID, Sequence: in.Sequence, Outcome: AdminPlaybackCommandReplayed, Delivery: prior.delivery}, nil
+		view := AdminPlaybackCommandView{CommandID: in.CommandID, Sequence: in.Sequence, Outcome: AdminPlaybackCommandReplayed, Delivery: prior.delivery}
+		if prior.answer != nil {
+			// A retry while the first request still waits must not report
+			// "dispatched" before the player's time is up.
+			locked = false
+			h.commandMu.Unlock()
+			if h.beforeReplayWait != nil {
+				h.beforeReplayWait()
+			}
+			<-prior.answer.done
+			view.Delivery = prior.answer.delivery
+		}
+		return view, nil
 	}
 	if in.Sequence <= ledger.latest {
 		return AdminPlaybackCommandView{}, &AdminPlaybackCommandStaleError{Latest: ledger.latest}
@@ -240,15 +285,59 @@ func (h *AdminPlaybackControlHandler) commandLocal(ctx context.Context, in Admin
 	if requiresLivePlaybackControl(in.Name) && (session == nil || !session.HasRealtimeConnection) {
 		return AdminPlaybackCommandView{}, ErrAdminPlaybackRealtimeRequired
 	}
+	var answered <-chan playback.RealtimeResultStatus
+	if in.Name == playback.CommandDisplayMessage {
+		var release func()
+		answered, release = h.playback.awaitRealtimeResult(in.SessionID, in.CommandID)
+		defer release()
+	}
 	delivery, err := h.dispatchSequenced(ctx, in, payload)
 	if err != nil {
 		return AdminPlaybackCommandView{}, err
 	}
 	receipt.delivery = delivery
+	if answered != nil {
+		receipt.answer = &adminPlaybackMessageAnswer{done: make(chan struct{})}
+	}
 	ledger.latest = in.Sequence
 	ledger.receipts[in.CommandID] = receipt
 	ledger.trim()
-	return AdminPlaybackCommandView{CommandID: in.CommandID, Sequence: in.Sequence, Outcome: AdminPlaybackCommandApplied, Delivery: delivery}, nil
+	view := AdminPlaybackCommandView{CommandID: in.CommandID, Sequence: in.Sequence, Outcome: AdminPlaybackCommandApplied, Delivery: delivery}
+	if answered == nil {
+		return view, nil
+	}
+	locked = false
+	h.commandMu.Unlock()
+	awaitMessageResult(receipt.answer, answered)
+	view.Delivery = receipt.answer.delivery
+	return view, nil
+}
+
+// awaitMessageResult waits a bounded time for the player's result to a
+// message that was written to its lane and records the outcome on answer. It
+// takes no lock, so a player's answer is reported without queuing behind
+// other sessions' lane writes. The wait does not follow the caller's context:
+// it is short, and stopping early would report a healthy player as
+// unconfirmed.
+func awaitMessageResult(answer *adminPlaybackMessageAnswer, answered <-chan playback.RealtimeResultStatus) {
+	defer close(answer.done)
+	answer.delivery = AdminPlaybackDeliveryDispatched
+	timer := time.NewTimer(adminPlaybackMessageResultWait)
+	defer timer.Stop()
+	var status playback.RealtimeResultStatus
+	select {
+	case status = <-answered:
+	case <-timer.C:
+		// select picks at random when the answer lands with the deadline.
+		select {
+		case status = <-answered:
+		default:
+		}
+	}
+	// A rejection ends the wait at once and stays "dispatched".
+	if status == playback.RealtimeResultStatusCompleted {
+		answer.delivery = AdminPlaybackDeliveryAcknowledged
+	}
 }
 
 // dispatchSequenced sends the command exactly as the frozen v1 handlers do:
