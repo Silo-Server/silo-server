@@ -1849,8 +1849,15 @@ describe("VideoPlayer credits pill keys", () => {
 
     fireEvent.mouseMove(container.firstElementChild!);
     expect(pill()).not.toBeNull();
+    // The pill's handler listens in the capture phase and stops a key it
+    // claims, so a key that reaches the body was left to the player.
+    const reached: string[] = [];
+    const listen = (event: KeyboardEvent) => reached.push(event.key);
+    document.body.addEventListener("keydown", listen);
     press(" ");
     press("Escape");
+    document.body.removeEventListener("keydown", listen);
+    expect(reached).toEqual([" ", "Escape"]);
     expect(onReanchorSeek).not.toHaveBeenCalled();
     expect(pill()).not.toBeNull();
   });
