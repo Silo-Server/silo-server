@@ -59,17 +59,3 @@ func TestSignInSource(t *testing.T) {
 		}
 	}
 }
-
-// Budget keys fold names as the database matches accounts: every letter on a
-// Unicode collation, ASCII letters only on the C collation, where "Älice" and
-// "älice" are two accounts that must not share a budget.
-func TestFoldSignInName(t *testing.T) {
-	for _, asciiOnly := range []bool{false, true} {
-		if got := foldSignInName(" ALICE ", asciiOnly); got != "alice" {
-			t.Errorf("asciiOnly=%v: \" ALICE \" folds to %q, want \"alice\"", asciiOnly, got)
-		}
-		if same := foldSignInName("Älice", asciiOnly) == foldSignInName("älice", asciiOnly); same == asciiOnly {
-			t.Errorf("asciiOnly=%v: Älice and älice fold together = %v", asciiOnly, same)
-		}
-	}
-}

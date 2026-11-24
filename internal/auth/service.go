@@ -240,8 +240,7 @@ func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, pa
 	if budgetName == "" {
 		budgetName = username
 	}
-	spend := newSignInSpend(ctx, budgetName)
-	spend.derived = spend.key != signInAttemptKey(username)
+	spend := s.newSignInSpend(ctx, budgetName, username)
 	if err = s.reserveSignIn(ctx, spend); err != nil {
 		return nil, nil, false, err
 	}
@@ -296,7 +295,7 @@ func (s *Service) LoginWithProvider(
 	deviceName string,
 	ip string,
 ) (pair *TokenPair, user *models.User, err error) {
-	spend := newSignInSpend(ctx, username)
+	spend := s.newSignInSpend(ctx, username, "")
 	if err = s.reserveSignIn(ctx, spend); err != nil {
 		return nil, nil, err
 	}

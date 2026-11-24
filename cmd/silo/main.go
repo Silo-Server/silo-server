@@ -3340,11 +3340,6 @@ func main() {
 	// limiter serves the native, Jellyfin and Audiobookshelf auth services,
 	// so no listener gets its own allowance.
 	deps.SignInAttempts = ratelimit.NewSignInLimiter(apiRedisClient)
-	// Its name keys fold case as the database matches accounts, so two
-	// accounts never share one budget.
-	if err := auth.ConfigureSignInNameFold(ctx, pool); err != nil {
-		slog.WarnContext(ctx, "sign-in budget name folding not configured; folding every letter", "error", err)
-	}
 
 	// Activity log writer + consumer.
 	if err := activitylog.SeedDefaults(ctx, settingsRepo); err != nil {

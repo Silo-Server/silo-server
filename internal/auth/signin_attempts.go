@@ -5,14 +5,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"log/slog"
 	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
-
-	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -70,51 +68,49 @@ func (s *Service) SetSignInAttempts(l SignInAttemptLimiter) {
 	s.signInAttempts = l
 }
 
-// signInAttemptKey is the budget key of a sign-in name. Names match accounts
-// trimmed and without regard to case (usernames and emails are citext), so
-// they count that way too, folded as the database folds them; a name typed
-// as an email and the same account's username are two names. The hash keeps
-// keys short and names out of the limiter's logs.
-func signInAttemptKey(name string) string {
-	sum := sha256.Sum256([]byte(foldSignInName(name, signInFoldsASCIIOnly.Load())))
-	return "signin_name:" + hex.EncodeToString(sum[:])
-}
-
-// signInFoldsASCIIOnly records that the database folds the case of ASCII
-// letters only (the C collation), where "Älice" and "älice" are two
-// accounts. Budget keys then fold the same way, so two accounts never share
-// a key.
-var signInFoldsASCIIOnly atomic.Bool
-
-// ConfigureSignInNameFold asks the database how it folds case, which is how
-// citext matches accounts, and makes sign-in budget keys fold names the same
-// way. Until it runs, keys fold every letter, as a database with a Unicode
-// collation does. A process runs against one database, so the setting is
-// process-wide; call it once at startup.
-func ConfigureSignInNameFold(ctx context.Context, db interface {
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}) error {
-	var foldsUnicode bool
-	if err := db.QueryRow(ctx, `SELECT lower('Ä') = 'ä'`).Scan(&foldsUnicode); err != nil {
-		return err
+// signInNameKeys returns the budget keys of names, in order. Names match
+// accounts trimmed and without regard to case (usernames and emails are
+// citext), so they count that way too; a name typed as an email and the same
+// account's username are two names. The database folds the case, with the
+// lower() that citext compares by: Go's case tables cannot match every
+// collation (the C collation folds ASCII letters only, a Turkish one folds
+// "I" to "ı"), and two accounts must never share a key. It reports false when
+// the database could not fold them; the keys then fold in Go, which still
+// counts every attempt but must not decide whose budget a name is. The hash
+// keeps keys short and names out of the limiter's logs.
+func (s *Service) signInNameKeys(ctx context.Context, names ...string) ([]string, bool) {
+	trimmed := make([]string, len(names))
+	for i, name := range names {
+		trimmed[i] = NormalizeUsername(name)
 	}
-	signInFoldsASCIIOnly.Store(!foldsUnicode)
-	return nil
-}
-
-// foldSignInName trims name and folds its case: ASCII letters only when
-// asciiOnly, every letter otherwise.
-func foldSignInName(name string, asciiOnly bool) string {
-	name = NormalizeUsername(name)
-	if !asciiOnly {
-		return strings.ToLower(name)
-	}
-	return strings.Map(func(r rune) rune {
-		if 'A' <= r && r <= 'Z' {
-			return r + ('a' - 'A')
+	folded, ok := s.foldSignInNames(ctx, trimmed)
+	if !ok {
+		folded = make([]string, len(trimmed))
+		for i, name := range trimmed {
+			folded[i] = strings.ToLower(name)
 		}
-		return r
-	}, name)
+	}
+	keys := make([]string, len(folded))
+	for i, name := range folded {
+		sum := sha256.Sum256([]byte(name))
+		keys[i] = "signin_name:" + hex.EncodeToString(sum[:])
+	}
+	return keys, ok
+}
+
+func (s *Service) foldSignInNames(ctx context.Context, names []string) ([]string, bool) {
+	if s.users == nil || len(names) == 0 {
+		return nil, false
+	}
+	var folded []string
+	err := s.users.pool.QueryRow(ctx,
+		`SELECT array_agg(lower(name) ORDER BY i) FROM unnest($1::text[]) WITH ORDINALITY AS t(name, i)`,
+		names).Scan(&folded)
+	if err != nil || len(folded) != len(names) {
+		slog.WarnContext(ctx, "sign-in budget names could not be folded by the database", "component", "auth", "error", err)
+		return nil, false
+	}
+	return folded, true
 }
 
 // signInSpend is what one sign-in spent of a name's budget: the name and its
@@ -125,14 +121,30 @@ type signInSpend struct {
 	key       string
 	source    string
 	spentName bool
+	// folded reports that the database folded the key (signInNameKeys), so
+	// the key may decide whose budget it is.
+	folded bool
 	// derived marks a budget name taken from what was typed rather than the
 	// name that signed in (Jellyfin's "alice#Kids"), which can be another
 	// account's.
 	derived bool
 }
 
-func newSignInSpend(ctx context.Context, name string) *signInSpend {
-	return &signInSpend{name: name, key: signInAttemptKey(name), source: signInSource(ctx)}
+// newSignInSpend starts a sign-in's spend of the budget of name. loginName is
+// the name the sign-in looks an account up by, when it differs from name.
+func (s *Service) newSignInSpend(ctx context.Context, name, loginName string) *signInSpend {
+	names := []string{name}
+	if loginName != "" && loginName != name {
+		names = append(names, loginName)
+	}
+	keys, folded := s.signInNameKeys(ctx, names...)
+	return &signInSpend{
+		name:    name,
+		key:     keys[0],
+		source:  signInSource(ctx),
+		folded:  folded,
+		derived: len(keys) > 1 && keys[1] != keys[0],
+	}
 }
 
 // signInSource is the client address a sign-in counts from and makes known,
@@ -197,11 +209,14 @@ func (s *Service) finishSignIn(ctx context.Context, spend *signInSpend, user *mo
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
-	if !s.ownsSignInBudget(ctx, spend, user) {
+	own, ownFolded := s.ownSignInKeys(ctx, user)
+	if !ownFolded || !spend.folded || !s.ownsSignInBudget(ctx, spend, own) {
 		// Clearing or extending another account's budget would let whoever
 		// holds this one guess at that account without end, alternating with
-		// sign-ins of their own.
-		s.signInAttempts.Trust(ctx, signInTrustKeys("", user), spend.source)
+		// sign-ins of their own; so would a key the database did not fold.
+		if ownFolded {
+			s.signInAttempts.Trust(ctx, own, spend.source)
+		}
 		return
 	}
 	if spend.spentName {
@@ -210,23 +225,24 @@ func (s *Service) finishSignIn(ctx context.Context, spend *signInSpend, user *mo
 	if spend.source != "" {
 		s.signInAttempts.Reset(ctx, spend.key, spend.source, SignInLaneSource)
 	}
-	s.signInAttempts.Trust(ctx, signInTrustKeys(spend.key, user), spend.source)
+	if !slices.Contains(own, spend.key) {
+		own = append(own, spend.key)
+	}
+	s.signInAttempts.Trust(ctx, own, spend.source)
 }
 
 // ownsSignInBudget reports whether the name whose budget spend spent belongs
-// to user, the account that signed in, so its success may clear and extend
-// that budget. One of user's own names does. So does a name no account
-// answers to, such as user's directory username: the lookup and the budget
-// key fold case alike (ConfigureSignInNameFold). A name that finds an
-// account does not: a directory identity of a separate account with the same
-// login name, or a Jellyfin "alice#Kids" signing in to the account named
-// that, whose budget name is derived from the typed text and counts only when
-// it is one of user's own names. A failed lookup counts as another's.
-func (s *Service) ownsSignInBudget(ctx context.Context, spend *signInSpend, user *models.User) bool {
-	if user == nil {
-		return false
-	}
-	if slices.Contains(signInTrustKeys("", user), spend.key) {
+// to the account that signed in, whose own budget keys are own, so its
+// success may clear and extend that budget. One of the account's own names
+// does. So does a name no account answers to, such as its directory
+// username: the lookup and the key fold case alike (signInNameKeys). A name
+// that finds an account does not: a directory identity of a separate account
+// with the same login name, or a Jellyfin "alice#Kids" signing in to the
+// account named that, whose budget name is derived from the typed text and
+// counts only when it is one of the account's own names. A failed lookup
+// counts as another's.
+func (s *Service) ownsSignInBudget(ctx context.Context, spend *signInSpend, own []string) bool {
+	if slices.Contains(own, spend.key) {
 		return true
 	}
 	if spend.derived || s.users == nil {
@@ -242,26 +258,30 @@ func (s *Service) trustSignInSource(ctx context.Context, user *models.User) {
 	if s.signInAttempts == nil || user == nil {
 		return
 	}
-	s.signInAttempts.Trust(context.WithoutCancel(ctx), signInTrustKeys("", user), signInSource(ctx))
+	ctx = context.WithoutCancel(ctx)
+	if own, ok := s.ownSignInKeys(ctx, user); ok && len(own) > 0 {
+		s.signInAttempts.Trust(ctx, own, signInSource(ctx))
+	}
 }
 
-// signInTrustKeys are the budget keys of typed (when set) and of user's
-// username and email, without repeats.
-func signInTrustKeys(typed string, user *models.User) []string {
-	keys := make([]string, 0, 3)
-	if typed != "" {
-		keys = append(keys, typed)
-	}
+// ownSignInKeys are the budget keys of user's username and email, without
+// repeats, and whether the database folded them (signInNameKeys).
+func (s *Service) ownSignInKeys(ctx context.Context, user *models.User) ([]string, bool) {
 	if user == nil {
-		return keys
+		return nil, false
 	}
+	names := make([]string, 0, 2)
 	for _, name := range []string{user.Username, user.Email} {
-		if strings.TrimSpace(name) == "" {
-			continue
-		}
-		if key := signInAttemptKey(name); !slices.Contains(keys, key) {
-			keys = append(keys, key)
+		if strings.TrimSpace(name) != "" {
+			names = append(names, name)
 		}
 	}
-	return keys
+	if len(names) == 0 {
+		return nil, true
+	}
+	keys, ok := s.signInNameKeys(ctx, names...)
+	if !ok {
+		return nil, false
+	}
+	return slices.Compact(keys), true
 }

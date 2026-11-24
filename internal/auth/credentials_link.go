@@ -68,7 +68,7 @@ func (s *Service) LinkCredentialsIdentity(ctx context.Context, in CredentialsLin
 	if username == "" || in.DirectoryPassword == "" {
 		return nil, ErrInvalidCredentials
 	}
-	spend := newSignInSpend(ctx, username)
+	spend := s.newSignInSpend(ctx, username, "")
 	if err = s.reserveSignIn(ctx, spend); err != nil {
 		return nil, err
 	}

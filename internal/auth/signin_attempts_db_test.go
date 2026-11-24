@@ -264,7 +264,8 @@ func TestSignInNameBudgetDB(t *testing.T) {
 
 		// Once the name's lock has passed, a success from home clears home's
 		// own count too, so locking the name again does not shut home out.
-		delete(limiter.counts, signInAttemptKey(user.Username))
+		nameKey, _ := svc.signInNameKeys(t.Context(), user.Username)
+		delete(limiter.counts, nameKey[0])
 		if _, err := signInFrom(home, user.Username, right); err != nil {
 			t.Fatalf("sign-in from home after the name's lock passed: %v", err)
 		}
