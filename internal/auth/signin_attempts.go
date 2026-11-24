@@ -92,10 +92,15 @@ func (s *Service) signInNameKeys(ctx context.Context, names ...string) ([]string
 	}
 	keys := make([]string, len(folded))
 	for i, name := range folded {
-		sum := sha256.Sum256([]byte(name))
-		keys[i] = "signin_name:" + hex.EncodeToString(sum[:])
+		keys[i] = signInKey(name)
 	}
 	return keys, ok
+}
+
+// signInKey is the budget key of a name the database folded.
+func signInKey(folded string) string {
+	sum := sha256.Sum256([]byte(folded))
+	return "signin_name:" + hex.EncodeToString(sum[:])
 }
 
 func (s *Service) foldSignInNames(ctx context.Context, names []string) ([]string, bool) {
@@ -264,24 +269,38 @@ func (s *Service) trustSignInSource(ctx context.Context, user *models.User) {
 	}
 }
 
-// ownSignInKeys are the budget keys of user's username and email, without
-// repeats, and whether the database folded them (signInNameKeys).
+// ownSignInKeys are the budget keys of user's username and email, folded by
+// the database (signInNameKeys), without repeats, and whether it answered.
+// A name another account also answers to is left out: an account kept from
+// before the single login identity space can have another account's
+// username as its email, and that name is not its to clear or extend.
 func (s *Service) ownSignInKeys(ctx context.Context, user *models.User) ([]string, bool) {
-	if user == nil {
+	if user == nil || s.users == nil {
 		return nil, false
 	}
 	names := make([]string, 0, 2)
 	for _, name := range []string{user.Username, user.Email} {
-		if strings.TrimSpace(name) != "" {
+		if name = NormalizeUsername(name); name != "" {
 			names = append(names, name)
 		}
 	}
 	if len(names) == 0 {
 		return nil, true
 	}
-	keys, ok := s.signInNameKeys(ctx, names...)
-	if !ok {
+	var folded []string
+	err := s.users.pool.QueryRow(ctx, `
+		SELECT coalesce(array_agg(lower(t.name) ORDER BY t.i) FILTER (WHERE NOT EXISTS (
+			SELECT 1 FROM users u
+			WHERE u.id <> $2 AND (u.username = t.name::citext OR u.email = t.name::citext))), '{}')
+		FROM unnest($1::text[]) WITH ORDINALITY AS t(name, i)`,
+		names, user.ID).Scan(&folded)
+	if err != nil {
+		slog.WarnContext(ctx, "sign-in budget names of an account could not be read", "component", "auth", "error", err)
 		return nil, false
+	}
+	keys := make([]string, len(folded))
+	for i, name := range folded {
+		keys[i] = signInKey(name)
 	}
 	return slices.Compact(keys), true
 }

@@ -222,6 +222,57 @@ func TestSignInNameBudgetDB(t *testing.T) {
 		}
 	})
 
+	// An account kept from before the single login identity space can have
+	// another account's username as its email. That name answers to the
+	// other account, so signing in or refreshing must not make an address
+	// known for it.
+	t.Run("a legacy duplicate identifier is not an account's own name", func(t *testing.T) {
+		defer limiter.expire()
+		ctx := t.Context()
+		victim := env.localAccount(t, "signin-budget-legacy-victim", models.RoleUser)
+		holder := env.name("signin-budget-legacy-holder")
+		tx, err := env.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, "SET LOCAL session_replication_role = replica"); err != nil {
+			t.Skipf("cannot bypass triggers to seed a legacy collision: %v", err)
+		}
+		var holderID int
+		if err := tx.QueryRow(ctx, `INSERT INTO users
+			(username, email, password_hash, role, permissions, local_password_login_enabled, access_group_id)
+			VALUES ($1, $2, $3, 'user', $4, true, (SELECT id FROM access_groups WHERE is_default)) RETURNING id`,
+			holder, victim.Username, externalSignInPasswordHash, DefaultUserPermissions()).Scan(&holderID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO user_login_identifiers (identifier, user_id, legacy_duplicate)
+			VALUES ($1, $2, false), ($3, $2, true)`, holder, holderID, victim.Username); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+
+		from := func(ip string) context.Context { return clientip.SetContext(ctx, ip) }
+		signedIn, refreshed := "198.51.100.77", "203.0.113.77"
+		pair, _, err := svc.LoginWithProvider(from(signedIn), "", holder, right, "test", "")
+		if err != nil {
+			t.Fatalf("holder sign-in: %v", err)
+		}
+		if _, err := svc.Refresh(from(refreshed), pair.RefreshToken); err != nil {
+			t.Fatalf("holder refresh: %v", err)
+		}
+		for range limiter.max {
+			_, _, err := svc.LoginWithProvider(from("192.0.2.77"), "", victim.Username, wrong, "test", "")
+			wantInvalid(t, err)
+		}
+		for _, ip := range []string{signedIn, refreshed} {
+			_, _, err := svc.LoginWithProvider(from(ip), "", victim.Username, wrong, "test", "")
+			wantThrottled(t, err)
+		}
+	})
+
 	// A stranger who keeps a name locked does not lock its account out of the
 	// addresses it signs in from: a sign-in or a refresh makes the address
 	// known for the account's username and email, and a known address then
