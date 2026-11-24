@@ -38940,7 +38940,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "記錄"
+      "value": "動作"
     }
   ],
   "web.admin.history.column.media": [
@@ -38970,7 +38970,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "使用者"
+      "value": "帳號"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -39012,7 +39012,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "軌道"
+      "value": "項目"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -39036,13 +39036,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "結束位置"
+      "value": "停止位置"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "結束原因"
+      "value": "結束方式"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -39108,7 +39108,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "使用 ↑ 和 ↓ 逐列瀏覽"
+      "value": "使用 ↑ 和 ↓ 切換工作階段"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -39138,7 +39138,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "此記錄建立於開始擷取詳細路由遙測資料之前。此工作階段沒有來源規格與傳送路由欄位。"
+      "value": "此記錄建立於開始追蹤詳細播放資訊之前。此工作階段沒有檔案詳細資料與伺服器路由。"
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -39180,13 +39180,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "用戶端、裝置與路由"
+      "value": "帳號、裝置與路由"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "此工作階段調整的原因"
+      "value": "未直接播放的原因"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -39216,7 +39216,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "HLS 字幕軌"
+      "value": "串流（HLS）"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -39228,7 +39228,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "獨立字幕檔"
+      "value": "外部檔案"
     }
   ],
   "web.admin.history.detail.title": [
@@ -39292,7 +39292,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "沒有符合目前篩選條件的播放記錄。請試著調整使用者、個人檔案或完成狀態篩選條件。"
+      "value": "沒有符合這些篩選條件的工作階段。請試著清除或調整篩選條件。"
     }
   ],
   "web.admin.history.empty.title": [
@@ -39304,7 +39304,7 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "已中止"
+      "value": "由伺服器結束"
     }
   ],
   "web.admin.history.endReason.expired": [
@@ -39316,7 +39316,7 @@
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "已取代"
+      "value": "已切換串流"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -39328,7 +39328,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "已由管理員終止"
+      "value": "由管理員停止"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -39420,7 +39420,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "所有播放"
+      "value": "所有狀態"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -39450,7 +39450,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "所有使用者"
+      "value": "所有帳號"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -39462,7 +39462,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "請先選擇使用者"
+      "value": "請先選擇帳號"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -39512,13 +39512,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "搜尋作品、使用者、用戶端或工作階段 ID……"
+      "value": "搜尋作品、帳號、用戶端或工作階段 ID……"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "已套用項目篩選"
+      "value": "作品："
     }
   ],
   "web.admin.history.loadError": [
@@ -39677,7 +39677,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "估計值：記錄於開始測量觀看時間之前"
+      "value": "估計值（記錄於開始追蹤確切觀看時間之前）"
     }
   ],
   "web.admin.history.row.meta": [
@@ -39735,13 +39735,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "顯示的列數"
+      "value": "已顯示"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "所有使用者和個人檔案已結束的播放記錄。"
+      "value": "所有帳號和個人檔案過去的播放工作階段。"
     }
   ],
   "web.admin.history.title": [
@@ -41762,6 +41762,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "記錄"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -41805,7 +41811,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "此時段內沒有記錄到觀看時數"
+      "value": "此時段內沒有觀看活動"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -41823,7 +41829,7 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "播放開始時間（"
+      "value": "開始觀看的時間（"
     },
     {
       "type": 1,
@@ -41831,7 +41837,7 @@
     },
     {
       "type": 0,
-      "value": " 時區）"
+      "value": "）"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -41883,7 +41889,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "此時段內沒有串流樣本"
+      "value": "尚無串流資料"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -41957,7 +41963,7 @@
             },
             {
               "type": 0,
-              "value": " 個工作階段中已測量 "
+              "value": " 個工作階段中有 "
             },
             {
               "type": 1,
@@ -41965,7 +41971,7 @@
             },
             {
               "type": 0,
-              "value": " 個"
+              "value": " 個為確切值"
             }
           ]
         }
@@ -41983,19 +41989,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "此時段內沒有同時串流樣本"
+      "value": "此時段內沒有串流資料"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "尖峰同時串流數以整個伺服器計算，不受帳號或媒體庫篩選條件影響。"
+      "value": "一律顯示整個伺服器的資料，帳號和媒體庫篩選條件不適用於此。"
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "每日最高同時串流數（整個伺服器，以 UTC 日計）"
+      "value": "每日同時播放的最多串流數（整個伺服器，UTC）"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -42007,7 +42013,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "播放量趨勢"
+      "value": "播放趨勢"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -42061,13 +42067,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "中斷後繼續觀看只計為一次播放，未看完且不到 30 秒的嘗試不計入。"
+      "value": "暫停後繼續播放只計為一次播放。未看完且不到 30 秒就停止的不計入。"
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "播放量"
+      "value": "播放趨勢"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -42079,7 +42085,7 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "此時段內沒有頻寬樣本"
+      "value": "此時段內沒有頻寬資料"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
@@ -42091,25 +42097,25 @@
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "流量"
+      "value": "傳送資料量"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "每日傳出尖峰速率"
+      "value": "每日尖峰頻寬"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "每日傳出總量與尖峰速率（整個伺服器，以 UTC 日計）"
+      "value": "整個伺服器每日的傳送資料量與尖峰速率（UTC）。"
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "傳出流量趨勢"
+      "value": "頻寬趨勢"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -42127,7 +42133,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "每日傳出流量"
+      "value": "每日傳送資料量"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -42200,7 +42206,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "傳出尖峰"
+      "value": "尖峰速率"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -42216,7 +42222,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "遠端工作階段比例"
+      "value": "遠端觀看"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -42240,13 +42246,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "此時段內沒有位置資訊"
+      "value": "尚無網路資訊"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "傳出總量"
+      "value": "傳送資料總量"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -42270,25 +42276,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "傳出總量"
+      "value": "傳送資料量"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "此時段內沒有遠端節點傳出流量"
+      "value": "此時段內沒有遠端節點流量"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "各節點傳出流量"
+      "value": "各節點頻寬"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "每日頻寬與同時串流指標自 "
+      "value": "頻寬記錄自 "
     },
     {
       "type": 1,
@@ -42296,13 +42302,13 @@
     },
     {
       "type": 0,
-      "value": " 起開始記錄。"
+      "value": " 起。"
     }
   ],
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "此時段內的工作階段尚未帶有詳細路由資訊。新的工作階段會自動記錄完整的編解碼器、編碼器與路由遙測資料。"
+      "value": "這些較舊的工作階段沒有詳細播放資訊。新的工作階段會自動記錄。"
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -42313,16 +42319,12 @@
         "other": {
           "value": [
             {
-              "type": 0,
-              "value": "此時段內 "
-            },
-            {
               "type": 1,
               "value": "total"
             },
             {
               "type": 0,
-              "value": " 個工作階段中，有 "
+              "value": " 個工作階段中有 "
             },
             {
               "type": 1,
@@ -42330,7 +42332,7 @@
             },
             {
               "type": 0,
-              "value": " 個記錄了詳細的編解碼器、轉碼與路由資訊（自 "
+              "value": " 個有詳細播放資訊（自 "
             },
             {
               "type": 1,
@@ -42338,7 +42340,7 @@
             },
             {
               "type": 0,
-              "value": " 起記錄）。"
+              "value": " 起追蹤）。"
             }
           ]
         }
@@ -42355,16 +42357,12 @@
         "other": {
           "value": [
             {
-              "type": 0,
-              "value": "此時段內 "
-            },
-            {
               "type": 1,
               "value": "total"
             },
             {
               "type": 0,
-              "value": " 個工作階段中，有 "
+              "value": " 個工作階段中有 "
             },
             {
               "type": 1,
@@ -42372,7 +42370,7 @@
             },
             {
               "type": 0,
-              "value": " 個有實測觀看時間；較舊的工作階段以結束位置估算。"
+              "value": " 個有確切觀看時間；較舊的工作階段為估計值。"
             }
           ]
         }
@@ -42384,7 +42382,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "檢視工作階段"
+      "value": "檢視記錄"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -42428,7 +42426,7 @@
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "燒錄字幕編解碼器"
+      "value": "燒錄字幕格式"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -42446,7 +42444,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "編碼器加速"
+      "value": "硬體加速"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -42504,7 +42502,7 @@
     },
     {
       "type": 0,
-      "value": " · 軟體 "
+      "value": " · CPU "
     },
     {
       "type": 1,
@@ -42514,7 +42512,7 @@
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "轉碼編碼器"
+      "value": "硬體轉碼"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -42528,7 +42526,7 @@
     },
     {
       "type": 0,
-      "value": " · 軟體 "
+      "value": " · CPU "
     },
     {
       "type": 1,
@@ -42564,7 +42562,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "所有樣本"
+      "value": "全部"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -42630,25 +42628,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "此時段內沒有符合樣本門檻的用戶端與編解碼器組合"
+      "value": "工作階段數量還不夠。請切換至「全部」或擴大日期範圍。"
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "至少 5 個工作階段"
+      "value": "5 個以上工作階段"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "依用戶端與來源編解碼器顯示的直接播放率。選擇任一儲存格即可檢視相符的工作階段。"
+      "value": "各 App 不經轉換直接播放各影片格式的頻率。點選儲存格即可查看這些工作階段。"
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "用戶端 × 來源影片編解碼器"
+      "value": "依 App 與影片格式的直接播放"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -42660,19 +42658,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "此時段內沒有記錄到調整原因"
+      "value": "此時段內沒有記錄到轉換原因"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "非直接播放工作階段中記錄的伺服器調整原因"
+      "value": "點選原因即可查看相符的工作階段。"
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "工作階段調整的原因"
+      "value": "串流未直接播放的原因"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -42704,7 +42702,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "沒有工作階段以低於來源的解析度輸出"
+      "value": "此時段內沒有降低解析度的串流"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -42734,7 +42732,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "來源檔案與用戶端實際接收的解析度（依工作階段）"
+      "value": "原始影片解析度與實際串流解析度比較。"
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -42758,7 +42756,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "此期間內沒有轉碼記錄"
+      "value": "此時段內沒有轉碼"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -42962,7 +42960,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "直接播放 %"
+      "value": "直接播放"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -43092,6 +43090,16 @@
       "value": "所有個人檔案"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% 直接播放"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -43101,7 +43109,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "此期間內沒有工作階段"
+      "value": "此時段內沒有活動"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -43205,7 +43213,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "播放趨勢、熱門作品、家庭使用情形、裝置相容性，以及流量輸出隨時間的變化。"
+      "value": "觀看趨勢、熱門作品、家庭活動、裝置播放情形與頻寬。"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -43271,7 +43279,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "此作品已不在目錄中。"
+      "value": "此作品已不在你的媒體庫中。"
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -43343,7 +43351,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "此期間內沒有媒體庫播放記錄"
+      "value": "此時段內沒有媒體庫活動"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -43355,7 +43363,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "此期間內沒有播放任何電影"
+      "value": "此時段內沒有觀看任何電影"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -43367,7 +43375,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "此期間內沒有播放任何影集"
+      "value": "此時段內沒有觀看任何影集"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -73827,7 +73835,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "播放趨勢、帳號、裝置畫質與頻寬。"
+      "value": "觀看趨勢、熱門作品、帳號、裝置與頻寬。"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

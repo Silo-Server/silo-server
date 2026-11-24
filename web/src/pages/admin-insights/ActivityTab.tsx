@@ -25,6 +25,7 @@ import {
   buildDailyUtcGrid,
   buildInsightsWindowQueryParams,
   formatActivityBucketLabel,
+  formatInsightsCount,
   formatRatePercentNumber,
   formatShortCalendarDate,
   formatShortTimestamp,
@@ -326,11 +327,15 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
         <InsightKpiCard
           label={t("web.admin.insights.activity.kpi.watchTime")}
           value={formatWatchTime(summary.watch_seconds)}
-          subtext={t("web.admin.insights.activity.kpi.watchTimeMeasured", {
-            measured: coverage.measured_sessions.toLocaleString(formatLocale()),
-            total: coverage.total_sessions.toLocaleString(formatLocale()),
-            total_count: coverage.total_sessions,
-          })}
+          subtext={
+            showMeasuredBanner
+              ? t("web.admin.insights.activity.kpi.watchTimeMeasured", {
+                  measured: coverage.measured_sessions.toLocaleString(formatLocale()),
+                  total: coverage.total_sessions.toLocaleString(formatLocale()),
+                  total_count: coverage.total_sessions,
+                })
+              : formatInsightsCount(t, "web.admin.insights.sessionCount", coverage.total_sessions)
+          }
         />
         <InsightKpiCard
           label={t("web.admin.insights.activity.kpi.completionRate")}

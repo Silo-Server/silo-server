@@ -319,7 +319,11 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
               seriesLabel={
                 effectiveScope === "nodes" && metric === "peak"
                   ? t("web.admin.dashboard.chart.total")
-                  : t("web.admin.dashboard.widgets.egress.seriesLabel")
+                  : t(
+                      metric === "volume"
+                        ? "web.admin.insights.bandwidth.chart.metricVolume"
+                        : "web.admin.insights.bandwidth.chart.metricPeak",
+                    )
               }
               overlays={chartSeries.overlays}
               stacks={chartSeries.stacks}

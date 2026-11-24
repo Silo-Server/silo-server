@@ -43145,7 +43145,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Günlükler"
+      "value": "İşlemler"
     }
   ],
   "web.admin.history.column.media": [
@@ -43175,7 +43175,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Kullanıcı"
+      "value": "Hesap"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -43217,7 +43217,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Parça"
+      "value": "Ayrıntı"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -43241,13 +43241,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Bitiş konumu"
+      "value": "Durduğu konum"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Bitiş nedeni"
+      "value": "Bitiş şekli"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -43313,7 +43313,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Satırlar arasında geçiş yapmak için ↑ ve ↓ tuşlarını kullanın"
+      "value": "Oturumlar arasında geçiş yapmak için ↑ ve ↓ tuşlarını kullanın"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -43343,7 +43343,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Ayrıntılı rota telemetrisi toplanmaya başlamadan önce kaydedildi. Bu oturum için kaynak özellikleri ve iletim rotası alanları kullanılamıyor."
+      "value": "Ayrıntılı oynatma bilgileri izlenmeye başlanmadan önce kaydedildi. Bu oturum için dosya ayrıntıları ve sunucu rotası kullanılamıyor."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -43385,13 +43385,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "İstemci, cihaz ve rota"
+      "value": "Hesap, cihaz ve rota"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Bu oturum neden uyarlandı"
+      "value": "Neden doğrudan oynatılmadı"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -43421,7 +43421,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "HLS sürümü"
+      "value": "Akış olarak (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -43433,7 +43433,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Ayrı dosya"
+      "value": "Harici dosya"
     }
   ],
   "web.admin.history.detail.title": [
@@ -43497,7 +43497,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Mevcut filtrelerle eşleşen oynatma geçmişi yok. Kullanıcı, profil veya tamamlanma filtrelerini değiştirmeyi deneyin."
+      "value": "Bu filtrelerle eşleşen oturum yok. Bir filtreyi temizlemeyi veya değiştirmeyi deneyin."
     }
   ],
   "web.admin.history.empty.title": [
@@ -43509,19 +43509,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Yarıda kesildi"
+      "value": "Sunucu tarafından sonlandırıldı"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "Süresi doldu"
+      "value": "Zaman aşımına uğradı"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Değiştirildi"
+      "value": "Akış değiştirildi"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -43533,7 +43533,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Yönetici tarafından sonlandırıldı"
+      "value": "Yönetici tarafından durduruldu"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -43617,7 +43617,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Tüm denemeler"
+      "value": "Tüm durumlar"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -43647,7 +43647,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Tüm kullanıcılar"
+      "value": "Tüm hesaplar"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -43659,7 +43659,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Önce bir kullanıcı seçin"
+      "value": "Önce bir hesap seçin"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -43705,13 +43705,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "İçerik, kullanıcı, istemci veya oturum kimliği arayın…"
+      "value": "İçerik, hesap, istemci veya oturum kimliği arayın…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Öğe filtresi etkin"
+      "value": "İçerik:"
     }
   ],
   "web.admin.history.loadError": [
@@ -43885,7 +43885,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Tahmini: izleme süresi ölçülmeye başlanmadan önce kaydedildi"
+      "value": "Tahmini (kesin izleme süresi ölçülmeye başlanmadan önce kaydedildi)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -43943,13 +43943,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Görünen satırlar"
+      "value": "Gösterilen"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Tüm kullanıcı ve profillerdeki tamamlanmış oynatma denemeleri."
+      "value": "Tüm hesap ve profillerdeki geçmiş oynatma oturumları."
     }
   ],
   "web.admin.history.title": [
@@ -46180,6 +46180,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Geçmiş"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -46223,7 +46229,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "Bu aralıkta kayıtlı izleme saati yok"
+      "value": "Bu aralıkta izleme etkinliği yok"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -46241,7 +46247,7 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Oynatmaların başladığı saatler (saat dilimi: "
+      "value": "İzleyicilerin izlemeye başladığı saatler ("
     },
     {
       "type": 1,
@@ -46301,7 +46307,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "Bu aralıkta akış örneği yok"
+      "value": "Henüz akış verisi yok"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -46407,7 +46413,7 @@
             },
             {
               "type": 0,
-              "value": " tanesi ölçüldü"
+              "value": " tanesi için kesin"
             }
           ]
         },
@@ -46427,7 +46433,7 @@
             },
             {
               "type": 0,
-              "value": " tanesi ölçüldü"
+              "value": " tanesi için kesin"
             }
           ]
         }
@@ -46445,19 +46451,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "Bu aralıkta eşzamanlılık örneği yok"
+      "value": "Bu aralıkta akış verisi yok"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "En yüksek eşzamanlı akış değerleri sunucu genelindedir ve hesap veya kitaplık filtreleriyle değişmez."
+      "value": "Her zaman sunucunun tamamını gösterir; hesap ve kitaplık filtreleri burada uygulanmaz."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Günlük en yüksek eşzamanlı akış (sunucu geneli, UTC günleri)"
+      "value": "Her gün aynı anda oynatılan en fazla akış (sunucu geneli, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -46469,7 +46475,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Zaman içinde oynatma hacmi"
+      "value": "Zaman içinde oynatma"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -46523,13 +46529,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Bir oynatma, devam ettirilen izlemeleri bir kez sayar ve 30 saniyenin altındaki tamamlanmamış denemeleri saymaz."
+      "value": "Duraklatıp devam ettirmek tek oynatma sayılır. 30 saniyenin altındaki tamamlanmamış durdurmalar sayılmaz."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Oynatma hacmi"
+      "value": "Zaman içinde oynatma"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -46541,7 +46547,7 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "Bu aralıkta bant genişliği örneği yok"
+      "value": "Bu aralıkta bant genişliği verisi yok"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
@@ -46553,25 +46559,25 @@
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Hacim"
+      "value": "Gönderilen veri"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Günlük en yüksek giden trafik hızı"
+      "value": "Günlük en yüksek bant genişliği"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Günlük giden trafik toplamları ve en yüksek hızlar (sunucu geneli, UTC günleri)"
+      "value": "Sunucunun tamamında günlük gönderilen veri ve en yüksek hız (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Zaman içinde giden trafik"
+      "value": "Zaman içinde bant genişliği"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -46589,7 +46595,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Günlük giden trafik hacmi"
+      "value": "Günlük gönderilen veri"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -46669,7 +46675,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "En yüksek giden trafik"
+      "value": "En yüksek hız"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -46685,7 +46691,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Uzak oturum payı"
+      "value": "Uzaktan izleme"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -46709,13 +46715,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "Bu aralıkta konum bilgisi yok"
+      "value": "Henüz ağ bilgisi yok"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Toplam giden trafik"
+      "value": "Toplam gönderilen veri"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -46739,25 +46745,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Toplam giden trafik"
+      "value": "Gönderilen veri"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "Bu aralıkta uzak düğüm giden trafiği yok"
+      "value": "Bu aralıkta uzak düğüm trafiği yok"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Düğüme göre giden trafik"
+      "value": "Düğüme göre bant genişliği"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Günlük bant genişliği ve eşzamanlılık metriklerinin başlangıç tarihi: "
+      "value": "Bant genişliği geçmişinin başlangıç tarihi: "
     },
     {
       "type": 1,
@@ -46771,7 +46777,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Bu aralıktaki oturumların hiçbiri henüz ayrıntılı yönlendirme bilgisi taşımıyor. Yeni oturumlar tam codec, kodlayıcı ve yönlendirme telemetrisini otomatik olarak kaydeder."
+      "value": "Bu eski oturumlar için ayrıntılı oynatma bilgisi mevcut değil. Yeni oturumlar bu bilgiyi otomatik olarak kaydeder."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -46783,7 +46789,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Ayrıntılı codec, kod dönüştürme ve yönlendirme bilgileri bu aralıktaki "
+              "value": "Ayrıntılı oynatma bilgisi "
             },
             {
               "type": 1,
@@ -46799,7 +46805,7 @@
             },
             {
               "type": 0,
-              "value": " tanesi için kaydedildi (kayıt başlangıcı: "
+              "value": " tanesi için mevcut (kayıt başlangıcı: "
             },
             {
               "type": 1,
@@ -46815,7 +46821,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Ayrıntılı codec, kod dönüştürme ve yönlendirme bilgileri bu aralıktaki "
+              "value": "Ayrıntılı oynatma bilgisi "
             },
             {
               "type": 1,
@@ -46831,7 +46837,7 @@
             },
             {
               "type": 0,
-              "value": " tanesi için kaydedildi (kayıt başlangıcı: "
+              "value": " tanesi için mevcut (kayıt başlangıcı: "
             },
             {
               "type": 1,
@@ -46857,7 +46863,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Ölçülen izleme süresi bu aralıktaki "
+              "value": "Kesin izleme süresi "
             },
             {
               "type": 1,
@@ -46873,7 +46879,7 @@
             },
             {
               "type": 0,
-              "value": " tanesini kapsıyor; eski oturumlarda bitiş konumu tahminleri kullanılır."
+              "value": " tanesi için mevcut; eski oturumlar tahminidir."
             }
           ]
         },
@@ -46881,7 +46887,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Ölçülen izleme süresi bu aralıktaki "
+              "value": "Kesin izleme süresi "
             },
             {
               "type": 1,
@@ -46897,7 +46903,7 @@
             },
             {
               "type": 0,
-              "value": " tanesini kapsıyor; eski oturumlarda bitiş konumu tahminleri kullanılır."
+              "value": " tanesi için mevcut; eski oturumlar tahminidir."
             }
           ]
         }
@@ -46909,7 +46915,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Oturumları görüntüle"
+      "value": "Geçmişi görüntüle"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -46947,13 +46953,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "Bu aralıkta altyazı gömme yok"
+      "value": "Bu aralıkta görüntüye işlenmiş altyazı yok"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Gömülen altyazı codec’leri"
+      "value": "Görüntüye işlenmiş altyazı biçimleri"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -46971,7 +46977,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Kodlayıcı hızlandırma"
+      "value": "Donanım hızlandırma"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -47009,7 +47015,7 @@
   "web.admin.insights.devices.kpi.directPlayRate": [
     {
       "type": 0,
-      "value": "Doğrudan oynatma payı"
+      "value": "Doğrudan oynatma oranı"
     }
   ],
   "web.admin.insights.devices.kpi.hdrToneMap": [
@@ -47033,13 +47039,13 @@
     },
     {
       "type": 0,
-      "value": " yazılım"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Kod dönüştürme kodlayıcısı"
+      "value": "Donanımla kod dönüştürme"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -47057,7 +47063,7 @@
     },
     {
       "type": 0,
-      "value": " yazılım"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -47089,7 +47095,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Tüm örnekler"
+      "value": "Tümü"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -47199,25 +47205,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "Bu aralıkta örnek eşiğini karşılayan istemci-codec çifti yok"
+      "value": "Henüz yeterli oturum yok. “Tümü” seçeneğine geçin veya tarih aralığını genişletin."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "En az 5 oturum"
+      "value": "5+ oturum"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "İstemciye ve kaynak codec’ine göre doğrudan oynatma oranı. Eşleşen oturumları incelemek için herhangi bir hücreyi seçin."
+      "value": "Her uygulamanın bir video biçimini dönüştürmeden ne sıklıkla oynattığı. Bu oturumları görmek için bir hücreye tıklayın."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "İstemci × Kaynak video codec’i"
+      "value": "Uygulama ve video biçimine göre doğrudan oynatma"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -47229,19 +47235,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "Bu aralıkta kayıtlı uyarlama nedeni yok"
+      "value": "Bu aralıkta kayıtlı dönüştürme nedeni yok"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Doğrudan olmayan oturumlarda kaydedilen sunucu uyarlama nedenleri"
+      "value": "Eşleşen oturumları görmek için bir nedene tıklayın."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Oturumlar neden uyarlandı"
+      "value": "Akışlar neden doğrudan oynatılmadı"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -47273,7 +47279,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Hiçbir oturum kaynak çözünürlüğünün altında iletilmedi"
+      "value": "Bu aralıkta ölçeği düşürülen içerik yok"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -47303,7 +47309,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Oturuma göre kaynak dosyalar ve istemcilerin aldığı çözünürlük"
+      "value": "Orijinal video çözünürlüğü ve akışla iletilen çözünürlük."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -47327,7 +47333,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "Bu aralıkta kaydedilmiş dönüştürme yok"
+      "value": "Bu aralıkta kod dönüştürme yok"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -47555,7 +47561,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "Doğrudan %"
+      "value": "Doğrudan oynatma"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -47692,6 +47698,20 @@
       "value": "Tüm profiller"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 0,
+      "value": "%"
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": " doğrudan oynatma"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -47701,7 +47721,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "Bu aralıkta oturum yok"
+      "value": "Bu aralıkta etkinlik yok"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -47829,7 +47849,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Oynatma eğilimleri, popüler içerikler, hane kullanımı, cihaz uyumluluğu ve zaman içindeki giden trafik."
+      "value": "İzleme eğilimleri, popüler içerikler, hane etkinliği, cihazlarda oynatma ve bant genişliği."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -47895,7 +47915,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Bu içerik artık katalogda yok."
+      "value": "Bu içerik artık kitaplığınızda yok."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -47967,7 +47987,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "Bu aralıkta kitaplık oynatması yok"
+      "value": "Bu aralıkta kitaplık etkinliği yok"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -47979,7 +47999,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "Bu aralıkta oynatılan film yok"
+      "value": "Bu aralıkta izlenen film yok"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -47991,7 +48011,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "Bu aralıkta oynatılan dizi yok"
+      "value": "Bu aralıkta izlenen dizi yok"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -79604,7 +79624,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Oynatma eğilimleri, hesaplar, cihaz kalitesi ve bant genişliği."
+      "value": "İzleme eğilimleri, popüler içerikler, hesaplar, cihazlar ve bant genişliği."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

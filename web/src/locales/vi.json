@@ -43729,7 +43729,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Nhật ký"
+      "value": "Thao tác"
     }
   ],
   "web.admin.history.column.media": [
@@ -43759,7 +43759,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Người dùng"
+      "value": "Tài khoản"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -43801,7 +43801,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Luồng"
+      "value": "Chi tiết"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -43825,13 +43825,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Vị trí kết thúc"
+      "value": "Dừng tại"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Lý do kết thúc"
+      "value": "Cách kết thúc"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -43897,7 +43897,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Dùng ↑ và ↓ để chuyển qua các hàng"
+      "value": "Dùng ↑ và ↓ để chuyển giữa các phiên"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -43927,7 +43927,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Được ghi lại trước khi hệ thống thu thập dữ liệu chi tiết về tuyến truyền. Thông số nguồn và các trường tuyến truyền không có sẵn cho phiên này."
+      "value": "Được ghi lại trước khi hệ thống theo dõi thông tin phát chi tiết. Chi tiết tệp và tuyến máy chủ không có sẵn cho phiên này."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -43969,13 +43969,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Ứng dụng khách, thiết bị và tuyến"
+      "value": "Tài khoản, thiết bị và tuyến"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Lý do phiên này được điều chỉnh"
+      "value": "Lý do không phát trực tiếp"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -44005,7 +44005,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "Bản HLS"
+      "value": "Phát trực tuyến (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -44017,7 +44017,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Tệp riêng"
+      "value": "Tệp bên ngoài"
     }
   ],
   "web.admin.history.detail.title": [
@@ -44081,7 +44081,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Không có lịch sử phát nào khớp với bộ lọc hiện tại. Thử điều chỉnh bộ lọc người dùng, hồ sơ hoặc mức hoàn tất."
+      "value": "Không có phiên nào khớp với các bộ lọc này. Thử xóa hoặc điều chỉnh bộ lọc."
     }
   ],
   "web.admin.history.empty.title": [
@@ -44093,19 +44093,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Đã hủy bỏ"
+      "value": "Máy chủ đã kết thúc"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "Đã hết hạn"
+      "value": "Hết thời gian chờ"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Đã thay thế"
+      "value": "Đã chuyển luồng"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -44117,7 +44117,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Bị quản trị viên chấm dứt"
+      "value": "Quản trị viên đã dừng"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -44201,7 +44201,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Tất cả lượt phát"
+      "value": "Tất cả trạng thái"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -44231,7 +44231,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Tất cả người dùng"
+      "value": "Tất cả tài khoản"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -44243,7 +44243,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Chọn người dùng trước"
+      "value": "Chọn tài khoản trước"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -44289,13 +44289,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Tìm tiêu đề, người dùng, ứng dụng khách hoặc ID phiên…"
+      "value": "Tìm tiêu đề, tài khoản, ứng dụng khách hoặc ID phiên…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Đang lọc theo mục"
+      "value": "Tiêu đề:"
     }
   ],
   "web.admin.history.loadError": [
@@ -44477,7 +44477,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Ước tính: được ghi lại trước khi có tính năng đo thời gian xem"
+      "value": "Ước tính (ghi lại trước khi theo dõi thời gian xem chính xác)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44535,13 +44535,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Hàng hiển thị"
+      "value": "Đang hiển thị"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Các lượt phát đã kết thúc của tất cả người dùng và hồ sơ."
+      "value": "Các phiên phát trước đây của tất cả tài khoản và hồ sơ."
     }
   ],
   "web.admin.history.title": [
@@ -46832,6 +46832,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Lịch sử"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -46875,7 +46881,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "Không có giờ xem nào được ghi nhận trong khoảng thời gian này"
+      "value": "Không có hoạt động xem nào trong khoảng thời gian này"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -46893,11 +46899,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Thời điểm bắt đầu phát theo múi giờ "
+      "value": "Thời điểm mọi người bắt đầu xem ("
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -46949,7 +46959,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "Không có mẫu luồng nào trong khoảng thời gian này"
+      "value": "Chưa có dữ liệu luồng"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -47043,7 +47053,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Đã đo "
+              "value": "Chính xác cho "
             },
             {
               "type": 1,
@@ -47067,7 +47077,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Đã đo "
+              "value": "Chính xác cho "
             },
             {
               "type": 1,
@@ -47101,19 +47111,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "Không có mẫu đồng thời nào trong khoảng thời gian này"
+      "value": "Không có dữ liệu luồng trong khoảng thời gian này"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "Số luồng đồng thời cao nhất được tính trên toàn máy chủ và không thay đổi theo bộ lọc tài khoản hay thư viện."
+      "value": "Luôn hiển thị toàn bộ máy chủ — bộ lọc tài khoản và thư viện không áp dụng ở đây."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Số luồng đồng thời cao nhất mỗi ngày (toàn máy chủ, ngày theo UTC)"
+      "value": "Số luồng phát cùng lúc nhiều nhất mỗi ngày (toàn máy chủ, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -47125,7 +47135,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Lượng phát theo thời gian"
+      "value": "Lượt phát theo thời gian"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -47179,13 +47189,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Một lượt phát tính các lần xem tiếp là một lần và bỏ qua những lần chưa xem xong dưới 30 giây."
+      "value": "Tạm dừng rồi tiếp tục được tính là một lượt phát. Không tính các lần dừng khi chưa xem xong dưới 30 giây."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Lượng phát"
+      "value": "Lượt phát theo thời gian"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -47197,7 +47207,7 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "Không có mẫu băng thông nào trong khoảng thời gian này"
+      "value": "Không có dữ liệu băng thông trong khoảng thời gian này"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
@@ -47209,25 +47219,25 @@
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Dung lượng"
+      "value": "Dữ liệu đã gửi"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Tốc độ lưu lượng ra cao nhất mỗi ngày"
+      "value": "Băng thông cao nhất mỗi ngày"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Tổng lưu lượng ra và tốc độ cao nhất mỗi ngày (toàn máy chủ, ngày theo UTC)"
+      "value": "Dữ liệu đã gửi và tốc độ cao nhất mỗi ngày trên toàn máy chủ (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Lưu lượng ra theo thời gian"
+      "value": "Băng thông theo thời gian"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -47245,7 +47255,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Lưu lượng ra mỗi ngày"
+      "value": "Dữ liệu đã gửi mỗi ngày"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -47333,7 +47343,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Lưu lượng ra cao nhất"
+      "value": "Tốc độ cao nhất"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -47349,7 +47359,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Tỷ lệ phiên từ xa"
+      "value": "Xem từ xa"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -47373,13 +47383,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "Không có dữ liệu vị trí trong khoảng thời gian này"
+      "value": "Chưa có thông tin mạng"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Tổng lưu lượng ra"
+      "value": "Tổng dữ liệu đã gửi"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -47403,25 +47413,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Tổng lưu lượng ra"
+      "value": "Dữ liệu đã gửi"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "Không có lưu lượng ra từ node từ xa trong khoảng thời gian này"
+      "value": "Không có lưu lượng từ node từ xa trong khoảng thời gian này"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Lưu lượng ra theo node"
+      "value": "Băng thông theo node"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Số liệu băng thông và đồng thời hằng ngày bắt đầu từ "
+      "value": "Lịch sử băng thông bắt đầu từ "
     },
     {
       "type": 1,
@@ -47435,7 +47445,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Chưa có phiên nào trong khoảng thời gian này có dữ liệu chi tiết về tuyến truyền. Các phiên mới sẽ tự động ghi lại đầy đủ dữ liệu về codec, bộ mã hóa và định tuyến."
+      "value": "Không có thông tin phát chi tiết cho các phiên cũ này. Các phiên mới sẽ tự động ghi lại thông tin này."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -47447,7 +47457,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Dữ liệu chi tiết về codec, chuyển mã và định tuyến được ghi lại cho "
+              "value": "Có thông tin phát chi tiết cho "
             },
             {
               "type": 1,
@@ -47463,7 +47473,7 @@
             },
             {
               "type": 0,
-              "value": " phiên trong khoảng thời gian này (ghi lại từ "
+              "value": " phiên (theo dõi từ "
             },
             {
               "type": 1,
@@ -47479,7 +47489,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Dữ liệu chi tiết về codec, chuyển mã và định tuyến được ghi lại cho "
+              "value": "Có thông tin phát chi tiết cho "
             },
             {
               "type": 1,
@@ -47495,7 +47505,7 @@
             },
             {
               "type": 0,
-              "value": " phiên trong khoảng thời gian này (ghi lại từ "
+              "value": " phiên (theo dõi từ "
             },
             {
               "type": 1,
@@ -47521,7 +47531,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Thời gian xem đo được bao gồm "
+              "value": "Có thời gian xem chính xác cho "
             },
             {
               "type": 1,
@@ -47537,7 +47547,7 @@
             },
             {
               "type": 0,
-              "value": " phiên trong khoảng thời gian này; các phiên cũ hơn dùng giá trị ước tính theo vị trí kết thúc."
+              "value": " phiên; các phiên cũ hơn dùng giá trị ước tính."
             }
           ]
         },
@@ -47545,7 +47555,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Thời gian xem đo được bao gồm "
+              "value": "Có thời gian xem chính xác cho "
             },
             {
               "type": 1,
@@ -47561,7 +47571,7 @@
             },
             {
               "type": 0,
-              "value": " phiên trong khoảng thời gian này; các phiên cũ hơn dùng giá trị ước tính theo vị trí kết thúc."
+              "value": " phiên; các phiên cũ hơn dùng giá trị ước tính."
             }
           ]
         }
@@ -47573,7 +47583,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Xem các phiên"
+      "value": "Xem lịch sử"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -47611,13 +47621,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "Không có lượt ghi cứng phụ đề nào trong khoảng thời gian này"
+      "value": "Không có phụ đề ghi cứng nào trong khoảng thời gian này"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Codec phụ đề ghi cứng"
+      "value": "Định dạng phụ đề ghi cứng"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -47635,7 +47645,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Tăng tốc bộ mã hóa"
+      "value": "Tăng tốc phần cứng"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -47697,13 +47707,13 @@
     },
     {
       "type": 0,
-      "value": " phần mềm"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Bộ mã hóa chuyển mã"
+      "value": "Chuyển mã bằng phần cứng"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -47721,7 +47731,7 @@
     },
     {
       "type": 0,
-      "value": " phần mềm"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -47749,7 +47759,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Tất cả mẫu"
+      "value": "Tất cả"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -47859,25 +47869,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "Không có cặp ứng dụng–codec nào đạt ngưỡng mẫu trong khoảng thời gian này"
+      "value": "Chưa đủ phiên. Chuyển sang “Tất cả” hoặc mở rộng khoảng thời gian."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Tối thiểu 5 phiên"
+      "value": "5+ phiên"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Tỷ lệ phát trực tiếp theo ứng dụng và codec nguồn. Chọn một ô bất kỳ để xem các phiên tương ứng."
+      "value": "Tần suất mỗi ứng dụng phát một định dạng video mà không cần chuyển đổi. Nhấp vào một ô để xem các phiên đó."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Ứng dụng × Codec video nguồn"
+      "value": "Phát trực tiếp theo ứng dụng và định dạng video"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -47889,19 +47899,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "Không có lý do điều chỉnh nào được ghi nhận trong khoảng thời gian này"
+      "value": "Không có lý do chuyển đổi nào được ghi nhận trong khoảng thời gian này"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Lý do máy chủ điều chỉnh, ghi nhận trên các phiên không phát trực tiếp"
+      "value": "Nhấp vào một lý do để xem các phiên tương ứng."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Lý do phiên được điều chỉnh"
+      "value": "Lý do luồng không phát trực tiếp"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -47933,7 +47943,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Không có phiên nào được truyền tải với độ phân giải thấp hơn nguồn"
+      "value": "Không có nội dung nào giảm độ phân giải trong khoảng thời gian này"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -47963,7 +47973,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Tệp nguồn và nội dung máy khách nhận được, theo phiên"
+      "value": "Độ phân giải video gốc so với nội dung đã phát trực tuyến."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -48215,7 +48225,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "% phát trực tiếp"
+      "value": "Phát trực tiếp"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -48352,6 +48362,16 @@
       "value": "Tất cả hồ sơ"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% phát trực tiếp"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -48361,7 +48381,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "Không có phiên nào trong khoảng thời gian này"
+      "value": "Không có hoạt động nào trong khoảng thời gian này"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -48489,7 +48509,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Xu hướng phát, nội dung phổ biến, mức sử dụng trong gia đình, khả năng tương thích thiết bị và lưu lượng ra theo thời gian."
+      "value": "Xu hướng xem, nội dung hàng đầu, hoạt động trong gia đình, phát trên thiết bị và băng thông."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -48555,7 +48575,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Nội dung này không còn trong danh mục."
+      "value": "Tiêu đề này không còn trong thư viện của bạn."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -48627,7 +48647,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "Không có lượt phát nào từ thư viện trong khoảng thời gian này"
+      "value": "Không có hoạt động nào từ thư viện trong khoảng thời gian này"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -48639,7 +48659,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "Không có phim nào được phát trong khoảng thời gian này"
+      "value": "Không có phim nào được xem trong khoảng thời gian này"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -48651,7 +48671,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "Không có phim bộ nào được phát trong khoảng thời gian này"
+      "value": "Không có phim bộ nào được xem trong khoảng thời gian này"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -80552,7 +80572,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Xu hướng phát, tài khoản, chất lượng trên thiết bị và băng thông."
+      "value": "Xu hướng xem, nội dung hàng đầu, tài khoản, thiết bị và băng thông."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

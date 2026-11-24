@@ -53900,7 +53900,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Логи"
+      "value": "Дії"
     }
   ],
   "web.admin.history.column.media": [
@@ -53930,7 +53930,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Користувач"
+      "value": "Обліковий запис"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -53972,7 +53972,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Доріжка"
+      "value": "Параметр"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -53996,13 +53996,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Кінцева позиція"
+      "value": "Зупинено на"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Причина завершення"
+      "value": "Як завершено"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -54068,7 +54068,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Використовуйте ↑ і ↓ для переходу між рядками"
+      "value": "Використовуйте ↑ і ↓, щоб переходити між сеансами"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -54098,7 +54098,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Записано до того, як почали збирати детальну телеметрію маршруту. Характеристики джерела й поля маршруту передавання для цього сеансу недоступні."
+      "value": "Записано до того, як почали відстежувати докладні відомості про відтворення. Відомості про файл і маршрут сервера для цього сеансу недоступні."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -54140,13 +54140,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Клієнт, пристрій і маршрут"
+      "value": "Обліковий запис, пристрій і маршрут"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Чому цей сеанс адаптовано"
+      "value": "Чому не відбулося пряме відтворення"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -54176,7 +54176,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "Варіант HLS"
+      "value": "У потоці (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -54188,7 +54188,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Окремий файл"
+      "value": "Зовнішній файл"
     }
   ],
   "web.admin.history.detail.title": [
@@ -54252,7 +54252,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Немає історії відтворення за поточними фільтрами. Спробуйте змінити фільтри користувача, профілю або завершення."
+      "value": "Жоден сеанс не відповідає цим фільтрам. Спробуйте очистити або змінити фільтр."
     }
   ],
   "web.admin.history.empty.title": [
@@ -54264,19 +54264,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Перервано"
+      "value": "Завершено сервером"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "Минув час очікування"
+      "value": "Час очікування минув"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Замінено"
+      "value": "Потік змінено"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -54288,7 +54288,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Завершено адміністратором"
+      "value": "Зупинено адміністратором"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -54372,7 +54372,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Усі спроби"
+      "value": "Усі статуси"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -54402,7 +54402,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Усі користувачі"
+      "value": "Усі облікові записи"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -54414,7 +54414,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Спочатку виберіть користувача"
+      "value": "Спочатку виберіть обліковий запис"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -54464,13 +54464,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Пошук назв, користувачів, клієнтів або ID сеансів…"
+      "value": "Пошук назв, облікових записів, клієнтів або ID сеансів…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Активний фільтр за об’єктом"
+      "value": "Назва:"
     }
   ],
   "web.admin.history.loadError": [
@@ -54706,7 +54706,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Оцінка: записано до того, як почали вимірювати час перегляду"
+      "value": "Оцінка (записано до того, як почали відстежувати точний час перегляду)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -54764,13 +54764,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Видимі рядки"
+      "value": "Показано"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Завершені спроби відтворення всіх користувачів і профілів."
+      "value": "Минулі сеанси відтворення всіх облікових записів і профілів."
     }
   ],
   "web.admin.history.title": [
@@ -57677,6 +57677,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Історія"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -57720,7 +57726,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "За цей період години перегляду не записано"
+      "value": "За цей період переглядів не було"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -57738,11 +57744,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Початок відтворень за часовим поясом "
+      "value": "Коли починають дивитися ("
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -57794,7 +57804,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "Немає даних про потоки за цей період"
+      "value": "Ще немає даних про потоки"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -57936,7 +57946,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Виміряно "
+              "value": "Точно для "
             },
             {
               "type": 1,
@@ -57960,7 +57970,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Виміряно "
+              "value": "Точно для "
             },
             {
               "type": 1,
@@ -57984,7 +57994,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Виміряно "
+              "value": "Точно для "
             },
             {
               "type": 1,
@@ -58008,7 +58018,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Виміряно "
+              "value": "Точно для "
             },
             {
               "type": 1,
@@ -58042,19 +58052,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "Немає даних про одночасні потоки за цей період"
+      "value": "Немає даних про потоки за цей період"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "Пік одночасних потоків обчислюється для всього сервера й не залежить від фільтрів облікових записів чи бібліотек."
+      "value": "Завжди показує весь сервер – фільтри облікових записів і бібліотек тут не застосовуються."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Найбільша кількість одночасних потоків за день (увесь сервер, дні за UTC)"
+      "value": "Найбільше одночасних потоків за кожен день (увесь сервер, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -58066,7 +58076,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Обсяг відтворення з часом"
+      "value": "Відтворення з часом"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -58120,13 +58130,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Відновлений перегляд зараховується як одне відтворення, а незавершені спроби, коротші за 30 секунд, не враховуються."
+      "value": "Пауза й відновлення зараховуються як одне відтворення. Незавершені зупинки, коротші за 30 секунд, не враховуються."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Обсяг відтворення"
+      "value": "Відтворення з часом"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -58150,25 +58160,25 @@
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Обсяг"
+      "value": "Надіслано даних"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Пікова швидкість вихідного трафіку за день"
+      "value": "Пікова пропускна здатність за день"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Денний вихідний трафік і пікові швидкості (увесь сервер, дні за UTC)"
+      "value": "Обсяг надісланих даних і пікова швидкість за день для всього сервера (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Вихідний трафік з часом"
+      "value": "Трафік із часом"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -58186,7 +58196,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Обсяг вихідного трафіку за день"
+      "value": "Надіслано даних за день"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -58304,7 +58314,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Пік вихідного трафіку"
+      "value": "Пікова швидкість"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -58320,7 +58330,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Частка віддалених сеансів"
+      "value": "Віддалений перегляд"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -58344,13 +58354,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "Немає даних про розташування за цей період"
+      "value": "Ще немає даних про мережу"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Загальний вихідний трафік"
+      "value": "Усього надіслано даних"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -58374,7 +58384,7 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Загальний вихідний трафік"
+      "value": "Надіслано даних"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
@@ -58386,13 +58396,13 @@
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Вихідний трафік за вузлами"
+      "value": "Трафік за вузлами"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Щоденні показники трафіку й одночасних потоків доступні з "
+      "value": "Історія трафіку доступна з "
     },
     {
       "type": 1,
@@ -58406,7 +58416,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Жоден сеанс за цей період ще не містить докладних даних про маршрут. Нові сеанси автоматично записують повну телеметрію кодеків, кодувальників і маршрутизації."
+      "value": "Докладні відомості про відтворення для цих старіших сеансів недоступні. Нові сеанси записують їх автоматично."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -58418,7 +58428,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Докладні дані про кодеки, транскод і маршрутизацію записано для "
+              "value": "Докладні відомості про відтворення доступні для "
             },
             {
               "type": 1,
@@ -58434,7 +58444,7 @@
             },
             {
               "type": 0,
-              "value": " сеансу за цей період (записуються з "
+              "value": " сеансу (відстежуються з "
             },
             {
               "type": 1,
@@ -58450,7 +58460,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Докладні дані про кодеки, транскод і маршрутизацію записано для "
+              "value": "Докладні відомості про відтворення доступні для "
             },
             {
               "type": 1,
@@ -58466,7 +58476,7 @@
             },
             {
               "type": 0,
-              "value": " сеансів за цей період (записуються з "
+              "value": " сеансів (відстежуються з "
             },
             {
               "type": 1,
@@ -58482,7 +58492,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Докладні дані про кодеки, транскод і маршрутизацію записано для "
+              "value": "Докладні відомості про відтворення доступні для "
             },
             {
               "type": 1,
@@ -58498,7 +58508,7 @@
             },
             {
               "type": 0,
-              "value": " сеансів за цей період (записуються з "
+              "value": " сеансів (відстежуються з "
             },
             {
               "type": 1,
@@ -58514,7 +58524,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Докладні дані про кодеки, транскод і маршрутизацію записано для "
+              "value": "Докладні відомості про відтворення доступні для "
             },
             {
               "type": 1,
@@ -58530,7 +58540,7 @@
             },
             {
               "type": 0,
-              "value": " сеансу за цей період (записуються з "
+              "value": " сеансу (відстежуються з "
             },
             {
               "type": 1,
@@ -58556,7 +58566,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Виміряний час перегляду охоплює "
+              "value": "Точний час перегляду доступний для "
             },
             {
               "type": 1,
@@ -58572,7 +58582,7 @@
             },
             {
               "type": 0,
-              "value": " сеансу за цей період; для старіших сеансів використовується оцінка за кінцевою позицією."
+              "value": " сеансу; для старіших сеансів використано оцінку."
             }
           ]
         },
@@ -58580,7 +58590,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Виміряний час перегляду охоплює "
+              "value": "Точний час перегляду доступний для "
             },
             {
               "type": 1,
@@ -58596,7 +58606,7 @@
             },
             {
               "type": 0,
-              "value": " сеансів за цей період; для старіших сеансів використовується оцінка за кінцевою позицією."
+              "value": " сеансів; для старіших сеансів використано оцінку."
             }
           ]
         },
@@ -58604,7 +58614,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Виміряний час перегляду охоплює "
+              "value": "Точний час перегляду доступний для "
             },
             {
               "type": 1,
@@ -58620,7 +58630,7 @@
             },
             {
               "type": 0,
-              "value": " сеансів за цей період; для старіших сеансів використовується оцінка за кінцевою позицією."
+              "value": " сеансів; для старіших сеансів використано оцінку."
             }
           ]
         },
@@ -58628,7 +58638,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Виміряний час перегляду охоплює "
+              "value": "Точний час перегляду доступний для "
             },
             {
               "type": 1,
@@ -58644,7 +58654,7 @@
             },
             {
               "type": 0,
-              "value": " сеансу за цей період; для старіших сеансів використовується оцінка за кінцевою позицією."
+              "value": " сеансу; для старіших сеансів використано оцінку."
             }
           ]
         }
@@ -58656,7 +58666,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Переглянути сеанси"
+      "value": "Переглянути історію"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -58694,13 +58704,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "За цей період субтитри не вбудовувалися"
+      "value": "За цей період субтитри не вшивалися"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Кодеки вшитих субтитрів"
+      "value": "Формати вшитих субтитрів"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -58718,7 +58728,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Прискорення кодування"
+      "value": "Апаратне прискорення"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -58780,13 +58790,13 @@
     },
     {
       "type": 0,
-      "value": " програмно"
+      "value": " на CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Кодувальник транскодування"
+      "value": "Апаратне транскодування"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -58804,7 +58814,7 @@
     },
     {
       "type": 0,
-      "value": " програмно"
+      "value": " на CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -58832,7 +58842,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Усі вибірки"
+      "value": "Усі"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -59030,25 +59040,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "За цей період немає пар клієнт–кодек, що відповідають порогу вибірки"
+      "value": "Поки замало сеансів. Виберіть «Усі» або розширте діапазон дат."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Мін. 5 сеансів"
+      "value": "5+ сеансів"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Частка прямого відтворення за клієнтом і кодеком джерела. Виберіть будь-яку клітинку, щоб переглянути відповідні сеанси."
+      "value": "Як часто кожен застосунок відтворює відеоформат без конвертування. Клацніть клітинку, щоб переглянути ці сеанси."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Клієнт × відеокодек джерела"
+      "value": "Пряме відтворення за застосунком і відеоформатом"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -59060,19 +59070,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "За цей період причини адаптації не записано"
+      "value": "За цей період причини конвертування не записано"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Причини адаптації на сервері, записані для сеансів без прямого відтворення"
+      "value": "Клацніть причину, щоб переглянути відповідні сеанси."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Чому сеанси адаптовано"
+      "value": "Чому для потоків не було прямого відтворення"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -59104,7 +59114,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Жоден сеанс не доставлено з роздільністю, нижчою за роздільність джерела"
+      "value": "За цей період роздільність не знижувалася"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -59134,7 +59144,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Вихідні файли й те, що отримали клієнти, за сеансами"
+      "value": "Роздільність оригінального відео та переданого потоку."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -59158,7 +59168,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "У цьому періоді транскодувань не зафіксовано"
+      "value": "За цей період транскодувань немає"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -59450,7 +59460,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "Напряму, %"
+      "value": "Пряме відтворення"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -59609,6 +59619,16 @@
       "value": "Усі профілі"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% прямого відтворення"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -59618,7 +59638,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "У цьому періоді немає сеансів"
+      "value": "За цей період активності немає"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -59794,7 +59814,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Тенденції відтворення, популярні назви, використання в домогосподарстві, сумісність пристроїв і вихідний трафік із часом."
+      "value": "Тенденції перегляду, популярні назви, активність домогосподарства, відтворення на пристроях і трафік."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -59860,7 +59880,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Цієї назви більше немає в каталозі."
+      "value": "Цієї назви більше немає у вашій бібліотеці."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -59932,7 +59952,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "У цьому періоді немає відтворень із бібліотек"
+      "value": "Немає активності в бібліотеках за цей період"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -59944,7 +59964,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "У цьому періоді не відтворено жодного фільму"
+      "value": "За цей період фільми не переглядалися"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -59956,7 +59976,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "У цьому періоді не відтворено жодного серіалу"
+      "value": "За цей період серіали не переглядалися"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -94783,7 +94803,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Тенденції відтворення, облікові записи, якість пристроїв і пропускна здатність."
+      "value": "Тенденції перегляду, популярні назви, облікові записи, пристрої та трафік."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

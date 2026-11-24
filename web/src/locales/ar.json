@@ -63530,7 +63530,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "السجلات"
+      "value": "الإجراءات"
     }
   ],
   "web.admin.history.column.media": [
@@ -63560,7 +63560,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "المستخدم"
+      "value": "الحساب"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -63602,7 +63602,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "المسار"
+      "value": "التفاصيل"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -63626,13 +63626,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "موضع الانتهاء"
+      "value": "موضع التوقف"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "سبب الانتهاء"
+      "value": "طريقة الانتهاء"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -63698,7 +63698,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "استخدم ↑ و↓ للتنقل بين الصفوف"
+      "value": "استخدم ↑ و↓ للتنقل بين الجلسات"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -63728,7 +63728,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "سُجّلت هذه الجلسة قبل بدء التقاط بيانات التوجيه التفصيلية. مواصفات المصدر وحقول توجيه التسليم غير متاحة لهذه الجلسة."
+      "value": "سُجّلت هذه الجلسة قبل بدء تتبّع معلومات التشغيل التفصيلية. تفاصيل الملف ومسار الخادم غير متاحة لهذه الجلسة."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -63770,13 +63770,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "العميل والجهاز والتوجيه"
+      "value": "الحساب والجهاز والتوجيه"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "سبب تكييف هذه الجلسة"
+      "value": "سبب عدم التشغيل المباشر"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -63806,7 +63806,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "إصدار HLS"
+      "value": "مبثوثة (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -63818,7 +63818,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "ملف منفصل"
+      "value": "ملف خارجي"
     }
   ],
   "web.admin.history.detail.title": [
@@ -63882,7 +63882,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "لا يوجد سجل تشغيل يطابق عوامل التصفية الحالية. جرّب تعديل عوامل تصفية المستخدم أو الملف الشخصي أو الاكتمال."
+      "value": "لا توجد جلسات تطابق عوامل التصفية هذه. جرّب مسح عامل تصفية أو تعديله."
     }
   ],
   "web.admin.history.empty.title": [
@@ -63894,19 +63894,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "أُجهضت"
+      "value": "أنهاها الخادم"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "انتهت صلاحيتها"
+      "value": "انتهت مهلتها"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "استُبدلت"
+      "value": "استُبدلت ببث آخر"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -63918,7 +63918,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "أنهاها المسؤول"
+      "value": "أوقفها المسؤول"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -64002,7 +64002,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "كل المحاولات"
+      "value": "كل الحالات"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -64032,7 +64032,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "كل المستخدمين"
+      "value": "كل الحسابات"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -64044,7 +64044,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "اختر مستخدمًا أولًا"
+      "value": "اختر حسابًا أولًا"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -64090,13 +64090,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "ابحث في العناوين أو المستخدمين أو العملاء أو معرّفات الجلسات…"
+      "value": "ابحث في العناوين أو الحسابات أو العملاء أو معرّفات الجلسات…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "التصفية حسب عنصر مفعّلة"
+      "value": "العنوان:"
     }
   ],
   "web.admin.history.loadError": [
@@ -64361,7 +64361,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "تقديري: سُجّل قبل بدء قياس وقت المشاهدة"
+      "value": "تقديري (سُجّل قبل بدء تتبّع وقت المشاهدة الدقيق)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -64419,13 +64419,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "الصفوف المعروضة"
+      "value": "المعروض"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "محاولات التشغيل المنتهية لجميع المستخدمين والملفات الشخصية."
+      "value": "جلسات التشغيل السابقة لجميع الحسابات والملفات الشخصية."
     }
   ],
   "web.admin.history.title": [
@@ -67766,6 +67766,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "السجل"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -67809,7 +67815,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "لم تُسجَّل ساعات مشاهدة في هذه الفترة"
+      "value": "لا نشاط مشاهدة في هذه الفترة"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -67827,11 +67833,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "أوقات بدء التشغيل بتوقيت "
+      "value": "متى يبدأ المشاهدون المشاهدة ("
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -67883,7 +67893,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "لا عينات بث في هذه الفترة"
+      "value": "لا بيانات بث بعد"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -68049,7 +68059,7 @@
           "value": [
             {
               "type": 0,
-              "value": "قيست "
+              "value": "دقيق لـ "
             },
             {
               "type": 1,
@@ -68073,7 +68083,7 @@
           "value": [
             {
               "type": 0,
-              "value": "قيست "
+              "value": "دقيق لـ "
             },
             {
               "type": 1,
@@ -68089,7 +68099,7 @@
           "value": [
             {
               "type": 0,
-              "value": "قيست "
+              "value": "دقيق لـ "
             },
             {
               "type": 1,
@@ -68105,7 +68115,7 @@
           "value": [
             {
               "type": 0,
-              "value": "قيست "
+              "value": "دقيق لـ "
             },
             {
               "type": 1,
@@ -68129,7 +68139,7 @@
           "value": [
             {
               "type": 0,
-              "value": "قيست "
+              "value": "دقيق لـ "
             },
             {
               "type": 1,
@@ -68153,7 +68163,7 @@
           "value": [
             {
               "type": 0,
-              "value": "قيست "
+              "value": "دقيق لـ "
             },
             {
               "type": 1,
@@ -68187,19 +68197,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "لا عينات تزامن في هذه الفترة"
+      "value": "لا بيانات بث في هذه الفترة"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "تشمل ذروة البث المتزامن الخادم بأكمله ولا تتغير بتصفية الحساب أو المكتبة."
+      "value": "يعرض دائمًا الخادم بأكمله — لا تنطبق هنا عوامل تصفية الحساب والمكتبة."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "أعلى عدد من البث المتزامن يوميًا (على مستوى الخادم، أيام UTC)"
+      "value": "أكبر عدد من البث المتزامن كل يوم (الخادم بأكمله، UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -68211,7 +68221,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "حجم التشغيل بمرور الوقت"
+      "value": "التشغيل بمرور الوقت"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -68265,13 +68275,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "تُحتسب الجلسات المستأنفة مرة تشغيل واحدة، وتُستبعد المحاولات غير المكتملة التي تقل عن 30 ثانية."
+      "value": "يُحتسب الإيقاف المؤقت والاستئناف مرة تشغيل واحدة. لا تُحتسب مرات الإيقاف غير المكتملة التي تقل عن 30 ثانية."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "حجم التشغيل"
+      "value": "التشغيل بمرور الوقت"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -68283,37 +68293,37 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "لا عينات لعرض النطاق في هذه الفترة"
+      "value": "لا بيانات لعرض النطاق في هذه الفترة"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
     {
       "type": 0,
-      "value": "معدل الذروة"
+      "value": "سرعة الذروة"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "الحجم"
+      "value": "البيانات المرسلة"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "معدل الذروة اليومي للبيانات الصادرة"
+      "value": "ذروة عرض النطاق اليومية"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "إجمالي البيانات الصادرة ومعدلات الذروة يوميًا (على مستوى الخادم، أيام UTC)"
+      "value": "البيانات المرسلة يوميًا وسرعة الذروة على مستوى الخادم بأكمله (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "البيانات الصادرة بمرور الوقت"
+      "value": "عرض النطاق بمرور الوقت"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -68331,7 +68341,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "حجم البيانات الصادرة يوميًا"
+      "value": "البيانات المرسلة يوميًا"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -68458,7 +68468,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "ذروة البيانات الصادرة"
+      "value": "سرعة الذروة"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -68474,7 +68484,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "نسبة الجلسات البعيدة"
+      "value": "المشاهدة عن بُعد"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -68498,13 +68508,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "لا بيانات موقع في هذه الفترة"
+      "value": "لا معلومات شبكة بعد"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "إجمالي البيانات الصادرة"
+      "value": "إجمالي البيانات المرسلة"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -68516,7 +68526,7 @@
   "web.admin.insights.bandwidth.nodes.column.peak": [
     {
       "type": 0,
-      "value": "معدل الذروة"
+      "value": "سرعة الذروة"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.share": [
@@ -68528,25 +68538,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "إجمالي البيانات الصادرة"
+      "value": "البيانات المرسلة"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "لا بيانات صادرة من العقد البعيدة في هذه الفترة"
+      "value": "لا حركة بيانات من العقد البعيدة في هذه الفترة"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "البيانات الصادرة حسب العقدة"
+      "value": "عرض النطاق حسب العقدة"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "تبدأ مقاييس عرض النطاق والتزامن اليومية في "
+      "value": "يبدأ سجل عرض النطاق في "
     },
     {
       "type": 1,
@@ -68560,7 +68570,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "لا تحمل أي جلسة في هذه الفترة بيانات مسار تفصيلية بعد. تسجّل الجلسات الجديدة بيانات الترميز والمرمِّز والتوجيه كاملة تلقائيًا."
+      "value": "معلومات التشغيل التفصيلية غير متاحة لهذه الجلسات الأقدم. تسجّلها الجلسات الجديدة تلقائيًا."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -68572,7 +68582,7 @@
           "value": [
             {
               "type": 0,
-              "value": "تُسجَّل بيانات الترميز وتحويل الترميز والتوجيه التفصيلية لـ "
+              "value": "تتوفر معلومات التشغيل التفصيلية لـ "
             },
             {
               "type": 1,
@@ -68588,7 +68598,7 @@
             },
             {
               "type": 0,
-              "value": " جلسة في هذه الفترة (تُسجَّل منذ "
+              "value": " جلسة (تُتتبَّع منذ "
             },
             {
               "type": 1,
@@ -68604,7 +68614,7 @@
           "value": [
             {
               "type": 0,
-              "value": "تُسجَّل بيانات الترميز وتحويل الترميز والتوجيه التفصيلية لـ "
+              "value": "تتوفر معلومات التشغيل التفصيلية لـ "
             },
             {
               "type": 1,
@@ -68612,7 +68622,7 @@
             },
             {
               "type": 0,
-              "value": " من جلسة واحدة في هذه الفترة (تُسجَّل منذ "
+              "value": " من جلسة واحدة (تُتتبَّع منذ "
             },
             {
               "type": 1,
@@ -68628,7 +68638,7 @@
           "value": [
             {
               "type": 0,
-              "value": "تُسجَّل بيانات الترميز وتحويل الترميز والتوجيه التفصيلية لـ "
+              "value": "تتوفر معلومات التشغيل التفصيلية لـ "
             },
             {
               "type": 1,
@@ -68636,7 +68646,7 @@
             },
             {
               "type": 0,
-              "value": " من جلستين في هذه الفترة (تُسجَّل منذ "
+              "value": " من جلستين (تُتتبَّع منذ "
             },
             {
               "type": 1,
@@ -68652,7 +68662,7 @@
           "value": [
             {
               "type": 0,
-              "value": "تُسجَّل بيانات الترميز وتحويل الترميز والتوجيه التفصيلية لـ "
+              "value": "تتوفر معلومات التشغيل التفصيلية لـ "
             },
             {
               "type": 1,
@@ -68668,7 +68678,7 @@
             },
             {
               "type": 0,
-              "value": " جلسات في هذه الفترة (تُسجَّل منذ "
+              "value": " جلسات (تُتتبَّع منذ "
             },
             {
               "type": 1,
@@ -68684,7 +68694,7 @@
           "value": [
             {
               "type": 0,
-              "value": "تُسجَّل بيانات الترميز وتحويل الترميز والتوجيه التفصيلية لـ "
+              "value": "تتوفر معلومات التشغيل التفصيلية لـ "
             },
             {
               "type": 1,
@@ -68700,7 +68710,7 @@
             },
             {
               "type": 0,
-              "value": " جلسة في هذه الفترة (تُسجَّل منذ "
+              "value": " جلسة (تُتتبَّع منذ "
             },
             {
               "type": 1,
@@ -68716,7 +68726,7 @@
           "value": [
             {
               "type": 0,
-              "value": "تُسجَّل بيانات الترميز وتحويل الترميز والتوجيه التفصيلية لـ "
+              "value": "تتوفر معلومات التشغيل التفصيلية لـ "
             },
             {
               "type": 1,
@@ -68732,7 +68742,7 @@
             },
             {
               "type": 0,
-              "value": " جلسة في هذه الفترة (تُسجَّل منذ "
+              "value": " جلسة (تُتتبَّع منذ "
             },
             {
               "type": 1,
@@ -68758,7 +68768,7 @@
           "value": [
             {
               "type": 0,
-              "value": "يشمل وقت المشاهدة المقيس "
+              "value": "يتوفر وقت المشاهدة الدقيق لـ "
             },
             {
               "type": 1,
@@ -68774,7 +68784,7 @@
             },
             {
               "type": 0,
-              "value": " جلسة في هذه الفترة؛ وتعتمد الجلسات الأقدم على تقديرات موضع الانتهاء."
+              "value": " جلسة؛ والجلسات الأقدم تقديرية."
             }
           ]
         },
@@ -68782,7 +68792,7 @@
           "value": [
             {
               "type": 0,
-              "value": "يشمل وقت المشاهدة المقيس "
+              "value": "يتوفر وقت المشاهدة الدقيق لـ "
             },
             {
               "type": 1,
@@ -68790,7 +68800,7 @@
             },
             {
               "type": 0,
-              "value": " من جلسة واحدة في هذه الفترة؛ وتعتمد الجلسات الأقدم على تقديرات موضع الانتهاء."
+              "value": " من جلسة واحدة؛ والجلسات الأقدم تقديرية."
             }
           ]
         },
@@ -68798,7 +68808,7 @@
           "value": [
             {
               "type": 0,
-              "value": "يشمل وقت المشاهدة المقيس "
+              "value": "يتوفر وقت المشاهدة الدقيق لـ "
             },
             {
               "type": 1,
@@ -68806,7 +68816,7 @@
             },
             {
               "type": 0,
-              "value": " من جلستين في هذه الفترة؛ وتعتمد الجلسات الأقدم على تقديرات موضع الانتهاء."
+              "value": " من جلستين؛ والجلسات الأقدم تقديرية."
             }
           ]
         },
@@ -68814,7 +68824,7 @@
           "value": [
             {
               "type": 0,
-              "value": "يشمل وقت المشاهدة المقيس "
+              "value": "يتوفر وقت المشاهدة الدقيق لـ "
             },
             {
               "type": 1,
@@ -68830,7 +68840,7 @@
             },
             {
               "type": 0,
-              "value": " جلسات في هذه الفترة؛ وتعتمد الجلسات الأقدم على تقديرات موضع الانتهاء."
+              "value": " جلسات؛ والجلسات الأقدم تقديرية."
             }
           ]
         },
@@ -68838,7 +68848,7 @@
           "value": [
             {
               "type": 0,
-              "value": "يشمل وقت المشاهدة المقيس "
+              "value": "يتوفر وقت المشاهدة الدقيق لـ "
             },
             {
               "type": 1,
@@ -68854,7 +68864,7 @@
             },
             {
               "type": 0,
-              "value": " جلسة في هذه الفترة؛ وتعتمد الجلسات الأقدم على تقديرات موضع الانتهاء."
+              "value": " جلسة؛ والجلسات الأقدم تقديرية."
             }
           ]
         },
@@ -68862,7 +68872,7 @@
           "value": [
             {
               "type": 0,
-              "value": "يشمل وقت المشاهدة المقيس "
+              "value": "يتوفر وقت المشاهدة الدقيق لـ "
             },
             {
               "type": 1,
@@ -68878,7 +68888,7 @@
             },
             {
               "type": 0,
-              "value": " جلسة في هذه الفترة؛ وتعتمد الجلسات الأقدم على تقديرات موضع الانتهاء."
+              "value": " جلسة؛ والجلسات الأقدم تقديرية."
             }
           ]
         }
@@ -68890,7 +68900,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "عرض الجلسات"
+      "value": "عرض السجل"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -68928,13 +68938,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "لم تُدمج أي ترجمات في هذه الفترة"
+      "value": "لا ترجمات مدمجة في الصورة في هذه الفترة"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "صيغ الترجمة المدمجة"
+      "value": "صيغ الترجمة المدمجة في الصورة"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -68952,7 +68962,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "تسريع المرمِّز"
+      "value": "التسريع العتادي"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -69010,7 +69020,7 @@
     },
     {
       "type": 0,
-      "value": " · برمجي: "
+      "value": " · CPU: "
     },
     {
       "type": 1,
@@ -69020,7 +69030,7 @@
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "مرمِّز تحويل الترميز"
+      "value": "تحويل الترميز العتادي"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -69034,7 +69044,7 @@
     },
     {
       "type": 0,
-      "value": " · برمجي: "
+      "value": " · CPU: "
     },
     {
       "type": 1,
@@ -69066,7 +69076,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "كل العينات"
+      "value": "الكل"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -69328,25 +69338,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "لا توجد أزواج عميل وترميز تبلغ حد العينات في هذه الفترة"
+      "value": "لا جلسات كافية بعد. انتقل إلى «الكل» أو وسّع النطاق الزمني."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "5 جلسات على الأقل"
+      "value": "5 جلسات أو أكثر"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "معدل التشغيل المباشر حسب العميل وترميز المصدر. اختر أي خلية لفحص الجلسات المطابقة."
+      "value": "مدى تكرار تشغيل كل تطبيق لصيغة فيديو دون تحويل. انقر على خلية لعرض تلك الجلسات."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "العميل × ترميز فيديو المصدر"
+      "value": "التشغيل المباشر حسب التطبيق وصيغة الفيديو"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -69358,19 +69368,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "لم تُسجَّل أسباب تكييف في هذه الفترة"
+      "value": "لم تُسجَّل أسباب تحويل في هذه الفترة"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "أسباب التكييف التي سجّلها الخادم للجلسات غير المباشرة"
+      "value": "انقر على سبب لعرض الجلسات المطابقة."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "أسباب تكييف الجلسات"
+      "value": "أسباب عدم التشغيل المباشر للبث"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -69402,7 +69412,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "لم تُرسَل أي جلسة بدقة أقل من دقة مصدرها"
+      "value": "لم تُخفَّض دقة أي شيء في هذه الفترة"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -69432,7 +69442,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "ملفات المصدر وما استلمته العملاء، حسب الجلسة"
+      "value": "دقة الفيديو الأصلية مقابل ما بُثّ."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -69456,7 +69466,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "لم يُسجَّل أي تحويل للترميز في هذه الفترة"
+      "value": "لا تحويل ترميز في هذه الفترة"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -69784,7 +69794,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "% مباشر"
+      "value": "التشغيل المباشر"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -69956,6 +69966,16 @@
       "value": "كل الملفات الشخصية"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% تشغيل مباشر"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -69965,7 +69985,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "لا جلسات في هذه الفترة"
+      "value": "لا نشاط في هذه الفترة"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -70165,7 +70185,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "اتجاهات التشغيل، والعناوين الشائعة، واستخدام الأسرة، وتوافق الأجهزة، والبيانات الصادرة بمرور الوقت."
+      "value": "اتجاهات المشاهدة، والعناوين الأبرز، ونشاط الأسرة، والتشغيل على الأجهزة، وعرض النطاق."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -70231,7 +70251,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "لم يعد هذا العنوان موجودًا في الكتالوج."
+      "value": "لم يعد هذا العنوان موجودًا في مكتبتك."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -70303,7 +70323,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "لا تشغيلات من المكتبات في هذه الفترة"
+      "value": "لا نشاط في المكتبات في هذه الفترة"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -70315,7 +70335,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "لم يُشغَّل أي فيلم في هذه الفترة"
+      "value": "لم يُشاهَد أي فيلم في هذه الفترة"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -70327,7 +70347,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "لم يُشغَّل أي مسلسل في هذه الفترة"
+      "value": "لم يُشاهَد أي مسلسل في هذه الفترة"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -107533,7 +107553,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "اتجاهات التشغيل، والحسابات، وجودة الأجهزة، وعرض النطاق الترددي."
+      "value": "اتجاهات المشاهدة، والعناوين الأبرز، والحسابات، والأجهزة، وعرض النطاق."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

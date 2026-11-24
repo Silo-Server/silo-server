@@ -46269,7 +46269,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "\u200F\u202ELogs\u202C"
+      "value": "\u200F\u202EActions\u202C"
     }
   ],
   "web.admin.history.column.media": [
@@ -46299,13 +46299,13 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "\u200F\u202EUser\u202C"
+      "value": "\u200F\u202EAccount\u202C"
     }
   ],
   "web.admin.history.column.watchTime": [
     {
       "type": 0,
-      "value": "\u200F\u202EWatch Time\u202C"
+      "value": "\u200F\u202EWatch time\u202C"
     }
   ],
   "web.admin.history.detail.action.ffmpegLogs": [
@@ -46341,7 +46341,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "\u200F\u202ETrack\u202C"
+      "value": "\u200F\u202EDetail\u202C"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -46365,13 +46365,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "\u200F\u202EEnd position\u202C"
+      "value": "\u200F\u202EStopped at\u202C"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "\u200F\u202EEnd reason\u202C"
+      "value": "\u200F\u202EHow it ended\u202C"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -46437,7 +46437,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "\u200F\u202EUse ↑ and ↓ to step through rows\u202C"
+      "value": "\u200F\u202EUse ↑ and ↓ to move between sessions\u202C"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -46467,7 +46467,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "\u200F\u202ERecorded before detailed route telemetry was captured. Source specs and delivery route fields are unavailable for this session.\u202C"
+      "value": "\u200F\u202ERecorded before detailed playback info was tracked. File details and server route aren’t available for this session.\u202C"
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -46509,13 +46509,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "\u200F\u202EClient, device & route\u202C"
+      "value": "\u200F\u202EAccount, device & route\u202C"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "\u200F\u202EWhy this session adapted\u202C"
+      "value": "\u200F\u202EWhy it didn’t direct play\u202C"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -46545,7 +46545,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "\u200F\u202EHLS rendition\u202C"
+      "value": "\u200F\u202EStreamed (HLS)\u202C"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -46557,7 +46557,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "\u200F\u202ESidecar\u202C"
+      "value": "\u200F\u202EExternal file\u202C"
     }
   ],
   "web.admin.history.detail.title": [
@@ -46633,7 +46633,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo playback history matches the current filters. Try adjusting the user, profile, or completion filters.\u202C"
+      "value": "\u200F\u202ENo sessions match these filters. Try clearing or adjusting a filter.\u202C"
     }
   ],
   "web.admin.history.empty.title": [
@@ -46645,19 +46645,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "\u200F\u202EAborted\u202C"
+      "value": "\u200F\u202EEnded by server\u202C"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "\u200F\u202EExpired\u202C"
+      "value": "\u200F\u202ETimed out\u202C"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "\u200F\u202EReplaced\u202C"
+      "value": "\u200F\u202ESwitched stream\u202C"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -46669,7 +46669,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "\u200F\u202ETerminated by admin\u202C"
+      "value": "\u200F\u202EStopped by admin\u202C"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -46753,7 +46753,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "\u200F\u202EAll attempts\u202C"
+      "value": "\u200F\u202EAll statuses\u202C"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -46783,7 +46783,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "\u200F\u202EAll users\u202C"
+      "value": "\u200F\u202EAll accounts\u202C"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -46795,7 +46795,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "\u200F\u202EChoose a user first\u202C"
+      "value": "\u200F\u202EChoose an account first\u202C"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -46845,13 +46845,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "\u200F\u202ESearch titles, users, clients, or session IDs…\u202C"
+      "value": "\u200F\u202ESearch titles, accounts, clients, or session IDs…\u202C"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "\u200F\u202EItem filter active\u202C"
+      "value": "\u200F\u202ETitle:\u202C"
     }
   ],
   "web.admin.history.loadError": [
@@ -47041,7 +47041,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EEstimated: recorded before watch time was measured\u202C"
+      "value": "\u200F\u202EEstimated (recorded before exact watch time was tracked)\u202C"
     }
   ],
   "web.admin.history.row.meta": [
@@ -47103,13 +47103,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "\u200F\u202EVisible Rows\u202C"
+      "value": "\u200F\u202EShown\u202C"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EFinalized playback attempts across all users and profiles.\u202C"
+      "value": "\u200F\u202EPast playback sessions across all accounts and profiles.\u202C"
     }
   ],
   "web.admin.history.title": [
@@ -49520,6 +49520,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EHistory\u202C"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -49567,7 +49573,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo viewing hours recorded in this window\u202C"
+      "value": "\u200F\u202ENo viewing activity in this period\u202C"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -49585,11 +49591,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EWhen plays start in \u202C"
+      "value": "\u200F\u202EWhen people start watching (\u202C"
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -49645,7 +49655,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo stream samples in window\u202C"
+      "value": "\u200F\u202ENo stream data yet\u202C"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -49743,7 +49753,7 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F"
+              "value": "\u200F\u202EExact for \u202C"
             },
             {
               "type": 1,
@@ -49759,7 +49769,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E session measured\u202C"
+              "value": "\u202E session\u202C"
             }
           ]
         },
@@ -49767,7 +49777,7 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F"
+              "value": "\u200F\u202EExact for \u202C"
             },
             {
               "type": 1,
@@ -49783,7 +49793,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E sessions measured\u202C"
+              "value": "\u202E sessions\u202C"
             }
           ]
         }
@@ -49801,19 +49811,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo concurrency samples in this window\u202C"
+      "value": "\u200F\u202ENo stream data in this period\u202C"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "\u200F\u202EPeak concurrent streams are server-wide and do not change with account or library filters.\u202C"
+      "value": "\u200F\u202EAlways shows the whole server — account and library filters don’t apply here.\u202C"
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EDaily highest simultaneous streams (server-wide, UTC days)\u202C"
+      "value": "\u200F\u202EMost streams playing at once each day (whole server, UTC)\u202C"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -49825,13 +49835,13 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "\u200F\u202EPlayback volume over time\u202C"
+      "value": "\u200F\u202EPlayback over time\u202C"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo playback in this window\u202C"
+      "value": "\u200F\u202ENo playback in this period\u202C"
     }
   ],
   "web.admin.insights.activity.volume.metricPlays": [
@@ -49879,13 +49889,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EA play counts resumed sittings once and skips unfinished attempts under 30 seconds.\u202C"
+      "value": "\u200F\u202EPausing and resuming counts as one play. Unfinished stops under 30 seconds aren’t counted.\u202C"
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "\u200F\u202EPlayback volume\u202C"
+      "value": "\u200F\u202EPlayback over time\u202C"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -49897,37 +49907,37 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo bandwidth samples in this window\u202C"
+      "value": "\u200F\u202ENo bandwidth data in this period\u202C"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
     {
       "type": 0,
-      "value": "\u200F\u202EPeak rate\u202C"
+      "value": "\u200F\u202EPeak speed\u202C"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "\u200F\u202EVolume\u202C"
+      "value": "\u200F\u202EData sent\u202C"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "\u200F\u202EDaily peak egress rate\u202C"
+      "value": "\u200F\u202EDaily peak bandwidth\u202C"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EDaily egress totals and peak rates (server-wide, UTC days)\u202C"
+      "value": "\u200F\u202EDaily data sent and peak speed across the whole server (UTC).\u202C"
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "\u200F\u202EEgress over time\u202C"
+      "value": "\u200F\u202EBandwidth over time\u202C"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -49945,7 +49955,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "\u200F\u202EDaily egress volume\u202C"
+      "value": "\u200F\u202EDaily data sent\u202C"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -50041,7 +50051,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "\u200F\u202EPeak egress\u202C"
+      "value": "\u200F\u202EPeak speed\u202C"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -50057,7 +50067,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "\u200F\u202ERemote session share\u202C"
+      "value": "\u200F\u202ERemote viewing\u202C"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -50085,13 +50095,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo location facts in window\u202C"
+      "value": "\u200F\u202ENo network info yet\u202C"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "\u200F\u202ETotal egress\u202C"
+      "value": "\u200F\u202ETotal data sent\u202C"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -50103,7 +50113,7 @@
   "web.admin.insights.bandwidth.nodes.column.peak": [
     {
       "type": 0,
-      "value": "\u200F\u202EPeak rate\u202C"
+      "value": "\u200F\u202EPeak speed\u202C"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.share": [
@@ -50115,25 +50125,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "\u200F\u202ETotal egress\u202C"
+      "value": "\u200F\u202EData sent\u202C"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo remote node egress in this window\u202C"
+      "value": "\u200F\u202ENo remote node traffic in this period\u202C"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "\u200F\u202EEgress by node\u202C"
+      "value": "\u200F\u202EBandwidth by node\u202C"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "\u200F\u202EDaily bandwidth and concurrency metrics start on \u202C"
+      "value": "\u200F\u202EBandwidth history starts on \u202C"
     },
     {
       "type": 1,
@@ -50147,7 +50157,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo sessions in this window carry detailed route facts yet. New sessions record full codec, encoder, and routing telemetry automatically.\u202C"
+      "value": "\u200F\u202EDetailed playback info isn’t available for these older sessions. New sessions record it automatically.\u202C"
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -50159,7 +50169,7 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EDetailed codec, transcode, and routing facts are recorded for \u202C"
+              "value": "\u200F\u202EDetailed playback info is available for \u202C"
             },
             {
               "type": 1,
@@ -50175,7 +50185,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E session in this window (recorded since \u202C"
+              "value": "\u202E session (tracked since \u202C"
             },
             {
               "type": 1,
@@ -50191,7 +50201,7 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EDetailed codec, transcode, and routing facts are recorded for \u202C"
+              "value": "\u200F\u202EDetailed playback info is available for \u202C"
             },
             {
               "type": 1,
@@ -50207,7 +50217,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E sessions in this window (recorded since \u202C"
+              "value": "\u202E sessions (tracked since \u202C"
             },
             {
               "type": 1,
@@ -50233,7 +50243,7 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EMeasured watch time covers \u202C"
+              "value": "\u200F\u202EExact watch time is available for \u202C"
             },
             {
               "type": 1,
@@ -50249,7 +50259,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E session in this window; older sessions use end-position estimates.\u202C"
+              "value": "\u202E session; older sessions are estimated.\u202C"
             }
           ]
         },
@@ -50257,7 +50267,7 @@
           "value": [
             {
               "type": 0,
-              "value": "\u200F\u202EMeasured watch time covers \u202C"
+              "value": "\u200F\u202EExact watch time is available for \u202C"
             },
             {
               "type": 1,
@@ -50273,7 +50283,7 @@
             },
             {
               "type": 0,
-              "value": "\u202E sessions in this window; older sessions use end-position estimates.\u202C"
+              "value": "\u202E sessions; older sessions are estimated.\u202C"
             }
           ]
         }
@@ -50285,13 +50295,13 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "\u200F\u202EView sessions\u202C"
+      "value": "\u200F\u202EView history\u202C"
     }
   ],
   "web.admin.insights.detail.noPlays": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo plays in this window\u202C"
+      "value": "\u200F\u202ENo plays in this period\u202C"
     }
   ],
   "web.admin.insights.detail.playsOverTime": [
@@ -50327,19 +50337,19 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo subtitle burn-ins in this window\u202C"
+      "value": "\u200F\u202ENo burned-in subtitles in this period\u202C"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "\u200F\u202EBurn-in subtitle codecs\u202C"
+      "value": "\u200F\u202EBurned-in subtitle formats\u202C"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo video transcodes in this window\u202C"
+      "value": "\u200F\u202ENo video transcodes in this period\u202C"
     }
   ],
   "web.admin.insights.devices.hwAccel.software": [
@@ -50351,7 +50361,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "\u200F\u202EEncoder acceleration\u202C"
+      "value": "\u200F\u202EHardware acceleration\u202C"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -50393,7 +50403,7 @@
   "web.admin.insights.devices.kpi.directPlayRate": [
     {
       "type": 0,
-      "value": "\u200F\u202EDirect play share\u202C"
+      "value": "\u200F\u202EDirect play rate\u202C"
     }
   ],
   "web.admin.insights.devices.kpi.hdrToneMap": [
@@ -50413,7 +50423,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E HW · \u202C"
+      "value": "\u202E hardware · \u202C"
     },
     {
       "type": 1,
@@ -50421,13 +50431,13 @@
     },
     {
       "type": 0,
-      "value": "\u202E SW\u202C"
+      "value": "\u202E CPU\u202C"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "\u200F\u202ETranscode encoder\u202C"
+      "value": "\u200F\u202EHardware transcoding\u202C"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -50441,7 +50451,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E HW · \u202C"
+      "value": "\u202E hardware · \u202C"
     },
     {
       "type": 1,
@@ -50449,7 +50459,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E SW\u202C"
+      "value": "\u202E CPU\u202C"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -50481,7 +50491,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "\u200F\u202EAll samples\u202C"
+      "value": "\u200F\u202EAll\u202C"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -50599,25 +50609,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo client-codec pairs meet the sample threshold in this window\u202C"
+      "value": "\u200F\u202ENot enough sessions yet. Switch to “All” or widen the date range.\u202C"
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "\u200F\u202EMin 5 sessions\u202C"
+      "value": "\u200F\u202E5+ sessions\u202C"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EDirect-play rate by client and source codec. Select any cell to inspect matching sessions.\u202C"
+      "value": "\u200F\u202EHow often each app plays a video format without converting. Click a cell to see those sessions.\u202C"
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "\u200F\u202EClient × Source video codec\u202C"
+      "value": "\u200F\u202EDirect play by app & video format\u202C"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -50629,19 +50639,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo adaptation reasons recorded in this window\u202C"
+      "value": "\u200F\u202ENo conversion reasons recorded in this period\u202C"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EServer adaptation reasons recorded on non-direct sessions\u202C"
+      "value": "\u200F\u202EClick a reason to see matching sessions.\u202C"
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "\u200F\u202EWhy sessions adapted\u202C"
+      "value": "\u200F\u202EWhy streams didn’t direct play\u202C"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -50677,13 +50687,13 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo sessions were delivered below their source resolution\u202C"
+      "value": "\u200F\u202ENothing was downscaled in this period\u202C"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo sessions in this window\u202C"
+      "value": "\u200F\u202ENo sessions in this period\u202C"
     }
   ],
   "web.admin.insights.devices.resolution.fuhd": [
@@ -50707,7 +50717,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202ESource files and what clients received, by session\u202C"
+      "value": "\u200F\u202EOriginal video resolution vs. what was streamed.\u202C"
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -50731,7 +50741,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo transcodes recorded in this window\u202C"
+      "value": "\u200F\u202ENo transcodes in this period\u202C"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -50979,7 +50989,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "\u200F\u202EDirect %\u202C"
+      "value": "\u200F\u202EDirect play\u202C"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -51128,6 +51138,20 @@
       "value": "\u200F\u202EAll profiles\u202C"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "\u202E% direct play\u202C"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -51137,7 +51161,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo sessions in this window\u202C"
+      "value": "\u200F\u202ENo activity in this period\u202C"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -51281,7 +51305,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EPlayback trends, popular titles, household usage, device compatibility, and egress over time.\u202C"
+      "value": "\u200F\u202EWatch trends, top titles, household activity, device playback, and bandwidth.\u202C"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -51347,7 +51371,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "\u200F\u202EThis title is no longer in the catalog.\u202C"
+      "value": "\u200F\u202EThis title is no longer in your library.\u202C"
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -51419,7 +51443,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo library plays in this window\u202C"
+      "value": "\u200F\u202ENo library activity in this period\u202C"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -51431,7 +51455,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo movies played in this window\u202C"
+      "value": "\u200F\u202ENo movies watched in this period\u202C"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -51443,7 +51467,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo shows played in this window\u202C"
+      "value": "\u200F\u202ENo shows watched in this period\u202C"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -84356,7 +84380,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "\u200F\u202EPlayback trends, accounts, device quality, and bandwidth.\u202C"
+      "value": "\u200F\u202EWatch trends, top titles, accounts, devices, and bandwidth.\u202C"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

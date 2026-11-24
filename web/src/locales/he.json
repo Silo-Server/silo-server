@@ -48251,7 +48251,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "יומנים"
+      "value": "פעולות"
     }
   ],
   "web.admin.history.column.media": [
@@ -48281,7 +48281,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "משתמש"
+      "value": "חשבון"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -48323,7 +48323,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "רצועה"
+      "value": "פרט"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -48347,13 +48347,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "מיקום בסיום"
+      "value": "מיקום העצירה"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "סיבת הסיום"
+      "value": "אופן הסיום"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -48419,7 +48419,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "אפשר להשתמש ב-↑ וב-↓ כדי לעבור בין השורות"
+      "value": "אפשר להשתמש ב-↑ וב-↓ כדי לעבור בין הסשנים"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -48449,7 +48449,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "הסשן תועד לפני שנאספה טלמטריה מפורטת על הנתיב. מפרטי המקור ושדות נתיב המסירה לא זמינים לסשן הזה."
+      "value": "הסשן תועד לפני שנאסף מידע מפורט על ההפעלה. פרטי הקובץ ונתיב השרת לא זמינים לסשן הזה."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -48491,13 +48491,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "לקוח, מכשיר ונתיב"
+      "value": "חשבון, מכשיר ונתיב"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "למה הסשן הותאם"
+      "value": "למה לא בוצעה הפעלה ישירה"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -48527,7 +48527,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "גרסת HLS"
+      "value": "מוזרמות (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -48539,7 +48539,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "קובץ נפרד"
+      "value": "קובץ חיצוני"
     }
   ],
   "web.admin.history.detail.title": [
@@ -48603,7 +48603,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "אין היסטוריית הפעלה שתואמת למסננים הנוכחיים. אפשר לשנות את מסנני המשתמש, הפרופיל או ההשלמה."
+      "value": "אין סשנים שתואמים למסננים האלה. אפשר לנקות או לשנות מסנן."
     }
   ],
   "web.admin.history.empty.title": [
@@ -48615,19 +48615,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "נקטע"
+      "value": "הסתיים על ידי השרת"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "פג תוקף"
+      "value": "פג הזמן הקצוב"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "הוחלף"
+      "value": "מעבר להזרמה אחרת"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -48639,7 +48639,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "הופסק על ידי מנהל"
+      "value": "נעצר על ידי מנהל"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -48723,7 +48723,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "כל הניסיונות"
+      "value": "כל הסטטוסים"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -48753,7 +48753,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "כל המשתמשים"
+      "value": "כל החשבונות"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -48765,7 +48765,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "יש לבחור קודם משתמש"
+      "value": "יש לבחור קודם חשבון"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -48811,13 +48811,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "חיפוש פריטים, משתמשים, לקוחות או מזהי סשן…"
+      "value": "חיפוש פריטים, חשבונות, לקוחות או מזהי סשן…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "מסנן פריט פעיל"
+      "value": "פריט:"
     }
   ],
   "web.admin.history.loadError": [
@@ -49015,7 +49015,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "הערכה: נרשם לפני שזמן הצפייה נמדד"
+      "value": "הערכה (נרשם לפני שזמן הצפייה המדויק נמדד)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -49073,13 +49073,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "שורות מוצגות"
+      "value": "מוצגות"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "ניסיונות הפעלה סופיים של כל המשתמשים והפרופילים."
+      "value": "סשנים קודמים של הפעלה בכל החשבונות והפרופילים."
     }
   ],
   "web.admin.history.title": [
@@ -51622,6 +51622,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "היסטוריה"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -51665,7 +51671,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "לא נרשמו שעות צפייה בטווח הזה"
+      "value": "אין פעילות צפייה בטווח הזה"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -51683,11 +51689,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "מתי מתחילות הפעלות, לפי אזור הזמן "
+      "value": "מתי מתחילים לצפות (אזור הזמן "
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -51739,7 +51749,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "אין דגימות הזרמה בטווח"
+      "value": "אין עדיין נתוני הזרמה"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -51849,7 +51859,7 @@
           "value": [
             {
               "type": 0,
-              "value": "נמדד זמן צפייה ב-"
+              "value": "זמן מדויק עבור "
             },
             {
               "type": 1,
@@ -51865,7 +51875,7 @@
           "value": [
             {
               "type": 0,
-              "value": "נמדד זמן צפייה ב-"
+              "value": "זמן מדויק עבור "
             },
             {
               "type": 1,
@@ -51889,7 +51899,7 @@
           "value": [
             {
               "type": 0,
-              "value": "נמדד זמן צפייה ב-"
+              "value": "זמן מדויק עבור "
             },
             {
               "type": 1,
@@ -51923,19 +51933,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "אין דגימות של הזרמות במקביל בטווח הזה"
+      "value": "אין נתוני הזרמה בטווח הזה"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "שיא ההזרמות במקביל מחושב לכל השרת ואינו משתנה לפי מסנני חשבון או ספרייה."
+      "value": "תמיד מוצג לכל השרת – מסנני החשבון והספרייה לא חלים כאן."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "המספר הגבוה ביותר של הזרמות בו-זמניות בכל יום (כל השרת, ימים לפי UTC)"
+      "value": "המספר הגבוה ביותר של הזרמות במקביל בכל יום (כל השרת, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -51947,7 +51957,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "נפח ההפעלה לאורך זמן"
+      "value": "הפעלה לאורך זמן"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -52001,13 +52011,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "הפעלה סופרת צפייה שחודשה פעם אחת בלבד, ולא כוללת ניסיונות שלא הושלמו ונמשכו פחות מ-30 שניות."
+      "value": "השהיה והמשך נספרים כהפעלה אחת. עצירות לפני הסיום שנמשכו פחות מ-30 שניות לא נספרות."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "נפח הפעלה"
+      "value": "הפעלה לאורך זמן"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -52019,37 +52029,37 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "אין דגימות רוחב פס בטווח הזה"
+      "value": "אין נתוני רוחב פס בטווח הזה"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
     {
       "type": 0,
-      "value": "קצב שיא"
+      "value": "מהירות שיא"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "נפח"
+      "value": "נתונים שנשלחו"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "קצב שיא יומי של תעבורה יוצאת"
+      "value": "רוחב פס שיא יומי"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "סך התעבורה היוצאת וקצבי השיא לפי יום (כל השרת, ימים לפי UTC)"
+      "value": "נתונים שנשלחו ומהירות שיא לפי יום, בכל השרת (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "תעבורה יוצאת לאורך זמן"
+      "value": "רוחב פס לאורך זמן"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -52067,7 +52077,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "נפח תעבורה יוצאת יומי"
+      "value": "נתונים שנשלחו לפי יום"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -52156,7 +52166,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "שיא תעבורה יוצאת"
+      "value": "מהירות שיא"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -52172,7 +52182,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "שיעור סשנים מרוחקים"
+      "value": "צפייה מרחוק"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -52196,13 +52206,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "אין נתוני מיקום בטווח"
+      "value": "אין עדיין מידע על הרשת"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "סך התעבורה היוצאת"
+      "value": "סך הנתונים שנשלחו"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -52214,7 +52224,7 @@
   "web.admin.insights.bandwidth.nodes.column.peak": [
     {
       "type": 0,
-      "value": "קצב שיא"
+      "value": "מהירות שיא"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.share": [
@@ -52226,25 +52236,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "סך התעבורה היוצאת"
+      "value": "נתונים שנשלחו"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "אין תעבורה יוצאת מצמתים מרוחקים בטווח הזה"
+      "value": "אין תעבורה מצמתים מרוחקים בטווח הזה"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "תעבורה יוצאת לפי צומת"
+      "value": "רוחב פס לפי צומת"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "מדדים יומיים של רוחב פס ושל הזרמות במקביל זמינים החל מ-"
+      "value": "היסטוריית רוחב הפס מתחילה בתאריך "
     },
     {
       "type": 1,
@@ -52258,7 +52268,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "אף סשן בטווח הזה עדיין לא כולל נתוני ניתוב מפורטים. סשנים חדשים מתעדים באופן אוטומטי טלמטריה מלאה של קודק, מקודד וניתוב."
+      "value": "מידע מפורט על ההפעלה לא זמין לסשנים הישנים האלה. סשנים חדשים מתעדים אותו באופן אוטומטי."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -52270,7 +52280,7 @@
           "value": [
             {
               "type": 0,
-              "value": "נתונים מפורטים על קודק, המרת קידוד וניתוב נרשמו עבור "
+              "value": "מידע מפורט על ההפעלה זמין עבור "
             },
             {
               "type": 1,
@@ -52278,7 +52288,7 @@
             },
             {
               "type": 0,
-              "value": " מתוך סשן אחד בטווח הזה (נרשמים החל מ-"
+              "value": " מתוך סשן אחד (נאסף החל מתאריך "
             },
             {
               "type": 1,
@@ -52294,7 +52304,7 @@
           "value": [
             {
               "type": 0,
-              "value": "נתונים מפורטים על קודק, המרת קידוד וניתוב נרשמו עבור "
+              "value": "מידע מפורט על ההפעלה זמין עבור "
             },
             {
               "type": 1,
@@ -52310,7 +52320,7 @@
             },
             {
               "type": 0,
-              "value": " סשנים בטווח הזה (נרשמים החל מ-"
+              "value": " סשנים (נאסף החל מתאריך "
             },
             {
               "type": 1,
@@ -52326,7 +52336,7 @@
           "value": [
             {
               "type": 0,
-              "value": "נתונים מפורטים על קודק, המרת קידוד וניתוב נרשמו עבור "
+              "value": "מידע מפורט על ההפעלה זמין עבור "
             },
             {
               "type": 1,
@@ -52342,7 +52352,7 @@
             },
             {
               "type": 0,
-              "value": " סשנים בטווח הזה (נרשמים החל מ-"
+              "value": " סשנים (נאסף החל מתאריך "
             },
             {
               "type": 1,
@@ -52368,7 +52378,7 @@
           "value": [
             {
               "type": 0,
-              "value": "זמן הצפייה הנמדד מכסה "
+              "value": "זמן צפייה מדויק זמין עבור "
             },
             {
               "type": 1,
@@ -52376,7 +52386,7 @@
             },
             {
               "type": 0,
-              "value": " מתוך סשן אחד בטווח הזה; בסשנים ישנים יותר נעשה שימוש בהערכה לפי מיקום הסיום."
+              "value": " מתוך סשן אחד; בסשנים ישנים יותר מוצגת הערכה."
             }
           ]
         },
@@ -52384,7 +52394,7 @@
           "value": [
             {
               "type": 0,
-              "value": "זמן הצפייה הנמדד מכסה "
+              "value": "זמן צפייה מדויק זמין עבור "
             },
             {
               "type": 1,
@@ -52400,7 +52410,7 @@
             },
             {
               "type": 0,
-              "value": " סשנים בטווח הזה; בסשנים ישנים יותר נעשה שימוש בהערכה לפי מיקום הסיום."
+              "value": " סשנים; בסשנים ישנים יותר מוצגת הערכה."
             }
           ]
         },
@@ -52408,7 +52418,7 @@
           "value": [
             {
               "type": 0,
-              "value": "זמן הצפייה הנמדד מכסה "
+              "value": "זמן צפייה מדויק זמין עבור "
             },
             {
               "type": 1,
@@ -52424,7 +52434,7 @@
             },
             {
               "type": 0,
-              "value": " סשנים בטווח הזה; בסשנים ישנים יותר נעשה שימוש בהערכה לפי מיקום הסיום."
+              "value": " סשנים; בסשנים ישנים יותר מוצגת הערכה."
             }
           ]
         }
@@ -52436,7 +52446,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "הצגת הסשנים"
+      "value": "הצגת ההיסטוריה"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -52474,13 +52484,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "אין צריבות כתוביות בטווח הזה"
+      "value": "אין כתוביות צרובות בטווח הזה"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "קודקים של כתוביות צרובות"
+      "value": "פורמטים של כתוביות צרובות"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -52498,7 +52508,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "האצת מקודד"
+      "value": "האצת חומרה"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -52556,7 +52566,7 @@
     },
     {
       "type": 0,
-      "value": " · תוכנה: "
+      "value": " · CPU: "
     },
     {
       "type": 1,
@@ -52566,7 +52576,7 @@
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "מקודד להמרת קידוד"
+      "value": "המרת קידוד בחומרה"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -52580,7 +52590,7 @@
     },
     {
       "type": 0,
-      "value": " · תוכנה: "
+      "value": " · CPU: "
     },
     {
       "type": 1,
@@ -52612,7 +52622,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "כל הדגימות"
+      "value": "הכול"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -52758,25 +52768,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "אין צמדי לקוח-קודק שעומדים בסף הדגימות בטווח הזה"
+      "value": "אין עדיין מספיק סשנים. אפשר לעבור לאפשרות ”הכול” או להרחיב את טווח התאריכים."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "לפחות 5 סשנים"
+      "value": "5 סשנים ומעלה"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "שיעור ההפעלה הישירה לפי לקוח וקודק מקור. אפשר לבחור תא כלשהו כדי לבדוק את הסשנים התואמים."
+      "value": "באיזו תדירות כל אפליקציה מפעילה פורמט וידאו בלי המרה. אפשר ללחוץ על תא כדי לראות את הסשנים האלה."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "לקוח × קודק הווידאו של המקור"
+      "value": "הפעלה ישירה לפי אפליקציה ופורמט וידאו"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -52788,19 +52798,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "לא נרשמו סיבות התאמה בטווח הזה"
+      "value": "לא נרשמו סיבות להמרה בטווח הזה"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "סיבות ההתאמה של השרת שנרשמו בסשנים שאינם בהפעלה ישירה"
+      "value": "אפשר ללחוץ על סיבה כדי לראות את הסשנים התואמים."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "למה הסשנים הותאמו"
+      "value": "למה לא בוצעה הפעלה ישירה של הזרמות"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -52832,7 +52842,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "אף סשן לא סופק ברזולוציה נמוכה מזו של המקור"
+      "value": "לא בוצעה הקטנת רזולוציה בטווח הזה"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -52862,7 +52872,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "קובצי המקור ומה שהלקוחות קיבלו, לפי סשן"
+      "value": "רזולוציית הווידאו המקורית לעומת מה שהוזרם."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -52886,7 +52896,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "לא נרשמו המרות קידוד בטווח הזמן הזה"
+      "value": "אין המרות קידוד בטווח הזה"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -53146,7 +53156,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "% ישיר"
+      "value": "הפעלה ישירה"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -53291,6 +53301,20 @@
       "value": "כל הפרופילים"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 0,
+      "value": "הפעלה ישירה: "
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -53300,7 +53324,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "אין סשנים בטווח הזמן הזה"
+      "value": "אין פעילות בטווח הזה"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -53444,7 +53468,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "מגמות הפעלה, כותרים פופולריים, שימוש במשק הבית, תאימות מכשירים ותעבורה יוצאת לאורך זמן."
+      "value": "מגמות צפייה, פריטים מובילים, פעילות במשק הבית, הפעלה במכשירים ורוחב פס."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -53510,7 +53534,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "הכותר הזה כבר לא נמצא בקטלוג."
+      "value": "הפריט הזה כבר לא נמצא בספרייה שלך."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -53582,7 +53606,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "אין הפעלות מספריות בטווח הזמן הזה"
+      "value": "אין פעילות בספריות בטווח הזה"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -53594,7 +53618,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "לא הופעלו סרטים בטווח הזמן הזה"
+      "value": "לא נצפו סרטים בטווח הזה"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -53606,7 +53630,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "לא הופעלו סדרות בטווח הזמן הזה"
+      "value": "לא נצפו סדרות בטווח הזה"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -86906,7 +86930,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "מגמות הפעלה, חשבונות, איכות המכשירים ורוחב פס."
+      "value": "מגמות צפייה, פריטים מובילים, חשבונות, מכשירים ורוחב פס."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

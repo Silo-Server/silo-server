@@ -54125,7 +54125,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Protokoly"
+      "value": "Akce"
     }
   ],
   "web.admin.history.column.media": [
@@ -54155,7 +54155,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Uživatel"
+      "value": "Účet"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -54197,7 +54197,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Stopa"
+      "value": "Údaj"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -54221,13 +54221,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Pozice při ukončení"
+      "value": "Pozice při zastavení"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Důvod ukončení"
+      "value": "Způsob ukončení"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -54293,7 +54293,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Pomocí ↑ a ↓ procházejte řádky"
+      "value": "Pomocí ↑ a ↓ přecházejte mezi relacemi"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -54323,7 +54323,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Zaznamenáno před zavedením podrobné telemetrie trasy. Specifikace zdroje a údaje o trase doručení nejsou pro tuto relaci k dispozici."
+      "value": "Zaznamenáno dříve, než se začaly sledovat podrobné údaje o přehrávání. Podrobnosti o souboru a trasa serveru nejsou pro tuto relaci k dispozici."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -54365,13 +54365,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Klient, zařízení a trasa"
+      "value": "Účet, zařízení a trasa"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Proč se relace přizpůsobila"
+      "value": "Proč neproběhlo přímé přehrávání"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -54401,7 +54401,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "Varianta HLS"
+      "value": "Streamované (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -54413,7 +54413,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Samostatný soubor"
+      "value": "Externí soubor"
     }
   ],
   "web.admin.history.detail.title": [
@@ -54477,7 +54477,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Aktuálním filtrům neodpovídá žádná historie přehrávání. Zkuste upravit filtry uživatele, profilu nebo dokončení."
+      "value": "Těmto filtrům neodpovídají žádné relace. Zkuste některý filtr vymazat nebo upravit."
     }
   ],
   "web.admin.history.empty.title": [
@@ -54489,19 +54489,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Přerušeno"
+      "value": "Ukončeno serverem"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "Vypršelo"
+      "value": "Vypršel časový limit"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Nahrazeno"
+      "value": "Přepnuto na jiný stream"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -54513,7 +54513,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Ukončeno správcem"
+      "value": "Zastaveno správcem"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -54597,7 +54597,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Všechny pokusy"
+      "value": "Všechny stavy"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -54627,7 +54627,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Všichni uživatelé"
+      "value": "Všechny účty"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -54639,7 +54639,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Nejprve vyberte uživatele"
+      "value": "Nejprve vyberte účet"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -54685,13 +54685,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Hledat tituly, uživatele, klienty nebo ID relací…"
+      "value": "Hledat tituly, účty, klienty nebo ID relací…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Aktivní filtr položky"
+      "value": "Titul:"
     }
   ],
   "web.admin.history.loadError": [
@@ -54927,7 +54927,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Odhad: zaznamenáno před zavedením měření doby sledování"
+      "value": "Odhad (zaznamenáno před zavedením přesného měření doby sledování)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -54985,13 +54985,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Viditelné řádky"
+      "value": "Zobrazeno"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Dokončené pokusy o přehrání všech uživatelů a profilů."
+      "value": "Minulé relace přehrávání napříč všemi účty a profily."
     }
   ],
   "web.admin.history.title": [
@@ -57926,6 +57926,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Historie"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -57969,7 +57975,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "V tomto období nejsou zaznamenány žádné hodiny sledování"
+      "value": "V tomto období žádná aktivita sledování"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -57987,11 +57993,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Začátky přehrávání v časovém pásmu "
+      "value": "Kdy lidé začínají sledovat (časové pásmo "
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -58043,7 +58053,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "V období nejsou žádné vzorky streamů"
+      "value": "Zatím žádná data o streamech"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -58185,7 +58195,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Změřeno "
+              "value": "Přesné pro "
             },
             {
               "type": 1,
@@ -58209,7 +58219,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Změřeno "
+              "value": "Přesné pro "
             },
             {
               "type": 1,
@@ -58233,7 +58243,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Změřeno "
+              "value": "Přesné pro "
             },
             {
               "type": 1,
@@ -58257,7 +58267,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Změřeno "
+              "value": "Přesné pro "
             },
             {
               "type": 1,
@@ -58291,19 +58301,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "V tomto období nejsou žádné vzorky souběžnosti"
+      "value": "V tomto období žádná data o streamech"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "Maximum souběžných streamů platí pro celý server a nemění se s filtry účtu nebo knihovny."
+      "value": "Vždy zobrazuje celý server – filtry účtu a knihovny se zde neuplatňují."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Nejvyšší počet současných streamů za den (celý server, dny v UTC)"
+      "value": "Nejvíce současně přehrávaných streamů za den (celý server, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -58315,13 +58325,13 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Objem přehrávání v čase"
+      "value": "Přehrávání v čase"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
     {
       "type": 0,
-      "value": "V tomto období neproběhlo žádné přehrávání"
+      "value": "V tomto období žádné přehrávání"
     }
   ],
   "web.admin.insights.activity.volume.metricPlays": [
@@ -58369,13 +58379,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Obnovené sledování se počítá jako jedno přehrání a nedokončené pokusy kratší než 30 sekund se nezapočítávají."
+      "value": "Pozastavení a obnovení se počítá jako jedno přehrání. Nedokončená zastavení kratší než 30 sekund se nezapočítávají."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Objem přehrávání"
+      "value": "Přehrávání v čase"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -58387,7 +58397,7 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "V tomto období nejsou žádné vzorky šířky pásma"
+      "value": "V tomto období žádná data o šířce pásma"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
@@ -58399,25 +58409,25 @@
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Objem"
+      "value": "Odeslaná data"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Denní špičková rychlost odchozího přenosu"
+      "value": "Denní špička šířky pásma"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Denní součty a špičky odchozího přenosu (celý server, dny v UTC)"
+      "value": "Denní objem odeslaných dat a špičková rychlost za celý server (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Odchozí přenos v čase"
+      "value": "Šířka pásma v čase"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -58435,7 +58445,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Denní objem odchozího přenosu"
+      "value": "Denní objem odeslaných dat"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -58553,7 +58563,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Špička odchozího přenosu"
+      "value": "Špičková rychlost"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -58569,7 +58579,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Podíl vzdálených relací"
+      "value": "Vzdálené sledování"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -58593,13 +58603,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "V období nejsou žádné údaje o umístění"
+      "value": "Zatím žádné údaje o síti"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Celkový odchozí přenos"
+      "value": "Celkem odeslaná data"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -58623,25 +58633,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Celkový odchozí přenos"
+      "value": "Odeslaná data"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "V tomto období neodesílaly data žádné vzdálené uzly"
+      "value": "V tomto období žádný provoz vzdálených uzlů"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Odchozí přenos podle uzlů"
+      "value": "Šířka pásma podle uzlů"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Denní metriky šířky pásma a souběžnosti jsou k dispozici od "
+      "value": "Historie šířky pásma je k dispozici od "
     },
     {
       "type": 1,
@@ -58655,7 +58665,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Žádné relace v tomto období zatím neobsahují podrobné údaje o trase. Nové relace automaticky zaznamenávají úplnou telemetrii kodeků, enkodéru a směrování."
+      "value": "Podrobné údaje o přehrávání nejsou pro tyto starší relace k dispozici. Nové relace je zaznamenávají automaticky."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -58667,7 +58677,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Podrobné údaje o kodecích, překódování a směrování jsou zaznamenány pro "
+              "value": "Podrobné údaje o přehrávání jsou k dispozici pro "
             },
             {
               "type": 1,
@@ -58683,7 +58693,7 @@
             },
             {
               "type": 0,
-              "value": " relace v tomto období (zaznamenávají se od "
+              "value": " relace (zaznamenávají se od "
             },
             {
               "type": 1,
@@ -58699,7 +58709,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Podrobné údaje o kodecích, překódování a směrování jsou zaznamenány pro "
+              "value": "Podrobné údaje o přehrávání jsou k dispozici pro "
             },
             {
               "type": 1,
@@ -58715,7 +58725,7 @@
             },
             {
               "type": 0,
-              "value": " relací v tomto období (zaznamenávají se od "
+              "value": " relací (zaznamenávají se od "
             },
             {
               "type": 1,
@@ -58731,7 +58741,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Podrobné údaje o kodecích, překódování a směrování jsou zaznamenány pro "
+              "value": "Podrobné údaje o přehrávání jsou k dispozici pro "
             },
             {
               "type": 1,
@@ -58747,7 +58757,7 @@
             },
             {
               "type": 0,
-              "value": " relace v tomto období (zaznamenávají se od "
+              "value": " relace (zaznamenávají se od "
             },
             {
               "type": 1,
@@ -58763,7 +58773,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Podrobné údaje o kodecích, překódování a směrování jsou zaznamenány pro "
+              "value": "Podrobné údaje o přehrávání jsou k dispozici pro "
             },
             {
               "type": 1,
@@ -58779,7 +58789,7 @@
             },
             {
               "type": 0,
-              "value": " relací v tomto období (zaznamenávají se od "
+              "value": " relací (zaznamenávají se od "
             },
             {
               "type": 1,
@@ -58805,7 +58815,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Změřená doba sledování pokrývá "
+              "value": "Přesná doba sledování je k dispozici pro "
             },
             {
               "type": 1,
@@ -58821,7 +58831,7 @@
             },
             {
               "type": 0,
-              "value": " relace v tomto období; starší relace používají odhad podle koncové pozice."
+              "value": " relace; u starších relací jde o odhad."
             }
           ]
         },
@@ -58829,7 +58839,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Změřená doba sledování pokrývá "
+              "value": "Přesná doba sledování je k dispozici pro "
             },
             {
               "type": 1,
@@ -58845,7 +58855,7 @@
             },
             {
               "type": 0,
-              "value": " relací v tomto období; starší relace používají odhad podle koncové pozice."
+              "value": " relací; u starších relací jde o odhad."
             }
           ]
         },
@@ -58853,7 +58863,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Změřená doba sledování pokrývá "
+              "value": "Přesná doba sledování je k dispozici pro "
             },
             {
               "type": 1,
@@ -58869,7 +58879,7 @@
             },
             {
               "type": 0,
-              "value": " relace v tomto období; starší relace používají odhad podle koncové pozice."
+              "value": " relace; u starších relací jde o odhad."
             }
           ]
         },
@@ -58877,7 +58887,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Změřená doba sledování pokrývá "
+              "value": "Přesná doba sledování je k dispozici pro "
             },
             {
               "type": 1,
@@ -58893,7 +58903,7 @@
             },
             {
               "type": 0,
-              "value": " relací v tomto období; starší relace používají odhad podle koncové pozice."
+              "value": " relací; u starších relací jde o odhad."
             }
           ]
         }
@@ -58905,7 +58915,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Zobrazit relace"
+      "value": "Zobrazit historii"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -58943,13 +58953,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "V tomto období žádné vypalování titulků"
+      "value": "V tomto období žádné vypálené titulky"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Kodeky vypalovaných titulků"
+      "value": "Formáty vypálených titulků"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -58967,7 +58977,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Akcelerace enkodéru"
+      "value": "Hardwarová akcelerace"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -59016,44 +59026,44 @@
   ],
   "web.admin.insights.devices.kpi.hdrToneMapDetail": [
     {
+      "type": 0,
+      "value": "Hardwarově: "
+    },
+    {
       "type": 1,
       "value": "hw"
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " · CPU: "
     },
     {
       "type": 1,
       "value": "sw"
-    },
-    {
-      "type": 0,
-      "value": " SW"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Enkodér překódování"
+      "value": "Hardwarové překódování"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
+    {
+      "type": 0,
+      "value": "Hardwarově: "
+    },
     {
       "type": 1,
       "value": "hw"
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " · CPU: "
     },
     {
       "type": 1,
       "value": "sw"
-    },
-    {
-      "type": 0,
-      "value": " SW"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -59081,7 +59091,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Všechny vzorky"
+      "value": "Vše"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -59279,25 +59289,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "V tomto období žádná dvojice klient–kodek nesplňuje práh vzorků"
+      "value": "Zatím nedostatek relací. Přepněte na „Vše“ nebo rozšiřte časové období."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Alespoň 5 relací"
+      "value": "5+ relací"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Míra přímého přehrávání podle klienta a zdrojového kodeku. Výběrem buňky zobrazíte odpovídající relace."
+      "value": "Jak často jednotlivé aplikace přehrávají formát videa bez převodu. Kliknutím na buňku zobrazíte tyto relace."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Klient × kodek zdrojového videa"
+      "value": "Přímé přehrávání podle aplikace a formátu videa"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -59309,19 +59319,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "V tomto období nejsou zaznamenány žádné důvody adaptace"
+      "value": "V tomto období nejsou zaznamenány žádné důvody převodu"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Důvody adaptace zaznamenané serverem u relací bez přímého přehrávání"
+      "value": "Kliknutím na důvod zobrazíte odpovídající relace."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Důvody adaptace relací"
+      "value": "Proč streamy nevyužily přímé přehrávání"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -59353,7 +59363,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Žádné relace nebyly doručeny v nižším rozlišení, než má zdroj"
+      "value": "V tomto období nebylo nic sníženo na nižší rozlišení"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -59383,7 +59393,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Zdrojové soubory a to, co obdrželi klienti, podle relací"
+      "value": "Původní rozlišení videa vs. rozlišení streamu."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -59407,7 +59417,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "V tomto období nebylo zaznamenáno žádné překódování"
+      "value": "V tomto období žádné překódování"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -59699,7 +59709,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "Přímé %"
+      "value": "Přímé přehrávání"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -59858,6 +59868,16 @@
       "value": "Všechny profily"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": " % přímé přehrávání"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -59867,7 +59887,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "V tomto období nejsou žádné relace"
+      "value": "V tomto období žádná aktivita"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -60043,7 +60063,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Trendy přehrávání, oblíbené tituly, využití domácností, kompatibilita zařízení a odchozí přenos v čase."
+      "value": "Trendy sledování, nejsledovanější tituly, aktivita domácnosti, přehrávání na zařízeních a šířka pásma."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -60109,7 +60129,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Tento titul už v katalogu není."
+      "value": "Tento titul už ve vaší knihovně není."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -60181,7 +60201,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "V tomto období žádná přehrání z knihoven"
+      "value": "V tomto období žádná aktivita v knihovnách"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -60193,7 +60213,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "V tomto období se nepřehrály žádné filmy"
+      "value": "V tomto období nebyly sledovány žádné filmy"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -60205,7 +60225,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "V tomto období se nepřehrály žádné seriály"
+      "value": "V tomto období nebyly sledovány žádné seriály"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -95044,7 +95064,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Trendy přehrávání, účty, kvalita na zařízeních a šířka pásma."
+      "value": "Trendy sledování, nejsledovanější tituly, účty, zařízení a šířka pásma."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

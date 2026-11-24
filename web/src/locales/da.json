@@ -43605,7 +43605,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Logs"
+      "value": "Handlinger"
     }
   ],
   "web.admin.history.column.media": [
@@ -43635,7 +43635,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Bruger"
+      "value": "Konto"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -43677,7 +43677,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Spor"
+      "value": "Detalje"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -43701,13 +43701,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Slutposition"
+      "value": "Stoppet ved"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Årsag til afslutning"
+      "value": "Sådan sluttede den"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -43773,7 +43773,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Brug ↑ og ↓ for at gå gennem rækkerne"
+      "value": "Brug ↑ og ↓ til at skifte mellem sessioner"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -43803,7 +43803,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Registreret, før detaljeret rutetelemetri blev indsamlet. Kildespecifikationer og felter for leveringsruten er ikke tilgængelige for denne session."
+      "value": "Registreret, før detaljerede afspilningsoplysninger blev gemt. Fildetaljer og serverrute er ikke tilgængelige for denne session."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -43845,13 +43845,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Klient, enhed og rute"
+      "value": "Konto, enhed og rute"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Hvorfor denne session blev tilpasset"
+      "value": "Hvorfor den ikke blev afspillet direkte"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -43881,7 +43881,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "HLS-variant"
+      "value": "Streamet (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -43893,7 +43893,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Separat spor"
+      "value": "Ekstern fil"
     }
   ],
   "web.admin.history.detail.title": [
@@ -43957,7 +43957,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Ingen afspilningshistorik matcher de aktuelle filtre. Prøv at justere filtrene for bruger, profil eller fuldførelse."
+      "value": "Ingen sessioner matcher disse filtre. Prøv at rydde eller justere et filter."
     }
   ],
   "web.admin.history.empty.title": [
@@ -43969,19 +43969,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Afbrudt"
+      "value": "Afsluttet af serveren"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "Udløbet"
+      "value": "Tidsgrænse overskredet"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Erstattet"
+      "value": "Skiftede stream"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -43993,7 +43993,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Afsluttet af admin"
+      "value": "Stoppet af admin"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -44077,7 +44077,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Alle forsøg"
+      "value": "Alle statusser"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -44107,7 +44107,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Alle brugere"
+      "value": "Alle konti"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -44119,7 +44119,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Vælg først en bruger"
+      "value": "Vælg først en konto"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -44165,13 +44165,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Søg efter titler, brugere, klienter eller sessions-id’er…"
+      "value": "Søg efter titler, konti, klienter eller sessions-id’er…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Elementfilter aktivt"
+      "value": "Titel:"
     }
   ],
   "web.admin.history.loadError": [
@@ -44353,7 +44353,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Anslået: registreret, før visningstiden blev målt"
+      "value": "Anslået (registreret, før den præcise visningstid blev målt)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44411,13 +44411,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Synlige rækker"
+      "value": "Vist"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Afsluttede afspilningsforsøg på tværs af alle brugere og profiler."
+      "value": "Tidligere afspilningssessioner på tværs af alle konti og profiler."
     }
   ],
   "web.admin.history.title": [
@@ -46700,6 +46700,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Historik"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -46743,7 +46749,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "Ingen visningstimer registreret i denne periode"
+      "value": "Ingen visningsaktivitet i denne periode"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -46761,11 +46767,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Hvornår afspilninger starter i "
+      "value": "Hvornår folk begynder at se ("
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -46817,7 +46827,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "Ingen stream-målinger i perioden"
+      "value": "Ingen streamdata endnu"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -46910,6 +46920,10 @@
         "one": {
           "value": [
             {
+              "type": 0,
+              "value": "Præcis for "
+            },
+            {
               "type": 1,
               "value": "measured"
             },
@@ -46923,13 +46937,17 @@
             },
             {
               "type": 0,
-              "value": " session målt"
+              "value": " session"
             }
           ]
         },
         "other": {
           "value": [
             {
+              "type": 0,
+              "value": "Præcis for "
+            },
+            {
               "type": 1,
               "value": "measured"
             },
@@ -46943,7 +46961,7 @@
             },
             {
               "type": 0,
-              "value": " sessioner målt"
+              "value": " sessioner"
             }
           ]
         }
@@ -46961,19 +46979,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "Ingen samtidighedsmålinger i denne periode"
+      "value": "Ingen streamdata i denne periode"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "Maks. samtidige streams gælder hele serveren og ændres ikke af konto- eller biblioteksfiltre."
+      "value": "Viser altid hele serveren – konto- og biblioteksfiltre gælder ikke her."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Højeste antal samtidige streams pr. dag (hele serveren, UTC-døgn)"
+      "value": "Flest samtidige streams pr. dag (hele serveren, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -46985,7 +47003,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Afspilningsmængde over tid"
+      "value": "Afspilning over tid"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -47039,13 +47057,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "En afspilning tæller genoptagne visninger én gang og springer ufærdige forsøg under 30 sekunder over."
+      "value": "Pause og genoptagelse tæller som én afspilning. Ufærdige stop under 30 sekunder tælles ikke med."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Afspilningsmængde"
+      "value": "Afspilning over tid"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -47057,7 +47075,7 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "Ingen båndbreddemålinger i denne periode"
+      "value": "Ingen båndbreddedata i denne periode"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
@@ -47069,25 +47087,25 @@
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Mængde"
+      "value": "Sendte data"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Maks. udgående hastighed pr. dag"
+      "value": "Maks. båndbredde pr. dag"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Udgående trafik i alt og maks. hastighed pr. dag (hele serveren, UTC-døgn)"
+      "value": "Sendte data og maks. hastighed pr. dag for hele serveren (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Udgående trafik over tid"
+      "value": "Båndbredde over tid"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -47105,7 +47123,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Udgående datamængde pr. dag"
+      "value": "Sendte data pr. dag"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -47193,7 +47211,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Maks. udgående trafik"
+      "value": "Maks. hastighed"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -47209,7 +47227,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Andel af fjernsessioner"
+      "value": "Fjernvisning"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -47233,13 +47251,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "Ingen placeringsdata i perioden"
+      "value": "Ingen netværksoplysninger endnu"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Udgående trafik i alt"
+      "value": "Sendte data i alt"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -47263,25 +47281,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Udgående trafik i alt"
+      "value": "Sendte data"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "Ingen udgående trafik fra fjernnoder i denne periode"
+      "value": "Ingen trafik fra fjernnoder i denne periode"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Udgående trafik pr. node"
+      "value": "Båndbredde pr. node"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Daglige målinger af båndbredde og samtidighed starter den "
+      "value": "Båndbreddehistorikken starter den "
     },
     {
       "type": 1,
@@ -47295,7 +47313,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Ingen sessioner i denne periode har detaljerede rutedata endnu. Nye sessioner registrerer automatisk alle data om codec, encoder og routing."
+      "value": "Detaljerede afspilningsoplysninger er ikke tilgængelige for disse ældre sessioner. Nye sessioner registrerer dem automatisk."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -47307,7 +47325,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Detaljerede data om codec, transkodning og routing er registreret for "
+              "value": "Detaljerede afspilningsoplysninger er tilgængelige for "
             },
             {
               "type": 1,
@@ -47323,7 +47341,7 @@
             },
             {
               "type": 0,
-              "value": " session i denne periode (registreret siden "
+              "value": " session (registreret siden "
             },
             {
               "type": 1,
@@ -47339,7 +47357,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Detaljerede data om codec, transkodning og routing er registreret for "
+              "value": "Detaljerede afspilningsoplysninger er tilgængelige for "
             },
             {
               "type": 1,
@@ -47355,7 +47373,7 @@
             },
             {
               "type": 0,
-              "value": " sessioner i denne periode (registreret siden "
+              "value": " sessioner (registreret siden "
             },
             {
               "type": 1,
@@ -47381,7 +47399,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Målt visningstid dækker "
+              "value": "Præcis visningstid er tilgængelig for "
             },
             {
               "type": 1,
@@ -47397,7 +47415,7 @@
             },
             {
               "type": 0,
-              "value": " session i denne periode; ældre sessioner bruger skøn ud fra slutpositionen."
+              "value": " session; ældre sessioner er anslået."
             }
           ]
         },
@@ -47405,7 +47423,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Målt visningstid dækker "
+              "value": "Præcis visningstid er tilgængelig for "
             },
             {
               "type": 1,
@@ -47421,7 +47439,7 @@
             },
             {
               "type": 0,
-              "value": " sessioner i denne periode; ældre sessioner bruger skøn ud fra slutpositionen."
+              "value": " sessioner; ældre sessioner er anslået."
             }
           ]
         }
@@ -47433,7 +47451,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Vis sessioner"
+      "value": "Vis historik"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -47477,7 +47495,7 @@
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Undertekstcodecs ved indbrænding"
+      "value": "Formater for indbrændte undertekster"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -47495,7 +47513,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Encoderacceleration"
+      "value": "Hardwareacceleration"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -47549,7 +47567,7 @@
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " hardware · "
     },
     {
       "type": 1,
@@ -47557,13 +47575,13 @@
     },
     {
       "type": 0,
-      "value": " SW"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Transkodningsencoder"
+      "value": "Hardwaretranskodning"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -47573,7 +47591,7 @@
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " hardware · "
     },
     {
       "type": 1,
@@ -47581,7 +47599,7 @@
     },
     {
       "type": 0,
-      "value": " SW"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -47609,7 +47627,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Alle målinger"
+      "value": "Alle"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -47719,25 +47737,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "Ingen klient-codec-par når målingsgrænsen i denne periode"
+      "value": "Ikke nok sessioner endnu. Skift til ”Alle”, eller udvid datointervallet."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Min. 5 sessioner"
+      "value": "5+ sessioner"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Andel med direkte afspilning pr. klient og kildecodec. Vælg en celle for at se de matchende sessioner."
+      "value": "Hvor ofte hver app afspiller et videoformat uden at konvertere det. Klik på en celle for at se de sessioner."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Klient × kildevideocodec"
+      "value": "Direkte afspilning pr. app og videoformat"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -47749,19 +47767,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "Ingen tilpasningsårsager registreret i denne periode"
+      "value": "Ingen konverteringsårsager registreret i denne periode"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Serverens tilpasningsårsager registreret for ikke-direkte sessioner"
+      "value": "Klik på en årsag for at se matchende sessioner."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Hvorfor sessioner blev tilpasset"
+      "value": "Hvorfor streams ikke blev afspillet direkte"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -47793,7 +47811,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Ingen sessioner blev leveret under deres kildeopløsning"
+      "value": "Intet blev nedskaleret i denne periode"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -47823,7 +47841,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Kildefiler og hvad klienterne modtog, pr. session"
+      "value": "Oprindelig videoopløsning vs. hvad der blev streamet."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -47847,7 +47865,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "Ingen transkodninger registreret i denne periode"
+      "value": "Ingen transkodninger i denne periode"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -48075,7 +48093,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "Direkte %"
+      "value": "Direkte afspilning"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -48212,6 +48230,16 @@
       "value": "Alle profiler"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": " % direkte afspilning"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -48221,7 +48249,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "Ingen sessioner i denne periode"
+      "value": "Ingen aktivitet i denne periode"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -48349,7 +48377,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Afspilningstendenser, populære titler, husstandens brug, enhedskompatibilitet og udgående trafik over tid."
+      "value": "Afspilningstendenser, populære titler, husstandens aktivitet, afspilning på enheder og båndbredde."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -48415,7 +48443,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Denne titel er ikke længere i kataloget."
+      "value": "Denne titel er ikke længere i dit bibliotek."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -48487,7 +48515,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "Ingen biblioteksafspilninger i denne periode"
+      "value": "Ingen biblioteksaktivitet i denne periode"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -48499,7 +48527,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "Ingen film afspillet i denne periode"
+      "value": "Ingen film set i denne periode"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -48511,7 +48539,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "Ingen serier afspillet i denne periode"
+      "value": "Ingen serier set i denne periode"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -80160,7 +80188,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Afspilningstendenser, konti, enhedskvalitet og båndbredde."
+      "value": "Afspilningstendenser, populære titler, konti, enheder og båndbredde."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

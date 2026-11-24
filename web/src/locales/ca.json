@@ -48847,7 +48847,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Registres"
+      "value": "Accions"
     }
   ],
   "web.admin.history.column.media": [
@@ -48877,7 +48877,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Usuari"
+      "value": "Compte"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -48919,7 +48919,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Pista"
+      "value": "Detall"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -48943,13 +48943,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Posició final"
+      "value": "Posició d’aturada"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Motiu de finalització"
+      "value": "Com ha acabat"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -49015,7 +49015,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Utilitza ↑ i ↓ per recórrer les files"
+      "value": "Utilitza ↑ i ↓ per moure’t entre sessions"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -49045,7 +49045,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Enregistrada abans que es capturés la telemetria detallada de la ruta. Les especificacions de l’origen i els camps de la ruta de lliurament no estan disponibles per a aquesta sessió."
+      "value": "Enregistrada abans que es fes el seguiment de la informació detallada de reproducció. Els detalls del fitxer i la ruta del servidor no estan disponibles per a aquesta sessió."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -49087,13 +49087,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Client, dispositiu i ruta"
+      "value": "Compte, dispositiu i ruta"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Per què s’ha adaptat aquesta sessió"
+      "value": "Per què no s’ha reproduït directament"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -49123,7 +49123,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "Variant HLS"
+      "value": "Transmesos (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -49199,7 +49199,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Cap historial de reproducció coincideix amb els filtres actuals. Prova d’ajustar els filtres d’usuari, de perfil o de finalització."
+      "value": "Cap sessió no coincideix amb aquests filtres. Prova d’esborrar o d’ajustar un filtre."
     }
   ],
   "web.admin.history.empty.title": [
@@ -49211,19 +49211,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Avortada"
+      "value": "Finalitzada pel servidor"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "Caducada"
+      "value": "Temps esgotat"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Substituïda"
+      "value": "Canvi de transmissió"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -49235,7 +49235,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Finalitzada per un administrador"
+      "value": "Aturada per un administrador"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -49319,7 +49319,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Tots els intents"
+      "value": "Tots els estats"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -49349,7 +49349,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Tots els usuaris"
+      "value": "Tots els comptes"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -49361,7 +49361,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Primer tria un usuari"
+      "value": "Primer tria un compte"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -49407,13 +49407,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Cerca títols, usuaris, clients o ID de sessió…"
+      "value": "Cerca títols, comptes, clients o ID de sessió…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Filtre d’element actiu"
+      "value": "Títol:"
     }
   ],
   "web.admin.history.loadError": [
@@ -49626,7 +49626,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Estimat: registrat abans que es mesurés el temps de visualització"
+      "value": "Estimat (registrat abans que es fes el seguiment del temps de visualització exacte)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -49684,13 +49684,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Files visibles"
+      "value": "Mostrades"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Intents de reproducció finalitzats de tots els usuaris i perfils."
+      "value": "Sessions de reproducció anteriors de tots els comptes i perfils."
     }
   ],
   "web.admin.history.title": [
@@ -52311,6 +52311,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Historial"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -52354,7 +52360,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "No s’ha registrat cap hora de visualització en aquest període"
+      "value": "No hi ha activitat de visualització en aquest període"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -52372,11 +52378,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Quan comencen les reproduccions a la zona horària "
+      "value": "Quan la gent comença a mirar ("
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -52424,7 +52434,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "No hi ha mostres de transmissions en aquest període"
+      "value": "Encara no hi ha dades de transmissions"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -52541,6 +52551,10 @@
         "one": {
           "value": [
             {
+              "type": 0,
+              "value": "Exacte per a "
+            },
+            {
               "type": 1,
               "value": "measured"
             },
@@ -52554,13 +52568,17 @@
             },
             {
               "type": 0,
-              "value": " sessió mesurada"
+              "value": " sessió"
             }
           ]
         },
         "many": {
           "value": [
             {
+              "type": 0,
+              "value": "Exacte per a "
+            },
+            {
               "type": 1,
               "value": "measured"
             },
@@ -52574,13 +52592,17 @@
             },
             {
               "type": 0,
-              "value": " de sessions mesurades"
+              "value": " de sessions"
             }
           ]
         },
         "other": {
           "value": [
             {
+              "type": 0,
+              "value": "Exacte per a "
+            },
+            {
               "type": 1,
               "value": "measured"
             },
@@ -52594,7 +52616,7 @@
             },
             {
               "type": 0,
-              "value": " sessions mesurades"
+              "value": " sessions"
             }
           ]
         }
@@ -52612,19 +52634,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "No hi ha mostres de simultaneïtat en aquest període"
+      "value": "No hi ha dades de transmissions en aquest període"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "El pic de transmissions simultànies és global de tot el servidor i no canvia amb els filtres de compte o de biblioteca."
+      "value": "Sempre mostra tot el servidor: els filtres de compte i de biblioteca no s’apliquen aquí."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Màxim diari de transmissions simultànies (tot el servidor, dies UTC)"
+      "value": "Màxim de transmissions simultànies cada dia (tot el servidor, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -52636,7 +52658,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Volum de reproducció al llarg del temps"
+      "value": "Reproducció al llarg del temps"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -52690,13 +52712,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Una reproducció compta una sola vegada les sessions represes i omet els intents inacabats de menys de 30 segons."
+      "value": "Posar en pausa i reprendre compta com una sola reproducció. No es compten les aturades inacabades de menys de 30 segons."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Volum de reproducció"
+      "value": "Reproducció al llarg del temps"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -52708,37 +52730,37 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "No hi ha mostres d’amplada de banda en aquest període"
+      "value": "No hi ha dades d’amplada de banda en aquest període"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
     {
       "type": 0,
-      "value": "Taxa màxima"
+      "value": "Velocitat màxima"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Volum"
+      "value": "Dades enviades"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Taxa màxima diària de sortida"
+      "value": "Amplada de banda màxima diària"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Totals diaris de sortida i taxes màximes (tot el servidor, dies UTC)"
+      "value": "Dades enviades diàriament i velocitat màxima de tot el servidor (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Trànsit de sortida al llarg del temps"
+      "value": "Amplada de banda al llarg del temps"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -52756,7 +52778,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Volum diari de sortida"
+      "value": "Dades enviades diàriament"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -52859,7 +52881,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Pic de sortida"
+      "value": "Velocitat màxima"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -52875,7 +52897,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Proporció de sessions remotes"
+      "value": "Visualització remota"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -52899,13 +52921,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "No hi ha dades d’ubicació en aquest període"
+      "value": "Encara no hi ha informació de xarxa"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Sortida total"
+      "value": "Total de dades enviades"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -52917,7 +52939,7 @@
   "web.admin.insights.bandwidth.nodes.column.peak": [
     {
       "type": 0,
-      "value": "Taxa màxima"
+      "value": "Velocitat màxima"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.share": [
@@ -52929,25 +52951,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Sortida total"
+      "value": "Dades enviades"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "No hi ha trànsit de sortida de nodes remots en aquest període"
+      "value": "No hi ha trànsit de nodes remots en aquest període"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Sortida per node"
+      "value": "Amplada de banda per node"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Inici de les mètriques diàries d’amplada de banda i de simultaneïtat: "
+      "value": "Inici de l’historial d’amplada de banda: "
     },
     {
       "type": 1,
@@ -52961,7 +52983,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Encara no hi ha cap sessió d’aquest període amb dades de ruta detallades. Les sessions noves registren automàticament tota la telemetria de còdec, codificador i encaminament."
+      "value": "La informació detallada de reproducció no està disponible per a aquestes sessions més antigues. Les sessions noves la registren automàticament."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -52973,7 +52995,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Les dades detallades de còdec, transcodificació i encaminament estan registrades per a "
+              "value": "La informació detallada de reproducció està disponible per a "
             },
             {
               "type": 1,
@@ -52989,7 +53011,7 @@
             },
             {
               "type": 0,
-              "value": " sessió en aquest període (inici del registre: "
+              "value": " sessió (inici del seguiment: "
             },
             {
               "type": 1,
@@ -53005,7 +53027,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Les dades detallades de còdec, transcodificació i encaminament estan registrades per a "
+              "value": "La informació detallada de reproducció està disponible per a "
             },
             {
               "type": 1,
@@ -53021,7 +53043,7 @@
             },
             {
               "type": 0,
-              "value": " de sessions en aquest període (inici del registre: "
+              "value": " de sessions (inici del seguiment: "
             },
             {
               "type": 1,
@@ -53037,7 +53059,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Les dades detallades de còdec, transcodificació i encaminament estan registrades per a "
+              "value": "La informació detallada de reproducció està disponible per a "
             },
             {
               "type": 1,
@@ -53053,7 +53075,7 @@
             },
             {
               "type": 0,
-              "value": " sessions en aquest període (inici del registre: "
+              "value": " sessions (inici del seguiment: "
             },
             {
               "type": 1,
@@ -53079,7 +53101,7 @@
           "value": [
             {
               "type": 0,
-              "value": "El temps de visualització mesurat cobreix "
+              "value": "El temps de visualització exacte està disponible per a "
             },
             {
               "type": 1,
@@ -53095,7 +53117,7 @@
             },
             {
               "type": 0,
-              "value": " sessió en aquest període; les sessions més antigues utilitzen estimacions basades en la posició final."
+              "value": " sessió; les sessions més antigues són estimades."
             }
           ]
         },
@@ -53103,7 +53125,7 @@
           "value": [
             {
               "type": 0,
-              "value": "El temps de visualització mesurat cobreix "
+              "value": "El temps de visualització exacte està disponible per a "
             },
             {
               "type": 1,
@@ -53119,7 +53141,7 @@
             },
             {
               "type": 0,
-              "value": " de sessions en aquest període; les sessions més antigues utilitzen estimacions basades en la posició final."
+              "value": " de sessions; les sessions més antigues són estimades."
             }
           ]
         },
@@ -53127,7 +53149,7 @@
           "value": [
             {
               "type": 0,
-              "value": "El temps de visualització mesurat cobreix "
+              "value": "El temps de visualització exacte està disponible per a "
             },
             {
               "type": 1,
@@ -53143,7 +53165,7 @@
             },
             {
               "type": 0,
-              "value": " sessions en aquest període; les sessions més antigues utilitzen estimacions basades en la posició final."
+              "value": " sessions; les sessions més antigues són estimades."
             }
           ]
         }
@@ -53155,7 +53177,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Mostra les sessions"
+      "value": "Mostra l’historial"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -53199,7 +53221,7 @@
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Còdecs dels subtítols incrustats"
+      "value": "Formats de subtítols incrustats"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -53217,7 +53239,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Acceleració del codificador"
+      "value": "Acceleració per maquinari"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -53255,7 +53277,7 @@
   "web.admin.insights.devices.kpi.directPlayRate": [
     {
       "type": 0,
-      "value": "Proporció de reproducció directa"
+      "value": "Taxa de reproducció directa"
     }
   ],
   "web.admin.insights.devices.kpi.hdrToneMap": [
@@ -53271,7 +53293,7 @@
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " maquinari · "
     },
     {
       "type": 1,
@@ -53279,13 +53301,13 @@
     },
     {
       "type": 0,
-      "value": " SW"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Codificador de transcodificació"
+      "value": "Transcodificació per maquinari"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -53295,7 +53317,7 @@
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " maquinari · "
     },
     {
       "type": 1,
@@ -53303,7 +53325,7 @@
     },
     {
       "type": 0,
-      "value": " SW"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -53331,7 +53353,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Totes les mostres"
+      "value": "Totes"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -53485,25 +53507,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "Cap parella de client i còdec no arriba al llindar de mostres en aquest període"
+      "value": "Encara no hi ha prou sessions. Canvia a «Totes» o amplia l’interval de dates."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Mínim 5 sessions"
+      "value": "5+ sessions"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Taxa de reproducció directa per client i còdec d’origen. Selecciona qualsevol cel·la per examinar les sessions corresponents."
+      "value": "Amb quina freqüència cada aplicació reprodueix un format de vídeo sense convertir-lo. Fes clic a una cel·la per veure aquestes sessions."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Client × Còdec de vídeo d’origen"
+      "value": "Reproducció directa per aplicació i format de vídeo"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -53515,19 +53537,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "No s’ha registrat cap motiu d’adaptació en aquest període"
+      "value": "No s’ha registrat cap motiu de conversió en aquest període"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Motius d’adaptació del servidor registrats en sessions no directes"
+      "value": "Fes clic a un motiu per veure les sessions corresponents."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Per què s’han adaptat les sessions"
+      "value": "Per què les transmissions no s’han reproduït directament"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -53559,7 +53581,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Cap sessió no s’ha lliurat per sota de la resolució d’origen"
+      "value": "No hi ha hagut cap reducció de resolució en aquest període"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -53589,7 +53611,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Fitxers d’origen i què han rebut els clients, per sessió"
+      "value": "Resolució del vídeo original vs. el que s’ha transmès."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -53613,7 +53635,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "No s’ha registrat cap transcodificació en aquest període"
+      "value": "No hi ha transcodificacions en aquest període"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -53873,7 +53895,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "% directe"
+      "value": "Reproducció directa"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -54021,6 +54043,16 @@
       "value": "Tots els perfils"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% de reproducció directa"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -54030,7 +54062,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "No hi ha sessions en aquest període"
+      "value": "No hi ha activitat en aquest període"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -54182,7 +54214,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendències de reproducció, títols populars, ús de la llar, compatibilitat dels dispositius i trànsit de sortida al llarg del temps."
+      "value": "Tendències de visualització, títols populars, activitat de la llar, reproducció als dispositius i amplada de banda."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -54248,7 +54280,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Aquest títol ja no és al catàleg."
+      "value": "Aquest títol ja no és a la biblioteca."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -54320,7 +54352,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "No hi ha reproduccions de biblioteques en aquest període"
+      "value": "No hi ha activitat de biblioteques en aquest període"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -54332,7 +54364,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "No s’ha reproduït cap pel·lícula en aquest període"
+      "value": "No s’ha vist cap pel·lícula en aquest període"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -54344,7 +54376,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "No s’ha reproduït cap sèrie en aquest període"
+      "value": "No s’ha vist cap sèrie en aquest període"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -87570,7 +87602,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendències de reproducció, comptes, qualitat dels dispositius i amplada de banda."
+      "value": "Tendències de visualització, títols populars, comptes, dispositius i amplada de banda."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

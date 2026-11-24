@@ -110,8 +110,8 @@ export function PersonDetailSheet({
       id: `${row.client_name}:${row.device_platform}`,
       label: [row.client_name || unknownClient, row.device_platform].filter(Boolean).join(" · "),
       value: row.total_sessions,
-      secondary: t("web.admin.insights.percent", {
-        value: formatRatePercentNumber(row.direct_rate),
+      secondary: t("web.admin.insights.personDetail.clientDirectRate", {
+        percent: formatRatePercentNumber(row.direct_rate),
       }),
     }));
   }, [devices.data, t]);
@@ -222,17 +222,17 @@ export function PersonDetailSheet({
                 <InsightKpiCard
                   label={t("web.admin.insights.activity.kpi.plays")}
                   value={count(activity.data.summary.plays)}
-                  subtext={sessionCount(activity.data.summary.sessions)}
-                />
-                <InsightKpiCard
-                  label={t("web.admin.insights.activity.kpi.watchTime")}
-                  value={formatWatchTime(activity.data.summary.watch_seconds)}
                   subtext={t("web.admin.insights.activity.kpi.playsBreakdown", {
                     movies: count(activity.data.summary.movies),
                     movie_count: activity.data.summary.movies,
                     episodes: count(activity.data.summary.episodes),
                     episode_count: activity.data.summary.episodes,
                   })}
+                />
+                <InsightKpiCard
+                  label={t("web.admin.insights.activity.kpi.watchTime")}
+                  value={formatWatchTime(activity.data.summary.watch_seconds)}
+                  subtext={sessionCount(activity.data.summary.sessions)}
                 />
                 <InsightKpiCard
                   label={t("web.admin.insights.activity.kpi.completionRate")}

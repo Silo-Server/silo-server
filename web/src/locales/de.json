@@ -43465,7 +43465,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Logs"
+      "value": "Aktionen"
     }
   ],
   "web.admin.history.column.media": [
@@ -43495,7 +43495,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Benutzer"
+      "value": "Konto"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -43537,7 +43537,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Spur"
+      "value": "Detail"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -43561,13 +43561,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Endposition"
+      "value": "Gestoppt bei"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Grund für das Ende"
+      "value": "Art des Endes"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -43633,7 +43633,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Wechsle mit ↑ und ↓ zwischen den Zeilen"
+      "value": "Wechsle mit ↑ und ↓ zwischen den Sitzungen"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -43663,7 +43663,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Aufgezeichnet, bevor detaillierte Routen-Telemetrie erfasst wurde. Quellangaben und Felder zur Auslieferungsroute sind für diese Sitzung nicht verfügbar."
+      "value": "Aufgezeichnet, bevor detaillierte Wiedergabeinfos erfasst wurden. Dateidetails und Serverroute sind für diese Sitzung nicht verfügbar."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -43705,13 +43705,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Client, Gerät & Route"
+      "value": "Konto, Gerät & Route"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Warum sich diese Sitzung angepasst hat"
+      "value": "Warum keine Direktwiedergabe möglich war"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -43741,7 +43741,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "HLS-Variante"
+      "value": "Gestreamt (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -43753,7 +43753,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Separate Spur"
+      "value": "Externe Datei"
     }
   ],
   "web.admin.history.detail.title": [
@@ -43817,7 +43817,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Kein Wiedergabeverlauf entspricht den aktuellen Filtern. Passe die Filter für Benutzer, Profil oder Abschluss an."
+      "value": "Keine Sitzungen entsprechen diesen Filtern. Entferne oder ändere einen Filter."
     }
   ],
   "web.admin.history.empty.title": [
@@ -43829,19 +43829,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Abgebrochen"
+      "value": "Vom Server beendet"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "Abgelaufen"
+      "value": "Zeitüberschreitung"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Ersetzt"
+      "value": "Stream gewechselt"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -43853,7 +43853,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Vom Admin beendet"
+      "value": "Vom Admin gestoppt"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -43937,7 +43937,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Alle Versuche"
+      "value": "Alle Status"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -43967,7 +43967,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Alle Benutzer"
+      "value": "Alle Konten"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -43979,7 +43979,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Wähle zuerst einen Benutzer"
+      "value": "Wähle zuerst ein Konto"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -44029,13 +44029,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Titel, Benutzer, Clients oder Sitzungs-IDs suchen…"
+      "value": "Titel, Konten, Clients oder Sitzungs-IDs suchen…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Titelfilter aktiv"
+      "value": "Titel:"
     }
   ],
   "web.admin.history.loadError": [
@@ -44209,7 +44209,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Geschätzt: aufgezeichnet, bevor die Wiedergabezeit gemessen wurde"
+      "value": "Geschätzt (aufgezeichnet, bevor die genaue Wiedergabezeit erfasst wurde)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44267,13 +44267,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Sichtbare Zeilen"
+      "value": "Angezeigt"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Beendete Wiedergabeversuche aller Benutzer und Profile."
+      "value": "Vergangene Wiedergabesitzungen aller Konten und Profile."
     }
   ],
   "web.admin.history.title": [
@@ -46508,6 +46508,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Verlauf"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -46551,7 +46557,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "Keine Wiedergabezeiten in diesem Zeitraum erfasst"
+      "value": "Keine Wiedergabeaktivität in diesem Zeitraum"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -46569,11 +46575,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Startzeiten der Wiedergaben in "
+      "value": "Wann Wiedergaben gestartet werden ("
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -46625,7 +46635,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "Keine Stream-Messwerte im Zeitraum"
+      "value": "Noch keine Stream-Daten"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -46718,6 +46728,10 @@
         "one": {
           "value": [
             {
+              "type": 0,
+              "value": "Genau für "
+            },
+            {
               "type": 1,
               "value": "measured"
             },
@@ -46731,13 +46745,17 @@
             },
             {
               "type": 0,
-              "value": " Sitzung gemessen"
+              "value": " Sitzung"
             }
           ]
         },
         "other": {
           "value": [
             {
+              "type": 0,
+              "value": "Genau für "
+            },
+            {
               "type": 1,
               "value": "measured"
             },
@@ -46751,7 +46769,7 @@
             },
             {
               "type": 0,
-              "value": " Sitzungen gemessen"
+              "value": " Sitzungen"
             }
           ]
         }
@@ -46769,19 +46787,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "Keine Messwerte zur Gleichzeitigkeit in diesem Zeitraum"
+      "value": "Keine Stream-Daten in diesem Zeitraum"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "Die Spitze gleichzeitiger Streams gilt für den gesamten Server und ändert sich nicht mit Konto- oder Mediathek-Filtern."
+      "value": "Zeigt immer den gesamten Server – Konto- und Mediathek-Filter gelten hier nicht."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Tägliches Maximum gleichzeitiger Streams (serverweit, UTC-Tage)"
+      "value": "Höchste Zahl gleichzeitig laufender Streams pro Tag (gesamter Server, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -46793,7 +46811,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Wiedergabevolumen im Zeitverlauf"
+      "value": "Wiedergaben im Zeitverlauf"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -46847,13 +46865,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Fortgesetztes Schauen zählt als eine Wiedergabe; abgebrochene Versuche unter 30 Sekunden werden nicht gezählt."
+      "value": "Pausieren und Fortsetzen zählt als eine Wiedergabe. Abgebrochene Wiedergaben unter 30 Sekunden werden nicht gezählt."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Wiedergabevolumen"
+      "value": "Wiedergaben im Zeitverlauf"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -46865,7 +46883,7 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "Keine Bandbreiten-Messwerte in diesem Zeitraum"
+      "value": "Keine Bandbreitendaten in diesem Zeitraum"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
@@ -46877,25 +46895,25 @@
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Volumen"
+      "value": "Gesendete Daten"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Tägliche Spitzenrate des ausgehenden Datenverkehrs"
+      "value": "Tägliche Spitzenbandbreite"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Tägliche Summen und Spitzenraten des ausgehenden Datenverkehrs (serverweit, UTC-Tage)"
+      "value": "Täglich gesendete Daten und Spitzenrate des gesamten Servers (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Ausgehender Datenverkehr im Zeitverlauf"
+      "value": "Bandbreite im Zeitverlauf"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -46913,7 +46931,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Tägliches Volumen des ausgehenden Datenverkehrs"
+      "value": "Täglich gesendete Daten"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -47001,7 +47019,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Spitzenrate ausgehend"
+      "value": "Spitzenrate"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -47017,7 +47035,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Anteil externer Sitzungen"
+      "value": "Externe Wiedergabe"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -47041,13 +47059,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "Keine Standortdaten im Zeitraum"
+      "value": "Noch keine Netzwerkinfos"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Ausgehender Datenverkehr gesamt"
+      "value": "Gesendete Daten gesamt"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -47071,25 +47089,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Ausgehender Datenverkehr gesamt"
+      "value": "Gesendete Daten"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "Kein ausgehender Datenverkehr von externen Knoten in diesem Zeitraum"
+      "value": "Kein Datenverkehr externer Knoten in diesem Zeitraum"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Ausgehender Datenverkehr nach Knoten"
+      "value": "Bandbreite nach Knoten"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Tägliche Messwerte zu Bandbreite und Gleichzeitigkeit beginnen am "
+      "value": "Der Bandbreitenverlauf beginnt am "
     },
     {
       "type": 1,
@@ -47103,7 +47121,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Keine Sitzung in diesem Zeitraum enthält bisher detaillierte Routendaten. Neue Sitzungen erfassen Codec, Encoder und Routing automatisch vollständig."
+      "value": "Für diese älteren Sitzungen sind keine detaillierten Wiedergabeinfos verfügbar. Neue Sitzungen erfassen sie automatisch."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -47115,7 +47133,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Detaillierte Daten zu Codec, Transkodierung und Routing sind für "
+              "value": "Detaillierte Wiedergabeinfos sind für "
             },
             {
               "type": 1,
@@ -47131,7 +47149,7 @@
             },
             {
               "type": 0,
-              "value": " Sitzung in diesem Zeitraum erfasst (erfasst seit "
+              "value": " Sitzung verfügbar (erfasst seit "
             },
             {
               "type": 1,
@@ -47147,7 +47165,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Detaillierte Daten zu Codec, Transkodierung und Routing sind für "
+              "value": "Detaillierte Wiedergabeinfos sind für "
             },
             {
               "type": 1,
@@ -47163,7 +47181,7 @@
             },
             {
               "type": 0,
-              "value": " Sitzungen in diesem Zeitraum erfasst (erfasst seit "
+              "value": " Sitzungen verfügbar (erfasst seit "
             },
             {
               "type": 1,
@@ -47189,7 +47207,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Die gemessene Wiedergabedauer umfasst "
+              "value": "Die genaue Wiedergabezeit ist für "
             },
             {
               "type": 1,
@@ -47205,7 +47223,7 @@
             },
             {
               "type": 0,
-              "value": " Sitzung in diesem Zeitraum; für ältere Sitzungen wird sie anhand der Endposition geschätzt."
+              "value": " Sitzung verfügbar; ältere Sitzungen sind geschätzt."
             }
           ]
         },
@@ -47213,7 +47231,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Die gemessene Wiedergabedauer umfasst "
+              "value": "Die genaue Wiedergabezeit ist für "
             },
             {
               "type": 1,
@@ -47229,7 +47247,7 @@
             },
             {
               "type": 0,
-              "value": " Sitzungen in diesem Zeitraum; für ältere Sitzungen wird sie anhand der Endposition geschätzt."
+              "value": " Sitzungen verfügbar; ältere Sitzungen sind geschätzt."
             }
           ]
         }
@@ -47241,7 +47259,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Sitzungen anzeigen"
+      "value": "Verlauf anzeigen"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -47285,7 +47303,7 @@
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Untertitel-Codecs beim Einbrennen"
+      "value": "Formate eingebrannter Untertitel"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -47303,7 +47321,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Encoder-Beschleunigung"
+      "value": "Hardwarebeschleunigung"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -47357,7 +47375,7 @@
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " Hardware · "
     },
     {
       "type": 1,
@@ -47365,13 +47383,13 @@
     },
     {
       "type": 0,
-      "value": " SW"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Transkodierungs-Encoder"
+      "value": "Hardware-Transkodierung"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -47381,7 +47399,7 @@
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " Hardware · "
     },
     {
       "type": 1,
@@ -47389,7 +47407,7 @@
     },
     {
       "type": 0,
-      "value": " SW"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -47417,7 +47435,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Alle Stichproben"
+      "value": "Alle"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -47527,25 +47545,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "Keine Client-Codec-Paare erreichen in diesem Zeitraum die Mindestanzahl"
+      "value": "Noch nicht genug Sitzungen. Wechsle zu „Alle“ oder erweitere den Zeitraum."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Min. 5 Sitzungen"
+      "value": "5+ Sitzungen"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Direktwiedergabe-Rate nach Client und Quell-Codec. Wähle eine Zelle, um passende Sitzungen anzuzeigen."
+      "value": "Wie oft jede App ein Videoformat ohne Konvertierung abspielt. Klicke auf eine Zelle, um diese Sitzungen anzuzeigen."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Client × Quell-Videocodec"
+      "value": "Direktwiedergabe nach App & Videoformat"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -47557,19 +47575,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "Keine Anpassungsgründe in diesem Zeitraum erfasst"
+      "value": "Keine Konvertierungsgründe in diesem Zeitraum erfasst"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Vom Server erfasste Anpassungsgründe bei nicht direkten Sitzungen"
+      "value": "Klicke auf einen Grund, um passende Sitzungen anzuzeigen."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Warum Sitzungen angepasst wurden"
+      "value": "Warum Streams keine Direktwiedergabe waren"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -47601,7 +47619,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Keine Sitzungen wurden unter ihrer Quellauflösung ausgeliefert"
+      "value": "In diesem Zeitraum wurde nichts herunterskaliert"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -47631,7 +47649,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Quelldateien und was Clients erhalten haben, nach Sitzung"
+      "value": "Ursprüngliche Videoauflösung vs. gestreamte Auflösung."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -47655,7 +47673,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "In diesem Zeitraum wurde nichts transkodiert"
+      "value": "Keine Transkodierungen in diesem Zeitraum"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -47891,7 +47909,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "Direkt %"
+      "value": "Direktwiedergabe"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -48032,6 +48050,16 @@
       "value": "Alle Profile"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": " % Direktwiedergabe"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -48041,7 +48069,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "Keine Sitzungen in diesem Zeitraum"
+      "value": "Keine Aktivität in diesem Zeitraum"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -48169,7 +48197,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Wiedergabetrends, beliebte Titel, Nutzung im Haushalt, Gerätekompatibilität und ausgehender Datenverkehr im Zeitverlauf."
+      "value": "Wiedergabetrends, beliebte Titel, Aktivität im Haushalt, Wiedergabe auf Geräten und Bandbreite."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -48235,7 +48263,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Dieser Titel ist nicht mehr im Katalog."
+      "value": "Dieser Titel ist nicht mehr in deiner Mediathek."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -48307,7 +48335,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "Keine Wiedergaben aus Mediatheken in diesem Zeitraum"
+      "value": "Keine Mediathek-Aktivität in diesem Zeitraum"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -48319,7 +48347,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "In diesem Zeitraum wurden keine Filme abgespielt"
+      "value": "In diesem Zeitraum wurden keine Filme angesehen"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -48331,7 +48359,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "In diesem Zeitraum wurden keine Serien abgespielt"
+      "value": "In diesem Zeitraum wurden keine Serien angesehen"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -80064,7 +80092,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Wiedergabetrends, Konten, Gerätequalität und Bandbreite."
+      "value": "Wiedergabetrends, beliebte Titel, Konten, Geräte und Bandbreite."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

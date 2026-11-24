@@ -43369,7 +43369,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Logs"
+      "value": "Acties"
     }
   ],
   "web.admin.history.column.media": [
@@ -43399,7 +43399,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Gebruiker"
+      "value": "Account"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -43441,7 +43441,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Spoor"
+      "value": "Detail"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -43465,13 +43465,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Eindpositie"
+      "value": "Gestopt op"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Reden van beëindiging"
+      "value": "Hoe het eindigde"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -43537,7 +43537,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Gebruik ↑ en ↓ om door de rijen te gaan"
+      "value": "Gebruik ↑ en ↓ om tussen sessies te wisselen"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -43567,7 +43567,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Opgenomen voordat gedetailleerde routetelemetrie werd vastgelegd. Bronspecificaties en velden van de leveringsroute zijn niet beschikbaar voor deze sessie."
+      "value": "Vastgelegd voordat gedetailleerde afspeelgegevens werden bijgehouden. Bestandsgegevens en de serverroute zijn niet beschikbaar voor deze sessie."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -43609,13 +43609,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Client, apparaat en route"
+      "value": "Account, apparaat en route"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Waarom deze sessie is aangepast"
+      "value": "Waarom het niet direct is afgespeeld"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -43645,7 +43645,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "HLS-variant"
+      "value": "Gestreamd (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -43657,7 +43657,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Sidecar"
+      "value": "Extern bestand"
     }
   ],
   "web.admin.history.detail.title": [
@@ -43721,7 +43721,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Geen afspeelgeschiedenis die aan de huidige filters voldoet. Pas de filters voor gebruiker, profiel of voltooiing aan."
+      "value": "Geen sessies die aan deze filters voldoen. Wis of wijzig een filter."
     }
   ],
   "web.admin.history.empty.title": [
@@ -43733,19 +43733,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Afgebroken"
+      "value": "Beëindigd door server"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "Verlopen"
+      "value": "Time-out"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Vervangen"
+      "value": "Stream gewisseld"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -43757,7 +43757,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Beëindigd door beheerder"
+      "value": "Gestopt door beheerder"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -43841,7 +43841,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Alle pogingen"
+      "value": "Alle statussen"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -43871,7 +43871,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Alle gebruikers"
+      "value": "Alle accounts"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -43883,7 +43883,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Kies eerst een gebruiker"
+      "value": "Kies eerst een account"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -43933,13 +43933,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Zoek op titels, gebruikers, clients of sessie-ID’s…"
+      "value": "Zoek op titels, accounts, clients of sessie-ID’s…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Itemfilter actief"
+      "value": "Titel:"
     }
   ],
   "web.admin.history.loadError": [
@@ -44113,7 +44113,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Geschat: vastgelegd voordat de kijktijd werd gemeten"
+      "value": "Geschat (vastgelegd voordat de exacte kijktijd werd bijgehouden)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44171,13 +44171,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Zichtbare rijen"
+      "value": "Weergegeven"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Afgeronde afspeelpogingen van alle gebruikers en profielen."
+      "value": "Eerdere afspeelsessies van alle accounts en profielen."
     }
   ],
   "web.admin.history.title": [
@@ -46424,6 +46424,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Geschiedenis"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -46467,7 +46473,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "Geen kijkuren vastgelegd in deze periode"
+      "value": "Geen kijkactiviteit in deze periode"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -46485,11 +46491,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Wanneer weergaven starten in "
+      "value": "Wanneer mensen beginnen met kijken ("
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -46541,7 +46551,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "Geen streammetingen in deze periode"
+      "value": "Nog geen streamgegevens"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -46634,6 +46644,10 @@
         "one": {
           "value": [
             {
+              "type": 0,
+              "value": "Exact voor "
+            },
+            {
               "type": 1,
               "value": "measured"
             },
@@ -46647,13 +46661,17 @@
             },
             {
               "type": 0,
-              "value": " sessie gemeten"
+              "value": " sessie"
             }
           ]
         },
         "other": {
           "value": [
             {
+              "type": 0,
+              "value": "Exact voor "
+            },
+            {
               "type": 1,
               "value": "measured"
             },
@@ -46667,7 +46685,7 @@
             },
             {
               "type": 0,
-              "value": " sessies gemeten"
+              "value": " sessies"
             }
           ]
         }
@@ -46685,19 +46703,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "Geen gelijktijdigheidsmetingen in deze periode"
+      "value": "Geen streamgegevens in deze periode"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "De piek van gelijktijdige streams geldt voor de hele server en verandert niet met account- of bibliotheekfilters."
+      "value": "Toont altijd de hele server — account- en bibliotheekfilters gelden hier niet."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Hoogste aantal gelijktijdige streams per dag (hele server, UTC-dagen)"
+      "value": "Maximaal aantal gelijktijdige streams per dag (hele server, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -46709,7 +46727,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Afspeelvolume in de tijd"
+      "value": "Afspelen in de tijd"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -46763,13 +46781,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Een hervat kijkmoment telt als één weergave; onvoltooide pogingen korter dan 30 seconden tellen niet mee."
+      "value": "Pauzeren en hervatten telt als één weergave. Onvoltooide stops korter dan 30 seconden tellen niet mee."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Afspeelvolume"
+      "value": "Afspelen in de tijd"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -46781,37 +46799,37 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "Geen bandbreedtemetingen in deze periode"
+      "value": "Geen bandbreedtegegevens in deze periode"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
     {
       "type": 0,
-      "value": "Piekdoorvoer"
+      "value": "Pieksnelheid"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Volume"
+      "value": "Verzonden data"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Dagelijkse piekdoorvoer van uitgaand verkeer"
+      "value": "Dagelijkse piekbandbreedte"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Dagelijks uitgaand verkeer en piekdoorvoer (hele server, UTC-dagen)"
+      "value": "Dagelijks verzonden data en pieksnelheid voor de hele server (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Uitgaand verkeer in de tijd"
+      "value": "Bandbreedte in de tijd"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -46829,7 +46847,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Dagelijks volume van uitgaand verkeer"
+      "value": "Dagelijks verzonden data"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -46917,7 +46935,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Piek uitgaand verkeer"
+      "value": "Pieksnelheid"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -46933,7 +46951,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Aandeel externe sessies"
+      "value": "Extern kijken"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -46957,13 +46975,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "Geen locatiegegevens in deze periode"
+      "value": "Nog geen netwerkgegevens"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Totaal uitgaand verkeer"
+      "value": "Totaal verzonden data"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -46975,7 +46993,7 @@
   "web.admin.insights.bandwidth.nodes.column.peak": [
     {
       "type": 0,
-      "value": "Piekdoorvoer"
+      "value": "Pieksnelheid"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.share": [
@@ -46987,25 +47005,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Totaal uitgaand verkeer"
+      "value": "Verzonden data"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "Geen uitgaand verkeer van externe nodes in deze periode"
+      "value": "Geen verkeer van externe nodes in deze periode"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Uitgaand verkeer per node"
+      "value": "Bandbreedte per node"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Dagelijkse metingen van bandbreedte en gelijktijdigheid beginnen op "
+      "value": "Bandbreedtegeschiedenis begint op "
     },
     {
       "type": 1,
@@ -47019,7 +47037,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Nog geen enkele sessie in deze periode bevat gedetailleerde routegegevens. Nieuwe sessies leggen automatisch volledige codec-, encoder- en routeringstelemetrie vast."
+      "value": "Gedetailleerde afspeelgegevens zijn niet beschikbaar voor deze oudere sessies. Nieuwe sessies leggen ze automatisch vast."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -47031,7 +47049,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Gedetailleerde codec-, transcodeer- en routeringsgegevens zijn vastgelegd voor "
+              "value": "Gedetailleerde afspeelgegevens zijn beschikbaar voor "
             },
             {
               "type": 1,
@@ -47047,7 +47065,7 @@
             },
             {
               "type": 0,
-              "value": " sessie in deze periode (vastgelegd sinds "
+              "value": " sessie (bijgehouden sinds "
             },
             {
               "type": 1,
@@ -47063,7 +47081,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Gedetailleerde codec-, transcodeer- en routeringsgegevens zijn vastgelegd voor "
+              "value": "Gedetailleerde afspeelgegevens zijn beschikbaar voor "
             },
             {
               "type": 1,
@@ -47079,7 +47097,7 @@
             },
             {
               "type": 0,
-              "value": " sessies in deze periode (vastgelegd sinds "
+              "value": " sessies (bijgehouden sinds "
             },
             {
               "type": 1,
@@ -47105,7 +47123,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Gemeten kijktijd geldt voor "
+              "value": "Exacte kijktijd is beschikbaar voor "
             },
             {
               "type": 1,
@@ -47121,7 +47139,7 @@
             },
             {
               "type": 0,
-              "value": " sessie in deze periode; voor oudere sessies wordt een schatting op basis van de eindpositie gebruikt."
+              "value": " sessie; oudere sessies zijn geschat."
             }
           ]
         },
@@ -47129,7 +47147,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Gemeten kijktijd geldt voor "
+              "value": "Exacte kijktijd is beschikbaar voor "
             },
             {
               "type": 1,
@@ -47145,7 +47163,7 @@
             },
             {
               "type": 0,
-              "value": " sessies in deze periode; voor oudere sessies wordt een schatting op basis van de eindpositie gebruikt."
+              "value": " sessies; oudere sessies zijn geschat."
             }
           ]
         }
@@ -47157,7 +47175,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Sessies bekijken"
+      "value": "Geschiedenis bekijken"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -47201,7 +47219,7 @@
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Ondertitelcodecs bij inbranden"
+      "value": "Formaten van ingebrande ondertitels"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -47219,7 +47237,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Encoderversnelling"
+      "value": "Hardwareversnelling"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -47273,7 +47291,7 @@
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " hardware · "
     },
     {
       "type": 1,
@@ -47281,13 +47299,13 @@
     },
     {
       "type": 0,
-      "value": " SW"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Encoder voor transcoderen"
+      "value": "Transcoderen via hardware"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -47297,7 +47315,7 @@
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " hardware · "
     },
     {
       "type": 1,
@@ -47305,7 +47323,7 @@
     },
     {
       "type": 0,
-      "value": " SW"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -47333,7 +47351,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Alle metingen"
+      "value": "Alle"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -47443,25 +47461,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "Geen combinaties van client en codec halen de steekproefdrempel in deze periode"
+      "value": "Nog niet genoeg sessies. Kies “Alle” of vergroot de periode."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Minimaal 5 sessies"
+      "value": "5+ sessies"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Percentage direct afspelen per client en broncodec. Selecteer een cel om de bijbehorende sessies te bekijken."
+      "value": "Hoe vaak elke app een videoformaat afspeelt zonder te converteren. Klik op een cel om die sessies te bekijken."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Client × videocodec van bron"
+      "value": "Direct afspelen per app en videoformaat"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -47473,19 +47491,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "Geen aanpassingsredenen vastgelegd in deze periode"
+      "value": "Geen conversieredenen vastgelegd in deze periode"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Aanpassingsredenen van de server, vastgelegd bij niet-directe sessies"
+      "value": "Klik op een reden om de bijbehorende sessies te bekijken."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Waarom sessies zijn aangepast"
+      "value": "Waarom streams niet direct zijn afgespeeld"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -47517,7 +47535,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Geen sessies geleverd onder hun bronresolutie"
+      "value": "Niets omlaag geschaald in deze periode"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -47547,7 +47565,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Bronbestanden en wat clients ontvingen, per sessie"
+      "value": "Oorspronkelijke videoresolutie vs. wat is gestreamd."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -47571,7 +47589,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "Geen transcoderingen vastgelegd in deze periode"
+      "value": "Geen transcoderingen in deze periode"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -47807,7 +47825,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "Direct %"
+      "value": "Direct afspelen"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -47948,6 +47966,16 @@
       "value": "Alle profielen"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% direct afgespeeld"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -47957,7 +47985,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "Geen sessies in deze periode"
+      "value": "Geen activiteit in deze periode"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -48085,7 +48113,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Afspeeltrends, populaire titels, gebruik per huishouden, apparaatcompatibiliteit en uitgaand verkeer door de tijd."
+      "value": "Kijktrends, populaire titels, activiteit in het huishouden, afspelen per apparaat en bandbreedte."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -48151,7 +48179,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Deze titel staat niet meer in de catalogus."
+      "value": "Deze titel staat niet meer in je bibliotheek."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -48223,7 +48251,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "Geen weergaven uit bibliotheken in deze periode"
+      "value": "Geen bibliotheekactiviteit in deze periode"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -48235,7 +48263,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "Geen films afgespeeld in deze periode"
+      "value": "Geen films bekeken in deze periode"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -48247,7 +48275,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "Geen series afgespeeld in deze periode"
+      "value": "Geen series bekeken in deze periode"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -79892,7 +79920,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Afspeeltrends, accounts, kwaliteit per apparaat en bandbreedte."
+      "value": "Kijktrends, populaire titels, accounts, apparaten en bandbreedte."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

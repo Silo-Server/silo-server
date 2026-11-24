@@ -38618,7 +38618,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "ログ"
+      "value": "操作"
     }
   ],
   "web.admin.history.column.media": [
@@ -38648,7 +38648,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "ユーザー"
+      "value": "アカウント"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -38690,7 +38690,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "トラック"
+      "value": "項目"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -38714,7 +38714,7 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "終了位置"
+      "value": "停止位置"
     }
   ],
   "web.admin.history.detail.field.endReason": [
@@ -38786,7 +38786,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "↑と↓で行を移動できます"
+      "value": "↑と↓でセッションを移動できます"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -38816,7 +38816,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "詳細な経路の記録が始まる前に記録されたセッションです。このセッションでは、ソースの仕様と配信経路の項目を表示できません。"
+      "value": "詳細な再生情報の記録が始まる前に記録されたセッションです。このセッションでは、ファイルの詳細とサーバーの経路を表示できません。"
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -38858,13 +38858,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "クライアント、デバイス、経路"
+      "value": "アカウント、デバイス、経路"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "このセッションが調整された理由"
+      "value": "ダイレクト再生されなかった理由"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -38894,7 +38894,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "HLSレンディション"
+      "value": "ストリーミング（HLS）"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -38970,7 +38970,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "現在のフィルターに一致する再生履歴はありません。ユーザー、プロフィール、または完了状態のフィルターを調整してください。"
+      "value": "これらのフィルターに一致するセッションはありません。フィルターをクリアするか調整してください。"
     }
   ],
   "web.admin.history.empty.title": [
@@ -38982,19 +38982,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "中断"
+      "value": "サーバーにより終了"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "期限切れ"
+      "value": "タイムアウト"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "置き換え"
+      "value": "ストリームの切り替え"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -39006,7 +39006,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "管理者による終了"
+      "value": "管理者により停止"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -39090,7 +39090,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "すべての再生"
+      "value": "すべての状態"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -39120,7 +39120,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "すべてのユーザー"
+      "value": "すべてのアカウント"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -39132,7 +39132,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "先にユーザーを選択"
+      "value": "先にアカウントを選択"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -39178,13 +39178,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "タイトル、ユーザー、クライアント、セッションIDを検索…"
+      "value": "タイトル、アカウント、クライアント、セッションIDを検索…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "アイテムで絞り込み中"
+      "value": "タイトル："
     }
   ],
   "web.admin.history.loadError": [
@@ -39335,7 +39335,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "推定値：視聴時間の計測開始前に記録されました"
+      "value": "推定値（正確な視聴時間の記録開始前に記録）"
     }
   ],
   "web.admin.history.row.meta": [
@@ -39393,13 +39393,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "表示中の行"
+      "value": "表示中"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "すべてのユーザーとプロフィールの確定済みの再生記録です。"
+      "value": "すべてのアカウントとプロフィールの過去の再生セッションです。"
     }
   ],
   "web.admin.history.title": [
@@ -41364,6 +41364,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "履歴"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -41407,7 +41413,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "この期間の視聴時間帯の記録はありません"
+      "value": "この期間の視聴アクティビティはありません"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -41424,12 +41430,16 @@
   ],
   "web.admin.insights.activity.heatmap.subtitle": [
     {
+      "type": 0,
+      "value": "視聴を開始した時刻（"
+    },
+    {
       "type": 1,
       "value": "tz"
     },
     {
       "type": 0,
-      "value": "での再生開始時刻"
+      "value": "）"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -41477,7 +41487,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "この期間のストリームのサンプルはありません"
+      "value": "ストリームのデータはまだありません"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -41567,7 +41577,7 @@
             },
             {
               "type": 0,
-              "value": "セッションを計測"
+              "value": "セッションは正確な値"
             }
           ]
         }
@@ -41585,19 +41595,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "この期間の同時接続のサンプルはありません"
+      "value": "この期間のストリームのデータはありません"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "最大同時ストリーム数はサーバー全体の値で、アカウントやライブラリのフィルターでは変わりません。"
+      "value": "常にサーバー全体の値を表示します。アカウントとライブラリのフィルターはここには適用されません。"
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "1日の最大同時ストリーム数（サーバー全体、UTC基準の日）"
+      "value": "1日に同時に再生されたストリームの最大数（サーバー全体、UTC）"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -41609,7 +41619,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "再生量の推移"
+      "value": "再生の推移"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -41663,13 +41673,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "再開した視聴は1回の再生として数え、30秒未満で終わった未完了の再生は数えません。"
+      "value": "一時停止と再開は1回の再生として数えます。30秒未満で停止した未完了の再生は数えません。"
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "再生量"
+      "value": "再生の推移"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -41681,37 +41691,37 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "この期間の帯域幅のサンプルはありません"
+      "value": "この期間の帯域幅のデータはありません"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
     {
       "type": 0,
-      "value": "最大レート"
+      "value": "最大速度"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "転送量"
+      "value": "送信量"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "1日の最大送信レート"
+      "value": "1日の最大帯域幅"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "1日の送信量合計と最大レート（サーバー全体、UTC基準の日）"
+      "value": "サーバー全体の1日の送信量と最大速度（UTC）。"
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "送信量の推移"
+      "value": "帯域幅の推移"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -41802,7 +41812,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "最大送信レート"
+      "value": "最大速度"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -41814,7 +41824,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "リモートセッションの割合"
+      "value": "リモート視聴"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -41838,7 +41848,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "この期間の接続場所の記録はありません"
+      "value": "ネットワーク情報はまだありません"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
@@ -41856,7 +41866,7 @@
   "web.admin.insights.bandwidth.nodes.column.peak": [
     {
       "type": 0,
-      "value": "最大レート"
+      "value": "最大速度"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.share": [
@@ -41868,25 +41878,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "送信量合計"
+      "value": "送信量"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "この期間のリモートノードからの送信はありません"
+      "value": "この期間のリモートノードの通信はありません"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "ノード別の送信量"
+      "value": "ノード別の帯域幅"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "1日ごとの帯域幅と同時接続の指標は"
+      "value": "帯域幅の履歴は"
     },
     {
       "type": 1,
@@ -41900,7 +41910,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "この期間のセッションには、詳細な経路情報がまだありません。新しいセッションでは、コーデック、エンコーダー、経路の情報がすべて自動的に記録されます。"
+      "value": "これらの古いセッションには詳細な再生情報がありません。新しいセッションでは自動的に記録されます。"
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -41912,7 +41922,7 @@
           "value": [
             {
               "type": 0,
-              "value": "この期間の"
+              "value": "詳細な再生情報があるのは"
             },
             {
               "type": 1,
@@ -41928,7 +41938,7 @@
             },
             {
               "type": 0,
-              "value": "セッションで、コーデック、トランスコード、経路の詳細情報が記録されています（"
+              "value": "セッションです（"
             },
             {
               "type": 1,
@@ -41954,7 +41964,7 @@
           "value": [
             {
               "type": 0,
-              "value": "計測された視聴時間はこの期間の"
+              "value": "正確な視聴時間があるのは"
             },
             {
               "type": 1,
@@ -41970,7 +41980,7 @@
             },
             {
               "type": 0,
-              "value": "セッション分です。それより前のセッションは終了位置からの推定値です。"
+              "value": "セッションです。古いセッションは推定値です。"
             }
           ]
         }
@@ -41982,7 +41992,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "セッションを表示"
+      "value": "履歴を表示"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -42020,13 +42030,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "この期間の字幕の焼き込みはありません"
+      "value": "この期間に焼き込まれた字幕はありません"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "焼き込まれた字幕のコーデック"
+      "value": "焼き込まれた字幕の形式"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -42044,7 +42054,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "エンコーダーのアクセラレーション"
+      "value": "ハードウェアアクセラレーション"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -42082,7 +42092,7 @@
   "web.admin.insights.devices.kpi.directPlayRate": [
     {
       "type": 0,
-      "value": "ダイレクト再生の割合"
+      "value": "ダイレクト再生率"
     }
   ],
   "web.admin.insights.devices.kpi.hdrToneMap": [
@@ -42094,7 +42104,7 @@
   "web.admin.insights.devices.kpi.hdrToneMapDetail": [
     {
       "type": 0,
-      "value": "HW "
+      "value": "ハードウェア"
     },
     {
       "type": 1,
@@ -42102,7 +42112,7 @@
     },
     {
       "type": 0,
-      "value": " · SW "
+      "value": " · CPU "
     },
     {
       "type": 1,
@@ -42112,13 +42122,13 @@
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "トランスコードのエンコーダー"
+      "value": "ハードウェアトランスコード"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
     {
       "type": 0,
-      "value": "HW "
+      "value": "ハードウェア"
     },
     {
       "type": 1,
@@ -42126,7 +42136,7 @@
     },
     {
       "type": 0,
-      "value": " · SW "
+      "value": " · CPU "
     },
     {
       "type": 1,
@@ -42162,7 +42172,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "すべてのサンプル"
+      "value": "すべて"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -42228,7 +42238,7 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "この期間にサンプル数の基準を満たすクライアントとコーデックの組み合わせはありません"
+      "value": "セッションがまだ足りません。「すべて」に切り替えるか、期間を広げてください。"
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
@@ -42240,13 +42250,13 @@
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "クライアントとソースのコーデック別のダイレクト再生率です。セルを選択すると、該当するセッションを確認できます。"
+      "value": "各アプリが映像形式を変換せずに再生した割合です。セルをクリックすると、該当するセッションを表示します。"
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "クライアント × ソースの映像コーデック"
+      "value": "アプリと映像形式別のダイレクト再生"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -42264,13 +42274,13 @@
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "ダイレクト再生以外のセッションで記録された、サーバーによる変換理由"
+      "value": "理由をクリックすると、該当するセッションを表示します。"
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "セッションが変換された理由"
+      "value": "ストリームがダイレクト再生されなかった理由"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -42302,7 +42312,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "ソースより低い解像度で配信されたセッションはありません"
+      "value": "この期間にダウンスケールされたものはありません"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -42332,7 +42342,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "セッションごとのソースファイルとクライアントへの配信内容"
+      "value": "元の映像の解像度と配信された解像度の比較。"
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -42356,7 +42366,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "この期間にトランスコードの記録はありません"
+      "value": "この期間のトランスコードはありません"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -42552,7 +42562,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "直接再生率"
+      "value": "ダイレクト再生"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -42678,6 +42688,20 @@
       "value": "すべてのプロフィール"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 0,
+      "value": "ダイレクト再生"
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -42687,7 +42711,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "この期間のセッションはありません"
+      "value": "この期間のアクティビティはありません"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -42791,7 +42815,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "再生の傾向、人気のタイトル、世帯の利用状況、デバイスの互換性、送信量の推移。"
+      "value": "視聴の傾向、人気のタイトル、世帯のアクティビティ、デバイスでの再生、帯域幅。"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -42857,7 +42881,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "このタイトルはカタログにありません。"
+      "value": "このタイトルはライブラリにもうありません。"
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -42929,7 +42953,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "この期間にライブラリの再生はありません"
+      "value": "この期間のライブラリのアクティビティはありません"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -42941,7 +42965,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "この期間に再生された映画はありません"
+      "value": "この期間に視聴された映画はありません"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -42953,7 +42977,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "この期間に再生されたシリーズはありません"
+      "value": "この期間に視聴されたシリーズはありません"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -73213,7 +73237,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "再生の傾向、アカウント、デバイスの品質、帯域幅。"
+      "value": "視聴の傾向、人気のタイトル、アカウント、デバイス、帯域幅。"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

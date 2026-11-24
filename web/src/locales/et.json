@@ -44029,7 +44029,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Logid"
+      "value": "Toimingud"
     }
   ],
   "web.admin.history.column.media": [
@@ -44059,7 +44059,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Kasutaja"
+      "value": "Konto"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -44101,7 +44101,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Rada"
+      "value": "Üksikasi"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -44125,13 +44125,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Lõpupositsioon"
+      "value": "Lõpetati kohal"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Lõppemise põhjus"
+      "value": "Lõppemise viis"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -44197,7 +44197,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Ridade vahel liikumiseks kasutage klahve ↑ ja ↓"
+      "value": "Seansside vahel liikumiseks kasutage klahve ↑ ja ↓"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -44227,7 +44227,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Salvestatud enne, kui marsruudi üksikasjalikku telemeetriat koguti. Selle seansi allika andmed ja edastusmarsruudi väljad pole saadaval."
+      "value": "Salvestatud enne, kui esituse üksikasjalikku teavet koguma hakati. Selle seansi faili üksikasjad ja serveri marsruut pole saadaval."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -44269,13 +44269,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Klient, seade ja marsruut"
+      "value": "Konto, seade ja marsruut"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Miks see seanss kohandus"
+      "value": "Miks otseesitust ei kasutatud"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -44305,7 +44305,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "HLS-variant"
+      "value": "Voogedastatud (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -44317,7 +44317,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Eraldi fail"
+      "value": "Väline fail"
     }
   ],
   "web.admin.history.detail.title": [
@@ -44381,7 +44381,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Praegustele filtritele ei vasta ükski esitusajaloo kirje. Proovige muuta kasutaja, profiili või lõpetatuse filtreid."
+      "value": "Nendele filtritele ei vasta ükski seanss. Proovige mõni filter tühjendada või seda muuta."
     }
   ],
   "web.admin.history.empty.title": [
@@ -44393,19 +44393,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Katkestatud"
+      "value": "Serveri lõpetatud"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "Aegunud"
+      "value": "Aegus"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Asendatud"
+      "value": "Voog vahetati"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -44501,7 +44501,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Kõik katsed"
+      "value": "Kõik olekud"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -44531,7 +44531,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Kõik kasutajad"
+      "value": "Kõik kontod"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -44543,7 +44543,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Valige esmalt kasutaja"
+      "value": "Valige esmalt konto"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -44589,13 +44589,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Otsige pealkirju, kasutajaid, kliente või seansi ID-sid…"
+      "value": "Otsige pealkirju, kontosid, kliente või seansi ID-sid…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Üksuse filter on aktiivne"
+      "value": "Pealkiri:"
     }
   ],
   "web.admin.history.loadError": [
@@ -44777,7 +44777,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Hinnanguline: salvestatud enne vaatamisaja mõõtmist"
+      "value": "Hinnanguline (salvestatud enne täpse vaatamisaja mõõtmist)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44835,13 +44835,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Nähtavad read"
+      "value": "Kuvatud"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Kõigi kasutajate ja profiilide lõpule viidud esituskatsed."
+      "value": "Kõigi kontode ja profiilide varasemad esitusseansid."
     }
   ],
   "web.admin.history.title": [
@@ -47140,6 +47140,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Ajalugu"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -47183,7 +47189,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus pole vaatamistunde salvestatud"
+      "value": "Selles ajavahemikus pole vaatamistegevust"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -47201,11 +47207,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Esituste algusajad ajavööndis "
+      "value": "Millal vaatamist alustatakse (ajavöönd "
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -47257,7 +47267,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus pole voogude näidiseid"
+      "value": "Voogude andmeid veel pole"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -47350,32 +47360,48 @@
         "one": {
           "value": [
             {
+              "type": 0,
+              "value": "Täpne "
+            },
+            {
               "type": 1,
               "value": "total"
             },
             {
               "type": 0,
-              "value": " seansist on mõõdetud "
+              "value": " seansist "
             },
             {
               "type": 1,
               "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": " puhul"
             }
           ]
         },
         "other": {
           "value": [
             {
+              "type": 0,
+              "value": "Täpne "
+            },
+            {
               "type": 1,
               "value": "total"
             },
             {
               "type": 0,
-              "value": " seansist on mõõdetud "
+              "value": " seansist "
             },
             {
               "type": 1,
               "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": " puhul"
             }
           ]
         }
@@ -47393,19 +47419,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus pole samaaegsuse näidiseid"
+      "value": "Selles ajavahemikus pole voogude andmeid"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "Samaaegsete voogude tipp kehtib kogu serveri kohta ega muutu konto või meediakogu filtritega."
+      "value": "Näitab alati kogu serverit – konto ja meediakogu filtrid siin ei kehti."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Päeva suurim samaaegsete voogude arv (kogu server, UTC päevad)"
+      "value": "Päeva suurim korraga esitatud voogude arv (kogu server, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -47417,7 +47443,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Esituste maht ajas"
+      "value": "Esitused ajas"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -47471,13 +47497,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Jätkatud vaatamine loetakse üheks esituseks ning alla 30 sekundi pikkused lõpetamata katsed jäetakse välja."
+      "value": "Peatamine ja jätkamine loetakse üheks esituseks. Alla 30 sekundi pikkusi lõpetamata esitusi ei arvestata."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Esituste maht"
+      "value": "Esitused ajas"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -47489,7 +47515,7 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus pole ribalaiuse näidiseid"
+      "value": "Selles ajavahemikus pole ribalaiuse andmeid"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
@@ -47501,25 +47527,25 @@
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Maht"
+      "value": "Saadetud andmed"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Väljuva liikluse päevane tippkiirus"
+      "value": "Ribalaiuse päevane tipp"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Väljuva liikluse päevane kogumaht ja tippkiirus (kogu server, UTC päevad)"
+      "value": "Kogu serveri päevas saadetud andmed ja tippkiirus (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Väljuv liiklus ajas"
+      "value": "Ribalaius ajas"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -47537,7 +47563,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Väljuva liikluse päevane maht"
+      "value": "Päevas saadetud andmed"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -47617,7 +47643,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Väljuva liikluse tipp"
+      "value": "Tippkiirus"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -47633,7 +47659,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Kaugseansside osakaal"
+      "value": "Kaugvaatamine"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -47657,13 +47683,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus pole asukohaandmeid"
+      "value": "Võrguteavet veel pole"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Väljuv liiklus kokku"
+      "value": "Saadetud andmed kokku"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -47687,25 +47713,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Väljuv liiklus kokku"
+      "value": "Saadetud andmed"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus pole kaugsõlmedel väljuvat liiklust"
+      "value": "Selles ajavahemikus pole kaugsõlmede liiklust"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Väljuv liiklus sõlmede kaupa"
+      "value": "Ribalaius sõlmede kaupa"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Ribalaiuse ja samaaegsuse päevased mõõdikud algavad kuupäevast "
+      "value": "Ribalaiuse ajalugu algab kuupäevast "
     },
     {
       "type": 1,
@@ -47719,7 +47745,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Selle ajavahemiku seanssidel pole veel üksikasjalikke marsruudiandmeid. Uued seansid salvestavad koodeki, kodeerija ja marsruutimise täieliku telemeetria automaatselt."
+      "value": "Nende vanemate seansside kohta pole üksikasjalikku esitusteavet saadaval. Uued seansid salvestavad selle automaatselt."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -47731,7 +47757,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Selle ajavahemiku "
+              "value": "Üksikasjalik esitusteave on saadaval "
             },
             {
               "type": 1,
@@ -47747,7 +47773,7 @@
             },
             {
               "type": 0,
-              "value": " kohta on salvestatud üksikasjalikud koodeki, transkodeerimise ja marsruutimise andmed (salvestatakse alates kuupäevast "
+              "value": " kohta (kogutakse alates kuupäevast "
             },
             {
               "type": 1,
@@ -47763,7 +47789,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Selle ajavahemiku "
+              "value": "Üksikasjalik esitusteave on saadaval "
             },
             {
               "type": 1,
@@ -47779,7 +47805,7 @@
             },
             {
               "type": 0,
-              "value": " kohta on salvestatud üksikasjalikud koodeki, transkodeerimise ja marsruutimise andmed (salvestatakse alates kuupäevast "
+              "value": " kohta (kogutakse alates kuupäevast "
             },
             {
               "type": 1,
@@ -47805,7 +47831,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Selle ajavahemiku "
+              "value": "Täpne vaatamisaeg on saadaval "
             },
             {
               "type": 1,
@@ -47813,7 +47839,7 @@
             },
             {
               "type": 0,
-              "value": " seansist on mõõdetud vaatamisaeg olemas "
+              "value": " seansist "
             },
             {
               "type": 1,
@@ -47821,7 +47847,7 @@
             },
             {
               "type": 0,
-              "value": " kohta; vanemate seansside puhul kasutatakse lõpuasukoha põhjal tehtud hinnanguid."
+              "value": " kohta; vanemate seansside vaatamisaeg on hinnanguline."
             }
           ]
         },
@@ -47829,7 +47855,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Selle ajavahemiku "
+              "value": "Täpne vaatamisaeg on saadaval "
             },
             {
               "type": 1,
@@ -47837,7 +47863,7 @@
             },
             {
               "type": 0,
-              "value": " seansist on mõõdetud vaatamisaeg olemas "
+              "value": " seansist "
             },
             {
               "type": 1,
@@ -47845,7 +47871,7 @@
             },
             {
               "type": 0,
-              "value": " kohta; vanemate seansside puhul kasutatakse lõpuasukoha põhjal tehtud hinnanguid."
+              "value": " kohta; vanemate seansside vaatamisaeg on hinnanguline."
             }
           ]
         }
@@ -47857,7 +47883,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Vaata seansse"
+      "value": "Vaata ajalugu"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -47895,13 +47921,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus pole subtiitreid pilti põletatud"
+      "value": "Selles ajavahemikus pole pilti põletatud subtiitreid"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Pilti põletatud subtiitrite koodekid"
+      "value": "Pilti põletatud subtiitrite vormingud"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -47919,7 +47945,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Kodeerija kiirendus"
+      "value": "Riistvaraline kiirendus"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -47969,7 +47995,7 @@
   "web.admin.insights.devices.kpi.hdrToneMapDetail": [
     {
       "type": 0,
-      "value": "HW: "
+      "value": "Riistvara: "
     },
     {
       "type": 1,
@@ -47977,7 +48003,7 @@
     },
     {
       "type": 0,
-      "value": " · SW: "
+      "value": " · CPU: "
     },
     {
       "type": 1,
@@ -47987,13 +48013,13 @@
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Transkodeerimise kodeerija"
+      "value": "Riistvaraline transkodeerimine"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
     {
       "type": 0,
-      "value": "HW: "
+      "value": "Riistvara: "
     },
     {
       "type": 1,
@@ -48001,7 +48027,7 @@
     },
     {
       "type": 0,
-      "value": " · SW: "
+      "value": " · CPU: "
     },
     {
       "type": 1,
@@ -48033,7 +48059,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Kõik näidised"
+      "value": "Kõik"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -48143,25 +48169,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus ei ületa ükski kliendi ja koodeki paar näidiste lävendit"
+      "value": "Seansse pole veel piisavalt. Valige „Kõik“ või laiendage ajavahemikku."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Vähemalt 5 seanssi"
+      "value": "5+ seanssi"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Otseesituse määr kliendi ja lähtekoodeki kaupa. Vastavate seansside vaatamiseks valige mõni lahter."
+      "value": "Kui sageli iga rakendus esitab videovormingut ilma teisendamata. Nende seansside vaatamiseks klõpsake lahtril."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Klient × lähtevideo koodek"
+      "value": "Otseesitus rakenduse ja videovormingu kaupa"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -48173,19 +48199,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus pole kohandamise põhjuseid salvestatud"
+      "value": "Selles ajavahemikus pole teisendamise põhjuseid salvestatud"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Serveri salvestatud kohandamise põhjused seanssidel, mida ei esitatud otse"
+      "value": "Vastavate seansside vaatamiseks klõpsake põhjusel."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Miks seansse kohandati"
+      "value": "Miks voogude puhul otseesitust ei kasutatud"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -48217,7 +48243,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Ühtegi seanssi ei edastatud lähteeraldusvõimest madalamal"
+      "value": "Selles ajavahemikus ei vähendatud millegi eraldusvõimet"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -48247,7 +48273,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Lähtefailid ja see, mida kliendid said, seansside kaupa"
+      "value": "Video algne eraldusvõime vs. voogedastatud eraldusvõime."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -48271,7 +48297,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus pole transkodeerimisi registreeritud"
+      "value": "Selles ajavahemikus pole transkodeerimisi"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -48495,7 +48521,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "Otse %"
+      "value": "Otseesitus"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -48636,6 +48662,16 @@
       "value": "Kõik profiilid"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% otseesitus"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -48645,7 +48681,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus seansse pole"
+      "value": "Selles ajavahemikus pole tegevust"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -48773,7 +48809,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Esitustrendid, populaarsed pealkirjad, leibkonna kasutus, seadmete ühilduvus ja väljuv andmeliiklus ajas."
+      "value": "Vaatamistrendid, populaarsed pealkirjad, leibkonna tegevus, seadmete esitus ja ribalaius."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -48839,7 +48875,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Seda pealkirja pole enam kataloogis."
+      "value": "Seda pealkirja pole enam teie meediakogus."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -48915,7 +48951,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus pole meediakogudest midagi esitatud"
+      "value": "Selles ajavahemikus pole meediakogude tegevust"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -48927,7 +48963,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus pole filme esitatud"
+      "value": "Selles ajavahemikus pole filme vaadatud"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -48939,7 +48975,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "Selles ajavahemikus pole sarju esitatud"
+      "value": "Selles ajavahemikus pole sarju vaadatud"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -80896,7 +80932,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Esitustrendid, kontod, seadmepõhine kvaliteet ja ribalaius."
+      "value": "Vaatamistrendid, populaarsed pealkirjad, kontod, seadmed ja ribalaius."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

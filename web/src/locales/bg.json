@@ -43645,7 +43645,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Дневници"
+      "value": "Действия"
     }
   ],
   "web.admin.history.column.media": [
@@ -43675,13 +43675,13 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Потребител"
+      "value": "Акаунт"
     }
   ],
   "web.admin.history.column.watchTime": [
     {
       "type": 0,
-      "value": "Време за гледане"
+      "value": "Време на гледане"
     }
   ],
   "web.admin.history.detail.action.ffmpegLogs": [
@@ -43717,7 +43717,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Писта"
+      "value": "Параметър"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -43741,13 +43741,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Крайна позиция"
+      "value": "Спряно на"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Причина за края"
+      "value": "Как приключи"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -43813,7 +43813,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Използвайте ↑ и ↓, за да преминавате през редовете"
+      "value": "Използвайте ↑ и ↓, за да преминавате между сесиите"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -43843,7 +43843,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Записано, преди да се събира подробна телеметрия за маршрута. Спецификациите на източника и полетата за маршрута на доставката не са налични за тази сесия."
+      "value": "Записано, преди да се събира подробна информация за възпроизвеждането. Подробностите за файла и маршрутът през сървъра не са налични за тази сесия."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -43885,13 +43885,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Клиент, устройство и маршрут"
+      "value": "Акаунт, устройство и маршрут"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Защо тази сесия се адаптира"
+      "value": "Защо не се възпроизведе директно"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -43921,7 +43921,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "HLS вариант"
+      "value": "Поточно (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -43933,7 +43933,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Отделен файл"
+      "value": "Външен файл"
     }
   ],
   "web.admin.history.detail.title": [
@@ -43997,7 +43997,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Няма история на възпроизвеждането, която да отговаря на текущите филтри. Опитайте да промените филтрите за потребител, профил или завършване."
+      "value": "Няма сесии, които да отговарят на тези филтри. Опитайте да изчистите или промените някой филтър."
     }
   ],
   "web.admin.history.empty.title": [
@@ -44009,19 +44009,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Прекъснато"
+      "value": "Прекратено от сървъра"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "Изтекло"
+      "value": "Изтекло време"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Заменено"
+      "value": "Превключено към друг поток"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -44033,7 +44033,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Прекратено от администратор"
+      "value": "Спряно от администратор"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -44117,7 +44117,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Всички опити"
+      "value": "Всички статуси"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -44147,7 +44147,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Всички потребители"
+      "value": "Всички акаунти"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -44159,7 +44159,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Първо изберете потребител"
+      "value": "Първо изберете акаунт"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -44205,13 +44205,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Търсене на заглавия, потребители, клиенти или ID на сесии…"
+      "value": "Търсене на заглавия, акаунти, клиенти или ID на сесии…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Активен филтър по елемент"
+      "value": "Заглавие:"
     }
   ],
   "web.admin.history.loadError": [
@@ -44393,7 +44393,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Приблизително: записано преди измерването на времето за гледане"
+      "value": "Приблизително (записано, преди да се измерва точното време на гледане)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44451,13 +44451,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Видими редове"
+      "value": "Показани"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Финализирани опити за възпроизвеждане от всички потребители и профили."
+      "value": "Минали сесии на възпроизвеждане от всички акаунти и профили."
     }
   ],
   "web.admin.history.title": [
@@ -46772,6 +46772,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "История"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -46815,7 +46821,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "Няма записани часове на гледане за този период"
+      "value": "Няма гледане за този период"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -46833,11 +46839,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Начален час на възпроизвежданията в часова зона "
+      "value": "Кога хората започват да гледат ("
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -46889,7 +46899,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "Няма данни за потоци за периода"
+      "value": "Все още няма данни за потоци"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -46983,7 +46993,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Измерени: "
+              "value": "Точно време за "
             },
             {
               "type": 1,
@@ -47007,7 +47017,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Измерени: "
+              "value": "Точно време за "
             },
             {
               "type": 1,
@@ -47041,19 +47051,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "Няма данни за едновременност за този период"
+      "value": "Няма данни за потоци за този период"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "Пикът на едновременните потоци е за целия сървър и не се променя от филтрите по акаунт или библиотека."
+      "value": "Винаги показва целия сървър – филтрите по акаунт и библиотека не важат тук."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Най-много едновременни потоци за ден (за целия сървър, дни по UTC)"
+      "value": "Най-много едновременно възпроизвеждани потоци за всеки ден (целият сървър, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -47065,7 +47075,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Обем на възпроизвеждане във времето"
+      "value": "Възпроизвеждане във времето"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -47119,13 +47129,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Възобновеното гледане се брои като едно възпроизвеждане, а незавършените опити под 30 секунди не се броят."
+      "value": "Паузата и продължаването се броят като едно възпроизвеждане. Незавършени спирания под 30 секунди не се броят."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Обем на възпроизвеждане"
+      "value": "Възпроизвеждане във времето"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -47149,25 +47159,25 @@
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Обем"
+      "value": "Изпратени данни"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Дневна пикова скорост на изходящия трафик"
+      "value": "Дневна пикова скорост на трафика"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Дневен изходящ трафик и пикови скорости (за целия сървър, дни по UTC)"
+      "value": "Дневно изпратени данни и пикова скорост за целия сървър (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Изходящ трафик във времето"
+      "value": "Трафик във времето"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -47185,7 +47195,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Дневен обем на изходящия трафик"
+      "value": "Дневно изпратени данни"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -47273,7 +47283,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Пиков изходящ трафик"
+      "value": "Пикова скорост"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -47289,7 +47299,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Дял на отдалечените сесии"
+      "value": "Отдалечено гледане"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -47313,13 +47323,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "Няма данни за местоположение за периода"
+      "value": "Все още няма данни за мрежата"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Общ изходящ трафик"
+      "value": "Общо изпратени данни"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -47343,25 +47353,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Общ изходящ трафик"
+      "value": "Изпратени данни"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "Няма изходящ трафик от отдалечени възли за този период"
+      "value": "Няма трафик от отдалечени възли за този период"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Изходящ трафик по възел"
+      "value": "Трафик по възел"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Дневните показатели за трафика и едновременността започват от "
+      "value": "Историята на трафика започва от "
     },
     {
       "type": 1,
@@ -47375,7 +47385,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Все още няма сесии в този период с подробни данни за маршрута. Новите сесии автоматично записват пълни данни за кодека, енкодера и маршрутизирането."
+      "value": "Подробна информация за възпроизвеждането не е налична за тези по-стари сесии. Новите сесии я записват автоматично."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -47387,7 +47397,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Подробни данни за кодека, транскодирането и маршрутизирането са записани за "
+              "value": "Подробна информация за възпроизвеждането е налична за "
             },
             {
               "type": 1,
@@ -47403,7 +47413,7 @@
             },
             {
               "type": 0,
-              "value": " сесия в този период (записват се от "
+              "value": " сесия (записва се от "
             },
             {
               "type": 1,
@@ -47419,7 +47429,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Подробни данни за кодека, транскодирането и маршрутизирането са записани за "
+              "value": "Подробна информация за възпроизвеждането е налична за "
             },
             {
               "type": 1,
@@ -47435,7 +47445,7 @@
             },
             {
               "type": 0,
-              "value": " сесии в този период (записват се от "
+              "value": " сесии (записва се от "
             },
             {
               "type": 1,
@@ -47461,7 +47471,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Измереното време за гледане обхваща "
+              "value": "Точното време на гледане е налично за "
             },
             {
               "type": 1,
@@ -47477,7 +47487,7 @@
             },
             {
               "type": 0,
-              "value": " сесия в този период; за по-старите сесии се използва оценка по крайната позиция."
+              "value": " сесия; за по-старите сесии то е приблизително."
             }
           ]
         },
@@ -47485,7 +47495,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Измереното време за гледане обхваща "
+              "value": "Точното време на гледане е налично за "
             },
             {
               "type": 1,
@@ -47501,7 +47511,7 @@
             },
             {
               "type": 0,
-              "value": " сесии в този период; за по-старите сесии се използва оценка по крайната позиция."
+              "value": " сесии; за по-старите сесии то е приблизително."
             }
           ]
         }
@@ -47513,7 +47523,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Преглед на сесиите"
+      "value": "Преглед на историята"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -47551,13 +47561,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "Няма вграждания на субтитри за този период"
+      "value": "Няма вградени субтитри за този период"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Кодеци на вградените субтитри"
+      "value": "Формати на вградените субтитри"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -47575,7 +47585,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Ускорение на енкодера"
+      "value": "Хардуерно ускорение"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -47633,7 +47643,7 @@
     },
     {
       "type": 0,
-      "value": " · Софтуерно: "
+      "value": " · CPU: "
     },
     {
       "type": 1,
@@ -47643,7 +47653,7 @@
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Енкодер за транскодиране"
+      "value": "Хардуерно транскодиране"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -47657,7 +47667,7 @@
     },
     {
       "type": 0,
-      "value": " · Софтуерно: "
+      "value": " · CPU: "
     },
     {
       "type": 1,
@@ -47689,7 +47699,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Всички извадки"
+      "value": "Всички"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -47799,25 +47809,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "Няма двойки клиент–кодек, които да достигат прага на извадката за този период"
+      "value": "Все още няма достатъчно сесии. Превключете на „Всички“ или разширете периода."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Мин. 5 сесии"
+      "value": "5+ сесии"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Дял на директното възпроизвеждане по клиент и кодек на източника. Изберете клетка, за да прегледате съответните сесии."
+      "value": "Колко често всяко приложение възпроизвежда даден видеоформат без преобразуване. Щракнете върху клетка, за да видите тези сесии."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Клиент × видеокодек на източника"
+      "value": "Директно възпроизвеждане по приложение и видеоформат"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -47829,19 +47839,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "Няма записани причини за адаптиране за този период"
+      "value": "Няма записани причини за преобразуване за този период"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Причини за адаптиране от сървъра, записани при сесии без директно възпроизвеждане"
+      "value": "Щракнете върху причина, за да видите съответните сесии."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Защо сесиите са адаптирани"
+      "value": "Защо потоците не се възпроизведоха директно"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -47873,7 +47883,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Няма сесии, доставени с по-ниска резолюция от тази на източника"
+      "value": "Няма намаляване на резолюцията за този период"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -47903,7 +47913,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Изходни файлове и какво са получили клиентите, по сесии"
+      "value": "Оригинална резолюция на видеото спрямо предаваната."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -47927,7 +47937,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "Няма записани транскодирания в този период"
+      "value": "Няма транскодиране за този период"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -48155,7 +48165,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "Директно %"
+      "value": "Директно възпроизвеждане"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -48292,6 +48302,16 @@
       "value": "Всички профили"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% директно възпроизвеждане"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -48301,7 +48321,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "Няма сесии в този период"
+      "value": "Няма активност за този период"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -48429,7 +48449,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Тенденции във възпроизвеждането, популярни заглавия, използване в домакинството, съвместимост на устройствата и изходящ трафик във времето."
+      "value": "Тенденции в гледането, популярни заглавия, активност в домакинството, възпроизвеждане по устройства и трафик."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -48495,7 +48515,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Това заглавие вече не е в каталога."
+      "value": "Това заглавие вече не е във вашата библиотека."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -48567,7 +48587,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "Няма възпроизвеждания от библиотеки в този период"
+      "value": "Няма активност в библиотеките за този период"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -48579,7 +48599,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "Няма гледани филми в този период"
+      "value": "Няма гледани филми за този период"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -48591,7 +48611,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "Няма гледани сериали в този период"
+      "value": "Няма гледани сериали за този период"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -80504,7 +80524,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Тенденции във възпроизвеждането, акаунти, качество на устройствата и честотна лента."
+      "value": "Тенденции в гледането, популярни заглавия, акаунти, устройства и трафик."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

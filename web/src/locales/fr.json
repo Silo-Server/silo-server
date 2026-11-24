@@ -48647,7 +48647,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Journaux"
+      "value": "Actions"
     }
   ],
   "web.admin.history.column.media": [
@@ -48677,13 +48677,13 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Utilisateur"
+      "value": "Compte"
     }
   ],
   "web.admin.history.column.watchTime": [
     {
       "type": 0,
-      "value": "Durée de visionnage"
+      "value": "Temps de visionnage"
     }
   ],
   "web.admin.history.detail.action.ffmpegLogs": [
@@ -48719,7 +48719,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Piste"
+      "value": "Détail"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -48743,13 +48743,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Position de fin"
+      "value": "Arrêt à"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Motif de fin"
+      "value": "Mode de fin"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -48815,7 +48815,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Utilisez ↑ et ↓ pour parcourir les lignes"
+      "value": "Utilisez ↑ et ↓ pour passer d’une session à l’autre"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -48845,7 +48845,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Enregistrée avant la collecte de la télémétrie détaillée du routage. Les caractéristiques de la source et les champs du routage de diffusion ne sont pas disponibles pour cette session."
+      "value": "Enregistrée avant le suivi détaillé de la lecture. Les détails du fichier et le routage du serveur ne sont pas disponibles pour cette session."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -48887,13 +48887,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Client, appareil et routage"
+      "value": "Compte, appareil et routage"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Pourquoi cette session s’est adaptée"
+      "value": "Pourquoi la lecture directe n’a pas été possible"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -48923,7 +48923,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "Variante HLS"
+      "value": "Diffusés (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -48935,7 +48935,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Fichier séparé"
+      "value": "Fichier externe"
     }
   ],
   "web.admin.history.detail.title": [
@@ -48999,7 +48999,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Aucun historique de lecture ne correspond aux filtres actuels. Essayez de modifier les filtres d’utilisateur, de profil ou d’achèvement."
+      "value": "Aucune session ne correspond à ces filtres. Essayez d’effacer ou de modifier un filtre."
     }
   ],
   "web.admin.history.empty.title": [
@@ -49011,7 +49011,7 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Interrompue"
+      "value": "Terminée par le serveur"
     }
   ],
   "web.admin.history.endReason.expired": [
@@ -49023,7 +49023,7 @@
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Remplacée"
+      "value": "Flux remplacé"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -49035,7 +49035,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Terminée par un admin"
+      "value": "Arrêtée par un administrateur"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -49119,7 +49119,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Toutes les tentatives"
+      "value": "Tous les statuts"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -49149,7 +49149,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Tous les utilisateurs"
+      "value": "Tous les comptes"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -49161,7 +49161,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Choisissez d’abord un utilisateur"
+      "value": "Choisissez d’abord un compte"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -49207,13 +49207,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Rechercher des titres, utilisateurs, clients ou ID de session…"
+      "value": "Rechercher des titres, comptes, clients ou ID de session…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Filtre d’élément actif"
+      "value": "Titre :"
     }
   ],
   "web.admin.history.loadError": [
@@ -49422,7 +49422,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Estimée : enregistrée avant que la durée de visionnage soit mesurée"
+      "value": "Estimé (enregistré avant le suivi exact du temps de visionnage)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -49480,13 +49480,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Lignes visibles"
+      "value": "Affichées"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Tentatives de lecture finalisées pour l’ensemble des utilisateurs et des profils."
+      "value": "Sessions de lecture passées pour l’ensemble des comptes et des profils."
     }
   ],
   "web.admin.history.title": [
@@ -52047,6 +52047,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Historique"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -52090,7 +52096,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "Aucune heure de visionnage enregistrée sur cette période"
+      "value": "Aucune activité de visionnage sur cette période"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -52108,11 +52114,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Début des lectures selon le fuseau "
+      "value": "Heures de début de visionnage ("
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -52164,7 +52174,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "Aucun échantillon de flux sur la période"
+      "value": "Aucune donnée de flux pour l’instant"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -52282,7 +52292,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Mesuré pour "
+              "value": "Exact pour "
             },
             {
               "type": 1,
@@ -52306,7 +52316,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Mesuré pour "
+              "value": "Exact pour "
             },
             {
               "type": 1,
@@ -52330,7 +52340,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Mesuré pour "
+              "value": "Exact pour "
             },
             {
               "type": 1,
@@ -52364,19 +52374,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "Aucun échantillon de simultanéité sur cette période"
+      "value": "Aucune donnée de flux sur cette période"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "Le pic de flux simultanés concerne l’ensemble du serveur et ne varie pas selon les filtres de compte ou de bibliothèque."
+      "value": "Affiche toujours l’ensemble du serveur : les filtres de compte et de bibliothèque ne s’appliquent pas ici."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Maximum quotidien de flux simultanés (ensemble du serveur, jours UTC)"
+      "value": "Nombre maximal de flux lus simultanément chaque jour (ensemble du serveur, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -52388,7 +52398,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Volume de lecture au fil du temps"
+      "value": "Lectures au fil du temps"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -52442,13 +52452,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Les séances reprises comptent pour une seule lecture, et les tentatives inachevées de moins de 30 secondes sont ignorées."
+      "value": "Une pause suivie d’une reprise compte comme une seule lecture. Les lectures inachevées de moins de 30 secondes ne sont pas comptées."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Volume de lecture"
+      "value": "Lectures au fil du temps"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -52460,7 +52470,7 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "Aucun échantillon de bande passante sur cette période"
+      "value": "Aucune donnée de bande passante sur cette période"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
@@ -52472,25 +52482,25 @@
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Volume"
+      "value": "Données envoyées"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Débit sortant maximal quotidien"
+      "value": "Pic quotidien de bande passante"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Totaux quotidiens du trafic sortant et débits maximaux (ensemble du serveur, jours UTC)"
+      "value": "Données envoyées et débit maximal par jour pour l’ensemble du serveur (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Trafic sortant au fil du temps"
+      "value": "Bande passante au fil du temps"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -52508,7 +52518,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Volume sortant quotidien"
+      "value": "Données envoyées par jour"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -52611,7 +52621,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Pic de trafic sortant"
+      "value": "Débit maximal"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -52627,7 +52637,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Part des sessions distantes"
+      "value": "Visionnage à distance"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -52651,13 +52661,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "Aucune donnée de localisation sur la période"
+      "value": "Aucune information réseau pour l’instant"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Trafic sortant total"
+      "value": "Total des données envoyées"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -52681,25 +52691,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Trafic sortant total"
+      "value": "Données envoyées"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "Aucun trafic sortant de nœud distant sur cette période"
+      "value": "Aucun trafic de nœud distant sur cette période"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Trafic sortant par nœud"
+      "value": "Bande passante par nœud"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Les métriques quotidiennes de bande passante et de simultanéité commencent le "
+      "value": "L’historique de bande passante commence le "
     },
     {
       "type": 1,
@@ -52713,7 +52723,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Aucune session de cette période ne contient encore de données de routage détaillées. Les nouvelles sessions enregistrent automatiquement la télémétrie complète du codec, de l’encodeur et du routage."
+      "value": "Les informations de lecture détaillées ne sont pas disponibles pour ces anciennes sessions. Les nouvelles sessions les enregistrent automatiquement."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -52725,7 +52735,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Les données détaillées de codec, de transcodage et de routage sont enregistrées pour "
+              "value": "Les informations de lecture détaillées sont disponibles pour "
             },
             {
               "type": 1,
@@ -52741,7 +52751,7 @@
             },
             {
               "type": 0,
-              "value": " session de cette période (enregistrement depuis le "
+              "value": " session (suivi depuis le "
             },
             {
               "type": 1,
@@ -52757,7 +52767,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Les données détaillées de codec, de transcodage et de routage sont enregistrées pour "
+              "value": "Les informations de lecture détaillées sont disponibles pour "
             },
             {
               "type": 1,
@@ -52773,7 +52783,7 @@
             },
             {
               "type": 0,
-              "value": " de sessions de cette période (enregistrement depuis le "
+              "value": " de sessions (suivi depuis le "
             },
             {
               "type": 1,
@@ -52789,7 +52799,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Les données détaillées de codec, de transcodage et de routage sont enregistrées pour "
+              "value": "Les informations de lecture détaillées sont disponibles pour "
             },
             {
               "type": 1,
@@ -52805,7 +52815,7 @@
             },
             {
               "type": 0,
-              "value": " sessions de cette période (enregistrement depuis le "
+              "value": " sessions (suivi depuis le "
             },
             {
               "type": 1,
@@ -52831,7 +52841,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Le temps de visionnage mesuré couvre "
+              "value": "Le temps de visionnage exact est disponible pour "
             },
             {
               "type": 1,
@@ -52847,7 +52857,7 @@
             },
             {
               "type": 0,
-              "value": " session de cette période ; les sessions plus anciennes utilisent une estimation d’après la position de fin."
+              "value": " session ; celui des sessions plus anciennes est estimé."
             }
           ]
         },
@@ -52855,7 +52865,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Le temps de visionnage mesuré couvre "
+              "value": "Le temps de visionnage exact est disponible pour "
             },
             {
               "type": 1,
@@ -52871,7 +52881,7 @@
             },
             {
               "type": 0,
-              "value": " de sessions de cette période ; les sessions plus anciennes utilisent une estimation d’après la position de fin."
+              "value": " de sessions ; celui des sessions plus anciennes est estimé."
             }
           ]
         },
@@ -52879,7 +52889,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Le temps de visionnage mesuré couvre "
+              "value": "Le temps de visionnage exact est disponible pour "
             },
             {
               "type": 1,
@@ -52895,7 +52905,7 @@
             },
             {
               "type": 0,
-              "value": " sessions de cette période ; les sessions plus anciennes utilisent une estimation d’après la position de fin."
+              "value": " sessions ; celui des sessions plus anciennes est estimé."
             }
           ]
         }
@@ -52907,7 +52917,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Voir les sessions"
+      "value": "Voir l’historique"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -52945,13 +52955,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "Aucune incrustation de sous-titres sur cette période"
+      "value": "Aucun sous-titre incrusté sur cette période"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Codecs des sous-titres incrustés"
+      "value": "Formats des sous-titres incrustés"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -52969,7 +52979,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Accélération de l’encodeur"
+      "value": "Accélération matérielle"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -53007,7 +53017,7 @@
   "web.admin.insights.devices.kpi.directPlayRate": [
     {
       "type": 0,
-      "value": "Part de lecture directe"
+      "value": "Taux de lecture directe"
     }
   ],
   "web.admin.insights.devices.kpi.hdrToneMap": [
@@ -53031,13 +53041,13 @@
     },
     {
       "type": 0,
-      "value": " logiciel"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Encodeur de transcodage"
+      "value": "Transcodage matériel"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -53055,7 +53065,7 @@
     },
     {
       "type": 0,
-      "value": " logiciel"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -53083,7 +53093,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Tous les échantillons"
+      "value": "Tous"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -53237,25 +53247,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "Aucune paire client-codec n’atteint le seuil d’échantillonnage sur cette période"
+      "value": "Pas encore assez de sessions. Passez à « Tous » ou élargissez la période."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Au moins 5 sessions"
+      "value": "5 sessions et plus"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Taux de lecture directe par client et codec source. Sélectionnez une cellule pour examiner les sessions correspondantes."
+      "value": "Fréquence à laquelle chaque application lit un format vidéo sans conversion. Cliquez sur une cellule pour voir ces sessions."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Client × codec vidéo source"
+      "value": "Lecture directe par application et format vidéo"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -53267,19 +53277,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "Aucun motif d’adaptation enregistré sur cette période"
+      "value": "Aucun motif de conversion enregistré sur cette période"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Motifs d’adaptation du serveur enregistrés pour les sessions sans lecture directe"
+      "value": "Cliquez sur un motif pour voir les sessions correspondantes."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Pourquoi les sessions ont été adaptées"
+      "value": "Pourquoi la lecture directe n’a pas été possible"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -53311,7 +53321,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Aucune session n’a été diffusée sous sa résolution source"
+      "value": "Aucune résolution réduite sur cette période"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -53341,7 +53351,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Fichiers sources et ce que les clients ont reçu, par session"
+      "value": "Résolution vidéo d’origine et résolution diffusée."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -53365,7 +53375,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "Aucun transcodage enregistré sur cette période"
+      "value": "Aucun transcodage sur cette période"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -53625,7 +53635,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "Direct %"
+      "value": "Lecture directe"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -53773,6 +53783,16 @@
       "value": "Tous les profils"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": " % en lecture directe"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -53782,7 +53802,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "Aucune session sur cette période"
+      "value": "Aucune activité sur cette période"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -53934,7 +53954,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendances de lecture, titres populaires, utilisation par foyer, compatibilité des appareils et trafic sortant dans le temps."
+      "value": "Tendances de visionnage, titres populaires, activité du foyer, lecture par appareil et bande passante."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -54000,7 +54020,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Ce titre ne figure plus dans le catalogue."
+      "value": "Ce titre ne figure plus dans votre bibliothèque."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -54072,7 +54092,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "Aucune lecture de bibliothèque sur cette période"
+      "value": "Aucune activité de bibliothèque sur cette période"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -54084,7 +54104,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "Aucun film lu sur cette période"
+      "value": "Aucun film regardé sur cette période"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -54096,7 +54116,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "Aucune série lue sur cette période"
+      "value": "Aucune série regardée sur cette période"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -87198,7 +87218,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendances de lecture, comptes, qualité par appareil et bande passante."
+      "value": "Tendances de visionnage, titres populaires, comptes, appareils et bande passante."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

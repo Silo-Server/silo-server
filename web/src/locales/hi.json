@@ -43321,7 +43321,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "लॉग"
+      "value": "कार्रवाइयाँ"
     }
   ],
   "web.admin.history.column.media": [
@@ -43351,7 +43351,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "उपयोगकर्ता"
+      "value": "खाता"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -43393,7 +43393,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "ट्रैक"
+      "value": "विवरण"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -43417,13 +43417,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "खत्म होने की पोज़िशन"
+      "value": "रुकने की पोज़िशन"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "खत्म होने की वजह"
+      "value": "कैसे खत्म हुआ"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -43489,7 +43489,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "पंक्तियों में आगे-पीछे जाने के लिए ↑ और ↓ इस्तेमाल करें"
+      "value": "एक सेशन से दूसरे सेशन पर जाने के लिए ↑ और ↓ इस्तेमाल करें"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -43519,7 +43519,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "यह विस्तृत रूट टेलीमेट्री दर्ज होने से पहले रिकॉर्ड किया गया था। इस सेशन के लिए सोर्स स्पेक्स और डिलीवरी रूट फ़ील्ड उपलब्ध नहीं हैं।"
+      "value": "यह प्लेबैक की विस्तृत जानकारी दर्ज होने से पहले रिकॉर्ड किया गया था। इस सेशन के लिए फ़ाइल की जानकारी और सर्वर रूट उपलब्ध नहीं हैं।"
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -43561,13 +43561,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "क्लाइंट, डिवाइस और रूट"
+      "value": "खाता, डिवाइस और रूट"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "इस सेशन में बदलाव क्यों हुआ"
+      "value": "डायरेक्ट प्ले क्यों नहीं हुआ"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -43597,7 +43597,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "HLS रेंडिशन"
+      "value": "स्ट्रीम किया गया (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -43609,7 +43609,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "साइडकार"
+      "value": "बाहरी फ़ाइल"
     }
   ],
   "web.admin.history.detail.title": [
@@ -43673,7 +43673,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "मौजूदा फ़िल्टर से कोई प्लेबैक इतिहास मेल नहीं खाता। उपयोगकर्ता, प्रोफ़ाइल या पूरा होने के फ़िल्टर बदलकर देखें।"
+      "value": "इन फ़िल्टर से कोई सेशन मेल नहीं खाता। कोई फ़िल्टर साफ़ करके या बदलकर देखें।"
     }
   ],
   "web.admin.history.empty.title": [
@@ -43685,7 +43685,7 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "बीच में बंद हुआ"
+      "value": "सर्वर ने बंद किया"
     }
   ],
   "web.admin.history.endReason.expired": [
@@ -43697,7 +43697,7 @@
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "बदला गया"
+      "value": "स्ट्रीम बदली गई"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -43793,7 +43793,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "सभी प्रयास"
+      "value": "सभी स्थितियाँ"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -43823,7 +43823,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "सभी उपयोगकर्ता"
+      "value": "सभी खाते"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -43835,7 +43835,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "पहले कोई उपयोगकर्ता चुनें"
+      "value": "पहले कोई खाता चुनें"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -43881,13 +43881,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "टाइटल, उपयोगकर्ता, क्लाइंट या सेशन ID खोजें…"
+      "value": "टाइटल, खाते, क्लाइंट या सेशन ID खोजें…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "आइटम फ़िल्टर चालू"
+      "value": "टाइटल:"
     }
   ],
   "web.admin.history.loadError": [
@@ -44061,7 +44061,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "अनुमानित: देखने का समय मापे जाने से पहले रिकॉर्ड किया गया"
+      "value": "अनुमानित (देखने का सटीक समय दर्ज होने से पहले रिकॉर्ड किया गया)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -44119,13 +44119,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "दिखाई दे रही पंक्तियाँ"
+      "value": "दिखाए गए"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "सभी उपयोगकर्ताओं और प्रोफ़ाइलों के पूरे हो चुके प्लेबैक प्रयास।"
+      "value": "सभी खातों और प्रोफ़ाइलों के पिछले प्लेबैक सेशन।"
     }
   ],
   "web.admin.history.title": [
@@ -46356,6 +46356,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "इतिहास"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -46399,7 +46405,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "इस अवधि में देखने के घंटे दर्ज नहीं हुए"
+      "value": "इस अवधि में देखने की कोई गतिविधि नहीं"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -46416,12 +46422,16 @@
   ],
   "web.admin.insights.activity.heatmap.subtitle": [
     {
+      "type": 0,
+      "value": "लोग कब देखना शुरू करते हैं ("
+    },
+    {
       "type": 1,
       "value": "tz"
     },
     {
       "type": 0,
-      "value": " में प्ले शुरू होने का समय"
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -46473,7 +46483,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "इस अवधि में स्ट्रीम के सैंपल नहीं हैं"
+      "value": "अभी स्ट्रीम का कोई डेटा नहीं"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -46566,10 +46576,6 @@
         "one": {
           "value": [
             {
-              "type": 0,
-              "value": "मापे गए सेशन: "
-            },
-            {
               "type": 1,
               "value": "total"
             },
@@ -46580,16 +46586,16 @@
             {
               "type": 1,
               "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": " सेशन के लिए सटीक"
             }
           ]
         },
         "other": {
           "value": [
             {
-              "type": 0,
-              "value": "मापे गए सेशन: "
-            },
-            {
               "type": 1,
               "value": "total"
             },
@@ -46600,6 +46606,10 @@
             {
               "type": 1,
               "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": " सेशन के लिए सटीक"
             }
           ]
         }
@@ -46617,19 +46627,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "इस अवधि में एक साथ चलने वाली स्ट्रीम के सैंपल नहीं हैं"
+      "value": "इस अवधि में स्ट्रीम का कोई डेटा नहीं"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "एक साथ अधिकतम स्ट्रीम पूरे सर्वर की हैं और खाता या लाइब्रेरी फ़िल्टर से नहीं बदलतीं।"
+      "value": "यहाँ हमेशा पूरे सर्वर का डेटा दिखता है — खाता और लाइब्रेरी फ़िल्टर यहाँ लागू नहीं होते।"
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "हर दिन एक साथ चलीं सबसे ज़्यादा स्ट्रीम (पूरा सर्वर, UTC दिन)"
+      "value": "हर दिन एक साथ चल रही सबसे ज़्यादा स्ट्रीम (पूरा सर्वर, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -46641,7 +46651,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "समय के साथ प्लेबैक की मात्रा"
+      "value": "समय के साथ प्लेबैक"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -46695,13 +46705,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "जारी रखकर देखी गई बैठक एक ही प्ले गिनी जाती है, और 30 सेकंड से कम की अधूरी कोशिशें नहीं गिनी जातीं।"
+      "value": "रोककर फिर से चलाना एक ही प्ले गिना जाता है। 30 सेकंड से कम के अधूरे प्ले नहीं गिने जाते।"
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "प्लेबैक की मात्रा"
+      "value": "समय के साथ प्लेबैक"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -46713,37 +46723,37 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "इस अवधि में बैंडविड्थ के सैंपल नहीं हैं"
+      "value": "इस अवधि में बैंडविड्थ का कोई डेटा नहीं"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
     {
       "type": 0,
-      "value": "अधिकतम दर"
+      "value": "अधिकतम स्पीड"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "मात्रा"
+      "value": "भेजा गया डेटा"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "रोज़ की अधिकतम ईग्रेस दर"
+      "value": "रोज़ की अधिकतम बैंडविड्थ"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "रोज़ का कुल ईग्रेस और अधिकतम दरें (पूरा सर्वर, UTC दिन)"
+      "value": "पूरे सर्वर पर रोज़ भेजा गया डेटा और अधिकतम स्पीड (UTC)।"
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "समय के साथ ईग्रेस"
+      "value": "समय के साथ बैंडविड्थ"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -46761,7 +46771,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "रोज़ के ईग्रेस की मात्रा"
+      "value": "रोज़ भेजा गया डेटा"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -46841,7 +46851,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "अधिकतम ईग्रेस"
+      "value": "अधिकतम स्पीड"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -46857,7 +46867,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "रिमोट सेशन का हिस्सा"
+      "value": "रिमोट से देखना"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -46881,13 +46891,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "इस अवधि में लोकेशन की जानकारी नहीं है"
+      "value": "अभी नेटवर्क की कोई जानकारी नहीं"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "कुल ईग्रेस"
+      "value": "कुल भेजा गया डेटा"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -46899,7 +46909,7 @@
   "web.admin.insights.bandwidth.nodes.column.peak": [
     {
       "type": 0,
-      "value": "अधिकतम दर"
+      "value": "अधिकतम स्पीड"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.share": [
@@ -46911,25 +46921,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "कुल ईग्रेस"
+      "value": "भेजा गया डेटा"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "इस अवधि में रिमोट नोड से कोई ईग्रेस नहीं"
+      "value": "इस अवधि में रिमोट नोड का कोई ट्रैफ़िक नहीं"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "नोड के अनुसार ईग्रेस"
+      "value": "नोड के अनुसार बैंडविड्थ"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "बैंडविड्थ और एक साथ चलने वाली स्ट्रीम के रोज़ के मेट्रिक "
+      "value": "बैंडविड्थ का इतिहास "
     },
     {
       "type": 1,
@@ -46937,13 +46947,13 @@
     },
     {
       "type": 0,
-      "value": " से शुरू होते हैं।"
+      "value": " से शुरू होता है।"
     }
   ],
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "इस अवधि के किसी भी सेशन में अभी रूट की विस्तृत जानकारी नहीं है। नए सेशन पूरी कोडेक, एन्कोडर और रूटिंग टेलीमेट्री अपने-आप दर्ज करते हैं।"
+      "value": "इन पुराने सेशन के लिए प्लेबैक की विस्तृत जानकारी उपलब्ध नहीं है। नए सेशन इसे अपने-आप दर्ज करते हैं।"
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -46953,10 +46963,6 @@
       "options": {
         "one": {
           "value": [
-            {
-              "type": 0,
-              "value": "इस अवधि में "
-            },
             {
               "type": 1,
               "value": "total"
@@ -46971,7 +46977,7 @@
             },
             {
               "type": 0,
-              "value": " सेशन के लिए कोडेक, ट्रांसकोड और रूटिंग की विस्तृत जानकारी दर्ज है ("
+              "value": " सेशन के लिए प्लेबैक की विस्तृत जानकारी उपलब्ध है ("
             },
             {
               "type": 1,
@@ -46986,10 +46992,6 @@
         "other": {
           "value": [
             {
-              "type": 0,
-              "value": "इस अवधि में "
-            },
-            {
               "type": 1,
               "value": "total"
             },
@@ -47003,7 +47005,7 @@
             },
             {
               "type": 0,
-              "value": " सेशन के लिए कोडेक, ट्रांसकोड और रूटिंग की विस्तृत जानकारी दर्ज है ("
+              "value": " सेशन के लिए प्लेबैक की विस्तृत जानकारी उपलब्ध है ("
             },
             {
               "type": 1,
@@ -47028,10 +47030,6 @@
         "one": {
           "value": [
             {
-              "type": 0,
-              "value": "मापा गया देखने का समय इस अवधि के "
-            },
-            {
               "type": 1,
               "value": "total"
             },
@@ -47045,17 +47043,13 @@
             },
             {
               "type": 0,
-              "value": " सेशन पर लागू होता है; पुराने सेशन के लिए आखिरी पोज़िशन से अनुमान लगाया जाता है।"
+              "value": " सेशन के लिए देखने का सटीक समय उपलब्ध है; पुराने सेशन का समय अनुमानित है।"
             }
           ]
         },
         "other": {
           "value": [
             {
-              "type": 0,
-              "value": "मापा गया देखने का समय इस अवधि के "
-            },
-            {
               "type": 1,
               "value": "total"
             },
@@ -47069,7 +47063,7 @@
             },
             {
               "type": 0,
-              "value": " सेशन पर लागू होता है; पुराने सेशन के लिए आखिरी पोज़िशन से अनुमान लगाया जाता है।"
+              "value": " सेशन के लिए देखने का सटीक समय उपलब्ध है; पुराने सेशन का समय अनुमानित है।"
             }
           ]
         }
@@ -47081,7 +47075,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "सेशन देखें"
+      "value": "इतिहास देखें"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -47119,13 +47113,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "इस अवधि में कोई सबटाइटल बर्न-इन नहीं"
+      "value": "इस अवधि में कोई बर्न-इन सबटाइटल नहीं"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "बर्न-इन सबटाइटल कोडेक"
+      "value": "बर्न-इन सबटाइटल के फ़ॉर्मैट"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -47143,7 +47137,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "एन्कोडर एक्सेलरेशन"
+      "value": "हार्डवेयर एक्सेलरेशन"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -47181,7 +47175,7 @@
   "web.admin.insights.devices.kpi.directPlayRate": [
     {
       "type": 0,
-      "value": "डायरेक्ट प्ले का हिस्सा"
+      "value": "डायरेक्ट प्ले की दर"
     }
   ],
   "web.admin.insights.devices.kpi.hdrToneMap": [
@@ -47197,7 +47191,7 @@
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " हार्डवेयर · "
     },
     {
       "type": 1,
@@ -47205,13 +47199,13 @@
     },
     {
       "type": 0,
-      "value": " SW"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "ट्रांसकोड एन्कोडर"
+      "value": "हार्डवेयर ट्रांसकोडिंग"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -47221,7 +47215,7 @@
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " हार्डवेयर · "
     },
     {
       "type": 1,
@@ -47229,7 +47223,7 @@
     },
     {
       "type": 0,
-      "value": " SW"
+      "value": " CPU"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -47261,7 +47255,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "सभी सैंपल"
+      "value": "सभी"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -47371,25 +47365,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "इस अवधि में कोई भी क्लाइंट-कोडेक जोड़ी सैंपल की न्यूनतम सीमा पूरी नहीं करती"
+      "value": "अभी पर्याप्त सेशन नहीं हैं। “सभी” चुनें या तारीख की सीमा बढ़ाएँ।"
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "कम से कम 5 सेशन"
+      "value": "5+ सेशन"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "क्लाइंट और सोर्स कोडेक के अनुसार डायरेक्ट प्ले की दर। मिलते-जुलते सेशन देखने के लिए कोई भी सेल चुनें।"
+      "value": "हर ऐप किसी वीडियो फ़ॉर्मैट को बिना बदले कितनी बार चलाता है। वे सेशन देखने के लिए किसी सेल पर क्लिक करें।"
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "क्लाइंट × सोर्स वीडियो कोडेक"
+      "value": "ऐप और वीडियो फ़ॉर्मैट के अनुसार डायरेक्ट प्ले"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -47401,19 +47395,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "इस अवधि में अडैप्टेशन की कोई वजह दर्ज नहीं हुई"
+      "value": "इस अवधि में कन्वर्ज़न की कोई वजह दर्ज नहीं हुई"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "डायरेक्ट प्ले के अलावा दूसरे सेशन पर दर्ज सर्वर अडैप्टेशन की वजहें"
+      "value": "मिलते-जुलते सेशन देखने के लिए किसी वजह पर क्लिक करें।"
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "सेशन क्यों अडैप्ट हुए"
+      "value": "स्ट्रीम डायरेक्ट प्ले क्यों नहीं हुईं"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -47445,7 +47439,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "कोई भी सेशन अपने सोर्स रिज़ॉल्यूशन से कम पर डिलीवर नहीं हुआ"
+      "value": "इस अवधि में कुछ भी डाउनस्केल नहीं हुआ"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -47475,7 +47469,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "सोर्स फ़ाइलें और क्लाइंट को क्या मिला, सेशन के हिसाब से"
+      "value": "वीडियो का मूल रिज़ॉल्यूशन बनाम स्ट्रीम किया गया रिज़ॉल्यूशन।"
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -47499,7 +47493,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "इस अवधि में कोई ट्रांसकोड दर्ज नहीं हुआ"
+      "value": "इस अवधि में कोई ट्रांसकोड नहीं"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -47727,7 +47721,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "डायरेक्ट %"
+      "value": "डायरेक्ट प्ले"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -47864,6 +47858,16 @@
       "value": "सभी प्रोफ़ाइलें"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% डायरेक्ट प्ले"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -47873,7 +47877,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "इस अवधि में कोई सेशन नहीं"
+      "value": "इस अवधि में कोई गतिविधि नहीं"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -48001,7 +48005,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "प्लेबैक के रुझान, लोकप्रिय टाइटल, परिवार में इस्तेमाल, डिवाइस कम्पैटिबिलिटी और समय के साथ ईग्रेस।"
+      "value": "देखने के रुझान, लोकप्रिय टाइटल, परिवार की गतिविधि, डिवाइस पर प्लेबैक और बैंडविड्थ।"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -48067,7 +48071,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "यह टाइटल अब कैटलॉग में नहीं है।"
+      "value": "यह टाइटल अब आपकी लाइब्रेरी में नहीं है।"
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -48139,7 +48143,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "इस अवधि में किसी लाइब्रेरी में कोई प्ले नहीं"
+      "value": "इस अवधि में लाइब्रेरी की कोई गतिविधि नहीं"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -48151,7 +48155,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "इस अवधि में कोई फ़िल्म नहीं चलाई गई"
+      "value": "इस अवधि में कोई फ़िल्म नहीं देखी गई"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -48163,7 +48167,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "इस अवधि में कोई सीरीज़ नहीं चलाई गई"
+      "value": "इस अवधि में कोई सीरीज़ नहीं देखी गई"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -79928,7 +79932,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "प्लेबैक के ट्रेंड, खाते, डिवाइस की क्वालिटी और बैंडविड्थ।"
+      "value": "देखने के रुझान, लोकप्रिय टाइटल, खाते, डिवाइस और बैंडविड्थ।"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

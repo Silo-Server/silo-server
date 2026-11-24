@@ -39266,7 +39266,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "ล็อก"
+      "value": "การดำเนินการ"
     }
   ],
   "web.admin.history.column.media": [
@@ -39296,13 +39296,13 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "ผู้ใช้"
+      "value": "บัญชี"
     }
   ],
   "web.admin.history.column.watchTime": [
     {
       "type": 0,
-      "value": "เวลารับชม"
+      "value": "เวลาที่รับชม"
     }
   ],
   "web.admin.history.detail.action.ffmpegLogs": [
@@ -39338,7 +39338,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "แทร็ก"
+      "value": "รายละเอียด"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -39362,13 +39362,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "ตำแหน่งที่สิ้นสุด"
+      "value": "หยุดที่"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "สาเหตุที่สิ้นสุด"
+      "value": "ลักษณะการสิ้นสุด"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -39434,7 +39434,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "ใช้ ↑ และ ↓ เพื่อเลื่อนไปทีละแถว"
+      "value": "ใช้ ↑ และ ↓ เพื่อเลื่อนระหว่างเซสชัน"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -39464,7 +39464,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "เซสชันนี้บันทึกไว้ก่อนที่ระบบจะเก็บข้อมูลเทเลเมทรีของเส้นทางโดยละเอียด ข้อมูลจำเพาะของแหล่งที่มาและฟิลด์เส้นทางการส่งจึงไม่มีสำหรับเซสชันนี้"
+      "value": "บันทึกไว้ก่อนที่จะมีการเก็บข้อมูลการเล่นโดยละเอียด รายละเอียดไฟล์และเส้นทางเซิร์ฟเวอร์จึงไม่มีสำหรับเซสชันนี้"
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -39506,13 +39506,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "ไคลเอ็นต์ อุปกรณ์ และเส้นทาง"
+      "value": "บัญชี อุปกรณ์ และเส้นทาง"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "เหตุผลที่เซสชันนี้ปรับเปลี่ยน"
+      "value": "เหตุผลที่ไม่ได้เล่นโดยตรง"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -39542,7 +39542,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "เรนดิชัน HLS"
+      "value": "สตรีม (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -39554,7 +39554,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "ไฟล์แยก"
+      "value": "ไฟล์ภายนอก"
     }
   ],
   "web.admin.history.detail.title": [
@@ -39618,7 +39618,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "ไม่มีประวัติการเล่นที่ตรงกับตัวกรองปัจจุบัน ลองปรับตัวกรองผู้ใช้ โปรไฟล์ หรือการเล่นจบ"
+      "value": "ไม่มีเซสชันที่ตรงกับตัวกรองเหล่านี้ ลองล้างหรือปรับตัวกรอง"
     }
   ],
   "web.admin.history.empty.title": [
@@ -39630,7 +39630,7 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "ยกเลิกกลางคัน"
+      "value": "สิ้นสุดโดยเซิร์ฟเวอร์"
     }
   ],
   "web.admin.history.endReason.expired": [
@@ -39642,7 +39642,7 @@
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "แทนที่แล้ว"
+      "value": "เปลี่ยนสตรีม"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -39654,7 +39654,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "ผู้ดูแลระบบยุติแล้ว"
+      "value": "หยุดโดยผู้ดูแลระบบ"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -39738,7 +39738,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "การเล่นทั้งหมด"
+      "value": "ทุกสถานะ"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -39768,7 +39768,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "ผู้ใช้ทั้งหมด"
+      "value": "บัญชีทั้งหมด"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -39780,7 +39780,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "เลือกผู้ใช้ก่อน"
+      "value": "เลือกบัญชีก่อน"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -39830,13 +39830,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "ค้นหาชื่อเรื่อง ผู้ใช้ ไคลเอ็นต์ หรือ ID เซสชัน…"
+      "value": "ค้นหาชื่อเรื่อง บัญชี ไคลเอ็นต์ หรือ ID เซสชัน…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "กำลังกรองตามรายการ"
+      "value": "ชื่อเรื่อง:"
     }
   ],
   "web.admin.history.loadError": [
@@ -39991,7 +39991,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "ค่าประมาณ: บันทึกไว้ก่อนที่จะมีการวัดเวลารับชม"
+      "value": "ค่าประมาณ (บันทึกไว้ก่อนที่จะมีการติดตามเวลารับชมที่แน่นอน)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -40049,13 +40049,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "แถวที่แสดง"
+      "value": "ที่แสดง"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "การเล่นที่สิ้นสุดแล้วของผู้ใช้และโปรไฟล์ทั้งหมด"
+      "value": "เซสชันการเล่นที่ผ่านมาของทุกบัญชีและโปรไฟล์"
     }
   ],
   "web.admin.history.title": [
@@ -42092,6 +42092,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "ประวัติ"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -42135,7 +42141,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "ไม่มีชั่วโมงการรับชมที่บันทึกไว้ในช่วงเวลานี้"
+      "value": "ไม่มีกิจกรรมการรับชมในช่วงเวลานี้"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -42153,11 +42159,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "เวลาที่เริ่มเล่นตามเขตเวลา "
+      "value": "เวลาที่เริ่มรับชม ("
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -42209,7 +42219,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "ไม่มีตัวอย่างสตรีมในช่วงเวลานี้"
+      "value": "ยังไม่มีข้อมูลสตรีม"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -42283,7 +42293,7 @@
           "value": [
             {
               "type": 0,
-              "value": "วัดผลแล้ว "
+              "value": "วัดได้แน่นอน "
             },
             {
               "type": 1,
@@ -42317,19 +42327,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "ไม่มีตัวอย่างการสตรีมพร้อมกันในช่วงเวลานี้"
+      "value": "ไม่มีข้อมูลสตรีมในช่วงเวลานี้"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "สตรีมพร้อมกันสูงสุดนับรวมทั้งเซิร์ฟเวอร์ และไม่เปลี่ยนตามตัวกรองบัญชีหรือคลัง"
+      "value": "แสดงทั้งเซิร์ฟเวอร์เสมอ ตัวกรองบัญชีและคลังไม่มีผลที่นี่"
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "จำนวนสตรีมพร้อมกันสูงสุดรายวัน (ทั้งเซิร์ฟเวอร์ นับวันตาม UTC)"
+      "value": "จำนวนสตรีมที่เล่นพร้อมกันสูงสุดในแต่ละวัน (ทั้งเซิร์ฟเวอร์ UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -42341,7 +42351,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "ปริมาณการเล่นตามช่วงเวลา"
+      "value": "การเล่นตามช่วงเวลา"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -42395,13 +42405,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "การเล่นที่ดูต่อในรอบเดียวกันนับเป็นหนึ่งครั้ง และไม่นับการเล่นที่ไม่จบซึ่งสั้นกว่า 30 วินาที"
+      "value": "การหยุดชั่วคราวแล้วเล่นต่อนับเป็นการเล่นหนึ่งครั้ง ไม่นับการหยุดก่อนจบที่สั้นกว่า 30 วินาที"
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "ปริมาณการเล่น"
+      "value": "การเล่นตามช่วงเวลา"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -42413,37 +42423,37 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "ไม่มีตัวอย่างแบนด์วิดท์ในช่วงเวลานี้"
+      "value": "ไม่มีข้อมูลแบนด์วิดท์ในช่วงเวลานี้"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
     {
       "type": 0,
-      "value": "อัตราสูงสุด"
+      "value": "ความเร็วสูงสุด"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "ปริมาณ"
+      "value": "ข้อมูลที่ส่ง"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "อัตราข้อมูลขาออกสูงสุดรายวัน"
+      "value": "แบนด์วิดท์สูงสุดรายวัน"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "ปริมาณข้อมูลขาออกรวมและอัตราสูงสุดรายวัน (ทั้งเซิร์ฟเวอร์ นับวันตาม UTC)"
+      "value": "ข้อมูลที่ส่งและความเร็วสูงสุดรายวันของทั้งเซิร์ฟเวอร์ (UTC)"
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "ข้อมูลขาออกตามช่วงเวลา"
+      "value": "แบนด์วิดท์ตามช่วงเวลา"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -42461,7 +42471,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "ปริมาณข้อมูลขาออกรายวัน"
+      "value": "ข้อมูลที่ส่งรายวัน"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -42534,7 +42544,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "ข้อมูลขาออกสูงสุด"
+      "value": "ความเร็วสูงสุด"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -42550,7 +42560,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "สัดส่วนเซสชันระยะไกล"
+      "value": "การรับชมระยะไกล"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -42574,13 +42584,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "ไม่มีข้อมูลตำแหน่งในช่วงเวลานี้"
+      "value": "ยังไม่มีข้อมูลเครือข่าย"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "ข้อมูลขาออกทั้งหมด"
+      "value": "ข้อมูลที่ส่งทั้งหมด"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -42592,7 +42602,7 @@
   "web.admin.insights.bandwidth.nodes.column.peak": [
     {
       "type": 0,
-      "value": "อัตราสูงสุด"
+      "value": "ความเร็วสูงสุด"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.share": [
@@ -42604,25 +42614,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "ข้อมูลขาออกทั้งหมด"
+      "value": "ข้อมูลที่ส่ง"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "ไม่มีข้อมูลขาออกจากโหนดระยะไกลในช่วงเวลานี้"
+      "value": "ไม่มีทราฟฟิกของโหนดระยะไกลในช่วงเวลานี้"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "ข้อมูลขาออกตามโหนด"
+      "value": "แบนด์วิดท์ตามโหนด"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "เมตริกแบนด์วิดท์และการสตรีมพร้อมกันรายวันเริ่มตั้งแต่ "
+      "value": "ประวัติแบนด์วิดท์เริ่มตั้งแต่ "
     },
     {
       "type": 1,
@@ -42632,7 +42642,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "ยังไม่มีเซสชันในช่วงเวลานี้ที่มีข้อมูลเส้นทางโดยละเอียด เซสชันใหม่จะบันทึกข้อมูลโค้เดก ตัวเข้ารหัส และการกำหนดเส้นทางทั้งหมดโดยอัตโนมัติ"
+      "value": "ไม่มีข้อมูลการเล่นโดยละเอียดสำหรับเซสชันเก่าเหล่านี้ เซสชันใหม่จะบันทึกข้อมูลนี้โดยอัตโนมัติ"
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -42644,7 +42654,7 @@
           "value": [
             {
               "type": 0,
-              "value": "บันทึกข้อมูลโค้เดก การแปลงรหัส และการกำหนดเส้นทางโดยละเอียดไว้สำหรับ "
+              "value": "มีข้อมูลการเล่นโดยละเอียดสำหรับ "
             },
             {
               "type": 1,
@@ -42660,7 +42670,7 @@
             },
             {
               "type": 0,
-              "value": " เซสชันในช่วงเวลานี้ (บันทึกตั้งแต่ "
+              "value": " เซสชัน (ติดตามตั้งแต่ "
             },
             {
               "type": 1,
@@ -42686,7 +42696,7 @@
           "value": [
             {
               "type": 0,
-              "value": "เวลาที่รับชมที่วัดได้ครอบคลุม "
+              "value": "มีเวลารับชมที่แน่นอนสำหรับ "
             },
             {
               "type": 1,
@@ -42702,7 +42712,7 @@
             },
             {
               "type": 0,
-              "value": " เซสชันในช่วงเวลานี้ เซสชันที่เก่ากว่าใช้ค่าประมาณจากตำแหน่งที่หยุดเล่น"
+              "value": " เซสชัน เซสชันที่เก่ากว่าใช้ค่าประมาณ"
             }
           ]
         }
@@ -42714,7 +42724,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "ดูเซสชัน"
+      "value": "ดูประวัติ"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -42752,13 +42762,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "ไม่มีการฝังคำบรรยายในช่วงเวลานี้"
+      "value": "ไม่มีคำบรรยายที่ฝังในวิดีโอในช่วงเวลานี้"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "โค้เดกคำบรรยายที่ฝังลงวิดีโอ"
+      "value": "รูปแบบคำบรรยายที่ฝังในวิดีโอ"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -42776,7 +42786,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "การเร่งความเร็วตัวเข้ารหัส"
+      "value": "การเร่งความเร็วด้วยฮาร์ดแวร์"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -42814,7 +42824,7 @@
   "web.admin.insights.devices.kpi.directPlayRate": [
     {
       "type": 0,
-      "value": "สัดส่วนการเล่นโดยตรง"
+      "value": "อัตราการเล่นโดยตรง"
     }
   ],
   "web.admin.insights.devices.kpi.hdrToneMap": [
@@ -42825,44 +42835,44 @@
   ],
   "web.admin.insights.devices.kpi.hdrToneMapDetail": [
     {
+      "type": 0,
+      "value": "ฮาร์ดแวร์ "
+    },
+    {
       "type": 1,
       "value": "hw"
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " · CPU "
     },
     {
       "type": 1,
       "value": "sw"
-    },
-    {
-      "type": 0,
-      "value": " SW"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "ตัวเข้ารหัสสำหรับการแปลงรหัส"
+      "value": "การแปลงรหัสด้วยฮาร์ดแวร์"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
+    {
+      "type": 0,
+      "value": "ฮาร์ดแวร์ "
+    },
     {
       "type": 1,
       "value": "hw"
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " · CPU "
     },
     {
       "type": 1,
       "value": "sw"
-    },
-    {
-      "type": 0,
-      "value": " SW"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -42890,7 +42900,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "ตัวอย่างทั้งหมด"
+      "value": "ทั้งหมด"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -42956,25 +42966,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "ไม่มีคู่ไคลเอ็นต์และโค้เดกที่ถึงเกณฑ์จำนวนตัวอย่างในช่วงเวลานี้"
+      "value": "ยังมีเซสชันไม่เพียงพอ เปลี่ยนเป็น “ทั้งหมด” หรือขยายช่วงวันที่"
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "อย่างน้อย 5 เซสชัน"
+      "value": "5 เซสชันขึ้นไป"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "อัตราการเล่นโดยตรงตามไคลเอ็นต์และโค้เดกต้นฉบับ เลือกเซลล์ใดก็ได้เพื่อดูเซสชันที่ตรงกัน"
+      "value": "ความถี่ที่แต่ละแอปเล่นรูปแบบวิดีโอได้โดยไม่ต้องแปลง คลิกเซลล์เพื่อดูเซสชันเหล่านั้น"
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "ไคลเอ็นต์ × โค้เดกวิดีโอต้นฉบับ"
+      "value": "การเล่นโดยตรงตามแอปและรูปแบบวิดีโอ"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -42986,19 +42996,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "ไม่มีเหตุผลการปรับที่บันทึกไว้ในช่วงเวลานี้"
+      "value": "ไม่มีเหตุผลการแปลงที่บันทึกไว้ในช่วงเวลานี้"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "เหตุผลที่เซิร์ฟเวอร์ปรับการเล่น ซึ่งบันทึกไว้ในเซสชันที่ไม่ได้เล่นโดยตรง"
+      "value": "คลิกเหตุผลเพื่อดูเซสชันที่ตรงกัน"
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "เหตุผลที่ปรับเซสชัน"
+      "value": "เหตุผลที่สตรีมไม่ได้เล่นโดยตรง"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -43030,7 +43040,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "ไม่มีเซสชันที่ส่งด้วยความละเอียดต่ำกว่าต้นฉบับ"
+      "value": "ไม่มีการลดความละเอียดในช่วงเวลานี้"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -43060,7 +43070,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "ไฟล์ต้นฉบับและสิ่งที่ไคลเอนต์ได้รับ แยกตามเซสชัน"
+      "value": "ความละเอียดวิดีโอต้นฉบับเทียบกับที่สตรีม"
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -43084,7 +43094,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "ไม่มีการแปลงรหัสที่บันทึกไว้ในช่วงเวลานี้"
+      "value": "ไม่มีการแปลงรหัสในช่วงเวลานี้"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -43280,7 +43290,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "เล่นโดยตรง %"
+      "value": "เล่นโดยตรง"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -43406,6 +43416,20 @@
       "value": "โปรไฟล์ทั้งหมด"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 0,
+      "value": "เล่นโดยตรง "
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -43415,7 +43439,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "ไม่มีเซสชันในช่วงเวลานี้"
+      "value": "ไม่มีกิจกรรมในช่วงเวลานี้"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -43523,7 +43547,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "แนวโน้มการเล่น ชื่อเรื่องยอดนิยม การใช้งานในครัวเรือน ความเข้ากันได้ของอุปกรณ์ และปริมาณข้อมูลขาออกตามช่วงเวลา"
+      "value": "แนวโน้มการรับชม ชื่อเรื่องยอดนิยม กิจกรรมในครัวเรือน การเล่นบนอุปกรณ์ และแบนด์วิดท์"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -43589,7 +43613,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "ชื่อเรื่องนี้ไม่อยู่ในแค็ตตาล็อกแล้ว"
+      "value": "ชื่อเรื่องนี้ไม่อยู่ในคลังแล้ว"
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -43661,7 +43685,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "ไม่มีการเล่นในคลังในช่วงเวลานี้"
+      "value": "ไม่มีกิจกรรมในคลังในช่วงเวลานี้"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -43673,7 +43697,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "ไม่มีภาพยนตร์ที่เล่นในช่วงเวลานี้"
+      "value": "ไม่มีภาพยนตร์ที่รับชมในช่วงเวลานี้"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -43685,7 +43709,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "ไม่มีซีรีส์ที่เล่นในช่วงเวลานี้"
+      "value": "ไม่มีซีรีส์ที่รับชมในช่วงเวลานี้"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -74145,7 +74169,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "แนวโน้มการเล่น บัญชี คุณภาพของอุปกรณ์ และแบนด์วิดท์"
+      "value": "แนวโน้มการรับชม ชื่อเรื่องยอดนิยม บัญชี อุปกรณ์ และแบนด์วิดท์"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

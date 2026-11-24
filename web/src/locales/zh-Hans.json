@@ -38814,7 +38814,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "日志"
+      "value": "操作"
     }
   ],
   "web.admin.history.column.media": [
@@ -38844,7 +38844,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "用户"
+      "value": "账户"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -38886,7 +38886,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "轨道"
+      "value": "详情"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -38910,13 +38910,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "结束位置"
+      "value": "停止位置"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "结束原因"
+      "value": "结束方式"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -38982,7 +38982,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "使用↑和↓逐行切换"
+      "value": "使用↑和↓在会话之间切换"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -39012,7 +39012,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "此记录早于详细路由遥测数据的采集。此会话没有来源规格和输出路由字段。"
+      "value": "此记录早于详细播放信息的采集。此会话没有文件详情和服务器路由。"
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -39054,13 +39054,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "客户端、设备和路由"
+      "value": "账户、设备和路由"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "此会话的调整原因"
+      "value": "未能直接播放的原因"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -39090,7 +39090,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "HLS字幕轨"
+      "value": "串流（HLS）"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -39102,7 +39102,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "外挂"
+      "value": "外部文件"
     }
   ],
   "web.admin.history.detail.title": [
@@ -39166,7 +39166,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "没有符合当前筛选条件的播放历史。请尝试调整用户、个人资料或完成情况筛选条件。"
+      "value": "没有符合这些筛选条件的会话。请尝试清除或调整筛选条件。"
     }
   ],
   "web.admin.history.empty.title": [
@@ -39178,19 +39178,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "已中止"
+      "value": "已被服务器结束"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "已过期"
+      "value": "已超时"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "已被替换"
+      "value": "已切换串流"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -39202,7 +39202,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "已被管理员终止"
+      "value": "已被管理员停止"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -39290,7 +39290,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "全部播放"
+      "value": "所有状态"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -39320,7 +39320,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "全部用户"
+      "value": "所有账户"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -39332,7 +39332,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "请先选择用户"
+      "value": "请先选择账户"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -39382,13 +39382,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "搜索标题、用户、客户端或会话ID……"
+      "value": "搜索作品、账户、客户端或会话ID……"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "已按项目筛选"
+      "value": "作品："
     }
   ],
   "web.admin.history.loadError": [
@@ -39547,7 +39547,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "估算值：记录于开始统计观看时长之前"
+      "value": "估算值（记录于开始统计精确观看时长之前）"
     }
   ],
   "web.admin.history.row.meta": [
@@ -39605,13 +39605,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "显示的行数"
+      "value": "已显示"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "所有用户和个人资料已结束的播放记录。"
+      "value": "所有账户和个人资料过去的播放会话。"
     }
   ],
   "web.admin.history.title": [
@@ -41636,6 +41636,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "历史"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -41675,7 +41681,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "此时间范围内没有观看时段记录"
+      "value": "此时间范围内没有观看活动"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -41693,7 +41699,7 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "播放开始时间（"
+      "value": "开始观看的时间（"
     },
     {
       "type": 1,
@@ -41757,7 +41763,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "此时间范围内无串流采样"
+      "value": "尚无串流数据"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -41831,7 +41837,7 @@
             },
             {
               "type": 0,
-              "value": "个会话中已测量"
+              "value": "个会话中有"
             },
             {
               "type": 1,
@@ -41839,7 +41845,7 @@
             },
             {
               "type": 0,
-              "value": "个"
+              "value": "个为精确值"
             }
           ]
         }
@@ -41857,19 +41863,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "此时间范围内无并发采样"
+      "value": "此时间范围内没有串流数据"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "峰值并发串流按整个服务器统计，不受账户或媒体库筛选影响。"
+      "value": "始终显示整个服务器的数据，账户和媒体库筛选不适用于此处。"
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "每日最高同时串流数（全服务器，按UTC日）"
+      "value": "每天同时播放的最多串流数（全服务器，UTC）"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -41881,7 +41887,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "播放量趋势"
+      "value": "播放趋势"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -41935,13 +41941,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "续播的同一次观看只计为一次播放，未看完且不足30秒的尝试不计入。"
+      "value": "暂停后继续播放计为一次播放。未看完且不足30秒的停止不计入。"
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "播放量"
+      "value": "播放趋势"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -41953,37 +41959,37 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "此时间范围内无带宽采样"
+      "value": "此时间范围内没有带宽数据"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
     {
       "type": 0,
-      "value": "峰值速率"
+      "value": "峰值速度"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "流量"
+      "value": "发送数据量"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "每日峰值出站速率"
+      "value": "每日峰值带宽"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "每日出站总量及峰值速率（全服务器，按UTC日）"
+      "value": "整个服务器每日发送的数据量和峰值速度（UTC）。"
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "出站流量趋势"
+      "value": "带宽趋势"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -42001,7 +42007,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "每日出站流量"
+      "value": "每日发送数据量"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -42074,7 +42080,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "峰值出站"
+      "value": "峰值速度"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -42090,7 +42096,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "远程会话占比"
+      "value": "远程观看"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -42114,13 +42120,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "此时间范围内无位置信息"
+      "value": "尚无网络信息"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "出站总量"
+      "value": "发送数据总量"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -42132,7 +42138,7 @@
   "web.admin.insights.bandwidth.nodes.column.peak": [
     {
       "type": 0,
-      "value": "峰值速率"
+      "value": "峰值速度"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.share": [
@@ -42144,25 +42150,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "出站总量"
+      "value": "发送数据量"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "此时间范围内远程节点无出站流量"
+      "value": "此时间范围内没有远程节点流量"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "各节点出站流量"
+      "value": "各节点带宽"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "每日带宽和并发指标自"
+      "value": "带宽历史自"
     },
     {
       "type": 1,
@@ -42176,7 +42182,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "此时间范围内的会话尚无详细路由信息。新会话会自动记录完整的编解码器、编码器和路由遥测数据。"
+      "value": "这些较早的会话没有详细播放信息。新会话会自动记录。"
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -42186,10 +42192,6 @@
       "options": {
         "other": {
           "value": [
-            {
-              "type": 0,
-              "value": "此时间范围内"
-            },
             {
               "type": 1,
               "value": "total"
@@ -42204,7 +42206,7 @@
             },
             {
               "type": 0,
-              "value": "个记录了详细的编解码器、转码和路由信息（自"
+              "value": "个具有详细播放信息（自"
             },
             {
               "type": 1,
@@ -42229,10 +42231,6 @@
         "other": {
           "value": [
             {
-              "type": 0,
-              "value": "此时间范围内"
-            },
-            {
               "type": 1,
               "value": "total"
             },
@@ -42246,7 +42244,7 @@
             },
             {
               "type": 0,
-              "value": "个具有实测观看时长；较早的会话按结束位置估算。"
+              "value": "个具有精确观看时长；较早的会话为估算值。"
             }
           ]
         }
@@ -42258,7 +42256,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "查看会话"
+      "value": "查看历史"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -42296,13 +42294,13 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "此时间范围内没有字幕烧录"
+      "value": "此时间范围内没有烧录字幕"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "导致烧录的字幕编解码器"
+      "value": "烧录字幕格式"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -42320,7 +42318,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "编码器加速"
+      "value": "硬件加速"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -42358,7 +42356,7 @@
   "web.admin.insights.devices.kpi.directPlayRate": [
     {
       "type": 0,
-      "value": "直接播放占比"
+      "value": "直接播放率"
     }
   ],
   "web.admin.insights.devices.kpi.hdrToneMap": [
@@ -42378,7 +42376,7 @@
     },
     {
       "type": 0,
-      "value": " · 软件"
+      "value": " · CPU"
     },
     {
       "type": 1,
@@ -42388,7 +42386,7 @@
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "转码编码器"
+      "value": "硬件转码"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -42402,7 +42400,7 @@
     },
     {
       "type": 0,
-      "value": " · 软件"
+      "value": " · CPU"
     },
     {
       "type": 1,
@@ -42438,7 +42436,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "全部样本"
+      "value": "全部"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -42504,25 +42502,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "此时间范围内没有达到样本阈值的客户端与编解码器组合"
+      "value": "会话数量不足。请切换到“全部”或扩大日期范围。"
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "至少5个会话"
+      "value": "5个以上会话"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "按客户端和来源编解码器统计的直接播放率。选择任一单元格可查看匹配的会话。"
+      "value": "各应用无需转换即可播放某种视频格式的频率。点击单元格可查看相应会话。"
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "客户端 × 来源视频编解码器"
+      "value": "按应用和视频格式统计的直接播放"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -42534,19 +42532,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "此时间范围内没有记录适配原因"
+      "value": "此时间范围内没有记录转换原因"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "非直接播放会话中记录的服务器适配原因"
+      "value": "点击原因可查看匹配的会话。"
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "会话适配原因"
+      "value": "串流未能直接播放的原因"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -42578,7 +42576,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "没有会话以低于来源的分辨率输出"
+      "value": "此时间范围内没有降分辨率的内容"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -42608,7 +42606,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "源文件与客户端实际接收的分辨率（按会话统计）"
+      "value": "原始视频分辨率与实际串流分辨率对比。"
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -42632,7 +42630,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "此时间段内没有转码记录"
+      "value": "此时间范围内没有转码"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -42836,7 +42834,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "直接播放率"
+      "value": "直接播放"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -42966,6 +42964,16 @@
       "value": "所有个人资料"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "%直接播放"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -42975,7 +42983,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "此时间段内没有会话"
+      "value": "此时间范围内没有活动"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -43079,7 +43087,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "随时间变化的播放趋势、热门作品、家庭使用情况、设备兼容性和出站流量。"
+      "value": "观看趋势、热门作品、家庭活动、设备播放和带宽。"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -43145,7 +43153,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "此作品已不在目录中。"
+      "value": "此作品已不在你的媒体库中。"
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -43221,7 +43229,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "此时间段内没有媒体库播放记录"
+      "value": "此时间范围内没有媒体库活动"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -43233,7 +43241,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "此时间段内没有播放电影"
+      "value": "此时间范围内没有观看电影"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -43245,7 +43253,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "此时间段内没有播放剧集"
+      "value": "此时间范围内没有观看剧集"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -73681,7 +73689,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "播放趋势、账户、设备质量和带宽。"
+      "value": "观看趋势、热门作品、账户、设备和带宽。"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

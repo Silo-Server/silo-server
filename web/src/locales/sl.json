@@ -53928,7 +53928,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Dnevniki"
+      "value": "Dejanja"
     }
   ],
   "web.admin.history.column.media": [
@@ -53958,7 +53958,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Uporabnik"
+      "value": "Račun"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -54000,7 +54000,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Sled"
+      "value": "Podrobnost"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -54024,13 +54024,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Končni položaj"
+      "value": "Ustavljeno pri"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Razlog za konec"
+      "value": "Kako se je končalo"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -54096,7 +54096,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Za premikanje po vrsticah uporabite ↑ in ↓"
+      "value": "Za premikanje med sejami uporabite ↑ in ↓"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -54126,7 +54126,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Zabeleženo, preden so se zajemali podrobni telemetrični podatki o poti. Specifikacije vira in polja poti dostave za to sejo niso na voljo."
+      "value": "Zabeleženo, preden so se beležili podrobni podatki o predvajanju. Podrobnosti datoteke in pot prek strežnika za to sejo niso na voljo."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -54168,13 +54168,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Odjemalec, naprava in pot"
+      "value": "Račun, naprava in pot"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Zakaj se je seja prilagodila"
+      "value": "Zakaj ni bilo neposrednega predvajanja"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -54204,7 +54204,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "Različica HLS"
+      "value": "Pretočeno (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -54216,7 +54216,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Ločena sled"
+      "value": "Zunanja datoteka"
     }
   ],
   "web.admin.history.detail.title": [
@@ -54280,7 +54280,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Nobena zgodovina predvajanja se ne ujema s trenutnimi filtri. Poskusite prilagoditi filtre uporabnika, profila ali dokončanosti."
+      "value": "Nobena seja se ne ujema s temi filtri. Poskusite počistiti ali prilagoditi filter."
     }
   ],
   "web.admin.history.empty.title": [
@@ -54292,19 +54292,19 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Prekinjeno"
+      "value": "Končal strežnik"
     }
   ],
   "web.admin.history.endReason.expired": [
     {
       "type": 0,
-      "value": "Poteklo"
+      "value": "Časovna omejitev je potekla"
     }
   ],
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Zamenjano"
+      "value": "Zamenjan pretok"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -54316,7 +54316,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Končal skrbnik"
+      "value": "Ustavil skrbnik"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -54400,7 +54400,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Vsi poskusi"
+      "value": "Vsa stanja"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -54430,7 +54430,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Vsi uporabniki"
+      "value": "Vsi računi"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -54442,7 +54442,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Najprej izberite uporabnika"
+      "value": "Najprej izberite račun"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -54488,13 +54488,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Iščite naslove, uporabnike, odjemalce ali ID-je sej …"
+      "value": "Iščite naslove, račune, odjemalce ali ID-je sej …"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Filter elementa je aktiven"
+      "value": "Naslov:"
     }
   ],
   "web.admin.history.loadError": [
@@ -54730,7 +54730,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Ocenjeno: zabeleženo, preden se je čas ogleda meril"
+      "value": "Ocenjeno (zabeleženo, preden se je beležil natančen čas ogleda)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -54788,13 +54788,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Vidne vrstice"
+      "value": "Prikazano"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Zaključeni poskusi predvajanja vseh uporabnikov in profilov."
+      "value": "Pretekle seje predvajanja vseh računov in profilov."
     }
   ],
   "web.admin.history.title": [
@@ -57665,6 +57665,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Zgodovina"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -57708,7 +57714,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "V tem obdobju ni zabeleženih ur ogledovanja"
+      "value": "V tem obdobju ni dejavnosti ogledovanja"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -57726,11 +57732,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Začetki predvajanj v časovnem pasu "
+      "value": "Kdaj ljudje začnejo gledati (časovni pas "
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -57782,7 +57792,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "V obdobju ni vzorcev pretokov"
+      "value": "Podatkov o pretokih še ni"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -57924,7 +57934,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Izmerjeno: "
+              "value": "Natančno za "
             },
             {
               "type": 1,
@@ -57948,7 +57958,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Izmerjeno: "
+              "value": "Natančno za "
             },
             {
               "type": 1,
@@ -57972,7 +57982,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Izmerjeno: "
+              "value": "Natančno za "
             },
             {
               "type": 1,
@@ -57996,7 +58006,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Izmerjeno: "
+              "value": "Natančno za "
             },
             {
               "type": 1,
@@ -58030,19 +58040,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "V tem obdobju ni vzorcev sočasnosti"
+      "value": "V tem obdobju ni podatkov o pretokih"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "Največje število hkratnih pretokov velja za ves strežnik in se ne spreminja s filtri računov ali knjižnic."
+      "value": "Vedno prikazuje ves strežnik – filtri računov in knjižnic tukaj ne veljajo."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Dnevno največ hkratnih pretokov (ves strežnik, dnevi v UTC)"
+      "value": "Največ hkrati predvajanih pretokov na dan (ves strežnik, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -58054,7 +58064,7 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Obseg predvajanja skozi čas"
+      "value": "Predvajanje skozi čas"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
@@ -58108,13 +58118,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Predvajanje šteje nadaljevane oglede enkrat in izpusti nedokončane poskuse, krajše od 30 sekund."
+      "value": "Premor in nadaljevanje štejeta kot eno predvajanje. Nedokončane ustavitve, krajše od 30 sekund, se ne štejejo."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Obseg predvajanja"
+      "value": "Predvajanje skozi čas"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -58126,7 +58136,7 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "V tem obdobju ni vzorcev pasovne širine"
+      "value": "V tem obdobju ni podatkov o pasovni širini"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
@@ -58138,25 +58148,25 @@
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Količina"
+      "value": "Poslani podatki"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Dnevna najvišja hitrost odhodnega prometa"
+      "value": "Dnevna najvišja pasovna širina"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Dnevni skupni odhodni promet in najvišje hitrosti (ves strežnik, dnevi v UTC)"
+      "value": "Dnevno poslani podatki in najvišja hitrost na celotnem strežniku (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Odhodni promet skozi čas"
+      "value": "Pasovna širina skozi čas"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -58174,7 +58184,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Dnevna količina odhodnega prometa"
+      "value": "Dnevno poslani podatki"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -58292,7 +58302,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Najvišji odhodni promet"
+      "value": "Najvišja hitrost"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -58308,7 +58318,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Delež oddaljenih sej"
+      "value": "Oddaljeno gledanje"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -58332,13 +58342,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "V obdobju ni podatkov o lokaciji"
+      "value": "Podatkov o omrežju še ni"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Skupni odhodni promet"
+      "value": "Skupaj poslani podatki"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -58362,25 +58372,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Skupni odhodni promet"
+      "value": "Poslani podatki"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "V tem obdobju ni odhodnega prometa oddaljenih vozlišč"
+      "value": "V tem obdobju ni prometa oddaljenih vozlišč"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Odhodni promet po vozliščih"
+      "value": "Pasovna širina po vozliščih"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Dnevne meritve pasovne širine in sočasnosti so na voljo od "
+      "value": "Zgodovina pasovne širine se začne "
     },
     {
       "type": 1,
@@ -58394,7 +58404,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Nobena seja v tem obdobju še nima podrobnih podatkov o poti. Nove seje samodejno beležijo celotno telemetrijo kodekov, kodirnikov in usmerjanja."
+      "value": "Podrobni podatki o predvajanju za te starejše seje niso na voljo. Nove seje jih beležijo samodejno."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -58406,7 +58416,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Podrobni podatki o kodekih, prekodiranju in usmerjanju so zabeleženi za "
+              "value": "Podrobni podatki o predvajanju so na voljo za "
             },
             {
               "type": 1,
@@ -58422,7 +58432,7 @@
             },
             {
               "type": 0,
-              "value": " seje v tem obdobju (beležijo se od "
+              "value": " seje (beležijo se od "
             },
             {
               "type": 1,
@@ -58438,7 +58448,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Podrobni podatki o kodekih, prekodiranju in usmerjanju so zabeleženi za "
+              "value": "Podrobni podatki o predvajanju so na voljo za "
             },
             {
               "type": 1,
@@ -58454,7 +58464,7 @@
             },
             {
               "type": 0,
-              "value": " sej v tem obdobju (beležijo se od "
+              "value": " sej (beležijo se od "
             },
             {
               "type": 1,
@@ -58470,7 +58480,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Podrobni podatki o kodekih, prekodiranju in usmerjanju so zabeleženi za "
+              "value": "Podrobni podatki o predvajanju so na voljo za "
             },
             {
               "type": 1,
@@ -58486,7 +58496,7 @@
             },
             {
               "type": 0,
-              "value": " sej v tem obdobju (beležijo se od "
+              "value": " sej (beležijo se od "
             },
             {
               "type": 1,
@@ -58502,7 +58512,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Podrobni podatki o kodekih, prekodiranju in usmerjanju so zabeleženi za "
+              "value": "Podrobni podatki o predvajanju so na voljo za "
             },
             {
               "type": 1,
@@ -58518,7 +58528,7 @@
             },
             {
               "type": 0,
-              "value": " sej v tem obdobju (beležijo se od "
+              "value": " sej (beležijo se od "
             },
             {
               "type": 1,
@@ -58544,7 +58554,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Izmerjeni čas ogledovanja zajema "
+              "value": "Natančen čas ogleda je na voljo za "
             },
             {
               "type": 1,
@@ -58560,7 +58570,7 @@
             },
             {
               "type": 0,
-              "value": " seje v tem obdobju; za starejše seje se uporablja ocena po končnem položaju."
+              "value": " seje; za starejše seje je ocenjen."
             }
           ]
         },
@@ -58568,7 +58578,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Izmerjeni čas ogledovanja zajema "
+              "value": "Natančen čas ogleda je na voljo za "
             },
             {
               "type": 1,
@@ -58584,7 +58594,7 @@
             },
             {
               "type": 0,
-              "value": " sej v tem obdobju; za starejše seje se uporablja ocena po končnem položaju."
+              "value": " sej; za starejše seje je ocenjen."
             }
           ]
         },
@@ -58592,7 +58602,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Izmerjeni čas ogledovanja zajema "
+              "value": "Natančen čas ogleda je na voljo za "
             },
             {
               "type": 1,
@@ -58608,7 +58618,7 @@
             },
             {
               "type": 0,
-              "value": " sej v tem obdobju; za starejše seje se uporablja ocena po končnem položaju."
+              "value": " sej; za starejše seje je ocenjen."
             }
           ]
         },
@@ -58616,7 +58626,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Izmerjeni čas ogledovanja zajema "
+              "value": "Natančen čas ogleda je na voljo za "
             },
             {
               "type": 1,
@@ -58632,7 +58642,7 @@
             },
             {
               "type": 0,
-              "value": " sej v tem obdobju; za starejše seje se uporablja ocena po končnem položaju."
+              "value": " sej; za starejše seje je ocenjen."
             }
           ]
         }
@@ -58644,7 +58654,7 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Prikaži seje"
+      "value": "Prikaži zgodovino"
     }
   ],
   "web.admin.insights.detail.noPlays": [
@@ -58688,7 +58698,7 @@
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Kodeki vžganih podnapisov"
+      "value": "Formati vžganih podnapisov"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
@@ -58706,7 +58716,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Pospeševanje kodirnika"
+      "value": "Strojno pospeševanje"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -58764,7 +58774,7 @@
     },
     {
       "type": 0,
-      "value": " · programsko: "
+      "value": " · CPE: "
     },
     {
       "type": 1,
@@ -58774,7 +58784,7 @@
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Kodirnik za prekodiranje"
+      "value": "Strojno prekodiranje"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -58788,7 +58798,7 @@
     },
     {
       "type": 0,
-      "value": " · programsko: "
+      "value": " · CPE: "
     },
     {
       "type": 1,
@@ -58820,7 +58830,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Vsi vzorci"
+      "value": "Vse"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -59018,25 +59028,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "V tem obdobju noben par odjemalca in kodeka ne doseže praga vzorcev"
+      "value": "Sej še ni dovolj. Preklopite na „Vse“ ali razširite časovno obdobje."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Najmanj 5 sej"
+      "value": "5+ sej"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Delež neposrednega predvajanja po odjemalcu in izvornem kodeku. Izberite katero koli celico za pregled ustreznih sej."
+      "value": "Kako pogosto posamezna aplikacija predvaja video format brez pretvarjanja. Kliknite celico za ogled teh sej."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Odjemalec × izvorni video kodek"
+      "value": "Neposredno predvajanje po aplikaciji in video formatu"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -59048,19 +59058,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "V tem obdobju ni zabeleženih razlogov za prilagoditev"
+      "value": "V tem obdobju ni zabeleženih razlogov za pretvorbo"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Razlogi za prilagoditev na strežniku, zabeleženi pri sejah brez neposrednega predvajanja"
+      "value": "Kliknite razlog za ogled ustreznih sej."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Zakaj so se seje prilagodile"
+      "value": "Zakaj pretoki niso bili neposredno predvajani"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -59092,7 +59102,7 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Nobena seja ni bila dostavljena v nižji ločljivosti od izvorne"
+      "value": "V tem obdobju ni bilo nič pomanjšano"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
@@ -59122,7 +59132,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Izvorne datoteke in kaj so prejeli odjemalci, po sejah"
+      "value": "Izvirna ločljivost videa v primerjavi s pretočeno."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -59146,7 +59156,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "V tem obdobju ni zabeleženih prekodiranj"
+      "value": "V tem obdobju ni prekodiranj"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -59438,7 +59448,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "Neposredno %"
+      "value": "Neposredno predvajanje"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -59597,6 +59607,16 @@
       "value": "Vsi profili"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": " % neposrednega predvajanja"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -59606,7 +59626,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "V tem obdobju ni sej"
+      "value": "V tem obdobju ni dejavnosti"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -59782,7 +59802,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Trendi predvajanja, priljubljeni naslovi, uporaba v gospodinjstvu, združljivost naprav in odhodni promet skozi čas."
+      "value": "Trendi ogledovanja, najbolj gledani naslovi, dejavnost gospodinjstva, predvajanje na napravah in pasovna širina."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -59848,7 +59868,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Tega naslova ni več v katalogu."
+      "value": "Tega naslova ni več v vaši knjižnici."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -59920,7 +59940,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "V tem obdobju ni predvajanj iz knjižnic"
+      "value": "V tem obdobju ni dejavnosti v knjižnicah"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -59932,7 +59952,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "V tem obdobju ni bil predvajan noben film"
+      "value": "V tem obdobju ni bil ogledan noben film"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -59944,7 +59964,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "V tem obdobju ni bila predvajana nobena serija"
+      "value": "V tem obdobju ni bila ogledana nobena serija"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -94839,7 +94859,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Trendi predvajanja, računi, kakovost na napravah in pasovna širina."
+      "value": "Trendi ogledovanja, najbolj gledani naslovi, računi, naprave in pasovna širina."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

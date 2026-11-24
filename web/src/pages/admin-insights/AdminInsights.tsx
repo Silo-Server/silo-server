@@ -200,7 +200,7 @@ export default function AdminInsights() {
             <Button variant="ghost" size="sm" asChild>
               <Link to="/admin/history">
                 <History className="h-3.5 w-3.5" />
-                {t("web.admin.insights.openHistory")}
+                {t("web.admin.insights.action.history")}
               </Link>
             </Button>
             {hasNonDefaultFilters ? (

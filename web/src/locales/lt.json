@@ -54628,7 +54628,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Žurnalai"
+      "value": "Veiksmai"
     }
   ],
   "web.admin.history.column.media": [
@@ -54658,13 +54658,13 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Naudotojas"
+      "value": "Paskyra"
     }
   ],
   "web.admin.history.column.watchTime": [
     {
       "type": 0,
-      "value": "Žiūrėjimo trukmė"
+      "value": "Žiūrėjimo laikas"
     }
   ],
   "web.admin.history.detail.action.ffmpegLogs": [
@@ -54700,7 +54700,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Takelis"
+      "value": "Parametras"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -54724,13 +54724,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Pabaigos padėtis"
+      "value": "Sustabdyta ties"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Pabaigos priežastis"
+      "value": "Kaip baigėsi"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -54796,7 +54796,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Naudokite ↑ ir ↓, kad pereitumėte per eilutes"
+      "value": "Naudokite ↑ ir ↓, kad pereitumėte tarp seansų"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -54826,7 +54826,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Įrašyta prieš pradedant fiksuoti išsamią maršruto telemetriją. Šio seanso šaltinio specifikacijos ir perdavimo maršruto laukai nepasiekiami."
+      "value": "Įrašyta prieš pradedant fiksuoti išsamią atkūrimo informaciją. Šio seanso failo informacija ir serverio maršrutas nepasiekiami."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -54868,13 +54868,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Klientas, įrenginys ir maršrutas"
+      "value": "Paskyra, įrenginys ir maršrutas"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "Kodėl šis seansas prisitaikė"
+      "value": "Kodėl nebuvo atkurta tiesiogiai"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -54904,7 +54904,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "HLS variantas"
+      "value": "Perduoti srautu (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -54916,7 +54916,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Atskiras failas"
+      "value": "Išorinis failas"
     }
   ],
   "web.admin.history.detail.title": [
@@ -54980,7 +54980,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Dabartinius filtrus atitinkančios atkūrimo istorijos nėra. Pabandykite pakeisti naudotojo, profilio arba užbaigimo filtrus."
+      "value": "Šiuos filtrus atitinkančių seansų nėra. Pabandykite išvalyti arba pakeisti filtrą."
     }
   ],
   "web.admin.history.empty.title": [
@@ -54992,7 +54992,7 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Nutraukta"
+      "value": "Nutraukė serveris"
     }
   ],
   "web.admin.history.endReason.expired": [
@@ -55004,7 +55004,7 @@
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Pakeista"
+      "value": "Perjungtas srautas"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -55016,7 +55016,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Nutraukė administratorius"
+      "value": "Sustabdė administratorius"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -55100,7 +55100,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Visi bandymai"
+      "value": "Visos būsenos"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -55130,7 +55130,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Visi naudotojai"
+      "value": "Visos paskyros"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -55142,7 +55142,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Pirmiausia pasirinkite naudotoją"
+      "value": "Pirmiausia pasirinkite paskyrą"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -55188,13 +55188,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Ieškokite kūrinių, naudotojų, klientų arba seansų ID…"
+      "value": "Ieškokite kūrinių, paskyrų, klientų arba seansų ID…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Taikomas elemento filtras"
+      "value": "Kūrinys:"
     }
   ],
   "web.admin.history.loadError": [
@@ -55430,7 +55430,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Apytiksliai: įrašyta prieš pradedant matuoti žiūrėjimo trukmę"
+      "value": "Apytiksliai (įrašyta prieš pradedant tiksliai matuoti žiūrėjimo laiką)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -55488,13 +55488,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Matomos eilutės"
+      "value": "Rodoma"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Užbaigti visų naudotojų ir profilių atkūrimo bandymai."
+      "value": "Ankstesni visų paskyrų ir profilių atkūrimo seansai."
     }
   ],
   "web.admin.history.title": [
@@ -58409,6 +58409,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Istorija"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -58452,7 +58458,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje žiūrėjimo valandų neužfiksuota"
+      "value": "Šiuo laikotarpiu žiūrėjimo veiklos nėra"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -58530,7 +58536,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje srautų duomenų nėra"
+      "value": "Srautų duomenų dar nėra"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -58672,7 +58678,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Išmatuota "
+              "value": "Tiksliai: "
             },
             {
               "type": 1,
@@ -58696,7 +58702,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Išmatuota "
+              "value": "Tiksliai: "
             },
             {
               "type": 1,
@@ -58720,7 +58726,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Išmatuota "
+              "value": "Tiksliai: "
             },
             {
               "type": 1,
@@ -58744,7 +58750,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Išmatuota "
+              "value": "Tiksliai: "
             },
             {
               "type": 1,
@@ -58778,19 +58784,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje vienalaikių srautų duomenų nėra"
+      "value": "Šiuo laikotarpiu srautų duomenų nėra"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "Didžiausias vienalaikių srautų skaičius skaičiuojamas visam serveriui ir nekinta pritaikius paskyros ar bibliotekos filtrus."
+      "value": "Visada rodomas visas serveris – paskyros ir bibliotekos filtrai čia netaikomi."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Daugiausia vienu metu vykusių srautų per dieną (visas serveris, UTC paros)"
+      "value": "Daugiausia vienu metu leistų srautų per dieną (visas serveris, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -58802,13 +58808,13 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Atkūrimo apimtis per laiką"
+      "value": "Atkūrimas per laiką"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje atkūrimų nėra"
+      "value": "Šiuo laikotarpiu atkūrimų nėra"
     }
   ],
   "web.admin.insights.activity.volume.metricPlays": [
@@ -58856,13 +58862,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Pratęstas žiūrėjimas skaičiuojamas kaip viena peržiūra, o nebaigti bandymai, trumpesni nei 30 sek., neskaičiuojami."
+      "value": "Pristabdymas ir tęsimas skaičiuojami kaip viena peržiūra. Nebaigti atkūrimai, trumpesni nei 30 sek., neskaičiuojami."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Atkūrimo apimtis"
+      "value": "Atkūrimas per laiką"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -58874,7 +58880,7 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje pralaidumo duomenų nėra"
+      "value": "Šiuo laikotarpiu pralaidumo duomenų nėra"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
@@ -58886,25 +58892,25 @@
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Apimtis"
+      "value": "Išsiųsti duomenys"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Didžiausia išsiuntimo sparta per dieną"
+      "value": "Didžiausias paros pralaidumas"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Per dieną išsiųsti duomenys ir didžiausia sparta (visas serveris, UTC paros)"
+      "value": "Per dieną išsiųsti duomenys ir didžiausia sparta visame serveryje (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Išsiųsti duomenys per laiką"
+      "value": "Pralaidumas per laiką"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -58922,7 +58928,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Per dieną išsiųstų duomenų apimtis"
+      "value": "Per dieną išsiųsti duomenys"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -59040,7 +59046,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Didžiausia išsiuntimo sparta"
+      "value": "Didžiausia sparta"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -59056,7 +59062,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Nuotolinių seansų dalis"
+      "value": "Nuotolinis žiūrėjimas"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -59080,13 +59086,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje vietos duomenų nėra"
+      "value": "Tinklo informacijos dar nėra"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Iš viso išsiųsta"
+      "value": "Iš viso išsiųsta duomenų"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -59110,25 +59116,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Iš viso išsiųsta"
+      "value": "Išsiųsti duomenys"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje nuotoliniai mazgai duomenų neišsiuntė"
+      "value": "Šiuo laikotarpiu nuotolinių mazgų srauto nėra"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Išsiųsti duomenys pagal mazgą"
+      "value": "Pralaidumas pagal mazgą"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Paros pralaidumo ir vienalaikių srautų metrikos renkamos nuo "
+      "value": "Pralaidumo istorija renkama nuo "
     },
     {
       "type": 1,
@@ -59142,7 +59148,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Šio laikotarpio seansuose dar nėra išsamių maršruto duomenų. Nauji seansai automatiškai įrašo visus kodeko, koduotuvo ir maršruto telemetrijos duomenis."
+      "value": "Šiems senesniems seansams išsami atkūrimo informacija nepasiekiama. Nauji seansai ją įrašo automatiškai."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -59154,7 +59160,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Šiame laikotarpyje išsamūs kodeko, perkodavimo ir maršruto duomenys įrašyti "
+              "value": "Išsami atkūrimo informacija pasiekiama "
             },
             {
               "type": 1,
@@ -59170,7 +59176,7 @@
             },
             {
               "type": 0,
-              "value": " seanso (įrašoma nuo "
+              "value": " seanso (fiksuojama nuo "
             },
             {
               "type": 1,
@@ -59186,7 +59192,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Šiame laikotarpyje išsamūs kodeko, perkodavimo ir maršruto duomenys įrašyti "
+              "value": "Išsami atkūrimo informacija pasiekiama "
             },
             {
               "type": 1,
@@ -59202,7 +59208,7 @@
             },
             {
               "type": 0,
-              "value": " seansų (įrašoma nuo "
+              "value": " seansų (fiksuojama nuo "
             },
             {
               "type": 1,
@@ -59218,7 +59224,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Šiame laikotarpyje išsamūs kodeko, perkodavimo ir maršruto duomenys įrašyti "
+              "value": "Išsami atkūrimo informacija pasiekiama "
             },
             {
               "type": 1,
@@ -59234,7 +59240,7 @@
             },
             {
               "type": 0,
-              "value": " seanso (įrašoma nuo "
+              "value": " seanso (fiksuojama nuo "
             },
             {
               "type": 1,
@@ -59250,7 +59256,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Šiame laikotarpyje išsamūs kodeko, perkodavimo ir maršruto duomenys įrašyti "
+              "value": "Išsami atkūrimo informacija pasiekiama "
             },
             {
               "type": 1,
@@ -59266,7 +59272,7 @@
             },
             {
               "type": 0,
-              "value": " seansų (įrašoma nuo "
+              "value": " seansų (fiksuojama nuo "
             },
             {
               "type": 1,
@@ -59292,7 +59298,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Šiame laikotarpyje žiūrėjimo laikas išmatuotas "
+              "value": "Tikslus žiūrėjimo laikas pasiekiamas "
             },
             {
               "type": 1,
@@ -59308,7 +59314,7 @@
             },
             {
               "type": 0,
-              "value": " seanso; senesniems seansams naudojamas įvertis pagal pabaigos poziciją."
+              "value": " seanso; senesnių seansų laikas apytikslis."
             }
           ]
         },
@@ -59316,7 +59322,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Šiame laikotarpyje žiūrėjimo laikas išmatuotas "
+              "value": "Tikslus žiūrėjimo laikas pasiekiamas "
             },
             {
               "type": 1,
@@ -59332,7 +59338,7 @@
             },
             {
               "type": 0,
-              "value": " seansų; senesniems seansams naudojamas įvertis pagal pabaigos poziciją."
+              "value": " seansų; senesnių seansų laikas apytikslis."
             }
           ]
         },
@@ -59340,7 +59346,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Šiame laikotarpyje žiūrėjimo laikas išmatuotas "
+              "value": "Tikslus žiūrėjimo laikas pasiekiamas "
             },
             {
               "type": 1,
@@ -59356,7 +59362,7 @@
             },
             {
               "type": 0,
-              "value": " seanso; senesniems seansams naudojamas įvertis pagal pabaigos poziciją."
+              "value": " seanso; senesnių seansų laikas apytikslis."
             }
           ]
         },
@@ -59364,7 +59370,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Šiame laikotarpyje žiūrėjimo laikas išmatuotas "
+              "value": "Tikslus žiūrėjimo laikas pasiekiamas "
             },
             {
               "type": 1,
@@ -59380,7 +59386,7 @@
             },
             {
               "type": 0,
-              "value": " seansų; senesniems seansams naudojamas įvertis pagal pabaigos poziciją."
+              "value": " seansų; senesnių seansų laikas apytikslis."
             }
           ]
         }
@@ -59392,13 +59398,13 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Peržiūrėti seansus"
+      "value": "Peržiūrėti istoriją"
     }
   ],
   "web.admin.insights.detail.noPlays": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje peržiūrų nėra"
+      "value": "Šiuo laikotarpiu peržiūrų nėra"
     }
   ],
   "web.admin.insights.detail.playsOverTime": [
@@ -59430,19 +59436,19 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje subtitrai į vaizdą nebuvo įrašyti"
+      "value": "Šiuo laikotarpiu subtitrai į vaizdą nebuvo įrašyti"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Į vaizdą įrašomų subtitrų kodekai"
+      "value": "Į vaizdą įrašytų subtitrų formatai"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje vaizdo perkodavimų nėra"
+      "value": "Šiuo laikotarpiu vaizdo perkodavimų nėra"
     }
   ],
   "web.admin.insights.devices.hwAccel.software": [
@@ -59454,7 +59460,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Koduotuvo spartinimas"
+      "value": "Aparatinis spartinimas"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -59512,7 +59518,7 @@
     },
     {
       "type": 0,
-      "value": " · programinis: "
+      "value": " · CPU: "
     },
     {
       "type": 1,
@@ -59522,7 +59528,7 @@
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Perkodavimo koduotuvas"
+      "value": "Aparatinis perkodavimas"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
@@ -59536,7 +59542,7 @@
     },
     {
       "type": 0,
-      "value": " · programinis: "
+      "value": " · CPU: "
     },
     {
       "type": 1,
@@ -59568,7 +59574,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Visi pavyzdžiai"
+      "value": "Visi"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -59766,25 +59772,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje nėra kliento ir kodeko porų, atitinkančių imties ribą"
+      "value": "Seansų dar nepakanka. Pasirinkite „Visi“ arba išplėskite laikotarpį."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Mažiausiai 5 seansai"
+      "value": "5+ seansai"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Tiesioginio atkūrimo dalis pagal klientą ir šaltinio kodeką. Pasirinkite bet kurį langelį, kad peržiūrėtumėte atitinkamus seansus."
+      "value": "Kaip dažnai kiekviena programa leidžia vaizdo formatą jo nekonvertuodama. Spustelėkite langelį, kad pamatytumėte tuos seansus."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Klientas × šaltinio vaizdo kodekas"
+      "value": "Tiesioginis atkūrimas pagal programą ir vaizdo formatą"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -59796,19 +59802,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje pritaikymo priežasčių neužfiksuota"
+      "value": "Šiuo laikotarpiu konvertavimo priežasčių neužfiksuota"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Serverio pritaikymo priežastys, užfiksuotos netiesioginiuose seansuose"
+      "value": "Spustelėkite priežastį, kad pamatytumėte atitinkančius seansus."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "Kodėl seansai buvo pritaikyti"
+      "value": "Kodėl srautai nebuvo atkurti tiesiogiai"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -59840,13 +59846,13 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Nė vienas seansas nebuvo pateiktas mažesne nei šaltinio raiška"
+      "value": "Šiuo laikotarpiu raiška nebuvo sumažinta"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
     {
       "type": 0,
-      "value": "Šiame laikotarpyje seansų nėra"
+      "value": "Šiuo laikotarpiu seansų nėra"
     }
   ],
   "web.admin.insights.devices.resolution.fuhd": [
@@ -59870,7 +59876,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Šaltinio failai ir tai, ką gavo klientai, pagal seansus"
+      "value": "Originali vaizdo raiška ir tai, kas buvo transliuota."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -59894,7 +59900,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "Šiuo laikotarpiu perkodavimų neužfiksuota"
+      "value": "Šiuo laikotarpiu perkodavimų nėra"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -60190,7 +60196,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "Tiesiogiai %"
+      "value": "Tiesioginis atkūrimas"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -60353,6 +60359,20 @@
       "value": "Visi profiliai"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 0,
+      "value": "Tiesiogiai atkurta: "
+    },
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": " %"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -60362,7 +60382,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "Šiuo laikotarpiu seansų nėra"
+      "value": "Šiuo laikotarpiu veiklos nėra"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -60538,7 +60558,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Atkūrimo tendencijos, populiarūs pavadinimai, namų ūkio naudojimas, įrenginių suderinamumas ir išeinantis srautas laikui bėgant."
+      "value": "Žiūrėjimo tendencijos, populiariausi kūriniai, namų ūkio veikla, atkūrimas įrenginiuose ir pralaidumas."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -60604,7 +60624,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Šio pavadinimo kataloge nebėra."
+      "value": "Šio kūrinio jūsų bibliotekoje nebėra."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -60676,7 +60696,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "Šiuo laikotarpiu bibliotekose nieko neleista"
+      "value": "Šiuo laikotarpiu bibliotekose veiklos nėra"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -60688,7 +60708,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "Šiuo laikotarpiu filmų neleista"
+      "value": "Šiuo laikotarpiu filmų nežiūrėta"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -60700,7 +60720,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "Šiuo laikotarpiu serialų neleista"
+      "value": "Šiuo laikotarpiu serialų nežiūrėta"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -95831,7 +95851,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Atkūrimo tendencijos, paskyros, įrenginių kokybė ir pralaidumas."
+      "value": "Žiūrėjimo tendencijos, populiariausi kūriniai, paskyros, įrenginiai ir pralaidumas."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

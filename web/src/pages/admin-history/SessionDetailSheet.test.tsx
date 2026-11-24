@@ -105,8 +105,8 @@ describe("SessionDetailSheet", () => {
     );
 
     // Non-burn-in subtitle delivery and end reason render localized labels rather than raw enums.
-    expect(screen.getByText("HLS rendition")).toBeTruthy();
-    expect(screen.getByText("Terminated by admin")).toBeTruthy();
+    expect(screen.getByText("Streamed (HLS)")).toBeTruthy();
+    expect(screen.getByText("Stopped by admin")).toBeTruthy();
 
     fireEvent.keyDown(window, { key: "ArrowDown" });
     expect(onNext).toHaveBeenCalledTimes(1);
@@ -186,7 +186,7 @@ describe("SessionDetailSheet", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText(/Recorded before detailed route telemetry was captured/i)).toBeTruthy();
+    expect(screen.getByText(/Recorded before detailed playback info was tracked/i)).toBeTruthy();
     expect(screen.queryByText(/Local server/i)).toBeNull();
   });
 

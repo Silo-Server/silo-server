@@ -48771,7 +48771,7 @@
   "web.admin.history.column.logs": [
     {
       "type": 0,
-      "value": "Jurnale"
+      "value": "Acțiuni"
     }
   ],
   "web.admin.history.column.media": [
@@ -48801,7 +48801,7 @@
   "web.admin.history.column.user": [
     {
       "type": 0,
-      "value": "Utilizator"
+      "value": "Cont"
     }
   ],
   "web.admin.history.column.watchTime": [
@@ -48843,7 +48843,7 @@
   "web.admin.history.detail.column.stream": [
     {
       "type": 0,
-      "value": "Pistă"
+      "value": "Detaliu"
     }
   ],
   "web.admin.history.detail.field.account": [
@@ -48867,13 +48867,13 @@
   "web.admin.history.detail.field.endPosition": [
     {
       "type": 0,
-      "value": "Poziție finală"
+      "value": "Poziția la oprire"
     }
   ],
   "web.admin.history.detail.field.endReason": [
     {
       "type": 0,
-      "value": "Motivul încheierii"
+      "value": "Mod de încheiere"
     }
   ],
   "web.admin.history.detail.field.ended": [
@@ -48939,7 +48939,7 @@
   "web.admin.history.detail.keyboardHint": [
     {
       "type": 0,
-      "value": "Folosiți ↑ și ↓ pentru a parcurge rândurile"
+      "value": "Folosiți ↑ și ↓ pentru a trece de la o sesiune la alta"
     }
   ],
   "web.admin.history.detail.loadFailed": [
@@ -48969,7 +48969,7 @@
   "web.admin.history.detail.preUpgradeNotice": [
     {
       "type": 0,
-      "value": "Înregistrată înainte de colectarea telemetriei detaliate a rutei. Specificațiile sursei și câmpurile rutei de livrare nu sunt disponibile pentru această sesiune."
+      "value": "Sesiune înregistrată înainte de colectarea informațiilor detaliate despre redare. Detaliile fișierului și ruta serverului nu sunt disponibile pentru această sesiune."
     }
   ],
   "web.admin.history.detail.previousSession": [
@@ -49011,13 +49011,13 @@
   "web.admin.history.detail.section.clientRoute": [
     {
       "type": 0,
-      "value": "Client, dispozitiv și rută"
+      "value": "Cont, dispozitiv și rută"
     }
   ],
   "web.admin.history.detail.section.reasons": [
     {
       "type": 0,
-      "value": "De ce s-a adaptat această sesiune"
+      "value": "De ce nu s-a folosit redarea directă"
     }
   ],
   "web.admin.history.detail.section.streams": [
@@ -49047,7 +49047,7 @@
   "web.admin.history.detail.subtitlesHls": [
     {
       "type": 0,
-      "value": "Variantă HLS"
+      "value": "Transmise prin streaming (HLS)"
     }
   ],
   "web.admin.history.detail.subtitlesNone": [
@@ -49059,7 +49059,7 @@
   "web.admin.history.detail.subtitlesSidecar": [
     {
       "type": 0,
-      "value": "Fișier separat"
+      "value": "Fișier extern"
     }
   ],
   "web.admin.history.detail.title": [
@@ -49123,7 +49123,7 @@
   "web.admin.history.empty.body": [
     {
       "type": 0,
-      "value": "Niciun istoric de redare nu corespunde filtrelor curente. Încercați să ajustați filtrele pentru utilizator, profil sau finalizare."
+      "value": "Nicio sesiune nu corespunde acestor filtre. Încercați să eliminați sau să ajustați un filtru."
     }
   ],
   "web.admin.history.empty.title": [
@@ -49135,7 +49135,7 @@
   "web.admin.history.endReason.aborted": [
     {
       "type": 0,
-      "value": "Întreruptă"
+      "value": "Încheiată de server"
     }
   ],
   "web.admin.history.endReason.expired": [
@@ -49147,7 +49147,7 @@
   "web.admin.history.endReason.replaced": [
     {
       "type": 0,
-      "value": "Înlocuită"
+      "value": "Stream schimbat"
     }
   ],
   "web.admin.history.endReason.stopped": [
@@ -49159,7 +49159,7 @@
   "web.admin.history.endReason.terminated": [
     {
       "type": 0,
-      "value": "Încheiată de administrator"
+      "value": "Oprită de administrator"
     }
   ],
   "web.admin.history.filter.activeChip.client": [
@@ -49243,7 +49243,7 @@
   "web.admin.history.filter.allAttempts": [
     {
       "type": 0,
-      "value": "Toate încercările"
+      "value": "Toate stările"
     }
   ],
   "web.admin.history.filter.allLibraries": [
@@ -49273,7 +49273,7 @@
   "web.admin.history.filter.allUsers": [
     {
       "type": 0,
-      "value": "Toți utilizatorii"
+      "value": "Toate conturile"
     }
   ],
   "web.admin.history.filter.burnInOnly": [
@@ -49285,7 +49285,7 @@
   "web.admin.history.filter.chooseUserFirst": [
     {
       "type": 0,
-      "value": "Alegeți mai întâi un utilizator"
+      "value": "Alegeți mai întâi un cont"
     }
   ],
   "web.admin.history.filter.completed": [
@@ -49331,13 +49331,13 @@
   "web.admin.history.filter.searchPlaceholder": [
     {
       "type": 0,
-      "value": "Căutați titluri, utilizatori, clienți sau ID-uri de sesiune…"
+      "value": "Căutați titluri, conturi, clienți sau ID-uri de sesiune…"
     }
   ],
   "web.admin.history.itemFilterActive": [
     {
       "type": 0,
-      "value": "Filtru de element activ"
+      "value": "Titlu:"
     }
   ],
   "web.admin.history.loadError": [
@@ -49546,7 +49546,7 @@
   "web.admin.history.row.estimatedTitle": [
     {
       "type": 0,
-      "value": "Estimare: redare înregistrată înainte de măsurarea timpului de vizionare"
+      "value": "Estimat (înregistrat înainte de măsurarea exactă a timpului de vizionare)"
     }
   ],
   "web.admin.history.row.meta": [
@@ -49604,13 +49604,13 @@
   "web.admin.history.stats.visibleRows": [
     {
       "type": 0,
-      "value": "Rânduri vizibile"
+      "value": "Afișate"
     }
   ],
   "web.admin.history.subtitle": [
     {
       "type": 0,
-      "value": "Încercări de redare finalizate pentru toți utilizatorii și toate profilurile."
+      "value": "Sesiunile de redare anterioare din toate conturile și profilurile."
     }
   ],
   "web.admin.history.title": [
@@ -52235,6 +52235,12 @@
       "pluralType": "cardinal"
     }
   ],
+  "web.admin.insights.action.history": [
+    {
+      "type": 0,
+      "value": "Istoric"
+    }
+  ],
   "web.admin.insights.action.liveActivity": [
     {
       "type": 0,
@@ -52278,7 +52284,7 @@
   "web.admin.insights.activity.heatmap.empty": [
     {
       "type": 0,
-      "value": "Nu există ore de vizionare înregistrate în acest interval"
+      "value": "Nicio activitate de vizionare în această perioadă"
     }
   ],
   "web.admin.insights.activity.heatmap.less": [
@@ -52296,11 +52302,15 @@
   "web.admin.insights.activity.heatmap.subtitle": [
     {
       "type": 0,
-      "value": "Când încep redările în fusul orar "
+      "value": "Când începe vizionarea ("
     },
     {
       "type": 1,
       "value": "tz"
+    },
+    {
+      "type": 0,
+      "value": ")"
     }
   ],
   "web.admin.insights.activity.heatmap.title": [
@@ -52352,7 +52362,7 @@
   "web.admin.insights.activity.kpi.peakStreamsNone": [
     {
       "type": 0,
-      "value": "Niciun eșantion de streamuri în interval"
+      "value": "Încă nu există date despre streamuri"
     }
   ],
   "web.admin.insights.activity.kpi.plays": [
@@ -52469,6 +52479,10 @@
         "one": {
           "value": [
             {
+              "type": 0,
+              "value": "Exact pentru "
+            },
+            {
               "type": 1,
               "value": "measured"
             },
@@ -52482,13 +52496,17 @@
             },
             {
               "type": 0,
-              "value": " sesiune măsurată"
+              "value": " sesiune"
             }
           ]
         },
         "few": {
           "value": [
             {
+              "type": 0,
+              "value": "Exact pentru "
+            },
+            {
               "type": 1,
               "value": "measured"
             },
@@ -52502,13 +52520,17 @@
             },
             {
               "type": 0,
-              "value": " sesiuni măsurate"
+              "value": " sesiuni"
             }
           ]
         },
         "other": {
           "value": [
             {
+              "type": 0,
+              "value": "Exact pentru "
+            },
+            {
               "type": 1,
               "value": "measured"
             },
@@ -52522,7 +52544,7 @@
             },
             {
               "type": 0,
-              "value": " de sesiuni măsurate"
+              "value": " de sesiuni"
             }
           ]
         }
@@ -52540,19 +52562,19 @@
   "web.admin.insights.activity.peak.empty": [
     {
       "type": 0,
-      "value": "Nu există eșantioane de streamuri simultane în acest interval"
+      "value": "Nu există date despre streamuri în această perioadă"
     }
   ],
   "web.admin.insights.activity.peak.scopeNotice": [
     {
       "type": 0,
-      "value": "Vârfurile de streamuri simultane se referă la întregul server și nu se modifică în funcție de filtrele de cont sau de bibliotecă."
+      "value": "Se afișează mereu întregul server — filtrele de cont și de bibliotecă nu se aplică aici."
     }
   ],
   "web.admin.insights.activity.peak.subtitle": [
     {
       "type": 0,
-      "value": "Numărul zilnic maxim de streamuri simultane (pe întregul server, zile UTC)"
+      "value": "Numărul maxim de streamuri redate simultan în fiecare zi (întregul server, UTC)"
     }
   ],
   "web.admin.insights.activity.peak.title": [
@@ -52564,13 +52586,13 @@
   "web.admin.insights.activity.volume.chartLabel": [
     {
       "type": 0,
-      "value": "Volumul redărilor în timp"
+      "value": "Redarea în timp"
     }
   ],
   "web.admin.insights.activity.volume.empty": [
     {
       "type": 0,
-      "value": "Nicio redare în acest interval"
+      "value": "Nicio redare în această perioadă"
     }
   ],
   "web.admin.insights.activity.volume.metricPlays": [
@@ -52618,13 +52640,13 @@
   "web.admin.insights.activity.volume.subtitle": [
     {
       "type": 0,
-      "value": "Sesiunile reluate se numără ca o singură redare, iar încercările neterminate sub 30 de secunde sunt ignorate."
+      "value": "Pauza și reluarea se numără ca o singură redare. Redările neterminate, oprite în mai puțin de 30 de secunde, nu se numără."
     }
   ],
   "web.admin.insights.activity.volume.title": [
     {
       "type": 0,
-      "value": "Volumul redărilor"
+      "value": "Redarea în timp"
     }
   ],
   "web.admin.insights.bandwidth.chart.apiServer": [
@@ -52636,37 +52658,37 @@
   "web.admin.insights.bandwidth.chart.empty": [
     {
       "type": 0,
-      "value": "Nu există eșantioane de lățime de bandă în acest interval"
+      "value": "Nu există date despre lățimea de bandă în această perioadă"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricPeak": [
     {
       "type": 0,
-      "value": "Rată maximă"
+      "value": "Viteză maximă"
     }
   ],
   "web.admin.insights.bandwidth.chart.metricVolume": [
     {
       "type": 0,
-      "value": "Volum"
+      "value": "Date trimise"
     }
   ],
   "web.admin.insights.bandwidth.chart.peakLabel": [
     {
       "type": 0,
-      "value": "Rata maximă zilnică a traficului de ieșire"
+      "value": "Lățimea de bandă maximă zilnică"
     }
   ],
   "web.admin.insights.bandwidth.chart.subtitle": [
     {
       "type": 0,
-      "value": "Totaluri zilnice și rate maxime ale traficului de ieșire (pe întregul server, zile UTC)"
+      "value": "Datele trimise zilnic și viteza maximă pe întregul server (UTC)."
     }
   ],
   "web.admin.insights.bandwidth.chart.title": [
     {
       "type": 0,
-      "value": "Traficul de ieșire în timp"
+      "value": "Lățimea de bandă în timp"
     }
   ],
   "web.admin.insights.bandwidth.chart.viewNodes": [
@@ -52684,7 +52706,7 @@
   "web.admin.insights.bandwidth.chart.volumeLabel": [
     {
       "type": 0,
-      "value": "Volumul zilnic al traficului de ieșire"
+      "value": "Date trimise zilnic"
     }
   ],
   "web.admin.insights.bandwidth.kpi.dailyAverage": [
@@ -52787,7 +52809,7 @@
   "web.admin.insights.bandwidth.kpi.peakEgress": [
     {
       "type": 0,
-      "value": "Vârf de trafic de ieșire"
+      "value": "Viteză maximă"
     }
   ],
   "web.admin.insights.bandwidth.kpi.peakEgressAt": [
@@ -52803,7 +52825,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "Pondere sesiuni la distanță"
+      "value": "Vizionare la distanță"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -52827,13 +52849,13 @@
   "web.admin.insights.bandwidth.kpi.remoteShareUnknown": [
     {
       "type": 0,
-      "value": "Nu există date despre locație în interval"
+      "value": "Încă nu există informații despre rețea"
     }
   ],
   "web.admin.insights.bandwidth.kpi.totalEgress": [
     {
       "type": 0,
-      "value": "Trafic de ieșire total"
+      "value": "Total date trimise"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.node": [
@@ -52845,7 +52867,7 @@
   "web.admin.insights.bandwidth.nodes.column.peak": [
     {
       "type": 0,
-      "value": "Rată maximă"
+      "value": "Viteză maximă"
     }
   ],
   "web.admin.insights.bandwidth.nodes.column.share": [
@@ -52857,25 +52879,25 @@
   "web.admin.insights.bandwidth.nodes.column.total": [
     {
       "type": 0,
-      "value": "Trafic de ieșire total"
+      "value": "Date trimise"
     }
   ],
   "web.admin.insights.bandwidth.nodes.empty": [
     {
       "type": 0,
-      "value": "Niciun trafic de ieșire de la noduri la distanță în acest interval"
+      "value": "Niciun trafic de la noduri la distanță în această perioadă"
     }
   ],
   "web.admin.insights.bandwidth.nodes.title": [
     {
       "type": 0,
-      "value": "Trafic de ieșire pe noduri"
+      "value": "Lățime de bandă pe noduri"
     }
   ],
   "web.admin.insights.coverage.metricsStart": [
     {
       "type": 0,
-      "value": "Metricile zilnice pentru lățimea de bandă și streamurile simultane sunt disponibile începând cu "
+      "value": "Istoricul lățimii de bandă începe la "
     },
     {
       "type": 1,
@@ -52889,7 +52911,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "Nicio sesiune din acest interval nu are încă date detaliate despre rutare. Sesiunile noi înregistrează automat telemetria completă despre codec, encoder și rutare."
+      "value": "Informațiile detaliate despre redare nu sunt disponibile pentru aceste sesiuni mai vechi. Sesiunile noi le înregistrează automat."
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -52901,7 +52923,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Datele detaliate despre codec, transcodare și rutare sunt înregistrate pentru "
+              "value": "Informațiile detaliate despre redare sunt disponibile pentru "
             },
             {
               "type": 1,
@@ -52917,7 +52939,7 @@
             },
             {
               "type": 0,
-              "value": " sesiune din acest interval (înregistrate începând cu "
+              "value": " sesiune (colectate începând cu "
             },
             {
               "type": 1,
@@ -52933,7 +52955,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Datele detaliate despre codec, transcodare și rutare sunt înregistrate pentru "
+              "value": "Informațiile detaliate despre redare sunt disponibile pentru "
             },
             {
               "type": 1,
@@ -52949,7 +52971,7 @@
             },
             {
               "type": 0,
-              "value": " sesiuni din acest interval (înregistrate începând cu "
+              "value": " sesiuni (colectate începând cu "
             },
             {
               "type": 1,
@@ -52965,7 +52987,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Datele detaliate despre codec, transcodare și rutare sunt înregistrate pentru "
+              "value": "Informațiile detaliate despre redare sunt disponibile pentru "
             },
             {
               "type": 1,
@@ -52981,7 +53003,7 @@
             },
             {
               "type": 0,
-              "value": " de sesiuni din acest interval (înregistrate începând cu "
+              "value": " de sesiuni (colectate începând cu "
             },
             {
               "type": 1,
@@ -53007,7 +53029,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Timpul de vizionare măsurat acoperă "
+              "value": "Timpul exact de vizionare este disponibil pentru "
             },
             {
               "type": 1,
@@ -53023,7 +53045,7 @@
             },
             {
               "type": 0,
-              "value": " sesiune din acest interval; sesiunile mai vechi folosesc estimări pe baza poziției finale."
+              "value": " sesiune; pentru sesiunile mai vechi se folosesc estimări."
             }
           ]
         },
@@ -53031,7 +53053,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Timpul de vizionare măsurat acoperă "
+              "value": "Timpul exact de vizionare este disponibil pentru "
             },
             {
               "type": 1,
@@ -53047,7 +53069,7 @@
             },
             {
               "type": 0,
-              "value": " sesiuni din acest interval; sesiunile mai vechi folosesc estimări pe baza poziției finale."
+              "value": " sesiuni; pentru sesiunile mai vechi se folosesc estimări."
             }
           ]
         },
@@ -53055,7 +53077,7 @@
           "value": [
             {
               "type": 0,
-              "value": "Timpul de vizionare măsurat acoperă "
+              "value": "Timpul exact de vizionare este disponibil pentru "
             },
             {
               "type": 1,
@@ -53071,7 +53093,7 @@
             },
             {
               "type": 0,
-              "value": " de sesiuni din acest interval; sesiunile mai vechi folosesc estimări pe baza poziției finale."
+              "value": " de sesiuni; pentru sesiunile mai vechi se folosesc estimări."
             }
           ]
         }
@@ -53083,13 +53105,13 @@
   "web.admin.insights.detail.action.history": [
     {
       "type": 0,
-      "value": "Vedeți sesiunile"
+      "value": "Vedeți istoricul"
     }
   ],
   "web.admin.insights.detail.noPlays": [
     {
       "type": 0,
-      "value": "Nicio redare în acest interval"
+      "value": "Nicio redare în această perioadă"
     }
   ],
   "web.admin.insights.detail.playsOverTime": [
@@ -53121,19 +53143,19 @@
   "web.admin.insights.devices.burnInCodecs.empty": [
     {
       "type": 0,
-      "value": "Nu există subtitrări încorporate în imagine în acest interval"
+      "value": "Nu există subtitrări încorporate în imagine în această perioadă"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.title": [
     {
       "type": 0,
-      "value": "Codecuri ale subtitrărilor încorporate"
+      "value": "Formate ale subtitrărilor încorporate"
     }
   ],
   "web.admin.insights.devices.hwAccel.empty": [
     {
       "type": 0,
-      "value": "Nicio transcodare video în acest interval"
+      "value": "Nicio transcodare video în această perioadă"
     }
   ],
   "web.admin.insights.devices.hwAccel.software": [
@@ -53145,7 +53167,7 @@
   "web.admin.insights.devices.hwAccel.title": [
     {
       "type": 0,
-      "value": "Accelerarea encoderului"
+      "value": "Accelerare hardware"
     }
   ],
   "web.admin.insights.devices.hwAccel.unknown": [
@@ -53183,7 +53205,7 @@
   "web.admin.insights.devices.kpi.directPlayRate": [
     {
       "type": 0,
-      "value": "Pondere redare directă"
+      "value": "Rată de redare directă"
     }
   ],
   "web.admin.insights.devices.kpi.hdrToneMap": [
@@ -53194,44 +53216,44 @@
   ],
   "web.admin.insights.devices.kpi.hdrToneMapDetail": [
     {
+      "type": 0,
+      "value": "Hardware: "
+    },
+    {
       "type": 1,
       "value": "hw"
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " · CPU: "
     },
     {
       "type": 1,
       "value": "sw"
-    },
-    {
-      "type": 0,
-      "value": " SW"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplit": [
     {
       "type": 0,
-      "value": "Encoder de transcodare"
+      "value": "Transcodare hardware"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitDetail": [
+    {
+      "type": 0,
+      "value": "Hardware: "
+    },
     {
       "type": 1,
       "value": "hw"
     },
     {
       "type": 0,
-      "value": " HW · "
+      "value": " · CPU: "
     },
     {
       "type": 1,
       "value": "sw"
-    },
-    {
-      "type": 0,
-      "value": " SW"
     }
   ],
   "web.admin.insights.devices.kpi.hwSplitNone": [
@@ -53259,7 +53281,7 @@
   "web.admin.insights.devices.matrix.allSamples": [
     {
       "type": 0,
-      "value": "Toate eșantioanele"
+      "value": "Toate"
     }
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
@@ -53413,25 +53435,25 @@
   "web.admin.insights.devices.matrix.empty": [
     {
       "type": 0,
-      "value": "Nicio pereche client-codec nu atinge pragul de eșantioane în acest interval"
+      "value": "Încă nu există suficiente sesiuni. Selectați „Toate” sau extindeți intervalul de date."
     }
   ],
   "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "Minimum 5 sesiuni"
+      "value": "5+ sesiuni"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
     {
       "type": 0,
-      "value": "Rata de redare directă pe client și codec sursă. Selectați orice celulă pentru a inspecta sesiunile corespunzătoare."
+      "value": "Cât de des redă fiecare aplicație un format video fără conversie. Faceți clic pe o celulă pentru a vedea sesiunile respective."
     }
   ],
   "web.admin.insights.devices.matrix.title": [
     {
       "type": 0,
-      "value": "Client × codec video sursă"
+      "value": "Redare directă pe aplicație și format video"
     }
   ],
   "web.admin.insights.devices.matrix.totalColumn": [
@@ -53443,19 +53465,19 @@
   "web.admin.insights.devices.reasons.empty": [
     {
       "type": 0,
-      "value": "Niciun motiv de adaptare înregistrat în acest interval"
+      "value": "Niciun motiv de conversie înregistrat în această perioadă"
     }
   ],
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "Motivele de adaptare ale serverului înregistrate pentru sesiunile fără redare directă"
+      "value": "Faceți clic pe un motiv pentru a vedea sesiunile corespunzătoare."
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
-      "value": "De ce s-au adaptat sesiunile"
+      "value": "De ce streamurile nu au folosit redarea directă"
     }
   ],
   "web.admin.insights.devices.resolution.change": [
@@ -53487,13 +53509,13 @@
   "web.admin.insights.devices.resolution.downscaledEmpty": [
     {
       "type": 0,
-      "value": "Nicio sesiune nu a fost livrată sub rezoluția sursei"
+      "value": "Nicio rezoluție nu a fost redusă în această perioadă"
     }
   ],
   "web.admin.insights.devices.resolution.empty": [
     {
       "type": 0,
-      "value": "Nicio sesiune în acest interval"
+      "value": "Nicio sesiune în această perioadă"
     }
   ],
   "web.admin.insights.devices.resolution.fuhd": [
@@ -53517,7 +53539,7 @@
   "web.admin.insights.devices.resolution.subtitle": [
     {
       "type": 0,
-      "value": "Fișierele sursă și ce au primit clienții, pe sesiune"
+      "value": "Rezoluția video originală vs. ce s-a transmis în stream."
     }
   ],
   "web.admin.insights.devices.resolution.title": [
@@ -53541,7 +53563,7 @@
   "web.admin.insights.devices.topTranscoders.empty": [
     {
       "type": 0,
-      "value": "Nicio transcodare înregistrată în acest interval"
+      "value": "Nicio transcodare în această perioadă"
     }
   ],
   "web.admin.insights.devices.topTranscoders.title": [
@@ -53801,7 +53823,7 @@
   "web.admin.insights.people.column.directRate": [
     {
       "type": 0,
-      "value": "% direct"
+      "value": "Redare directă"
     }
   ],
   "web.admin.insights.people.column.lastSeen": [
@@ -53949,6 +53971,16 @@
       "value": "Toate profilurile"
     }
   ],
+  "web.admin.insights.personDetail.clientDirectRate": [
+    {
+      "type": 1,
+      "value": "percent"
+    },
+    {
+      "type": 0,
+      "value": "% redare directă"
+    }
+  ],
   "web.admin.insights.personDetail.clients": [
     {
       "type": 0,
@@ -53958,7 +53990,7 @@
   "web.admin.insights.personDetail.clientsEmpty": [
     {
       "type": 0,
-      "value": "Nicio sesiune în acest interval"
+      "value": "Nicio activitate în această perioadă"
     }
   ],
   "web.admin.insights.personDetail.profileLabel": [
@@ -54110,7 +54142,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendințe de redare, titluri populare, utilizarea în gospodărie, compatibilitatea dispozitivelor și traficul de ieșire în timp."
+      "value": "Tendințe de vizionare, titluri populare, activitatea din gospodărie, redarea pe dispozitive și lățimea de bandă."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -54176,7 +54208,7 @@
   "web.admin.insights.titleDetail.notFound": [
     {
       "type": 0,
-      "value": "Acest titlu nu mai există în catalog."
+      "value": "Acest titlu nu mai este în biblioteca dvs."
     }
   ],
   "web.admin.insights.titleDetail.scopedToPerson": [
@@ -54248,7 +54280,7 @@
   "web.admin.insights.titles.libraries.empty": [
     {
       "type": 0,
-      "value": "Nicio redare din biblioteci în acest interval"
+      "value": "Nicio activitate în biblioteci în această perioadă"
     }
   ],
   "web.admin.insights.titles.libraries.title": [
@@ -54260,7 +54292,7 @@
   "web.admin.insights.titles.movies.empty": [
     {
       "type": 0,
-      "value": "Niciun film redat în acest interval"
+      "value": "Niciun film vizionat în această perioadă"
     }
   ],
   "web.admin.insights.titles.movies.title": [
@@ -54272,7 +54304,7 @@
   "web.admin.insights.titles.shows.empty": [
     {
       "type": 0,
-      "value": "Niciun serial redat în acest interval"
+      "value": "Niciun serial vizionat în această perioadă"
     }
   ],
   "web.admin.insights.titles.shows.title": [
@@ -87602,7 +87634,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendințe de redare, conturi, calitatea pe dispozitive și lățime de bandă."
+      "value": "Tendințe de vizionare, titluri populare, conturi, dispozitive și lățime de bandă."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

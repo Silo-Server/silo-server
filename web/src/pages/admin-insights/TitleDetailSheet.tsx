@@ -204,7 +204,11 @@ function TitleDetailBody({
         <InsightKpiCard
           label={t("web.admin.insights.activity.kpi.plays")}
           value={count(summary.plays)}
-          subtext={formatInsightsCount(t, "web.admin.insights.sessionCount", summary.sessions)}
+          subtext={t("web.admin.insights.devices.kpi.directPlayDetail", {
+            direct: count(summary.direct_plays),
+            remux: count(summary.remux_plays),
+            transcode: count(summary.transcode_plays),
+          })}
         />
         <InsightKpiCard
           label={t("web.admin.insights.detail.viewers")}
@@ -213,11 +217,7 @@ function TitleDetailBody({
         <InsightKpiCard
           label={t("web.admin.insights.activity.kpi.watchTime")}
           value={formatWatchTime(summary.watch_seconds)}
-          subtext={t("web.admin.insights.devices.kpi.directPlayDetail", {
-            direct: count(summary.direct_plays),
-            remux: count(summary.remux_plays),
-            transcode: count(summary.transcode_plays),
-          })}
+          subtext={formatInsightsCount(t, "web.admin.insights.sessionCount", summary.sessions)}
         />
         <InsightKpiCard
           label={t("web.admin.insights.activity.kpi.completionRate")}
