@@ -21,6 +21,7 @@ export type AdminInsightsDevices = V2Result<"GET /api/v2/admin/insights/devices"
 export type AdminInsightsBandwidth = V2Result<"GET /api/v2/admin/insights/bandwidth">;
 export type AdminInsightsTitles = V2Result<"GET /api/v2/admin/insights/titles">;
 export type AdminInsightsTitle = V2Result<"GET /api/v2/admin/insights/titles/{content_id}">;
+export type AdminInsightsLibrary = V2Result<"GET /api/v2/admin/insights/library">;
 
 export type AdminInsightsActivityQuery = V2Query<"GET /api/v2/admin/insights/activity">;
 export type AdminInsightsPeopleQuery = V2Query<"GET /api/v2/admin/insights/people">;
@@ -28,6 +29,7 @@ export type AdminInsightsDevicesQuery = V2Query<"GET /api/v2/admin/insights/devi
 export type AdminInsightsBandwidthQuery = V2Query<"GET /api/v2/admin/insights/bandwidth">;
 export type AdminInsightsTitlesQuery = V2Query<"GET /api/v2/admin/insights/titles">;
 export type AdminInsightsTitleQuery = V2Query<"GET /api/v2/admin/insights/titles/{content_id}">;
+export type AdminInsightsLibraryQuery = V2Query<"GET /api/v2/admin/insights/library">;
 
 const INSIGHTS_STALE_TIME = 45_000;
 
@@ -138,6 +140,19 @@ export function useDashboardInsightsTitles(range: WidgetRange, limit: number) {
     adminKeys.insightsTitles(query),
     (profileContext, signal) =>
       v2("GET /api/v2/admin/insights/titles", { query, profileContext, signal }),
+    true,
+    interval,
+    interval,
+  );
+}
+
+export function useDashboardInsightsLibrary(range: WidgetRange) {
+  const query = dashboardInsightsWindow(range);
+  const interval = dashboardInsightsInterval(range);
+  return useAdminInsightQuery(
+    adminKeys.insightsLibrary(query),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/library", { query, profileContext, signal }),
     true,
     interval,
     interval,
@@ -260,6 +275,19 @@ export function useAdminInsightsTitles(query: AdminInsightsTitlesQuery, enabled 
     adminKeys.insightsTitles(query as Record<string, unknown>),
     (profileContext, signal) =>
       v2("GET /api/v2/admin/insights/titles", {
+        query: withRefreshFlag(query),
+        profileContext,
+        signal,
+      }),
+    enabled,
+  );
+}
+
+export function useAdminInsightsLibrary(query: AdminInsightsLibraryQuery, enabled = true) {
+  return useAdminInsightQuery(
+    adminKeys.insightsLibrary(query as Record<string, unknown>),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/library", {
         query: withRefreshFlag(query),
         profileContext,
         signal,

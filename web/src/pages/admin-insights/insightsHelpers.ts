@@ -4,7 +4,14 @@ import { formatLocale } from "@/lib/appLocale";
 import { formatDateTime, preferredDateLocale } from "@/lib/datetime";
 import type { MessageKey } from "@/locales/keys";
 
-export const INSIGHTS_TABS = ["playback", "titles", "people", "devices", "bandwidth"] as const;
+export const INSIGHTS_TABS = [
+  "playback",
+  "titles",
+  "library",
+  "people",
+  "devices",
+  "bandwidth",
+] as const;
 export type InsightsTab = (typeof INSIGHTS_TABS)[number];
 
 export const INSIGHTS_RANGES = ["7d", "30d", "90d", "1y", "all", "custom"] as const;

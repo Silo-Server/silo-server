@@ -38,6 +38,7 @@ import { ApiClientsWidget } from "./widgets/ApiClientsWidget";
 import {
   InsightsActivePeopleWidget,
   InsightsHourOfDayWidget,
+  InsightsLibraryCoverageWidget,
   InsightsPlaysWidget,
   InsightsViewingHoursWidget,
   InsightsWeekdayWidget,
@@ -348,6 +349,19 @@ export const DASHBOARD_WIDGETS: DashboardWidgetDefinition[] = [
     defaultRows: 3,
     ranges: INSIGHTS_RANGES,
     Component: InsightsActivePeopleWidget,
+  }),
+  defineDashboardWidget({
+    id: "insights-library-coverage",
+    titleKey: "web.admin.dashboard.widgetCatalog.insightsLibraryCoverage.title",
+    descriptionKey: "web.admin.dashboard.widgetCatalog.insightsLibraryCoverage.description",
+    minSpan: 4,
+    maxSpan: 8,
+    defaultSpan: 6,
+    minRows: 2,
+    maxRows: 6,
+    defaultRows: 3,
+    ranges: INSIGHTS_RANGES,
+    Component: InsightsLibraryCoverageWidget,
   }),
   defineDashboardWidget({
     id: "watch-providers",

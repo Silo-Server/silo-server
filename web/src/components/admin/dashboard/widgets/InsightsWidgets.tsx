@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Link } from "react-router";
 
 import { ActivePeopleChart } from "@/components/admin/insights/ActivePeopleChart";
+import { LibraryCoverageList } from "@/components/admin/insights/LibraryCoverageList";
 
 import {
   PlaysOverTimeChart,
@@ -13,11 +14,12 @@ import type { ViewingTimeMetric } from "@/components/admin/insights/viewingTime"
 import { Card, CardContent } from "@/components/ui/card";
 import {
   useDashboardInsightsActivity,
+  useDashboardInsightsLibrary,
   type AdminInsightsActivity,
 } from "@/hooks/queries/admin/insights";
 import { useT } from "@/i18n";
 import { widgetRangeToInsightsRange } from "@/pages/admin-insights/insightsHelpers";
-import { ChartEmptyState, ChartSkeleton } from "../charts";
+import { BarListSkeleton, ChartEmptyState, ChartSkeleton } from "../charts";
 import { SectionError } from "../feedback";
 import { rangeTitle } from "../range";
 import { useWidgetRange } from "../widgetChrome";
@@ -201,6 +203,26 @@ export function InsightsActivePeopleWidget() {
   return (
     <InsightsWidgetCard title={t("web.admin.insights.activity.activePeople.title")} tab="playback">
       <ActivityBody>{(data) => <ActivePeopleChart data={data} fill />}</ActivityBody>
+    </InsightsWidgetCard>
+  );
+}
+
+/** Each movie and TV library with the share of its titles played in the window. */
+export function InsightsLibraryCoverageWidget() {
+  const t = useT();
+  const { range } = useWidgetRange();
+  const query = useDashboardInsightsLibrary(range);
+  return (
+    <InsightsWidgetCard title={t("web.admin.insights.library.coverage.title")} tab="library">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {query.isLoading ? (
+          <BarListSkeleton />
+        ) : query.error || !query.data ? (
+          <SectionError message={t("web.admin.dashboard.widgets.insights.loadFailed")} />
+        ) : (
+          <LibraryCoverageList libraries={query.data.libraries} />
+        )}
+      </div>
     </InsightsWidgetCard>
   );
 }

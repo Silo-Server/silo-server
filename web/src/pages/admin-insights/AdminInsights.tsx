@@ -26,6 +26,7 @@ import { ActivityTab } from "./ActivityTab";
 import { BandwidthTab } from "./BandwidthTab";
 import { DevicesTab } from "./DevicesTab";
 import { InsightsDashboardPinsProvider } from "./InsightsDashboardPins";
+import { LibraryTab } from "./LibraryTab";
 import { PeopleTab } from "./PeopleTab";
 import { PersonDetailSheet } from "./PersonDetailSheet";
 import { TitleDetailSheet } from "./TitleDetailSheet";
@@ -172,7 +173,10 @@ export default function AdminInsights() {
   const activeTab: InsightsTab = filters.tab;
   const showLibraryFilter = activeTab !== "bandwidth";
   const showAccountFilter =
-    activeTab === "playback" || activeTab === "titles" || activeTab === "devices";
+    activeTab === "playback" ||
+    activeTab === "titles" ||
+    activeTab === "library" ||
+    activeTab === "devices";
   const showTimezoneFilter = activeTab !== "bandwidth";
   // The detail panels honor only the filters this tab shows: an account or
   // library chosen on another tab stays in the URL but is hidden here.
@@ -235,6 +239,7 @@ export default function AdminInsights() {
             <TabsList variant="line" className="h-auto gap-2 pb-1">
               <TabsTrigger value="playback">{t("web.admin.insights.tabs.activity")}</TabsTrigger>
               <TabsTrigger value="titles">{t("web.admin.insights.tabs.titles")}</TabsTrigger>
+              <TabsTrigger value="library">{t("web.admin.insights.tabs.library")}</TabsTrigger>
               <TabsTrigger value="people">{t("web.admin.insights.tabs.people")}</TabsTrigger>
               <TabsTrigger value="devices">{t("web.admin.insights.tabs.devices")}</TabsTrigger>
               <TabsTrigger value="bandwidth">{t("web.admin.insights.tabs.bandwidth")}</TabsTrigger>
@@ -407,6 +412,9 @@ export default function AdminInsights() {
           </TabsContent>
           <TabsContent value="titles" className="mt-0 space-y-5">
             {activeTab === "titles" ? <TitlesTab filters={filters} /> : null}
+          </TabsContent>
+          <TabsContent value="library" className="mt-0 space-y-5">
+            {activeTab === "library" ? <LibraryTab filters={filters} /> : null}
           </TabsContent>
           <TabsContent value="people" className="mt-0 space-y-5">
             {activeTab === "people" ? <PeopleTab filters={filters} /> : null}
