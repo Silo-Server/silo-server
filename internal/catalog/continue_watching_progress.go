@@ -26,14 +26,6 @@ type CompletedProgressSinceLister interface {
 	ListCompletedProgressSince(ctx context.Context, profileID string, since, until time.Time, limit int) ([]userstore.WatchProgress, error)
 }
 
-// ProgressByItemsLister reads a profile's progress rows for named media
-// items. userstore.UserStore satisfies it. With it the superseded-episode
-// check reads only the later episodes of the in-progress series instead of
-// walking the profile's completed history newest first.
-type ProgressByItemsLister interface {
-	ListProgressByMediaItems(ctx context.Context, profileID string, mediaItemIDs []string) (map[string]userstore.WatchProgress, error)
-}
-
 // ProgressSnapshot pairs a media item with the time its progress row last changed.
 type ProgressSnapshot struct {
 	ContentID string
@@ -114,7 +106,10 @@ func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDsCached(ctx 
 	}
 
 	var completed []ProgressSnapshot
-	if lister, ok := store.(ProgressByItemsLister); ok {
+	// A store that can read progress by item (every userstore.UserStore)
+	// checks only the later episodes of the in-progress series instead of
+	// walking the completed history newest first.
+	if lister, ok := store.(PlayableTargetProgressStore); ok {
 		completed, err = f.laterEpisodeCompletions(ctx, lister, profileID, inProgress, oldestInProgress, cache)
 	} else {
 		completed, err = cache.snapshots(ctx, store, profileID, oldestInProgress)
@@ -162,7 +157,7 @@ const laterEpisodeIDsChunk = 5000
 // A cache for the same profile keeps each item's answer, so a later
 // Continue Watching page reads progress only for items no earlier page asked
 // about. A nil cache, or one bound to another profile, reads fresh.
-func (f *ContinueWatchingProgressFilter) laterEpisodeCompletions(ctx context.Context, lister ProgressByItemsLister, profileID string, inProgress []ProgressSnapshot, notBefore time.Time, cache *CompletedProgressCache) ([]ProgressSnapshot, error) {
+func (f *ContinueWatchingProgressFilter) laterEpisodeCompletions(ctx context.Context, lister PlayableTargetProgressStore, profileID string, inProgress []ProgressSnapshot, notBefore time.Time, cache *CompletedProgressCache) ([]ProgressSnapshot, error) {
 	ids, _ := splitProgressSnapshots(inProgress)
 	rows, err := f.pool.Query(ctx, buildLaterEpisodesQuery(), ids)
 	if err != nil {
