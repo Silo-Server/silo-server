@@ -42,10 +42,11 @@ export function NextUpPromptSetting({
   seconds: number;
   offOffered: boolean;
   /**
-   * Held until the capabilities and values arrive. A failed capabilities read
-   * means unknown, not old: until they arrive a choice would not know whether
-   * to write next_up_enabled (so a seconds choice could leave Next Up off), nor
-   * see a device override to clear.
+   * Held until the capabilities and values arrive, also when either read
+   * fails: a failed read means unknown, not old or default. Until then a choice
+   * would not know whether to write next_up_enabled (so a seconds choice could
+   * leave Next Up off), the row could show a lead time while Next Up is off,
+   * and a device override would go uncleared.
    */
   disabled: boolean;
   /** The profile writer, which also clears a device override on the key. */

@@ -1044,6 +1044,20 @@ function WatchPlaybackHostContent() {
     }
   }, [activeRequest, stopPlayback, navigate]);
 
+  // Off can arrive after the end has opened the card: the settings were still
+  // loading, or another device turned Next Up off during the countdown. The
+  // card then closes as the end of the episode would have closed the player.
+  useEffect(() => {
+    if (
+      nextUp.atEnd === "close" &&
+      episodeSeriesId &&
+      state.mode === "post-roll" &&
+      postRollVideoEnded
+    ) {
+      handlePostRollClose();
+    }
+  }, [nextUp.atEnd, episodeSeriesId, state.mode, postRollVideoEnded, handlePostRollClose]);
+
   // -- Handle video ended → enter post-roll or exit --
   const handleEnded = useCallback(
     (exitState?: PlaybackExitState) => {

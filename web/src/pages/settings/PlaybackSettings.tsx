@@ -542,9 +542,7 @@ export default function PlaybackSettings() {
     ],
     [supportsIntroSkipMode, supportsBuffering, supportsMarkerProvenance, supportsNextUpOff],
   );
-  const { data: effective, isPending: effectivePending } = useEffectiveSettings({
-    keys: playbackKeys,
-  });
+  const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
   const { save: saveProfileDefault, isSaving } = useProfileDefaultWriter(effective);
 
   // The effective endpoint resolves an unset key to the contract default, so
@@ -753,7 +751,7 @@ export default function PlaybackSettings() {
           enabled={read<boolean>(SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED)}
           seconds={read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS)}
           offOffered={supportsNextUpOff}
-          disabled={pending || capabilities.data === undefined || effectivePending}
+          disabled={pending || capabilities.data === undefined || effective === undefined}
           save={saveProfileDefault}
         />
 
