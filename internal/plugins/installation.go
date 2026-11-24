@@ -35,6 +35,11 @@ var ErrInstallationChanged = errors.New("plugin installation changed since it wa
 // another install created first; a plugin has at most one installation.
 var ErrPluginAlreadyInstalled = errors.New("plugin is already installed")
 
+// ErrNoUpdateAvailable refuses to apply a recorded update when the
+// installation records none, or records a version that isn't newer than the
+// installed one.
+var ErrNoUpdateAvailable = errors.New("no update available for plugin")
+
 // ErrBuiltinInstallationImmutable is returned when a caller tries to mutate
 // the reserved builtin-host installation row (delete, update, config, ...).
 var ErrBuiltinInstallationImmutable = errors.New("builtin installation cannot be modified")

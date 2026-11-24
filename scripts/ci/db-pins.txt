@@ -127,6 +127,7 @@
 ./internal/catalog TestPlayableTargetResolverProfileStateAvailabilityAndAccess
 ./internal/catalog TestPlayableTargetResolverResumesDeepInsideLongSeries
 ./internal/catalog TestPlayableTargetResolverStaleCompletedProgressPlan
+./internal/catalog TestPlayableTargetResolverAnchoredCompletedRangePlan
 ./internal/catalog TestCatalogOverlaySummariesPreserveLegacyWinners
 ./internal/catalog TestPlayableTargetsPostgresMatchesGeneral
 
@@ -276,6 +277,10 @@
 # large the catalog.
 ./internal/recommendations TestDefaultRowQueriesWalkTypeIndexesPostgres
 
+# A profile refresh reads its candidates' details with the candidate scans,
+# not in a read per candidate pool.
+./internal/recommendations TestProfileRefreshStatementBudgetPostgres
+
 # Seek preview workers stop after a library or file becomes ineligible.
 ./internal/trickplay TestLibraryTypeChangeFencesWorkerProgressDB
 ./internal/trickplay TestLibraryTypeChangeRetiresFinishedAndExpiredWorkDB
@@ -359,3 +364,7 @@
 # versus earliest first-seen times, every present file with one track's facts, and two
 # statements for a page with files, whatever else it holds.
 ./internal/catalog TestListAdminCatalogItemsDB
+
+# Skipped-root upsert: descendant file_count bounds file_path on the folder path
+# index under a generic plan instead of scanning every file in the library.
+./internal/metadata TestUpsertObservedFileUsesPathRangeUnderGenericPlanDB

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -880,6 +882,216 @@ func TestSegmentRecoveryDecision(t *testing.T) {
 			tt.check(t, decision)
 		})
 	}
+}
+
+// fakeFFmpegSession is an encoded transcode of a 160 s file whose FFmpeg is
+// a shell script: each run writes segments 72-74 when writeSegments is set,
+// prints stderr and exits with exitCode.
+func fakeFFmpegSession(t *testing.T, codec string, writeSegments bool, stderr string, exitCode int) *TranscodeSession {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(t.TempDir(), "ffmpeg")
+	ext := hlsSegmentExtension(TranscodeOpts{TargetCodecVideo: codec})
+	body := "#!/bin/sh\n"
+	if writeSegments {
+		body += "for n in 72 73 74; do printf x > seg_000$n" + ext + "; done\n" +
+			"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:2\\n#EXT-X-MEDIA-SEQUENCE:72\\n" +
+			"#EXTINF:2.0,\\nseg_00072" + ext + "\\n#EXTINF:2.0,\\nseg_00073" + ext + "\\n#EXTINF:1.5,\\nseg_00074" + ext + "\\n#EXT-X-ENDLIST\\n' > stream.m3u8\n"
+	}
+	body += fmt.Sprintf("echo '%s' >&2\nexit %d\n", stderr, exitCode)
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	s := &TranscodeSession{
+		outputDir: dir,
+		opts: TranscodeOpts{
+			SessionID:        "sess-eof",
+			FFmpegPath:       script,
+			OutputDir:        dir,
+			TargetCodecVideo: codec,
+			SegmentDuration:  2,
+			TotalDuration:    160,
+		},
+	}
+	t.Cleanup(func() {
+		s.StopThrottler()
+		_ = s.Close()
+	})
+	return s
+}
+
+// runFakeFFmpeg restarts s at segment and waits for its FFmpeg to exit.
+func runFakeFFmpeg(t *testing.T, s *TranscodeSession, segment int) {
+	t.Helper()
+	if err := s.Restart(context.Background(), float64(segment*2), segment); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-s.Done():
+	case <-time.After(10 * time.Second):
+		t.Fatal("fake FFmpeg did not exit")
+	}
+}
+
+// A file whose container outlasts its streams lists segments FFmpeg never
+// writes. FFmpeg finishing the input cleanly is the end of the stream: a
+// request past its last segment must end playback rather than seek-restart
+// FFmpeg past the end, which writes nothing and is requested again. A
+// failed FFmpeg is a crash and still restarts, and so is one that exits 0
+// after its input failed (a source read cut short), which ends its output
+// early. Copy-video serves FFmpeg's own playlist, whose segments a seek
+// re-cuts, and another audio track can run longer: neither uses the end.
+func TestSegmentRecoveryAfterFFmpegExits(t *testing.T) {
+	const demuxError = "[in#0/matroska,webm @ 0x1] Error during demuxing: Input/output error"
+	for _, tt := range []struct {
+		name        string
+		codec       string
+		exitCode    int
+		stderr      string
+		restarting  bool
+		switchAudio bool
+		request     int
+		wantEnd     bool
+		wantReason  string
+	}{
+		{"clean exit ends the stream past its last segment", "h264", 0, "", false, false, 75, true, "past_end_of_stream"},
+		{"clean exit ends the stream during another request's restart", "h264", 0, "", true, false, 75, true, "past_end_of_stream"},
+		{"clean exit still restarts before its first segment", "h264", 0, "", false, false, 10, false, "transcode_not_running"},
+		{"failed exit restarts past its last segment", "h264", 1, "", false, false, 75, false, "transcode_not_running"},
+		{"exit after a demux error restarts past its last segment", "h264", 0, demuxError, false, false, 75, false, "transcode_not_running"},
+		{"copy video restarts past its last segment", "copy", 0, "", false, false, 75, false, "transcode_not_running"},
+		{"another audio track restarts past the end", "h264", 0, "", false, true, 75, false, "transcode_not_running"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s := fakeFFmpegSession(t, tt.codec, true, tt.stderr, tt.exitCode)
+			runFakeFFmpeg(t, s, 72)
+			if tt.switchAudio {
+				s.SetAudioTrackIndex(1)
+			}
+			if tt.restarting {
+				// A backward seek's restart is in flight for another request.
+				s.mu.Lock()
+				s.restarting = &restartFlight{}
+				s.mu.Unlock()
+				t.Cleanup(func() {
+					s.mu.Lock()
+					s.restarting = nil
+					s.mu.Unlock()
+				})
+			}
+
+			decision := s.SegmentRecoveryDecision(tt.request, time.Now())
+			if decision.Reason != tt.wantReason {
+				t.Fatalf("Reason = %q, want %q", decision.Reason, tt.wantReason)
+			}
+			if decision.Wait {
+				t.Fatalf("decision = %+v, want no wait", decision)
+			}
+			name := segmentFilename(tt.request, s.Opts())
+			restarted := false
+			_, err := OpenSegmentWithRecovery(context.Background(), s, name, SegmentRecoveryOptions{
+				Restart: func(context.Context, int, time.Time) (SegmentRecoveryTarget, bool, error) {
+					restarted = true
+					return SegmentRecoveryTarget{}, false, nil
+				},
+			})
+			if restarted == tt.wantEnd {
+				t.Fatalf("restarted = %v, want a restart only when the stream has not ended", restarted)
+			}
+			rec := httptest.NewRecorder()
+			served := s.ServePastEndOfStream(rec, name, err)
+			if served != tt.wantEnd {
+				t.Fatalf("ServePastEndOfStream(%d, %v) = %v, want %v", tt.request, err, served, tt.wantEnd)
+			}
+			if !served && !errors.Is(err, ErrSegmentNotFound) {
+				t.Fatalf("err = %v, want ErrSegmentNotFound", err)
+			}
+			if served && (rec.Code != http.StatusOK || rec.Header().Get("Content-Type") != "video/mp2t" ||
+				!bytes.Equal(rec.Body.Bytes(), genericTSProgramTables())) {
+				t.Fatalf("end of stream = %d %q (% x), want 200 video/mp2t with a PAT and PMT", rec.Code, rec.Header().Get("Content-Type"), rec.Body.Bytes())
+			}
+			if end, ok := s.LearnedStreamEnd(); tt.wantEnd && (!ok || end.Seconds != 149.5 || end.PlannedSeconds != 160 || end.ReadSince.IsZero()) {
+				t.Fatalf("LearnedStreamEnd() = %+v, %v; want 149.5 (the run from 144 s wrote 5.5 s), planned 160, read since the run started", end, ok)
+			}
+		})
+	}
+}
+
+// A run that wrote nothing only shows that the media ends before the segment
+// it started at. A seek straight into the tail learns the end that way, and
+// the request answers the end of the stream rather than not found, which the
+// player retries into another restart. Such a run never moves a known end
+// later, and one that started at segment 0 shows nothing about the media.
+// A request waiting on the restart lock checks the end again.
+func TestEmptyRunsBoundTheStreamEnd(t *testing.T) {
+	t.Run("a seek into the tail ends the stream", func(t *testing.T) {
+		s := fakeFFmpegSession(t, "h264", false, "", 0)
+		restarts := 0
+		name := "seg_00076.ts"
+		_, err := OpenSegmentWithRecovery(context.Background(), s, name, SegmentRecoveryOptions{
+			Restart: func(ctx context.Context, segNum int, _ time.Time) (SegmentRecoveryTarget, bool, error) {
+				restarts++
+				return s.RestartSegmentSince(ctx, segNum, time.Time{})
+			},
+		})
+		if restarts != 1 {
+			t.Fatalf("restarts = %d, want 1", restarts)
+		}
+		rec := httptest.NewRecorder()
+		if !s.ServePastEndOfStream(rec, name, err) || rec.Code != http.StatusOK {
+			t.Fatalf("err = %v, answer %d; want the end of the stream", err, rec.Code)
+		}
+		if _, ok := s.LearnedStreamEnd(); ok {
+			t.Fatal("LearnedStreamEnd() ok from a run that wrote nothing, want no seconds")
+		}
+		if _, _, err := s.RestartSegmentSince(context.Background(), 77, time.Time{}); !errors.Is(err, ErrPastEndOfStream) {
+			t.Fatalf("RestartSegmentSince(77) = %v, want ErrPastEndOfStream without a restart", err)
+		}
+	})
+	t.Run("a run that listed only an empty segment ends the stream", func(t *testing.T) {
+		// What FFmpeg writes when it starts past the end: a playlist
+		// listing one empty segment.
+		s := fakeFFmpegSession(t, "h264", false, "", 0)
+		if err := os.WriteFile(s.Opts().FFmpegPath, []byte("#!/bin/sh\n: > seg_00076.ts\n"+
+			"printf '#EXTM3U\\n#EXT-X-TARGETDURATION:0\\n#EXT-X-MEDIA-SEQUENCE:76\\n#EXTINF:0.000000,\\nseg_00076.ts\\n#EXT-X-ENDLIST\\n' > stream.m3u8\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		runFakeFFmpeg(t, s, 76)
+		if !s.pastEndOfStream(76) || s.pastEndOfStream(75) {
+			t.Fatal("the end after a run that listed only an empty segment at 76 is not 75")
+		}
+	})
+	t.Run("a run from a seek inside a segment ends where it started plus what it wrote", func(t *testing.T) {
+		// An audio-track switch restarts at the player's position, which
+		// need not fall on a segment boundary.
+		s := fakeFFmpegSession(t, "h264", true, "", 0)
+		if err := s.Restart(context.Background(), 145.3, 72); err != nil {
+			t.Fatal(err)
+		}
+		<-s.Done()
+		if end, ok := s.LearnedStreamEnd(); !ok || math.Abs(end.Seconds-150.8) > 1e-9 {
+			t.Fatalf("LearnedStreamEnd() = %v, %v; want 150.8 (145.3 s plus 5.5 s written)", end.Seconds, ok)
+		}
+	})
+	t.Run("a run from segment 0 that wrote nothing learns nothing", func(t *testing.T) {
+		s := fakeFFmpegSession(t, "h264", false, "", 0)
+		runFakeFFmpeg(t, s, 0)
+		if s.pastEndOfStream(1) {
+			t.Fatal("segment 1 past the end after a run from segment 0 wrote nothing")
+		}
+	})
+	t.Run("a run that wrote nothing keeps a known end", func(t *testing.T) {
+		s := fakeFFmpegSession(t, "h264", true, "", 0)
+		runFakeFFmpeg(t, s, 72)
+		// The next run writes nothing.
+		if err := os.WriteFile(s.Opts().FFmpegPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		runFakeFFmpeg(t, s, 78)
+		if !s.pastEndOfStream(75) {
+			t.Fatal("segment 75 not past the end after a run from 78 wrote nothing, want the end kept at 74")
+		}
+	})
 }
 
 // A check already past its progress read when Stop runs must not pause

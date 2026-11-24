@@ -521,6 +521,12 @@
       "value": "この再生セッションは終了しました。もう一度再生してください。"
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "一時停止の時間が長すぎたため、再生を停止しました。もう一度再生してください。"
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -60614,6 +60620,24 @@
       "value": "ライブラリに保存"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "一時停止中の再生"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "一時停止した再生を終了するまで"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0〜1440。Siloアプリでこの時間一時停止した動画を終了し、そのストリームとトランスコードを解放します。もう一度再生すると同じ位置から続行します。「一緒に見る」、キャスト再生、オーディオブックは対象外です。0でオフになります。"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -61048,6 +61072,12 @@
     {
       "type": 0,
       "value": "日"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "分"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -66911,6 +66941,12 @@
       "value": "ソフトウェアHDRトーンマッピングを有効化"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "一時停止した再生を終了するまで（分）"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -66969,6 +67005,12 @@
     {
       "type": 0,
       "value": "マーカーのソース"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "一時停止中の再生"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -68891,6 +68933,36 @@
     {
       "type": 0,
       "value": "先にサインインプロバイダーをオンにしてください。パスワードでのサインインがオフでプロバイダーもオフの場合、緊急用管理者しかサインインできません。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "8〜72文字。ルールはパスワードを設定または変更するときに適用されます。設定済みのパスワードは引き続き使用できます。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "パスワードの最小文字数"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "!や#などの記号や句読点。文字、数字、スペースは含まれません。"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "特殊文字を必須にする"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "大文字を必須にする"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -79889,6 +79961,16 @@
       "value": "設定中…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "に直接伝えてください。"
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -82218,10 +82300,44 @@
       "value": "により、このデバイスからこのサーバーへのサインインは許可されていません。"
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": "文字以上。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "パスワードが一致しません。"
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "!や#などの特殊文字を1文字以上含めてください。"
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "大文字を1文字以上含めてください。"
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -82234,6 +82350,28 @@
     {
       "type": 0,
       "value": "8文字以上で入力してください。"
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": "文字以上にしてください。"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -113151,6 +113289,12 @@
     {
       "type": 0,
       "value": "管理者がこの再生セッションを終了しました。"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "一時停止の時間が長すぎたため、再生を停止しました。"
     }
   ],
   "web.player.shuffle.scopeWithParent": [

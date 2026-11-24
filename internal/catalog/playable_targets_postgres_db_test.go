@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"os"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -79,7 +80,14 @@ func TestPlayableTargetsPostgresMatchesGeneral(t *testing.T) {
 	var seriesIDs, movieIDs []string
 	var episodes []episode
 	seasonIDs := map[string]map[int]string{}
+	// Even series use provider-anchored IDs, whose episodes the PostgreSQL path
+	// reads by key range; odd ones use IDs without that shape.
+	anchored := func(s int) bool { return s%2 == 0 }
 	for s := range 14 {
+		if anchored(s) {
+			seriesIDs = append(seriesIDs, fmt.Sprintf("series-tvdb-%d", suffix%1_000_000_000_000*100+int64(s)))
+			continue
+		}
 		seriesIDs = append(seriesIDs, id("series-%d", s))
 	}
 	for m := range 4 {
@@ -114,7 +122,12 @@ func TestPlayableTargetsPostgresMatchesGeneral(t *testing.T) {
 			}
 			for e := range 1 + rng.Intn(6) {
 				e++
-				episodes = append(episodes, episode{id("series-%d-s%de%d", s, season, e), seriesID, season})
+				episodeID := id("series-%d-s%de%d", s, season, e)
+				// S2E1 keeps an off-format ID even in an anchored series.
+				if anchored(s) && (season != 2 || e != 1) {
+					episodeID = fmt.Sprintf("episode-%s-%d-%d", strings.TrimPrefix(seriesID, "series-"), season, e)
+				}
+				episodes = append(episodes, episode{episodeID, seriesID, season})
 				if _, err := pool.Exec(ctx, `INSERT INTO episodes (content_id, series_id, season_number, episode_number, title) VALUES ($1, $2, $3, $4, 'E')`,
 					episodes[len(episodes)-1].contentID, seriesID, season, e); err != nil {
 					t.Fatalf("seed episode: %v", err)

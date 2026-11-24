@@ -62,11 +62,14 @@ describe("NodeName", () => {
     }
   });
 
-  it("doesn't start the end piece with a zero-width joiner", () => {
-    const name = "render-node-\u{1f468}\u200d\u{1f469}\u200d\u{1f467}-family-box";
-    expect(pieces(name)).toEqual({
-      dir: "ltr",
-      texts: ["render-node-\u{1f468}\u200d\u{1f469}\u200d\u{1f467}", "-family-box"],
-    });
+  it("keeps a flag or a joined emoji whole", () => {
+    const names: [head: string, tail: string][] = [
+      ["render-node-\u{1f468}\u200d\u{1f469}\u200d\u{1f467}", "-family-box"],
+      ["gpu-", "\u{1f1fa}\u{1f1f8}-worker-07"],
+      ["gpu-worker-", "\u{1f469}\u{1f3fd}\u200d\u{1f4bb}-node07"],
+    ];
+    for (const [head, tail] of names) {
+      expect(pieces(head + tail)).toEqual({ dir: "ltr", texts: [head, tail] });
+    }
   });
 });

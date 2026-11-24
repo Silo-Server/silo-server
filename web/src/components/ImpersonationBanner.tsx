@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 
 import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
 import { useT } from "@/i18n";
+import { nameFloor } from "@/lib/direction";
 import { getInitial } from "@/lib/text";
 
 /**
@@ -12,9 +13,6 @@ import { getInitial } from "@/lib/text";
  * with the words they apply to.
  */
 const EDGE_SPACES = /^(\s*)([\s\S]*?)([\s\u202c\u2069]*)$/;
-
-/** Up to this many characters a name is short enough to keep whole. */
-const SHORT_NAME = 3;
 
 /**
  * A narrow banner squeezes the "authorized by" sentence. Its words give up space
@@ -62,10 +60,6 @@ export default function ImpersonationBanner({
   }
 
   const initial = getInitial(userName) || "?";
-  // The authorizing name keeps at least a letter and "…" before the words around
-  // it give way. A short name is kept whole instead: a fixed floor wider than
-  // the name would leave a gap after it.
-  const nameFloor = [...impersonatorName].length <= SHORT_NAME ? "min-w-max" : "min-w-[2em]";
 
   return (
     <div
@@ -109,8 +103,9 @@ export default function ImpersonationBanner({
                 </span>
               ),
               strong: (chunks) => (
+                // The name keeps its floor before the words around it give way.
                 <span
-                  className={`text-foreground/80 flex max-w-max grow basis-0 overflow-hidden font-medium ${nameFloor}`}
+                  className={`text-foreground/80 flex max-w-max grow basis-0 overflow-hidden font-medium ${nameFloor(impersonatorName)}`}
                 >
                   {chunks}
                 </span>

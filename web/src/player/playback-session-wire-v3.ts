@@ -32,9 +32,14 @@ const BASE_CLIENT_FEATURES_V3 = [FEATURE_PLAYBACK_PLAN_V3];
 /**
  * The features the video watch page adds: it executes the realtime
  * `plan_invalidated` command (see `VideoPlayer`) and replans off the plan the
- * server names.
+ * server names, and it leaves with its own notice when the server ends a
+ * session paused too long (410 `playback_session_paused_timeout`).
  */
-export const VIDEO_CLIENT_FEATURES_V3 = [FEATURE_PLAN_INVALIDATED_V3, "marker_thumbnails_v1"];
+export const VIDEO_CLIENT_FEATURES_V3 = [
+  FEATURE_PLAN_INVALIDATED_V3,
+  "marker_thumbnails_v1",
+  "paused_timeout_v1",
+];
 
 /**
  * `client_features` is the contract's single advertisement location, and a

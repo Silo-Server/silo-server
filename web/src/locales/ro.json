@@ -521,6 +521,12 @@
       "value": "Această sesiune de redare s-a încheiat. Porniți din nou redarea."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Redarea s-a oprit deoarece a rămas în pauză prea mult timp. Porniți din nou redarea."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -74155,6 +74161,24 @@
       "value": "Salvați în bibliotecă"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Redare în pauză"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Încheierea redării în pauză după"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "Între 0 și 1440. Încheie redarea unui videoclip aflat în pauză atât de mult timp într-o aplicație Silo, eliberând streamul și orice transcodare; la o nouă redare, aceasta continuă din același punct. Vizionarea împreună, proiectarea și cărțile audio nu sunt afectate. Valoarea 0 dezactivează această opțiune."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -74657,6 +74681,12 @@
     {
       "type": 0,
       "value": "zile"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minute"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -80618,6 +80648,12 @@
       "value": "Activați maparea tonurilor HDR software"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Încheierea redării în pauză după (minute)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -80676,6 +80712,12 @@
     {
       "type": 0,
       "value": "Sursa marcajelor"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Redare în pauză"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -82698,6 +82740,36 @@
     {
       "type": 0,
       "value": "Activați mai întâi un furnizor de conectare. Cu conectarea cu parolă dezactivată și fără niciun furnizor activat, s-ar putea conecta doar administratorii de urgență."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Între 8 și 72 de caractere. Regulile se aplică atunci când cineva alege sau schimbă o parolă; parolele deja setate continuă să funcționeze."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Lungimea minimă a parolei"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Orice semn de punctuație sau simbol, cum ar fi ! sau #. Literele, cifrele și spațiile nu se iau în calcul."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Solicitați un caracter special"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Solicitați o literă mare"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -95376,6 +95448,20 @@
       "value": "Se setează…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Comunicați-o personal utilizatorului "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -98167,10 +98253,80 @@
       "value": " nu permite acestui dispozitiv să se conecteze la acest server."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Cel puțin "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caracter."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Cel puțin "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caractere."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Cel puțin "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " de caractere."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Parolele nu se potrivesc."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Includeți cel puțin un caracter special, cum ar fi ! sau #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Includeți cel puțin o literă mare."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -98183,6 +98339,64 @@
     {
       "type": 0,
       "value": "Folosiți cel puțin 8 caractere."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Folosiți cel puțin "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caracter."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Folosiți cel puțin "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caractere."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Folosiți cel puțin "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " de caractere."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -135613,6 +135827,12 @@
     {
       "type": 0,
       "value": "Un administrator a încheiat această sesiune de redare."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Redarea s-a oprit deoarece a rămas în pauză prea mult timp."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

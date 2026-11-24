@@ -503,6 +503,7 @@ var adminSettingDefaults = map[string]string{
 	Allow4KTranscodeSettingKey:                       "true",
 	playback.TranscodeThrottleEnabledSettingKey:      strconv.FormatBool(playback.DefaultTranscodeThrottleEnabled),
 	playback.TranscodeThrottleSecondsSettingKey:      strconv.Itoa(playback.DefaultTranscodeThrottleSeconds),
+	playback.PausedSessionTimeoutSettingKey:          strconv.Itoa(playback.DefaultPausedSessionTimeoutMinutes),
 
 	"audiobookshelf_compat.enabled":            "true",
 	"jellyfin_compat.enabled":                  "true",
@@ -871,6 +872,9 @@ func NormalizeAdminSetting(key, raw string) (string, error) {
 		return normalizeAdminInt(key, value, 1, 99)
 	case playback.TranscodeThrottleSecondsSettingKey:
 		return normalizeAdminInt(key, value, 60, 86400)
+	case playback.PausedSessionTimeoutSettingKey:
+		// Zero turns the timeout off.
+		return normalizeAdminInt(key, value, 0, playback.MaxPausedSessionTimeoutMinutes)
 	case playbackSegmentRetentionSettingKey:
 		normalized, err := normalizeAdminInt(key, value, 0, 86400)
 		if err != nil {

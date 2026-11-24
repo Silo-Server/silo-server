@@ -260,6 +260,7 @@ type embeddingStore interface {
 	ItemsNeedingEmbedding(ctx context.Context, currentModel, afterID string, limit int) ([]string, error)
 	ListEmbeddingTextCandidates(ctx context.Context, afterID, currentModel string, limit int) ([]EmbeddingTextCandidate, error)
 	UpsertEmbedding(ctx context.Context, itemID string, embedding []float32, model, canonicalText string) error
+	UpsertEmbeddings(ctx context.Context, model string, writes []EmbeddingWrite) error
 	MarkProfilesStaleForItems(ctx context.Context, itemIDs []string) (int64, error)
 	MarkAllProfilesStale(ctx context.Context) (int64, error)
 	HasEmbeddingsFromModel(ctx context.Context, model string) (bool, error)
@@ -494,10 +495,8 @@ func (b *embedBackfill) embedBatch(ctx context.Context, items []*models.MediaIte
 		if err := b.checkHeld(ctx); err != nil {
 			return err
 		}
-		for i, item := range chunkItems {
-			if _, err := b.save(ctx, item, vectors[i], chunkTexts[i]); err != nil {
-				return err
-			}
+		if err := b.saveChunk(ctx, chunkItems, vectors, chunkTexts); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -688,12 +687,51 @@ func (b *embedBackfill) save(ctx context.Context, item *models.MediaItem, vector
 		slog.WarnContext(ctx, "skipping item, store failed", "component", "recommendations", "item_id", item.ContentID, "error", err)
 		return false, nil
 	}
+	b.recordStored(item.ContentID)
+	return true, nil
+}
+
+// saveChunk stores one embedding call's vectors (parallel to items and
+// texts) as save would store each, in one write. Each vector is checked
+// against the embedding lock first, in order; when one does not fit, the
+// vectors before it are stored and the error ends the run. When the write
+// fails, each item is stored on its own, so one bad row costs only its item.
+func (b *embedBackfill) saveChunk(ctx context.Context, items []*models.MediaItem, vectors [][]float32, texts []string) error {
+	var lockErr error
+	writes := make([]EmbeddingWrite, 0, len(items))
+	for i, item := range items {
+		if err := b.ensureLock(ctx, vectors[i]); err != nil {
+			lockErr = fmt.Errorf("embed item %s: %w", item.ContentID, err)
+			break
+		}
+		writes = append(writes, EmbeddingWrite{ItemID: item.ContentID, Embedding: vectors[i], CanonicalText: texts[i]})
+	}
+	if len(writes) == 0 {
+		return lockErr
+	}
+	err := b.db.UpsertEmbeddings(ctx, b.model, writes)
+	if err == nil {
+		for _, w := range writes {
+			b.recordStored(w.ItemID)
+		}
+		return lockErr
+	}
+	slog.WarnContext(ctx, "storing embedding batch failed, storing items one at a time", "component", "recommendations", "error", err, "batch_size", len(writes))
+	for i, w := range writes {
+		if _, err := b.save(ctx, items[i], w.Embedding, w.CanonicalText); err != nil {
+			return err
+		}
+	}
+	return lockErr
+}
+
+// recordStored counts an item whose vector was stored.
+func (b *embedBackfill) recordStored(itemID string) {
 	b.counts.Embedded++
 	if !b.signalsOutsidePostgres || len(b.stored) == 0 {
-		b.stored = append(b.stored, item.ContentID)
+		b.stored = append(b.stored, itemID)
 	}
 	b.unconfirmed = nil
-	return true, nil
 }
 
 // lockImportedEmbeddings writes the embedding lock for vectors a catalog
