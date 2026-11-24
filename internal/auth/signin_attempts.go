@@ -78,11 +78,12 @@ func signInAttemptKey(name string) string {
 }
 
 // signInSpend is what one sign-in spent of a name's budget: the name's key,
-// the client address it came from, and the lanes its attempts took.
+// the client address it came from, and whether an attempt spent the name's
+// own budget.
 type signInSpend struct {
-	key    string
-	source string
-	lanes  [2]bool // indexed by SignInLane
+	key       string
+	source    string
+	spentName bool
 }
 
 func newSignInSpend(ctx context.Context, name string) *signInSpend {
@@ -130,25 +131,32 @@ func (s *Service) reserveSignIn(ctx context.Context, spend *signInSpend) error {
 		}
 		return &SignInThrottledError{RetryAfter: retryAfter}
 	}
-	spend.lanes[lane] = true
+	if lane == SignInLaneName {
+		spend.spentName = true
+	}
 	return nil
 }
 
-// finishSignIn clears the lanes spend took once the password matched (the
-// sign-in succeeded, or a compatibility sign-in found a temporary password
-// it cannot change), and records the address as one the name and user's own
-// names sign in from. Every other outcome, outages included, keeps the
-// attempts counted. The count is cleared even when the client has already
+// finishSignIn clears the counts once the password matched (the sign-in
+// succeeded, or a compatibility sign-in found a temporary password it cannot
+// change), and records the address as one the name and user's own names
+// sign in from. The address's own count is cleared whichever lane the
+// sign-in spent, so a later lock of the name does not find it used up. The
+// name's count is cleared only when the sign-in spent it: a success from a
+// known address leaves the lock someone else caused in place, which keeps
+// their guessing bounded. Every other outcome, outages included, keeps the
+// attempts counted. The counts are cleared even when the client has already
 // hung up.
 func (s *Service) finishSignIn(ctx context.Context, spend *signInSpend, user *models.User, err error) {
 	if s.signInAttempts == nil || (err != nil && !errors.Is(err, ErrPasswordChangeRequired)) {
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
-	for lane, spent := range spend.lanes {
-		if spent {
-			s.signInAttempts.Reset(ctx, spend.key, spend.source, SignInLane(lane))
-		}
+	if spend.spentName {
+		s.signInAttempts.Reset(ctx, spend.key, spend.source, SignInLaneName)
+	}
+	if spend.source != "" {
+		s.signInAttempts.Reset(ctx, spend.key, spend.source, SignInLaneSource)
 	}
 	s.signInAttempts.Trust(ctx, signInTrustKeys(spend.key, user), spend.source)
 }

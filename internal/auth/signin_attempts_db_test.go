@@ -207,6 +207,21 @@ func TestSignInNameBudgetDB(t *testing.T) {
 		_, err = signInFrom(home, user.Username, right)
 		wantThrottled(t, err)
 
+		// Once the name's lock has passed, a success from home clears home's
+		// own count too, so locking the name again does not shut home out.
+		delete(limiter.counts, signInAttemptKey(user.Username))
+		if _, err := signInFrom(home, user.Username, right); err != nil {
+			t.Fatalf("sign-in from home after the name's lock passed: %v", err)
+		}
+		for range limiter.max {
+			if _, err := signInFrom(stranger, user.Username, wrong); !errors.Is(err, ErrInvalidCredentials) {
+				t.Fatalf("stranger's guess: err = %v, want ErrInvalidCredentials", err)
+			}
+		}
+		if _, err := signInFrom(home, user.Username, right); err != nil {
+			t.Fatalf("name locked again: sign-in from home: %v, want it to succeed", err)
+		}
+
 		// A refresh makes its address known as well.
 		_, err = signInFrom(travel, user.Username, right)
 		wantThrottled(t, err)
