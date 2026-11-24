@@ -579,7 +579,8 @@ Each file reports `state`, `servable`, and `failures`, with optional
 `last_error`, `generated_at`, `thumbnail_count`, `thumbnail_width`, `interval_ms`,
 and `sheet_bytes`. `state` is `off` for a disabled library, a library with an
 unsupported type, or one with previews turned off; `unusable` for an ineligible
-file or a permanent sampling failure; otherwise it reflects `pending`,
+file or one whose sampling failed on the file's data several times in a
+row; otherwise it reflects `pending`,
 `running`, or `ready`. An eligible file with
 no queue row yet reports `pending`. `servable` independently reports whether
 the current store has a published revision matching the file: previous sheets

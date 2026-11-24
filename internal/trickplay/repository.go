@@ -56,7 +56,8 @@ func backoffAfter(failures int) time.Duration {
 // damagedAttempts is how many Damaged outcomes in a row make a file
 // unusable. ffmpeg reports bytes that storage served wrong during an outage
 // the same way as a damaged file, so the earlier ones back off like any
-// failure: the attempts span about seven hours.
+// failure: from a row with no earlier failures, the attempts span about
+// seven hours.
 const damagedAttempts = 4
 
 // abandonedGrace is the minimum time an abandoned or displaced revision
@@ -255,7 +256,8 @@ func (r *Repository) Publish(ctx context.Context, fileID int, leaseToken string,
 		_, err := tx.Exec(ctx, `
 			UPDATE public.media_file_trickplay
 			SET state = 'ready', lease_owner = NULL, lease_expires_at = NULL,
-			    revision = work_revision, work_revision = NULL, failure_count = 0, last_error = '',
+			    revision = work_revision, work_revision = NULL,
+			    failure_count = 0, damaged_failures = 0, last_error = '',
 			    published_recipe = $2, published_size = source_size, published_hash = source_hash,
 			    published_duration = source_duration, published_expires_at = NULL, store_identity = $3,
 			    width = $4, height = $5, tile_columns = $6, tile_rows = $7, interval_ms = $8,
@@ -333,8 +335,9 @@ type fencedRow struct {
 	workRevision *int64
 	urlExpiresAt *time.Time
 	failures     int
-	// damaged counts the Damaged outcomes among the latest failures. The
-	// paths that reset failures leave the stored count, so it is capped there.
+	// damaged counts the Damaged outcomes among the latest failures. It is
+	// read capped at failures because servers from before the column reset
+	// failure_count without it.
 	damaged  int
 	eligible bool
 }
@@ -637,7 +640,7 @@ const adoptToneMapSQL = `
 // record one are adopted rather than requeued again.
 const requeueToneMapSQL = `
 	UPDATE public.media_file_trickplay t
-	SET state = 'pending', available_at = now(), failure_count = 0, last_error = '',
+	SET state = 'pending', available_at = now(), failure_count = 0, damaged_failures = 0, last_error = '',
 	    recipe_version = $6, tone_map_source = NULL, updated_at = now()
 	FROM unnest($1::bigint[], $2::bigint[], $3::text[], $4::text[], $5::boolean[]) AS c(id, revision, stored, key, requeue)
 	WHERE t.media_file_id = c.id AND c.requeue
@@ -714,7 +717,7 @@ const removeSQL = `
 // duration to within two seconds, which probes may round differently.
 const staleSQL = `
 	UPDATE public.media_file_trickplay t
-	SET state = 'pending', available_at = now(), failure_count = 0, last_error = '',
+	SET state = 'pending', available_at = now(), failure_count = 0, damaged_failures = 0, last_error = '',
 	    recipe_version = $1, tone_map_source = NULL, updated_at = now()
 	FROM public.media_files mf JOIN public.media_folders f ON f.id = mf.media_folder_id
 	WHERE mf.id = t.media_file_id
@@ -857,7 +860,7 @@ func (r *Repository) Regenerate(ctx context.Context, fileIDs []int) (int, error)
 		  AND mf.missing_since IS NULL AND mf.probe_updated_at IS NOT NULL AND mf.duration > 0
 		  AND jsonb_typeof(mf.video_tracks) = 'array' AND jsonb_array_length(mf.video_tracks) > 0
 		ON CONFLICT (media_file_id) DO UPDATE
-		SET state = 'pending', available_at = '-infinity', failure_count = 0, last_error = '',
+		SET state = 'pending', available_at = '-infinity', failure_count = 0, damaged_failures = 0, last_error = '',
 		    recipe_version = EXCLUDED.recipe_version, updated_at = now()
 		WHERE t.state <> 'running' AND t.recipe_version <= $2`,
 		fileIDs, AlgorithmVersion, videoLibraryTypes)
@@ -872,7 +875,9 @@ func (r *Repository) Regenerate(ctx context.Context, fileIDs []int) (int, error)
 
 // regenerateReclaimSQL takes back the expired leases of the given files
 // without counting a failure, since the regeneration clears the backoff
-// anyway, and queues any revision their work had started uploading.
+// anyway, and queues any revision their work had started uploading. Like
+// reclaimSQL it restarts the damage count, because the regeneration skips a
+// file that is not eligible now.
 const regenerateReclaimSQL = `
 	WITH expired AS (
 		SELECT media_file_id, work_revision
@@ -886,6 +891,7 @@ const regenerateReclaimSQL = `
 		ON CONFLICT (prefix) DO NOTHING
 	)
 	UPDATE public.media_file_trickplay t
-	SET state = 'pending', lease_owner = NULL, lease_expires_at = NULL, work_revision = NULL, updated_at = now()
+	SET state = 'pending', lease_owner = NULL, lease_expires_at = NULL, work_revision = NULL,
+	    damaged_failures = 0, updated_at = now()
 	FROM expired
 	WHERE t.media_file_id = expired.media_file_id`

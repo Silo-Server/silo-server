@@ -139,17 +139,21 @@ func TestFinishMakesRepeatedDamageUnusableDB(t *testing.T) {
 	f := newFixture(t)
 	folder := f.library(t, "movies", true)
 	for _, tc := range []struct {
-		name  string
-		steps string // D: Damaged, F: Failed, E: lease expired, R: regenerated, C: file size changed, L: duration changed
+		name string
+		// D: Damaged, F: Failed, E: lease expired, X: lease expired and taken
+		// back by a regenerate while the file was missing, R: regenerated,
+		// C: file size changed, L: duration changed
+		steps string
 		state string
 	}{
 		{"first verdict backs off", "D", statePending},
 		{"fourth in a row is final", "DDDD", stateUnusable},
-		{"another failure restarts the count", "DDDFD", statePending},
-		{"an expired lease restarts the count", "DDDED", statePending},
-		{"a regenerate restarts the count", "DDDRD", statePending},
-		{"a replaced file restarts the count", "DDDCD", statePending},
-		{"a changed duration restarts the count", "DDDLD", statePending},
+		{"another failure restarts the count", "DDDFDDD", statePending},
+		{"an expired lease restarts the count", "DDDEDDD", statePending},
+		{"an expired lease a regenerate takes back restarts the count", "DDDXDDD", statePending},
+		{"a regenerate restarts the count", "DDDRDDD", statePending},
+		{"a replaced file restarts the count", "DDDCDDD", statePending},
+		{"a changed duration restarts the count", "DDDLDDD", statePending},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			file := f.file(t, folder, tc.name)
@@ -177,6 +181,14 @@ func TestFinishMakesRepeatedDamageUnusableDB(t *testing.T) {
 				case 'E':
 					f.exec(t, `UPDATE public.media_file_trickplay SET lease_expires_at = now() - interval '1 second' WHERE media_file_id = $1`, file)
 					f.reconcile(t)
+				case 'X':
+					// A missing file is not requeued, so only the reclaim runs.
+					f.exec(t, `UPDATE public.media_file_trickplay SET lease_expires_at = now() - interval '1 second' WHERE media_file_id = $1`, file)
+					f.exec(t, `UPDATE public.media_files SET missing_since = now() WHERE id = $1`, file)
+					if _, err := f.repo.Regenerate(t.Context(), []int{file}); err != nil {
+						t.Fatal(err)
+					}
+					f.exec(t, `UPDATE public.media_files SET missing_since = NULL WHERE id = $1`, file)
 				default:
 					outcome := Damaged
 					if step == 'F' {

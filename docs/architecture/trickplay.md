@@ -65,10 +65,10 @@ serializes it across servers.
   `damaged_failures` counts permanent causes among the row's latest
   failures; the fourth in a row marks the row `unusable`. Any other
   failure, an expired lease, a changed file (size, hash, or duration, as
-  the stale check compares them), a publish, or a requeue
-  (regenerate, recipe or tone-map change) starts the count again. A cause that is the server's own
-  (a shutdown, no transcode node to run on) returns the row without counting
-  a failure.
+  the stale check compares them), a publish, or a requeue (regenerate,
+  recipe or tone-map change) starts the count again. A cause that is the
+  server's own (a shutdown, no transcode node to run on) returns the row
+  without counting a failure.
 
 `recipe_version` is the newest generation algorithm (`AlgorithmVersion`)
 that has touched a row. A server claims, requeues, and invalidates only rows
