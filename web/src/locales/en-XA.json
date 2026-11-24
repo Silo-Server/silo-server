@@ -2581,6 +2581,18 @@
       "value": "⟦Ṁåẋîɱûɱ ƀîţŕåţé~~~~~~⟧"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ ţĥé Ñéẋţ Ûþ çåŕđ ñéåŕ ţĥé éñđ öƒ åñ éþîšöđé.~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ Ñéẋţ Ûþ~~~~~⟧"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

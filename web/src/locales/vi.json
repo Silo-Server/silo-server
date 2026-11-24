@@ -2529,6 +2529,18 @@
       "value": "Tốc độ bit tối đa"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Hiển thị thẻ Tập tiếp theo khi tập sắp kết thúc."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Hiển thị Tập tiếp theo"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

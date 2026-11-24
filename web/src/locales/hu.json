@@ -2529,6 +2529,18 @@
       "value": "Maximális bitsebesség"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "A Következő epizódok kártya megjelenítése az epizód vége felé."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Következő epizódok megjelenítése"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

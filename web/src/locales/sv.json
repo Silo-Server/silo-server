@@ -2529,6 +2529,18 @@
       "value": "Högsta bithastighet"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Visa kortet Nästa avsnitt mot slutet av ett avsnitt."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Visa Nästa avsnitt"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

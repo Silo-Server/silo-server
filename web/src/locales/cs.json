@@ -2595,6 +2595,18 @@
       "value": "Maximální datový tok"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Zobrazí kartu Další díly ke konci dílu."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Zobrazit Další díly"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

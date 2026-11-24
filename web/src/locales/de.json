@@ -2537,6 +2537,18 @@
       "value": "Maximale Bitrate"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Zeigt gegen Ende einer Folge die Karte „Nächste Folgen“ an."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Nächste Folgen anzeigen"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

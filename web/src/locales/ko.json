@@ -2504,6 +2504,18 @@
       "value": "최대 비트레이트"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "에피소드가 끝날 무렵 다음 에피소드 카드를 표시해요."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "다음 에피소드 표시"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

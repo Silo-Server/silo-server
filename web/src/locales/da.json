@@ -2529,6 +2529,18 @@
       "value": "Maksimal bithastighed"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Vis kortet Næste afsnit, når et afsnit nærmer sig slutningen."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Vis Næste afsnit"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

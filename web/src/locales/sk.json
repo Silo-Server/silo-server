@@ -2595,6 +2595,18 @@
       "value": "Maximálny dátový tok"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Ku koncu epizódy zobrazí kartu Ďalšie epizódy."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Zobraziť Ďalšie epizódy"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

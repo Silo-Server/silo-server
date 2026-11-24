@@ -2553,6 +2553,18 @@
       "value": "קצב סיביות מרבי"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "הצגת הכרטיס ”הפרקים הבאים” לקראת סוף הפרק."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "הצגת הפרקים הבאים"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

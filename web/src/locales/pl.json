@@ -2595,6 +2595,18 @@
       "value": "Maksymalny bitrate"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Pokazuj kartę Następne odcinki pod koniec odcinka."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Pokazuj Następne odcinki"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

@@ -2553,6 +2553,18 @@
       "value": "\u200F\u202EMaximum bitrate\u202C"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow the Next Up card near the end of an episode.\u202C"
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow Next Up\u202C"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

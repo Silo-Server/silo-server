@@ -2496,6 +2496,18 @@
       "value": "Kadar bit maksimum"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Tunjukkan kad Episod seterusnya apabila episod hampir tamat."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Tunjukkan Episod seterusnya"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

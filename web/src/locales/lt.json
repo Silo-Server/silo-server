@@ -2611,6 +2611,18 @@
       "value": "Didžiausia sparta"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Rodyti kortelę „Kiti epizodai“ artėjant epizodo pabaigai."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Rodyti kitus epizodus"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

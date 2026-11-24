@@ -2529,6 +2529,18 @@
       "value": "Максимален битрейт"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Показване на картата „Следващи епизоди“ близо до края на епизода."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Показване на „Следващи епизоди“"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

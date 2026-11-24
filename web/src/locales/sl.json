@@ -2595,6 +2595,18 @@
       "value": "Največja bitna hitrost"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Proti koncu epizode prikaži kartico z naslednjo epizodo."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Prikaži naslednjo epizodo"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

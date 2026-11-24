@@ -2537,6 +2537,18 @@
       "value": "Maximale bitrate"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Toon de kaart Volgende afleveringen tegen het einde van een aflevering."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Volgende afleveringen tonen"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

@@ -2643,6 +2643,18 @@
       "value": "الحد الأقصى لمعدل البت"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "عرض بطاقة «الحلقات التالية» قرب نهاية الحلقة."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "عرض الحلقات التالية"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

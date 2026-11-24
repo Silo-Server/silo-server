@@ -2529,6 +2529,18 @@
       "value": "Maksimaalne bitikiirus"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Näitab osa lõpu lähedal kaarti „Järgmised osad“."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Järgmiste osade näitamine"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

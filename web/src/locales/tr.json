@@ -2549,6 +2549,18 @@
       "value": "En yüksek bit hızı"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Bir bölümün sonuna doğru Sıradaki bölümler kartını gösterir."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Sıradaki bölümleri göster"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

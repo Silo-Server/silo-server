@@ -2578,6 +2578,18 @@
       "value": "Maksimālais bitu ātrums"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Tuvu epizodes beigām rāda kartīti „Nākamās epizodes”."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Rādīt kartīti „Nākamās epizodes”"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

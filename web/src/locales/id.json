@@ -2496,6 +2496,18 @@
       "value": "Bitrate maksimum"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Tampilkan kartu Episode berikutnya menjelang akhir episode."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Tampilkan Episode berikutnya"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

@@ -2562,6 +2562,18 @@
       "value": "Taxa de bits máxima"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Mostrar o cartão Próximos episódios perto do fim de um episódio."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Mostrar Próximos episódios"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

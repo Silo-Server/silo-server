@@ -2562,6 +2562,18 @@
       "value": "Débit maximal"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Affiche la carte « Prochains épisodes » vers la fin d’un épisode."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Afficher « Prochains épisodes »"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

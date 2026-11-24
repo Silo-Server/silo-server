@@ -2529,6 +2529,18 @@
       "value": "Enimmäisbittinopeus"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Näytä Seuraavat jaksot -kortti, kun jakso on loppumassa."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Näytä Seuraavat jaksot"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

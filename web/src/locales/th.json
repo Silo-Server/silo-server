@@ -2496,6 +2496,18 @@
       "value": "บิตเรตสูงสุด"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "แสดงการ์ดตอนถัดไปเมื่อใกล้จบตอน"
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "แสดงตอนถัดไป"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

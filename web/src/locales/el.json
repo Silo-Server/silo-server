@@ -2529,6 +2529,18 @@
       "value": "Μέγιστος ρυθμός bit"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Εμφάνιση της κάρτας «Επόμενα επεισόδια» κοντά στο τέλος ενός επεισοδίου."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Εμφάνιση επόμενων επεισοδίων"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

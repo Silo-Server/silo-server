@@ -2631,6 +2631,18 @@
       "value": "Максимальний бітрейт"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Показувати картку «Наступні епізоди» наприкінці епізоду."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Показувати «Наступні епізоди»"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

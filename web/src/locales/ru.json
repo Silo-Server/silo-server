@@ -2643,6 +2643,18 @@
       "value": "Максимальный битрейт"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "Показывать карточку «Следующая серия» ближе к концу серии."
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "Показывать карточку «Следующая серия»"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,

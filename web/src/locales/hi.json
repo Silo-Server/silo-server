@@ -2549,6 +2549,18 @@
       "value": "अधिकतम बिटरेट"
     }
   ],
+  "settingsManifest.playback.next_up_enabled.description": [
+    {
+      "type": 0,
+      "value": "एपिसोड खत्म होने के करीब “अगले एपिसोड” कार्ड दिखाएँ।"
+    }
+  ],
+  "settingsManifest.playback.next_up_enabled.label": [
+    {
+      "type": 0,
+      "value": "अगले एपिसोड दिखाएँ"
+    }
+  ],
   "settingsManifest.playback.next_up_prompt_seconds.description": [
     {
       "type": 0,
