@@ -101,6 +101,9 @@ type TranscodeManager struct {
 	// restart or on another server keeps measuring the same play. ok is false
 	// when none was saved. No-op when nil.
 	RestoreReconstructedWatch func(ctx context.Context, sessionID string) (watch WatchTime, ok bool)
+	// StreamEndsFn returns the recorder that stores where a transcode found a
+	// file's media ends. Nil, or a nil result, stores nothing.
+	StreamEndsFn func() *StreamEndRecorder
 
 	// Package-private execution seams keep reconstruction lifecycle tests
 	// deterministic without invoking a host FFmpeg binary. Production always
@@ -1563,4 +1566,17 @@ func (m *TranscodeManager) CleanupOrphanedTranscodes() (int, error) {
 	m.inFlightMu.Unlock()
 
 	return CleanupOrphanedTranscodeDirs(m.runtimeConfig().TranscodeDir, active, MaxTokenTTL)
+}
+
+// ServePastEndOfStream answers a segment request past the media's end
+// (TranscodeSession.ServePastEndOfStream) and records where mediaFileID's
+// media ends (StreamEndRecorder), and reports whether it answered.
+func (m *TranscodeManager) ServePastEndOfStream(ctx context.Context, w http.ResponseWriter, session *TranscodeSession, mediaFileID int, name string, err error) bool {
+	if !session.ServePastEndOfStream(w, name, err) {
+		return false
+	}
+	if end, ok := session.LearnedStreamEnd(); ok && m != nil && m.StreamEndsFn != nil {
+		m.StreamEndsFn().Note(ctx, mediaFileID, end)
+	}
+	return true
 }

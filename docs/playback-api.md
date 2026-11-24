@@ -388,6 +388,16 @@ id); clients never retry automatically and treat `429` as drop.
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
 
+An encoded transcode's playlist can list video segments past the end of the
+media. Once an FFmpeg run of the session has exited 0 without a demux error, or a
+run started past the end and wrote nothing, a request for such a segment answers
+`200` with the segment's media type and a segment that holds no media: an
+MPEG-TS PAT and PMT, or an fMP4 fragment whose tracks have no samples. It does
+not restart FFmpeg. How far a player steps over such segments depends on the
+player; the conditions and the duration correction that follows are in the
+[protocol](architecture/playback-protocol-v3.md). Transcode nodes and the
+Jellyfin-compatible transcode answer it the same way.
+
 These reuse the shared byte-delivery handlers behind the native API listener, as the raw
 playback registry allows. The plan's URLs
 carry the signed stream reference `st`; a media element that cannot set headers

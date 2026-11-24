@@ -390,6 +390,22 @@ func compatSourceHasSurroundAudio(source PlaybackMediaSource) bool {
 	return false
 }
 
+// compatRecipeFileID is the media file the play session's transcode reads,
+// when it is the file source names, or 0.
+func compatRecipeFileID(playSession *PlaybackSession, source PlaybackMediaSource) int {
+	if playSession == nil {
+		return 0
+	}
+	fileID := playSession.UpstreamMediaFileID
+	if playSession.Recipe != nil {
+		fileID = playSession.Recipe.MediaFileID
+	}
+	if fileID == 0 || fileID != source.FileID {
+		return 0
+	}
+	return fileID
+}
+
 func compatRecipeMatchesSource(recipe *playback.RecipeCard, source PlaybackMediaSource) bool {
 	return recipe != nil &&
 		recipe.MediaFileID == source.FileID &&
@@ -1285,6 +1301,9 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 		},
 	})
 	if err != nil {
+		if h.tm.ServePastEndOfStream(r.Context(), w, transcodeSession, compatRecipeFileID(playSession, *source), segmentName, err) {
+			return
+		}
 		if r.Context().Err() != nil {
 			// net/http also ends the context of a client that only
 			// half-closed and is still reading. Answer it as a timed-out

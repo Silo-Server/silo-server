@@ -249,6 +249,9 @@ type PlaybackHandler struct {
 	SettingsRepo       PlaybackSettingsReader     // optional; reads server settings (e.g., allow_4k_transcode)
 	FileVersionFetcher PlaybackFileVersionFetcher // optional; queries sibling file versions for 4K guard
 	ProbeEnsurer       PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
+	// StreamEnds stores where a transcode found a file's media ends; nil
+	// stores nothing.
+	StreamEnds *playback.StreamEndRecorder
 	// CopySafetyRacer resolves an unknown H.264 copy-safety verdict behind an
 	// already-issued stream-copy plan. Optional: without it an unknown verdict
 	// stays unknown, and strict web decoders and downloads treat the file as
@@ -391,6 +394,7 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 		h.maybeStartThrottler(ctx, ts)
 	}
 	h.tm.RestoreReconstructedClient = h.restoreReconstructedClient
+	h.tm.StreamEndsFn = func() *playback.StreamEndRecorder { return h.StreamEnds }
 	h.tm.RestoreReconstructedWatch = h.restoreReconstructedWatch
 	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string, dead *playback.TranscodeSession) {
 		// ffmpeg crash — tear the session down; a client holding a valid stream
@@ -2421,6 +2425,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 		CopyLookaheadTimeout: 1200 * time.Millisecond,
 	})
 	if err != nil {
+		if h.tm.ServePastEndOfStream(r.Context(), w, transcodeSession, transcodeSession.Opts().MediaFileID, segmentName, err) {
+			return
+		}
 		if r.Context().Err() != nil {
 			// net/http also ends the context of a client that only
 			// half-closed and is still reading. Answer it as a timed-out
