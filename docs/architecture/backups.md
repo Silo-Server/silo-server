@@ -1904,8 +1904,8 @@ server-specific settings (below), so it lists a cleared unit with a
 credential the live server supplies that way as kept, not for re-entry, and
 leaves the settings it supplies out of the list of those the key cannot read
 (`ServerSpecificSettingKeys`). Only a connection counts: an empty value, an
-encrypted one this key cannot open, a provider list with no providers (as a
-server's first start writes it), ChatGPT credentials with no connected
+encrypted one this key cannot open, a provider list that does not parse or
+has no providers (as a server's first start writes it), ChatGPT credentials with no connected
 account, and a job binding, which only names a provider, supply nothing, and
 a unit's other settings without its credential, such as a push relay waiting
 to be registered again, connect nowhere. `TestEveryCredentialSettingIsDecided`

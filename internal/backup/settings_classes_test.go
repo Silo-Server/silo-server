@@ -192,6 +192,7 @@ func TestOnlyAConnectionIsSupplied(t *testing.T) {
 		want             bool
 	}{
 		{"providers", config.AIProvidersSettingKey, seal(cipher, config.AIProvidersSettingKey, provider), cipher, true},
+		{"unreadable providers", config.AIProvidersSettingKey, seal(cipher, config.AIProvidersSettingKey, "not json"), cipher, false},
 		{"no providers", config.AIProvidersSettingKey, seal(cipher, config.AIProvidersSettingKey, noProviders[config.AIProvidersSettingKey]), cipher, false},
 		{"connected ChatGPT", chatgpt.CredentialsKey, seal(cipher, chatgpt.CredentialsKey, connected), cipher, true},
 		{"disconnected ChatGPT", chatgpt.CredentialsKey, seal(cipher, chatgpt.CredentialsKey,

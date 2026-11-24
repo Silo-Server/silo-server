@@ -162,6 +162,14 @@ func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl Co
 	if err != nil || !found {
 		return discard(fmt.Errorf("reading %s's oid: %w", restored, errors.Join(err, errIf(!found, "not found"))))
 	}
+	// The live server's own settings replace the backup's after the
+	// post-load steps clear what they cannot keep, so those steps do not
+	// report them. Read before the load, so this connection has long ended
+	// when carryLiveState checks the live database is idle.
+	liveOwn, err := loader.ServerSpecificSettingKeys(ctx, opts.LiveURL, opts.Cipher)
+	if err != nil {
+		return discard(fmt.Errorf("reading this server's own settings: %w", err))
+	}
 	_, _ = fmt.Fprintf(out, "Restoring into %s…\n", restored)
 	if err := loader.Load(ctx, restoredURL, src.path(DumpName)); err != nil {
 		return discard(err)
@@ -180,11 +188,7 @@ func RestoreSwap(ctx context.Context, src *Source, loader DatabaseLoader, ctl Co
 		}
 	}
 	post := newPostLoad(m, opts.Validate, out)
-	// The live server's own settings replace the backup's after the steps
-	// below clear what they cannot keep, so those steps do not report them.
-	if post.liveOwn, err = loader.ServerSpecificSettingKeys(ctx, opts.LiveURL, opts.Cipher); err != nil {
-		return discard(fmt.Errorf("reading this server's own settings: %w", err))
-	}
+	post.liveOwn = liveOwn
 	// New signing keys first, so the lost-settings pass does not list them.
 	if err := post.step(stepSigningKeys, rotateSigningSecrets(ctx, loader, restoredURL, opts.Cipher, out)); err != nil {
 		return discard(err)

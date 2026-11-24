@@ -276,10 +276,10 @@ func (l PGLoader) ServerSpecificSettingKeys(ctx context.Context, liveURL string,
 // suppliesConnection reports whether the live server's value of a
 // server-specific setting key supplies what a restore would otherwise
 // report as lost. Nothing is supplied by an empty value, an encrypted one
-// cipher (nil for none) cannot open, an AI provider registry with no
-// providers (which a server's first start writes), ChatGPT credentials
-// with no connected account, or a job binding, which only names a provider
-// of the registry.
+// cipher (nil for none) cannot open, an AI provider registry that does not
+// parse or has no providers (which a server's first start writes), ChatGPT
+// credentials with no connected account, or a job binding, which only names
+// a provider of the registry.
 func suppliesConnection(key, value string, cipher *secret.Cipher) bool {
 	if secret.IsEncrypted(value) {
 		if cipher == nil {
@@ -294,7 +294,7 @@ func suppliesConnection(key, value string, cipher *secret.Cipher) bool {
 	switch {
 	case key == config.AIProvidersSettingKey:
 		registry, err := config.ParseAIProviderRegistry(value)
-		return err != nil || len(registry.Providers) > 0
+		return err == nil && len(registry.Providers) > 0
 	case key == chatgpt.CredentialsKey:
 		return chatgpt.Connected(value)
 	case slices.Contains(config.AIProviderBindingKeys(), key):

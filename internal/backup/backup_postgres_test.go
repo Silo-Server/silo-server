@@ -1692,7 +1692,8 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 		}
 	}
 	// The report leaves out what the carry takes from the live server, except
-	// the job bindings and a ChatGPT record ("live") with no connected account.
+	// the job bindings, and a provider list and a ChatGPT record ("live")
+	// that hold no connection.
 	liveOwn, err := (PGLoader{}).ServerSpecificSettingKeys(ctx, liveURL, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1702,7 +1703,7 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 	}
 	var fromLive []string
 	for i, key := range keys {
-		if _, rotated := rotatedSettings[key]; i%2 == 0 && !rotated && key != plugins.ProvisionRestoreHoldKey && key != chatgpt.CredentialsKey && !slices.Contains(config.AIProviderBindingKeys(), key) {
+		if _, rotated := rotatedSettings[key]; i%2 == 0 && !rotated && key != plugins.ProvisionRestoreHoldKey && key != chatgpt.CredentialsKey && key != config.AIProvidersSettingKey && !slices.Contains(config.AIProviderBindingKeys(), key) {
 			fromLive = append(fromLive, key)
 		}
 	}

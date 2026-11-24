@@ -880,7 +880,7 @@ func TestSwapReportsOnlyWhatTheRestoredServerLacks(t *testing.T) {
 	f.validate = ValidateOptions{KeyCheck: "another-key", AcceptLostCredentials: true}
 	f.ctl.unreadable = []string{"ai.providers", "notifications.web_push.vapid_keypair", "tmdb.api_key"}
 	f.ctl.cleared = []string{"mail (SMTP)", "AI providers", "the push relay"}
-	f.ctl.liveOwn = []string{"ai.providers", "ai.text_provider_id", "notifications.push_relay_reregistration_required",
+	f.ctl.liveOwn = []string{"ai.providers", "notifications.push_relay_reregistration_required",
 		"notifications.push_relay_url", "notifications.web_push.vapid_keypair"}
 	if err, _ := f.restore(); err != nil {
 		t.Fatalf("%v\n%s", err, f.output.String())
