@@ -2,8 +2,12 @@ package ratelimit
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
+
+	"github.com/alicebob/miniredis/v2"
+	"github.com/redis/go-redis/v9"
 
 	"github.com/Silo-Server/silo-server/internal/auth"
 )
@@ -53,5 +57,43 @@ func TestSignInLimiterKnownAddressesGetTheirOwnBudget(t *testing.T) {
 	}
 	if _, ok := reserve(stranger); ok {
 		t.Fatal("resetting a known address unlocked the name")
+	}
+}
+
+// A name keeps only the addresses it used most recently, in either store, so
+// refreshes that each name a new address cannot grow the store without
+// bound; an address stops being known when it expires.
+func TestSignInTrustKeepsTheMostRecentAddresses(t *testing.T) {
+	client := redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()})
+	t.Cleanup(func() { _ = client.Close() })
+	clock := time.Unix(1_800_000_000, 0)
+	now := func() time.Time { return clock }
+	const name = "signin_name:alice"
+	entry := func(i int) signInTrustEntry {
+		return signInTrustEntry{nameKey: name, pair: signInSourcePair(name, fmt.Sprintf("192.0.2.%d", i))}
+	}
+
+	for label, store := range map[string]signInTrustBackend{
+		"memory": newMemorySignInTrust(now),
+		"redis":  redisSignInTrust{client: client, now: now},
+	} {
+		t.Run(label, func(t *testing.T) {
+			ctx := context.Background()
+			for i := range SignInTrustMaxAddresses + 1 {
+				clock = clock.Add(time.Second)
+				if err := store.remember(ctx, []signInTrustEntry{entry(i)}, SignInTrustTTL); err != nil {
+					t.Fatal(err)
+				}
+			}
+			for i, want := range map[int]bool{0: false, 1: true, SignInTrustMaxAddresses: true} {
+				if got, err := store.known(ctx, entry(i)); err != nil || got != want {
+					t.Errorf("address %d known = %v (err %v), want %v", i, got, err, want)
+				}
+			}
+			clock = clock.Add(SignInTrustTTL)
+			if got, err := store.known(ctx, entry(SignInTrustMaxAddresses)); err != nil || got {
+				t.Errorf("expired address known = %v (err %v)", got, err)
+			}
+		})
 	}
 }

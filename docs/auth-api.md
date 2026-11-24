@@ -440,7 +440,9 @@ An address becomes known for an account's username and email address when a pass
 sign-in to the account succeeds from it (including signup, invitation acceptance and a
 completed password reset) or one of the account's login sessions refreshes from it (a
 Jellyfin app's session refreshes its login session as the app keeps using it), and
-stays known for 30 days after the last of those (`ratelimit.SignInTrustTTL`). While the
+stays known for 30 days after the last of those (`ratelimit.SignInTrustTTL`). A name
+keeps the 32 addresses it used most recently (`ratelimit.SignInTrustMaxAddresses`), so
+refreshes that each name a new address cannot grow the store without bound. While the
 name is locked, each known address spends a budget of its own instead,
 `ratelimit.SignInSourcePolicy` (ten attempts, then 15 minutes locked), which a success
 from it clears. Addresses count as the per-address request budgets count them: an IPv4

@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -21,6 +23,13 @@ var SignInSourcePolicy = AttemptPolicy{MaxAttempts: 10, Window: 15 * time.Minute
 // SignInTrustTTL is how long a client address stays known for a name after
 // the account last signed in or refreshed a session from it.
 const SignInTrustTTL = 30 * 24 * time.Hour
+
+// SignInTrustMaxAddresses is how many known addresses one name keeps: the
+// ones it signed in or refreshed from most recently. The cap bounds what
+// refreshes can store, since a client on a network the server trusts as a
+// proxy can name a new address on each one, and those refreshes only write
+// their own account's names.
+const SignInTrustMaxAddresses = 32
 
 // signInTrustCallTimeout bounds one trust lookup or write, so a Redis outage
 // delays a sign-in or refresh by at most this much.
@@ -49,9 +58,18 @@ type SignInLimiter struct {
 
 var _ auth.SignInAttemptLimiter = (*SignInLimiter)(nil)
 
+// signInTrustBackend keeps each name's known addresses: for a name key, a
+// set of address entries (signInSourcePair), each with an expiry, at most
+// SignInTrustMaxAddresses of them, dropping the one that expires first.
 type signInTrustBackend interface {
-	known(ctx context.Context, key string) (bool, error)
-	remember(ctx context.Context, keys []string, ttl time.Duration) error
+	known(ctx context.Context, entry signInTrustEntry) (bool, error)
+	remember(ctx context.Context, entries []signInTrustEntry, ttl time.Duration) error
+}
+
+// signInTrustEntry is one address known for one name.
+type signInTrustEntry struct {
+	nameKey string
+	pair    string
 }
 
 // NewSignInLimiter returns the per-name password sign-in limiter, shared
@@ -63,7 +81,7 @@ func NewSignInLimiter(client *redis.Client) *SignInLimiter {
 		return &SignInLimiter{
 			names:   NewRedisAttemptLimiter(client, SignInNamePolicy),
 			sources: NewRedisAttemptLimiter(client, SignInSourcePolicy),
-			trust:   redisSignInTrust{client: client},
+			trust:   redisSignInTrust{client: client, now: time.Now},
 		}
 	}
 	return NewMemorySignInLimiter(SignInNamePolicy, SignInSourcePolicy)
@@ -89,7 +107,7 @@ func (l *SignInLimiter) Reserve(ctx context.Context, nameKey, source string) (au
 		return auth.SignInLaneName, 0, false
 	}
 	pair := signInSourcePair(nameKey, source)
-	if pair == "" || !l.known(ctx, pair) {
+	if pair == "" || !l.known(ctx, signInTrustEntry{nameKey: nameKey, pair: pair}) {
 		return auth.SignInLaneName, nameRetry, false
 	}
 	sourceRetry, ok := l.sources.Reserve(ctx, "signin_source:"+pair)
@@ -115,29 +133,29 @@ func (l *SignInLimiter) Reset(ctx context.Context, nameKey, source string, lane 
 // A failure is logged: the names then lock for source like for any other
 // address.
 func (l *SignInLimiter) Trust(ctx context.Context, nameKeys []string, source string) {
-	keys := make([]string, 0, len(nameKeys))
+	entries := make([]signInTrustEntry, 0, len(nameKeys))
 	for _, nameKey := range nameKeys {
 		if pair := signInSourcePair(nameKey, source); pair != "" {
-			keys = append(keys, pair)
+			entries = append(entries, signInTrustEntry{nameKey: nameKey, pair: pair})
 		}
 	}
-	if len(keys) == 0 {
+	if len(entries) == 0 {
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, signInTrustCallTimeout)
 	defer cancel()
-	if err := l.trust.remember(ctx, keys, SignInTrustTTL); err != nil {
+	if err := l.trust.remember(ctx, entries, SignInTrustTTL); err != nil {
 		slog.WarnContext(ctx, "sign-in known address write failed", "component", "ratelimit", "error", err)
 	}
 }
 
-// known reports whether pair's address is known for its name. A backend
+// known reports whether entry's address is known for its name. A backend
 // error counts as unknown: the name's lock then holds, as it did before the
 // address was known.
-func (l *SignInLimiter) known(ctx context.Context, pair string) bool {
+func (l *SignInLimiter) known(ctx context.Context, entry signInTrustEntry) bool {
 	ctx, cancel := context.WithTimeout(ctx, signInTrustCallTimeout)
 	defer cancel()
-	ok, err := l.trust.known(ctx, pair)
+	ok, err := l.trust.known(ctx, entry)
 	if err != nil {
 		slog.WarnContext(ctx, "sign-in known address lookup failed", "component", "ratelimit", "error", err)
 		return false
@@ -159,58 +177,103 @@ func signInSourcePair(nameKey, source string) string {
 
 type memorySignInTrust struct {
 	mu        sync.Mutex
-	expires   map[string]time.Time
+	names     map[string]map[string]time.Time // name key -> pair -> expiry
 	now       func() time.Time
 	lastSweep time.Time
 }
 
 func newMemorySignInTrust(now func() time.Time) *memorySignInTrust {
-	return &memorySignInTrust{expires: map[string]time.Time{}, now: now}
+	return &memorySignInTrust{names: map[string]map[string]time.Time{}, now: now}
 }
 
-func (m *memorySignInTrust) known(_ context.Context, key string) (bool, error) {
+func (m *memorySignInTrust) known(_ context.Context, entry signInTrustEntry) (bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.now().Before(m.expires[key]), nil
+	return m.now().Before(m.names[entry.nameKey][entry.pair]), nil
 }
 
-func (m *memorySignInTrust) remember(_ context.Context, keys []string, ttl time.Duration) error {
+func (m *memorySignInTrust) remember(_ context.Context, entries []signInTrustEntry, ttl time.Duration) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	now := m.now()
-	// Expired entries are dropped lazily, at most once a day, so the map
-	// stays bounded without a background goroutine.
+	// Names whose addresses all expired are dropped lazily, at most once a
+	// day, so the map stays bounded without a background goroutine.
 	if now.Sub(m.lastSweep) >= 24*time.Hour {
-		for k, exp := range m.expires {
-			if !now.Before(exp) {
-				delete(m.expires, k)
+		for nameKey, pairs := range m.names {
+			dropExpired(pairs, now)
+			if len(pairs) == 0 {
+				delete(m.names, nameKey)
 			}
 		}
 		m.lastSweep = now
 	}
-	for _, key := range keys {
-		m.expires[key] = now.Add(ttl)
+	for _, entry := range entries {
+		pairs := m.names[entry.nameKey]
+		if pairs == nil {
+			pairs = map[string]time.Time{}
+			m.names[entry.nameKey] = pairs
+		}
+		pairs[entry.pair] = now.Add(ttl)
+		dropExpired(pairs, now)
+		for len(pairs) > SignInTrustMaxAddresses {
+			delete(pairs, firstToExpire(pairs))
+		}
 	}
 	return nil
 }
 
+func dropExpired(pairs map[string]time.Time, now time.Time) {
+	for pair, expires := range pairs {
+		if !now.Before(expires) {
+			delete(pairs, pair)
+		}
+	}
+}
+
+func firstToExpire(pairs map[string]time.Time) string {
+	var first string
+	var firstExpires time.Time
+	for pair, expires := range pairs {
+		if first == "" || expires.Before(firstExpires) {
+			first, firstExpires = pair, expires
+		}
+	}
+	return first
+}
+
 // --- Redis backend ---
 
+// redisSignInTrust keeps each name's known addresses in one sorted set,
+// scored by expiry in Unix milliseconds.
 type redisSignInTrust struct {
 	client *redis.Client
+	now    func() time.Time
 }
 
-func redisSignInTrustKey(key string) string { return "silo:signin_trust:" + key }
+func redisSignInTrustKey(nameKey string) string { return "silo:signin_trust:" + nameKey }
 
-func (r redisSignInTrust) known(ctx context.Context, key string) (bool, error) {
-	n, err := r.client.Exists(ctx, redisSignInTrustKey(key)).Result()
-	return n > 0, err
+func (r redisSignInTrust) known(ctx context.Context, entry signInTrustEntry) (bool, error) {
+	expires, err := r.client.ZScore(ctx, redisSignInTrustKey(entry.nameKey), entry.pair).Result()
+	if errors.Is(err, redis.Nil) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return expires > float64(r.now().UnixMilli()), nil
 }
 
-func (r redisSignInTrust) remember(ctx context.Context, keys []string, ttl time.Duration) error {
+func (r redisSignInTrust) remember(ctx context.Context, entries []signInTrustEntry, ttl time.Duration) error {
+	now := r.now()
+	expires := float64(now.Add(ttl).UnixMilli())
 	pipe := r.client.Pipeline()
-	for _, key := range keys {
-		pipe.Set(ctx, redisSignInTrustKey(key), "1", ttl)
+	for _, entry := range entries {
+		key := redisSignInTrustKey(entry.nameKey)
+		pipe.ZAdd(ctx, key, redis.Z{Score: expires, Member: entry.pair})
+		pipe.ZRemRangeByScore(ctx, key, "-inf", strconv.FormatInt(now.UnixMilli(), 10))
+		// Keep the addresses that expire last.
+		pipe.ZRemRangeByRank(ctx, key, 0, -SignInTrustMaxAddresses-1)
+		pipe.Expire(ctx, key, ttl)
 	}
 	_, err := pipe.Exec(ctx)
 	return err
