@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { Link } from "react-router";
 
+import { ActivePeopleChart } from "@/components/admin/insights/ActivePeopleChart";
+
 import {
   PlaysOverTimeChart,
   type PlaysOverTimeView,
@@ -189,6 +191,16 @@ export function InsightsHourOfDayWidget() {
       <ActivityBody>
         {(data) => <ViewingTimeChart cells={data.heatmap} axis="hour" metric={metric} fill />}
       </ActivityBody>
+    </InsightsWidgetCard>
+  );
+}
+
+/** Distinct profiles and accounts watching per day, week or month. */
+export function InsightsActivePeopleWidget() {
+  const t = useT();
+  return (
+    <InsightsWidgetCard title={t("web.admin.insights.activity.activePeople.title")} tab="playback">
+      <ActivityBody>{(data) => <ActivePeopleChart data={data} fill />}</ActivityBody>
     </InsightsWidgetCard>
   );
 }

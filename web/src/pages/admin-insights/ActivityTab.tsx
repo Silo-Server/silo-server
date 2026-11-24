@@ -1,8 +1,10 @@
 import { useMemo, useState } from "react";
 
 import {
+  BarList,
   ChartEmptyState,
   LineChart,
+  type BarListItem,
   chartSeriesColor,
   type LineChartOverlay,
   type LineChartPoint,
@@ -11,12 +13,18 @@ import {
 import { formatWatchTime } from "@/components/admin/dashboard/format";
 import { WidgetViewToggle } from "@/components/admin/dashboard/WidgetViewToggle";
 import { NEUTRAL_SERIES_COLOR } from "@/components/admin/dashboard/widgets/concurrentStreamsSeries";
+import { ActivePeopleChart } from "@/components/admin/insights/ActivePeopleChart";
 import { PlaysOverTimeChart } from "@/components/admin/insights/PlaysOverTimeChart";
 import { ViewingHeatmap } from "@/components/admin/insights/ViewingHeatmap";
+import { ViewingTimeChart } from "@/components/admin/insights/ViewingTimeChart";
+import type { ViewingTimeMetric } from "@/components/admin/insights/viewingTime";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAdminInsightsActivity } from "@/hooks/queries/admin/insights";
-import { useT } from "@/i18n";
+import {
+  useAdminInsightsActivity,
+  type AdminInsightsActivity,
+} from "@/hooks/queries/admin/insights";
+import { useT, type MessageKey } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
 
 import { AddToDashboardButton } from "./InsightsDashboardPins";
@@ -363,6 +371,141 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
           </CardContent>
         </Card>
       </div>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <ViewingTimeCard axis="weekday" data={data} filters={filters} />
+        <ViewingTimeCard axis="hour" data={data} filters={filters} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <Card className="surface-panel rounded-2xl border-0">
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0">
+            <div className="space-y-0.5">
+              <CardTitle className="text-sm font-bold">
+                {t("web.admin.insights.activity.activePeople.title")}
+              </CardTitle>
+              <p className="text-muted-foreground text-xs">
+                {t("web.admin.insights.activity.activePeople.subtitle")}
+              </p>
+            </div>
+            <AddToDashboardButton
+              widgetId="insights-active-people"
+              range={filters.range}
+              chartName={t("web.admin.insights.activity.activePeople.title")}
+            />
+          </CardHeader>
+          <CardContent>
+            <ActivePeopleChart data={data} height={200} />
+          </CardContent>
+        </Card>
+        <EndReasonsCard reasons={data.end_reasons} />
+      </div>
     </div>
+  );
+}
+
+/** Plays or watch time by weekday or hour, with its own metric switch. */
+function ViewingTimeCard({
+  axis,
+  data,
+  filters,
+}: {
+  axis: "weekday" | "hour";
+  data: AdminInsightsActivity;
+  filters: InsightsFilterState;
+}) {
+  const t = useT();
+  const [metric, setMetric] = useState<ViewingTimeMetric>("plays");
+  const title =
+    axis === "weekday"
+      ? t("web.admin.insights.activity.weekday.title")
+      : t("web.admin.insights.activity.hour.title");
+  return (
+    <Card className="surface-panel rounded-2xl border-0">
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0">
+        <div className="space-y-0.5">
+          <CardTitle className="text-sm font-bold">{title}</CardTitle>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.insights.activity.heatmap.subtitle", { tz: data.tz })}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <AddToDashboardButton
+            widgetId={axis === "weekday" ? "insights-weekday" : "insights-hour-of-day"}
+            range={filters.range}
+            chartName={title}
+          />
+          <WidgetViewToggle
+            value={metric}
+            options={[
+              {
+                value: "plays",
+                label: t("web.admin.insights.activity.volume.metricPlays"),
+                ariaLabel: t("web.admin.insights.activity.volume.metricPlays"),
+              },
+              {
+                value: "watch_time",
+                label: t("web.admin.insights.activity.volume.metricWatchTime"),
+                ariaLabel: t("web.admin.insights.activity.volume.metricWatchTime"),
+              },
+            ]}
+            onChange={setMetric}
+          />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <ViewingTimeChart cells={data.heatmap} axis={axis} metric={metric} height={180} />
+      </CardContent>
+    </Card>
+  );
+}
+
+const END_REASON_LABELS: Record<string, MessageKey> = {
+  stopped: "web.admin.history.endReason.stopped",
+  terminated: "web.admin.history.endReason.terminated",
+  expired: "web.admin.history.endReason.expired",
+  aborted: "web.admin.history.endReason.aborted",
+  replaced: "web.admin.history.endReason.replaced",
+};
+
+/**
+ * Sessions by why they ended. A high share of timeouts points at clients that
+ * crash or lose their connection; "Ended by server" at missing media.
+ */
+function EndReasonsCard({ reasons }: { reasons: AdminInsightsActivity["end_reasons"] }) {
+  const t = useT();
+  const total = reasons.reduce((sum, reason) => sum + reason.sessions, 0);
+  const items: BarListItem[] = reasons.map((reason) => {
+    const labelKey = END_REASON_LABELS[reason.key];
+    return {
+      id: reason.key,
+      label: labelKey ? t(labelKey) : t("web.admin.insights.activity.endReasons.unknown"),
+      value: reason.sessions,
+      secondary: t("web.admin.insights.percent", {
+        value: formatRatePercentNumber(total > 0 ? reason.sessions / total : 0),
+      }),
+    };
+  });
+  return (
+    <Card className="surface-panel rounded-2xl border-0">
+      <CardHeader className="space-y-0.5">
+        <CardTitle className="text-sm font-bold">
+          {t("web.admin.insights.activity.endReasons.title")}
+        </CardTitle>
+        <p className="text-muted-foreground text-xs">
+          {t("web.admin.insights.activity.endReasons.subtitle")}
+        </p>
+      </CardHeader>
+      <CardContent>
+        <BarList
+          items={items}
+          seriesIndex={3}
+          formatValue={(sessions) =>
+            formatInsightsCount(t, "web.admin.insights.sessionCount", sessions)
+          }
+          emptyLabel={t("web.admin.insights.activity.volume.empty")}
+        />
+      </CardContent>
+    </Card>
   );
 }

@@ -36,6 +36,7 @@ import { RecentErrorsWidget } from "./widgets/RecentErrorsWidget";
 import { RecentActivityWidget } from "./widgets/RecentActivityWidget";
 import { ApiClientsWidget } from "./widgets/ApiClientsWidget";
 import {
+  InsightsActivePeopleWidget,
   InsightsHourOfDayWidget,
   InsightsPlaysWidget,
   InsightsViewingHoursWidget,
@@ -334,6 +335,19 @@ export const DASHBOARD_WIDGETS: DashboardWidgetDefinition[] = [
     ranges: INSIGHTS_RANGES,
     views: { allowed: ["plays", "watch_time"], default: "plays" },
     Component: InsightsHourOfDayWidget,
+  }),
+  defineDashboardWidget({
+    id: "insights-active-people",
+    titleKey: "web.admin.dashboard.widgetCatalog.insightsActivePeople.title",
+    descriptionKey: "web.admin.dashboard.widgetCatalog.insightsActivePeople.description",
+    minSpan: 4,
+    maxSpan: 12,
+    defaultSpan: 6,
+    minRows: 2,
+    maxRows: 5,
+    defaultRows: 3,
+    ranges: INSIGHTS_RANGES,
+    Component: InsightsActivePeopleWidget,
   }),
   defineDashboardWidget({
     id: "watch-providers",

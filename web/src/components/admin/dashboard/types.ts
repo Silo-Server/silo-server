@@ -34,7 +34,8 @@ export type WidgetId =
   | "insights-plays"
   | "insights-viewing-hours"
   | "insights-weekday"
-  | "insights-hour-of-day";
+  | "insights-hour-of-day"
+  | "insights-active-people";
 
 /**
  * The window a metric widget covers.
