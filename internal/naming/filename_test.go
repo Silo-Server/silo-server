@@ -275,6 +275,7 @@ func TestResolvePathContext(t *testing.T) {
 	tests := []struct {
 		name                    string
 		path                    string
+		libraryRoots            []string
 		libraryType             string
 		wantType                string
 		wantRoot                string
@@ -469,6 +470,154 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: false,
 		},
 		{
+			// #5148: a provider-tagged show folder named by its original title
+			// holds season folders named by the international title.
+			name:                    "season folder titled differently from a tagged show folder",
+			path:                    "/tv/فوضى - 2015 {tmdb-227604}/Fauda - S02/Fauda - S02E01.mkv",
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/فوضى - 2015 {tmdb-227604}",
+			wantTitle:               "فوضى - 2015",
+			wantSeason:              2,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     true,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// A trailing bare IMDb id tags a show folder as well. The title keeps
+			// the id, as it does under a Season 01 folder; matching uses the id.
+			name:                    "season folder titled differently from a show folder with a bare IMDb id",
+			path:                    "/tv/فوضى tt4565380/Fauda - S01/Fauda - S01E01.mkv",
+			libraryRoots:            []string{"/tv"},
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/فوضى tt4565380",
+			wantTitle:               "فوضى tt4565380",
+			wantSeason:              1,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     true,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// A season folder with its own provider tag names another show.
+			name:                    "tagged release folder under another tagged show folder keeps its own root",
+			path:                    "/tv/Doctor Who (2005) {tvdb-78804}/Torchwood - S01 tt0485301/Torchwood - S01E01.mkv",
+			libraryRoots:            []string{"/tv"},
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/Doctor Who (2005) {tvdb-78804}/Torchwood - S01 tt0485301",
+			wantTitle:               "Torchwood",
+			wantSeason:              1,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: true,
+		},
+		{
+			// Nor is a configured library folder ending in a bare IMDb id.
+			name:                    "season folder in a library folder with a bare IMDb id keeps its own root",
+			path:                    "/tv/Library tt4565380/Fauda - S02/E01.mkv",
+			libraryRoots:            []string{"/tv/Library tt4565380"},
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/Library tt4565380/Fauda - S02",
+			wantTitle:               "Fauda",
+			wantSeason:              2,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// A tagged configured library folder is not a parent show folder.
+			name:                    "season folder in a tagged library folder keeps its own root",
+			path:                    "/tv/فوضى - 2015 {tmdb-227604}/Fauda - S02/E01.mkv",
+			libraryRoots:            []string{"/tv/فوضى - 2015 {tmdb-227604}"},
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/فوضى - 2015 {tmdb-227604}/Fauda - S02",
+			wantTitle:               "Fauda",
+			wantSeason:              2,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// Season and Series also appear in titles, so a tagged movie folder
+			// does not make World Series 2020 a season.
+			name:                    "movie in a word-labeled subfolder of a tagged movie folder stays a movie",
+			path:                    "/media/Baseball (2020) {tmdb-12345}/World Series 2020/Baseball (2020).mkv",
+			libraryRoots:            []string{"/media"},
+			libraryType:             "mixed",
+			wantType:                "movie",
+			wantRoot:                "/media/Baseball (2020) {tmdb-12345}/World Series 2020/Baseball (2020)",
+			wantTitle:               "Baseball",
+			wantYear:                2020,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// An S followed by more title text is part of the title.
+			name:                    "S token inside a title under a tagged show folder yields to a later season token",
+			path:                    "/tv/別題 {tvdb-12345}/Agent S7 (2019) - S03/E01.mkv",
+			libraryRoots:            []string{"/tv"},
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/別題 {tvdb-12345}",
+			wantTitle:               "別題",
+			wantSeason:              3,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     true,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// A spaced S, as in an abbreviation, is not the short season form.
+			name:                    "spaced S folder under a tagged movie folder stays a movie",
+			path:                    "/media/Documentary (2020) {tmdb-12345}/U.S. 2020/Documentary (2020).mkv",
+			libraryRoots:            []string{"/media"},
+			libraryType:             "mixed",
+			wantType:                "movie",
+			wantRoot:                "/media/Documentary (2020) {tmdb-12345}/U.S. 2020/Documentary (2020)",
+			wantTitle:               "Documentary",
+			wantYear:                2020,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// Release details before an S token name a release, not a season.
+			name:                    "release folder with an S-like group under a tagged movie folder stays a movie",
+			path:                    "/media/Movie (2020) {tmdb-1}/Movie.2020.2160p.WEB-DL.DDP5.1-S3/Movie.2020.2160p.mkv",
+			libraryRoots:            []string{"/media"},
+			libraryType:             "mixed",
+			wantType:                "movie",
+			wantRoot:                "/media/Movie (2020) {tmdb-1}/Movie.2020.2160p.WEB-DL.DDP5.1-S3",
+			wantTitle:               "Movie",
+			wantYear:                2020,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: true,
+		},
+		{
+			// A season token whose title matches the show folder wins over the
+			// tagged-folder fallback for an earlier token.
+			name:                    "season token matching the tagged show title wins over an earlier S token",
+			path:                    "/tv/Agent S7 (2019) {tvdb-12345}/Agent S7 - S03/E01.mkv",
+			libraryRoots:            []string{"/tv"},
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/Agent S7 (2019) {tvdb-12345}",
+			wantTitle:               "Agent S7",
+			wantYear:                2019,
+			wantSeason:              3,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     true,
+			wantMovieFolderEvidence: false,
+		},
+		{
 			name:                    "series daily date has air date but no episode number",
 			path:                    "/tv/Jeopardy! (1984)/Season 2026/Jeopardy! (1984) - 2026_04_24 - Jamie Ding.mkv",
 			libraryType:             "series",
@@ -522,7 +671,7 @@ func TestResolvePathContext(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := ResolvePathContext(tt.path, tt.libraryType)
+			ctx := ResolvePathContext(tt.path, tt.libraryType, tt.libraryRoots...)
 			if ctx == nil {
 				t.Fatal("expected non-nil PathContext")
 			}
