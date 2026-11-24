@@ -62,7 +62,7 @@ type ChangePasswordInput struct {
 	RawBody []byte
 	Body    struct {
 		CurrentPassword      string `json:"current_password" minLength:"1" maxLength:"1024" doc:"The password in use" example:"correct horse battery staple"`
-		NewPassword          string `json:"new_password" minLength:"1" maxLength:"1024" doc:"The replacement; the capability document names the length limits" example:"margin fossil quench hollow"`
+		NewPassword          string `json:"new_password" minLength:"1" maxLength:"1024" doc:"The replacement; getPasswordPolicy describes the rules it must meet" example:"margin fossil quench hollow"`
 		SignOutOtherSessions bool   `json:"sign_out_other_sessions,omitempty" doc:"Also sign the account out everywhere except this session, in the same transaction: its other login sessions (including View as user sessions it opened or that view it), its Jellyfin- and Audiobookshelf-compatible sessions, and device sign-ins it approved that were not collected yet. API keys are kept. False or omitted signs nothing else out" example:"false"`
 	}
 }

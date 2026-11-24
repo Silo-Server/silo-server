@@ -33,6 +33,9 @@ func TestPasswordPolicyRestoreNeverWeakens(t *testing.T) {
 		{config.AuthPasswordMinLengthSettingKey, "12", "", false},
 		// Out of range applies as 8, so it is weaker than a live 12.
 		{config.AuthPasswordMinLengthSettingKey, "99", "12", true},
+		// A value the setting refuses never replaces a live one, even the default.
+		{config.AuthPasswordMinLengthSettingKey, "99", "8", true},
+		{config.AuthPasswordMinLengthSettingKey, "abc", "", true},
 		{config.AuthPasswordRequireUppercaseSettingKey, "false", "true", true},
 		{config.AuthPasswordRequireUppercaseSettingKey, "true", "", false},
 		{config.AuthPasswordRequireSpecialSettingKey, "", "true", true},

@@ -102,8 +102,9 @@ Settings → Sign-in:
 
 Every new password is also at most 72 UTF-8 bytes, the bcrypt input limit. The policy is read on
 every check, so a change applies at once on every node. It applies only when a password is chosen;
-passwords already stored keep working. The recovery command `silo auth local-login enable` sets a
-temporary password without it, and the account then chooses a new one under the policy. A backup
+passwords already stored keep working. The recovery command
+`silo auth local-login enable -user <name> -temporary-password` sets a temporary password without
+it, and the account then chooses a new one under the policy. A backup
 restore never weakens the live policy.
 
 To change a password, the caller must prove knowledge of the current

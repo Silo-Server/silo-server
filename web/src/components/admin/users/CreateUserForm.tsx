@@ -5,6 +5,7 @@ import { XIcon } from "lucide-react";
 
 import type { CreateUserRequest } from "@/api/types";
 import { captureAdminUserAuthority } from "@/api/v2/adminUsers";
+import { V2ProblemError } from "@/api/v2/request";
 import {
   PolicyAccessFields,
   PolicyLimitFields,
@@ -38,7 +39,7 @@ import {
 } from "@/hooks/queries/admin/users";
 import { useAuth } from "@/hooks/useAuth";
 import { usePasswordPolicy } from "@/hooks/queries/account";
-import { newPasswordPolicyProblem, passwordErrorMessage } from "@/lib/newPassword";
+import { newPasswordHint, newPasswordPolicyProblem, passwordErrorMessage } from "@/lib/newPassword";
 import { useT } from "@/i18n";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import {
@@ -161,6 +162,7 @@ function CreateUserForm({
   const emailId = useId();
   const passwordId = useId();
   const passwordErrorId = useId();
+  const passwordHintId = useId();
   const requireChangeId = useId();
   const roleId = useId();
   const markerEditId = useId();
@@ -200,6 +202,16 @@ function CreateUserForm({
     accessGroupsLoaded &&
     !accessGroups.some((group) => group.id === selectedGroupID);
 
+  // Saved from another tab, the field is not rendered: show it first.
+  function showPasswordError(message: string) {
+    setError("");
+    flushSync(() => {
+      setDialogTab("account");
+      setPasswordError(message);
+    });
+    passwordRef.current?.focus();
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (
@@ -214,13 +226,7 @@ function CreateUserForm({
     }
     const passwordProblem = newPasswordPolicyProblem(password, passwordPolicy);
     if (passwordProblem) {
-      // Saved from another tab, the field is not rendered: show it first.
-      setError("");
-      flushSync(() => {
-        setDialogTab("account");
-        setPasswordError(passwordProblem);
-      });
-      passwordRef.current?.focus();
+      showPasswordError(passwordProblem);
       return;
     }
     // A cleared or half-typed limit is not in the policy state, which still
@@ -251,7 +257,13 @@ function CreateUserForm({
       createMutation.reset();
       onClose();
     } catch (err) {
-      setError(passwordErrorMessage(err, t("web.admin.users.list.create.saveFailed")));
+      // A policy that changed since the form loaded: the server's rule goes
+      // at the field like the form's own check.
+      if (err instanceof V2ProblemError && err.problem.errors?.[0]?.location === "body.password") {
+        showPasswordError(passwordErrorMessage(err, ""));
+      } else {
+        setError(passwordErrorMessage(err, t("web.admin.users.list.create.saveFailed")));
+      }
     } finally {
       busy.current = false;
       onBusy(false);
@@ -339,9 +351,14 @@ function CreateUserForm({
                   }}
                   aria-invalid={passwordError ? true : undefined}
                   aria-errormessage={passwordError ? passwordErrorId : undefined}
-                  aria-describedby={passwordError ? passwordErrorId : undefined}
+                  aria-describedby={
+                    passwordError ? `${passwordHintId} ${passwordErrorId}` : passwordHintId
+                  }
                   required
                 />
+                <p id={passwordHintId} className="text-muted-foreground text-xs">
+                  {newPasswordHint(passwordPolicy)}
+                </p>
                 {passwordError ? (
                   <p id={passwordErrorId} className="text-destructive text-xs">
                     {passwordError}

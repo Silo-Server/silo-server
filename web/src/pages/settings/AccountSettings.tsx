@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { toast } from "sonner";
 
-import { v2ErrorText } from "@/api/v2/request";
+import { V2ProblemError, v2ErrorText } from "@/api/v2/request";
 import { PageHeader } from "@/components/page/PageHeader";
 import { SettingsGroup } from "@/components/settings/SettingsGroup";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,11 @@ import {
   usePasswordPolicy,
 } from "@/hooks/queries/account";
 import { useT } from "@/i18n";
-import { newPasswordPolicyProblem, newPasswordRuleHint } from "@/lib/newPassword";
+import {
+  newPasswordPolicyProblem,
+  newPasswordRuleHint,
+  passwordErrorMessage,
+} from "@/lib/newPassword";
 import { AccountSignInSection } from "./AccountSignInSection";
 
 export default function AccountSettings() {
@@ -68,7 +72,13 @@ export default function AccountSettings() {
           : t("web.settings.account.password.changed"),
       );
     } catch (error) {
-      setFormError(v2ErrorText(error, t("web.settings.account.password.error.failed")));
+      const failed = t("web.settings.account.password.error.failed");
+      // A refused password names its rule in the field detail.
+      setFormError(
+        error instanceof V2ProblemError
+          ? passwordErrorMessage(error, failed)
+          : v2ErrorText(error, failed),
+      );
     }
   }
 

@@ -506,6 +506,10 @@ func invalidEmailProblem(email string) *Problem {
 // (an invite code the store refused) is a validation problem at that member;
 // everything else follows the v1 status.
 func registrationProblem(err error) *Problem {
+	// A password the policy refused reads as on every other password path.
+	if message, ok := auth.PasswordRuleMessage(err); ok {
+		return passwordMemberProblem(message)
+	}
 	var apiErr *handlers.APIError
 	if errors.As(err, &apiErr) && apiErr.Field != "" {
 		return NewProblem(TypeValidationFailed, "The request did not pass validation; see errors.").

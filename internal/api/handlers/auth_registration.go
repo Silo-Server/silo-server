@@ -291,7 +291,8 @@ func (h *AuthHandler) PasswordPolicy(ctx context.Context) (auth.PasswordPolicy, 
 
 // passwordPolicyError is the API error for a password the policy refused,
 // reported at field, or nil when err is not such a refusal. The message has
-// no full stop: the v1 and v2 surfaces render it as their other messages.
+// no full stop, like the handlers' other messages; v2 renders the refusal
+// from its cause.
 func passwordPolicyError(err error, field string) *APIError {
 	message, ok := auth.PasswordRuleMessage(err)
 	if !ok {
@@ -302,5 +303,5 @@ func passwordPolicyError(err error, field string) *APIError {
 	if errors.Is(err, auth.ErrPasswordTooLong) {
 		code = codePasswordTooLong
 	}
-	return &APIError{Status: http.StatusBadRequest, Code: code, Message: message, Field: field}
+	return (&APIError{Status: http.StatusBadRequest, Code: code, Message: message, Field: field}).WithCause(err)
 }

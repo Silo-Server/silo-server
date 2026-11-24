@@ -149,6 +149,10 @@ func off(restored, live string) bool { return on(live, restored) }
 // applies as the built-in floor (auth.LoadPasswordPolicy), so a stored "99"
 // is weaker than a live "12".
 func shorterPasswordMinimum(restored, live string) bool {
+	// A restored value the setting refuses is never written over the live one.
+	if _, err := config.NormalizeAdminSetting(config.AuthPasswordMinLengthSettingKey, restored); err != nil {
+		return true
+	}
 	return appliedPasswordMinimum(restored) < appliedPasswordMinimum(live)
 }
 

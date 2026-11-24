@@ -3,6 +3,7 @@ package apiv2
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"time"
@@ -300,8 +301,9 @@ func registerInvitations(reg *Registry) {
 		return &InvitationLookupOutput{Body: InvitationLookup{Email: view.Email, EmailRequired: view.EmailRequired, Note: view.Note, InviterName: view.InviterName, ServerName: view.ServerName, ExpiresAt: NewInstant(view.ExpiresAt), ShowTour: view.ShowTour, AcceptanceAvailable: !view.CreateProfile || svc.SupportsDefaultProfile()}}, nil
 	}
 	accept := func(ctx context.Context, token, email, password, userAgent string) (*InvitationAcceptOutput, error) {
-		if len([]byte(password)) > 72 {
-			return nil, NewProblem(TypeValidationFailed, "Password must not exceed 72 bytes.")
+		if len(password) > auth.MaximumPasswordBytes {
+			// At the member, worded as the password policy refuses it.
+			return nil, passwordMemberProblem(fmt.Sprintf("Use at most %d bytes.", auth.MaximumPasswordBytes))
 		}
 		svc, p := reg.invitationService()
 		if p != nil {

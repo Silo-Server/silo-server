@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import { setAccessToken, setProfileId } from "@/api/client";
+import { v2Problem } from "@/api/v2/problems.test-support";
 
 import { Dialog } from "@/components/ui/dialog";
 
@@ -65,10 +66,47 @@ it("shows a password the policy refuses on the Account tab, at the field", async
   const password = screen.getByLabelText("Password");
   expect(password).toHaveAttribute("aria-invalid", "true");
   expect(password).toHaveAccessibleErrorMessage("Include at least one capital letter.");
-  expect(password).toHaveAccessibleDescription("Include at least one capital letter.");
+  // The live rules, then the refusal.
+  expect(password).toHaveAccessibleDescription(
+    /^At least 12 characters\..*Include at least one capital letter\.$/,
+  );
   expect(create).not.toHaveBeenCalled();
 
   await user.type(password, "X");
   expect(password).not.toHaveAttribute("aria-invalid");
   expect(screen.queryByText("Include at least one capital letter.")).not.toBeInTheDocument();
+});
+
+it("shows a password the server refuses at the field", async () => {
+  // The policy tightened after the form loaded its copy.
+  const refused = v2Problem(
+    422,
+    "validation_failed",
+    "The request did not pass validation; see errors.",
+  );
+  refused.problem.errors = [
+    {
+      location: "body.password",
+      code: "invalid",
+      detail: "Include at least one special character, such as ! or #.",
+    },
+  ];
+  create.mockRejectedValueOnce(refused);
+  const user = userEvent.setup();
+  render(
+    <Dialog open>
+      <CreateUserDialogContent onClose={() => {}} onBusy={() => {}} />
+    </Dialog>,
+  );
+  await user.type(screen.getByLabelText("Username"), "bob");
+  await user.type(screen.getByLabelText("Email"), "bob@example.test");
+  await user.type(screen.getByLabelText("Password"), "Uppercase-only-pw");
+  await user.click(screen.getByRole("button", { name: "Save" }));
+
+  const password = await screen.findByLabelText("Password");
+  expect(create).toHaveBeenCalled();
+  expect(password).toHaveAttribute("aria-invalid", "true");
+  expect(password).toHaveAccessibleErrorMessage(
+    "Include at least one special character, such as ! or #.",
+  );
 });

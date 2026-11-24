@@ -262,10 +262,20 @@ it.each([
   { status: 429, type: "rate_limited", message: /Too many requests from this network/ },
   { status: 501, type: "capability_unsupported", message: /cannot create the profile required/ },
   { status: 409, type: "conflict", message: /An account already uses this email address/ },
-  { status: 422, type: "validation_failed", message: /Password must not exceed 72 bytes/ },
+  // A policy refusal: the field detail names the rule, not the summary.
+  { status: 422, type: "validation_failed", message: /Include at least one capital letter/ },
 ])("lets the invitee retry after a $status $type refusal", async ({ status, type, message }) => {
   submit = async () =>
-    problemResponse(status, type, { detail: "Password must not exceed 72 bytes." });
+    problemResponse(status, type, {
+      detail: "The request did not pass validation; see errors.",
+      errors: [
+        {
+          location: "body.password",
+          code: "invalid",
+          detail: "Include at least one capital letter.",
+        },
+      ],
+    });
   mount();
   await fill();
   send();

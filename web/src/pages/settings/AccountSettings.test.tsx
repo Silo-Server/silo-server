@@ -124,11 +124,22 @@ describe("AccountSettings", () => {
       await user.click(screen.getByRole("button", { name: "Change password" }));
     };
 
-    mocks.mutateAsync.mockRejectedValueOnce(
-      v2Problem(422, "validation_failed", "Current password is incorrect."),
+    // As the server answers a refusal: the summary, then the member's detail.
+    const refused = v2Problem(
+      422,
+      "validation_failed",
+      "The request did not pass validation; see errors.",
     );
+    refused.problem.errors = [
+      {
+        location: "body.new_password",
+        code: "invalid",
+        detail: "Include at least one capital letter.",
+      },
+    ];
+    mocks.mutateAsync.mockRejectedValueOnce(refused);
     await submit();
-    expect(screen.getByRole("alert")).toHaveTextContent("Current password is incorrect.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Include at least one capital letter.");
 
     mocks.mutateAsync.mockRejectedValueOnce(new TypeError("Failed to fetch"));
     await submit();

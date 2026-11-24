@@ -24,7 +24,7 @@ import { toast } from "sonner";
 import { invalidEmailMessage, isValidEmail } from "@/lib/email";
 import { useLinkToken } from "@/hooks/useLinkToken";
 import { usePasswordPolicy } from "@/hooks/queries/account";
-import { newPasswordPolicyProblem, newPasswordHint } from "@/lib/newPassword";
+import { newPasswordPolicyProblem, newPasswordHint, passwordErrorMessage } from "@/lib/newPassword";
 import { useT } from "@/i18n";
 
 export default function InviteClaim() {
@@ -178,7 +178,8 @@ function ClaimForm({ token }: { token: string }) {
       case "conflict":
         return t("web.auth.invite.emailTaken");
       case "validation_failed":
-        return error.message;
+        // The rule the server refused, which a stale policy can miss.
+        return passwordErrorMessage(error, error.message);
       default:
         return null;
     }
