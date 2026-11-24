@@ -354,7 +354,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
                               <span>{clientLabel}</span>
                               <JellyfinSessionPill session={row} />
                             </div>
-                            <div className="text-muted-foreground text-[11px]">
+                            <div className="text-muted-foreground text-[0.6875rem]">
                               {row.device_platform}
                             </div>
                           </div>
@@ -403,7 +403,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
                                 <span className="font-bold tabular-nums">
                                   {t("web.admin.insights.percent", { value: rateStr })}
                                 </span>
-                                <span className="text-[10px] tabular-nums opacity-80">
+                                <span className="text-[0.625rem] tabular-nums opacity-80">
                                   {cell.sessions.toLocaleString(formatLocale())}
                                 </span>
                               </Link>
@@ -416,7 +416,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
                               value: formatRatePercentNumber(row.direct_rate),
                             })}
                           </div>
-                          <div className="text-muted-foreground text-[11px]">
+                          <div className="text-muted-foreground text-[0.6875rem]">
                             {row.total_sessions.toLocaleString(formatLocale())}
                           </div>
                         </TableCell>

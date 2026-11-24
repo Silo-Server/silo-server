@@ -60,7 +60,7 @@ export function PlaybackActivityWidget() {
         </span>
         <Link
           to={`/admin/insights?tab=playback&range=${widgetRangeToInsightsRange(range)}`}
-          className="text-muted-foreground hover:text-primary hidden text-[11px] whitespace-nowrap transition-colors @md/card-header:inline"
+          className="text-muted-foreground hover:text-primary hidden text-[0.6875rem] whitespace-nowrap transition-colors @md/card-header:inline"
         >
           {t("web.admin.dashboard.widgets.openInsights")}
         </Link>

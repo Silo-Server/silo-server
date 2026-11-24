@@ -18,7 +18,7 @@ export function InsightKpiCard({
 }) {
   return (
     <div className="surface-panel rounded-2xl border-0 p-4">
-      <div className="text-muted-foreground text-[11px] font-medium">{label}</div>
+      <div className="text-muted-foreground text-[0.6875rem] font-medium">{label}</div>
       <div
         className={cn(
           "mt-1 text-2xl font-extrabold tracking-tight tabular-nums",

@@ -382,7 +382,7 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
                             <div className="flex items-center gap-2">
                               <span>{displayName}</span>
                               {src.node_type ? (
-                                <Badge variant="outline" className="text-[10px]">
+                                <Badge variant="outline" className="text-[0.625rem]">
                                   {src.node_type === "proxy"
                                     ? t("web.admin.activity.route.proxy")
                                     : src.node_type === "transcode"

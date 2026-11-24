@@ -303,25 +303,28 @@ export function SessionDetailSheet({
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <span
                 className={cn(
-                  "inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-semibold",
+                  "inline-flex items-center rounded-md border px-2 py-0.5 text-[0.6875rem] font-semibold",
                   methodMeta.badgeClass,
                 )}
               >
                 {formatDecisionLabel(session.play_method)}
               </span>
               <JellyfinSessionPill session={session} />
-              <Badge variant={session.completed ? "default" : "outline"} className="text-[11px]">
+              <Badge
+                variant={session.completed ? "default" : "outline"}
+                className="text-[0.6875rem]"
+              >
                 {session.completed
                   ? t("web.admin.history.row.completed")
                   : t("web.admin.history.row.partial")}
               </Badge>
               {transcodeMode ? (
-                <Badge variant="secondary" className="text-[11px]">
+                <Badge variant="secondary" className="text-[0.6875rem]">
                   {transcodeMode}
                 </Badge>
               ) : null}
               {toneMap ? (
-                <Badge variant="secondary" className="text-[11px]">
+                <Badge variant="secondary" className="text-[0.6875rem]">
                   {toneMap.badge}
                 </Badge>
               ) : null}
@@ -390,7 +393,7 @@ export function SessionDetailSheet({
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span>{formatVideoSummary(adminSession)}</span>
                             {session.source_video_range_type ? (
-                              <Badge variant="outline" className="px-1.5 py-0 text-[10px]">
+                              <Badge variant="outline" className="px-1.5 py-0 text-[0.625rem]">
                                 {session.source_video_range_type}
                               </Badge>
                             ) : null}
@@ -432,7 +435,7 @@ export function SessionDetailSheet({
                           {session.subtitle?.delivery === "burn_in" ? (
                             <Badge
                               variant="outline"
-                              className="border-warning/30 bg-warning/10 text-warning-label text-[10px]"
+                              className="border-warning/30 bg-warning/10 text-warning-label text-[0.625rem]"
                             >
                               {t("web.admin.history.detail.subtitlesBurnIn")}
                             </Badge>
@@ -606,7 +609,9 @@ export function SessionDetailSheet({
                     <dt className="text-muted-foreground">
                       {t("web.admin.history.detail.field.clientIp")}
                     </dt>
-                    <dd className="mt-0.5 font-mono text-[11px]">{session.client_ip ?? EM_DASH}</dd>
+                    <dd className="mt-0.5 font-mono text-[0.6875rem]">
+                      {session.client_ip ?? EM_DASH}
+                    </dd>
                   </div>
                   <div>
                     <dt className="text-muted-foreground">
@@ -630,7 +635,9 @@ export function SessionDetailSheet({
                     <dt className="text-muted-foreground">
                       {t("web.admin.history.detail.field.sessionId")}
                     </dt>
-                    <dd className="mt-0.5 font-mono text-[11px] break-all">{session.session_id}</dd>
+                    <dd className="mt-0.5 font-mono text-[0.6875rem] break-all">
+                      {session.session_id}
+                    </dd>
                   </div>
                 </dl>
               </section>

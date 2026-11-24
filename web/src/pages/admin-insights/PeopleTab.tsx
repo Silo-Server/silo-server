@@ -283,13 +283,13 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
                                       {account.username}
                                     </Link>
                                     {account.is_live ? (
-                                      <span className="border-success/30 bg-success/15 text-success-label inline-flex items-center gap-1 rounded-full border px-1.5 py-0 text-[10px] font-semibold">
+                                      <span className="border-success/30 bg-success/15 text-success-label inline-flex items-center gap-1 rounded-full border px-1.5 py-0 text-[0.625rem] font-semibold">
                                         <span className="bg-success h-1.5 w-1.5 rounded-full" />
                                         {t("web.admin.insights.people.liveBadge")}
                                       </span>
                                     ) : null}
                                     {account.profiles.length > 1 ? (
-                                      <Badge variant="outline" className="text-[10px]">
+                                      <Badge variant="outline" className="text-[0.625rem]">
                                         {t("web.admin.insights.people.profilesCount", {
                                           count: account.profiles.length,
                                         })}
@@ -297,7 +297,7 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
                                     ) : null}
                                   </div>
                                   {account.top_client ? (
-                                    <div className="text-muted-foreground text-[11px]">
+                                    <div className="text-muted-foreground text-[0.6875rem]">
                                       {account.top_client}
                                     </div>
                                   ) : null}

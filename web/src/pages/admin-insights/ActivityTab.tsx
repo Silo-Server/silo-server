@@ -458,7 +458,7 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
                         <span
                           key={hour}
                           role="columnheader"
-                          className="text-muted-foreground text-center text-[10px] tabular-nums"
+                          className="text-muted-foreground text-center text-[0.625rem] tabular-nums"
                         >
                           {hour % 6 === 0 ? label : ""}
                         </span>
@@ -472,7 +472,7 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
                       >
                         <span
                           role="rowheader"
-                          className="text-muted-foreground pe-1 text-end text-[11px] font-medium"
+                          className="text-muted-foreground pe-1 text-end text-[0.6875rem] font-medium"
                         >
                           {dayLabel}
                         </span>
@@ -515,7 +515,7 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
                     ))}
                   </div>
                 </div>
-                <div className="text-muted-foreground flex items-center justify-end gap-1.5 text-[11px]">
+                <div className="text-muted-foreground flex items-center justify-end gap-1.5 text-[0.6875rem]">
                   <span>{t("web.admin.insights.activity.heatmap.less")}</span>
                   {HEATMAP_LEVEL_CLASSES.map((cls, idx) => (
                     <span key={idx} className={cn("h-3 w-3 rounded-[3px]", cls)} />
