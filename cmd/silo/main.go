@@ -4639,20 +4639,24 @@ func main() {
 	// never finishes, the HTTP drain above uses all of shutdownCtx, and they
 	// must still run (#5094).
 	cleanupSteps := []shutdownCleanupStep{{
-		name: "stream telemetry shutdown",
-		run:  streamTelemetryRegistry.Stop,
+		run: streamTelemetryRegistry.Stop,
+		logErr: func(err error) {
+			slog.Error("stream telemetry shutdown error", "error", err)
+		},
 	}}
 
 	// 2. Clean up stale sessions.
 	if sessionCleaner != nil {
 		cleanupSteps = append(cleanupSteps, shutdownCleanupStep{
-			name: "stale session cleanup",
 			run: func(ctx context.Context) error {
 				cleaned, err := sessionCleaner.CleanStale(ctx)
 				if err == nil && cleaned > 0 {
-					slog.Info("cleaned stale sessions", "count", cleaned)
+					slog.InfoContext(ctx, "cleaned stale sessions", "count", cleaned)
 				}
 				return err
+			},
+			logErr: func(err error) {
+				slog.Error("stale session cleanup error", "error", err)
 			},
 		})
 	}
@@ -4661,10 +4665,16 @@ func main() {
 	// saving the sessions' watch time for whichever server rebuilds or stops
 	// them next.
 	if reconciler != nil {
-		cleanupSteps = append(cleanupSteps, shutdownCleanupStep{name: "watch time save", run: reconciler.SaveWatch})
+		cleanupSteps = append(cleanupSteps, shutdownCleanupStep{
+			run:    reconciler.SaveWatch,
+			logErr: func(err error) { slog.Error("watch time save error", "error", err) },
+		})
 	}
 	if heartbeatWriter != nil {
-		cleanupSteps = append(cleanupSteps, shutdownCleanupStep{name: "heartbeat cleanup", run: heartbeatWriter.CleanupSelf})
+		cleanupSteps = append(cleanupSteps, shutdownCleanupStep{
+			run:    heartbeatWriter.CleanupSelf,
+			logErr: func(err error) { slog.Error("heartbeat cleanup error", "error", err) },
+		})
 	}
 	runShutdownCleanupSteps(shutdownCleanupStepTimeout, cleanupSteps)
 
@@ -4717,11 +4727,11 @@ func runShutdownWorkWithTimeout(timeout time.Duration, work func(context.Context
 // HTTP servers stop.
 const shutdownCleanupStepTimeout = 5 * time.Second
 
-// shutdownCleanupStep is one step of the shutdown cleanup; a failure is
-// logged as "<name> error".
+// shutdownCleanupStep is one step of the shutdown cleanup; logErr reports
+// its failure.
 type shutdownCleanupStep struct {
-	name string
-	run  func(context.Context) error
+	run    func(context.Context) error
+	logErr func(error)
 }
 
 // runShutdownCleanupSteps runs the steps in order, each with a fresh deadline
@@ -4730,7 +4740,7 @@ type shutdownCleanupStep struct {
 func runShutdownCleanupSteps(timeout time.Duration, steps []shutdownCleanupStep) {
 	for _, step := range steps {
 		if err := runShutdownWorkWithTimeout(timeout, step.run); err != nil {
-			slog.Error(step.name+" error", "error", err)
+			step.logErr(err)
 		}
 	}
 }

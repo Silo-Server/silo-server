@@ -28,7 +28,7 @@ func TestShutdownCleanupStepsRunAfterHTTPDrainDeadline(t *testing.T) {
 	go func() {
 		resp, err := http.Get("http://" + ln.Addr().String())
 		if err == nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 		}
 	}()
 	<-started
@@ -41,7 +41,7 @@ func TestShutdownCleanupStepsRunAfterHTTPDrainDeadline(t *testing.T) {
 
 	var ran []string
 	step := func(name string) shutdownCleanupStep {
-		return shutdownCleanupStep{name: name, run: func(ctx context.Context) error {
+		return shutdownCleanupStep{logErr: func(error) {}, run: func(ctx context.Context) error {
 			if err := ctx.Err(); err != nil {
 				t.Errorf("%s got a finished context: %v", name, err)
 			}
@@ -52,7 +52,7 @@ func TestShutdownCleanupStepsRunAfterHTTPDrainDeadline(t *testing.T) {
 			return nil
 		}}
 	}
-	slow := shutdownCleanupStep{name: "slow", run: func(ctx context.Context) error {
+	slow := shutdownCleanupStep{logErr: func(error) {}, run: func(ctx context.Context) error {
 		<-ctx.Done()
 		ran = append(ran, "slow")
 		return ctx.Err()
