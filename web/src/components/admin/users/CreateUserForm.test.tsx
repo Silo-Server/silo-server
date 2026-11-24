@@ -100,7 +100,7 @@ it("shows a password the server refuses at the field", async () => {
   );
   await user.type(screen.getByLabelText("Username"), "bob");
   await user.type(screen.getByLabelText("Email"), "bob@example.test");
-  await user.type(screen.getByLabelText("Password"), "Uppercase-only-pw");
+  await user.type(screen.getByLabelText("Password"), "UppercaseOnlyPw1");
   await user.click(screen.getByRole("button", { name: "Save" }));
 
   const password = await screen.findByLabelText("Password");

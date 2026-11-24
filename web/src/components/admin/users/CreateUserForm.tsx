@@ -241,26 +241,30 @@ function CreateUserForm({
     busy.current = true;
     onBusy(true);
     setError("");
+    setPasswordError("");
+    const body: CreateUserRequest = {
+      username,
+      email,
+      password,
+      ...(requirePasswordChange ? { require_password_change: true } : {}),
+      role,
+      permissions,
+      create_default_profile: createDefaultProfile,
+      ...policyCreateFields(policy),
+      ...(typeof groupToSend === "number" ? { access_group_id: groupToSend } : {}),
+    };
     try {
-      const body: CreateUserRequest = {
-        username,
-        email,
-        password,
-        ...(requirePasswordChange ? { require_password_change: true } : {}),
-        role,
-        permissions,
-        create_default_profile: createDefaultProfile,
-        ...policyCreateFields(policy),
-        ...(typeof groupToSend === "number" ? { access_group_id: groupToSend } : {}),
-      };
       await createMutation.mutateAsync({ body, profileContext: authority });
       createMutation.reset();
       onClose();
     } catch (err) {
       // A policy that changed since the form loaded: the server's rule goes
-      // at the field like the form's own check.
+      // at the field like the form's own check, unless the admin has already
+      // changed the password it refused.
       if (err instanceof V2ProblemError && err.problem.errors?.[0]?.location === "body.password") {
-        showPasswordError(passwordErrorMessage(err, ""));
+        if (passwordRef.current?.value === body.password) {
+          showPasswordError(passwordErrorMessage(err, ""));
+        }
       } else {
         setError(passwordErrorMessage(err, t("web.admin.users.list.create.saveFailed")));
       }
