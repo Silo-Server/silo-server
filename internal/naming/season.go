@@ -118,11 +118,14 @@ func seasonDirectoryNumber(segment, parent string, allowNumeric, topLevel bool) 
 	// A provider-tagged parent names one show, so its season folders may
 	// carry another title for it (an original-title show folder holding
 	// international-title seasons: فوضى {tmdb-227604}/Fauda - S01). A folder
-	// with its own provider tag names its own show.
+	// with its own provider tag names its own show. A word label (Series 7)
+	// also ends ordinary titles (World Series 2020), so it still needs the
+	// title match.
 	parentTagged := ParseFolderIDs(parent) != nil && ParseFolderIDs(segment) == nil
 	for _, match := range seasonDirectoryTokenRe.FindAllStringSubmatchIndex(segment, -1) {
 		prefix := normalizeInferComparable(segment[:match[0]])
-		if prefix != "" && !parentTagged && (parentTitle == "" || prefix != parentTitle) {
+		if prefix != "" && (parentTitle == "" || prefix != parentTitle) &&
+			(!parentTagged || wordSeasonDirectoryLabelRe.MatchString(segment[match[2]:match[3]])) {
 			continue
 		}
 		if prefix == "" && topLevel && !seasonLabelStandsAlone(segment[match[2]:match[3]], segment[match[5]:]) {

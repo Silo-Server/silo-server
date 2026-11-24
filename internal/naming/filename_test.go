@@ -546,6 +546,20 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: false,
 		},
 		{
+			// A word label also ends ordinary titles, so a tagged movie folder
+			// does not make World Series 2020 a season.
+			name:                    "movie in a word-labeled subfolder of a tagged movie folder stays a movie",
+			path:                    "/media/Baseball (2020) {tmdb-12345}/World Series 2020/Baseball (2020).mkv",
+			libraryRoots:            []string{"/media"},
+			libraryType:             "mixed",
+			wantType:                "movie",
+			wantRoot:                "/media/Baseball (2020) {tmdb-12345}/World Series 2020/Baseball (2020)",
+			wantTitle:               "Baseball",
+			wantYear:                2020,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
 			name:                    "series daily date has air date but no episode number",
 			path:                    "/tv/Jeopardy! (1984)/Season 2026/Jeopardy! (1984) - 2026_04_24 - Jamie Ding.mkv",
 			libraryType:             "series",
