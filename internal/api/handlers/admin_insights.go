@@ -603,7 +603,7 @@ func insightsWindowCacheable(rangeVal string) bool {
 
 // cachedInsightsRead serves key from c or fills it. One fill runs per key and
 // generation, on a context detached from the caller so one request leaving
-// does not fail the others sharing it. The fill is published only when no
+// does not fail the others sharing it; insightsReadTimeout still bounds it. The fill is published only when no
 // invalidation ran while it was in flight; the comparison and the Set share
 // publishMu with Invalidate, so an invalidation cannot slip in between.
 func cachedInsightsRead[T comparable](ctx context.Context, p *AdminInsightsProvider, c *cache.TTLCache[T], key string, load func(context.Context) (T, error)) (T, error) {
@@ -612,7 +612,9 @@ func cachedInsightsRead[T comparable](ctx context.Context, p *AdminInsightsProvi
 	}
 	gen := p.generation()
 	shared, err, _ := p.fills.Do(fmt.Sprintf("%s#%d", key, gen), func() (any, error) {
-		v, err := load(context.WithoutCancel(ctx))
+		fillCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), insightsReadTimeout)
+		defer cancel()
+		v, err := load(fillCtx)
 		if err != nil {
 			return nil, err
 		}

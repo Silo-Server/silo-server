@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -67,21 +68,52 @@ const (
 	// in memory. The viewing grouping sorts every session in scope, which
 	// spills to disk at the default work_mem on year-long ranges.
 	insightsReadWorkMem = "64MB"
+	// insightsMaxConcurrentReads bounds the Insights reads one process runs
+	// at once. Uncached reads, such as all-time ranges or a new filter
+	// combination, are the most expensive statements an admin key can start,
+	// so a burst of them waits here instead of taking the database pool.
+	insightsMaxConcurrentReads = 3
+	// insightsReadTimeout bounds one Insights read, including a cache fill
+	// that outlives the request that started it.
+	insightsReadTimeout = 2 * time.Minute
 )
 
-// beginInsightsPlaysRead opens the read-only snapshot a play-counting read
-// runs in, with insightsReadWorkMem for its sorts. SET LOCAL ends with the
-// transaction.
-func beginInsightsPlaysRead(ctx context.Context, pool *pgxpool.Pool) (pgx.Tx, error) {
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+var insightsReadSlots = make(chan struct{}, insightsMaxConcurrentReads)
+
+// beginInsightsRead waits for one of insightsMaxConcurrentReads slots and
+// opens the read-only snapshot an Insights read runs in, with
+// insightsReadTimeout as its statement timeout and, when workMem is set, that
+// work_mem for its sorts (SET LOCAL ends with the transaction). The caller
+// defers done, which rolls the transaction back if it is still open and
+// frees the slot. A caller that leaves while waiting gets its context's
+// error.
+func beginInsightsRead(ctx context.Context, pool *pgxpool.Pool, workMem string) (tx pgx.Tx, done func(), err error) {
+	select {
+	case insightsReadSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, nil, ctx.Err()
+	}
+	release := func() { <-insightsReadSlots }
+	tx, err = pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
-		return nil, err
+		release()
+		return nil, nil, err
 	}
-	if _, err := tx.Exec(ctx, "SET LOCAL work_mem = '"+insightsReadWorkMem+"'"); err != nil {
+	done = func() {
 		_ = tx.Rollback(context.WithoutCancel(ctx))
-		return nil, fmt.Errorf("setting insights work_mem: %w", err)
+		release()
 	}
-	return tx, nil
+	settings := []string{fmt.Sprintf("SET LOCAL statement_timeout = '%dms'", insightsReadTimeout.Milliseconds())}
+	if workMem != "" {
+		settings = append(settings, "SET LOCAL work_mem = '"+workMem+"'")
+	}
+	for _, stmt := range settings {
+		if _, err := tx.Exec(ctx, stmt); err != nil {
+			done()
+			return nil, nil, fmt.Errorf("configuring insights read: %w", err)
+		}
+	}
+	return tx, done, nil
 }
 
 // insightsPlaysScope is the row filter of a play-counting read. Account,

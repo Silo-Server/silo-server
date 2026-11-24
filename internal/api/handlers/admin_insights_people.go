@@ -18,11 +18,11 @@ func queryAdminInsightsPeopleSnapshot(ctx context.Context, pool *pgxpool.Pool, q
 	if pool == nil {
 		return nil, ErrAdminDashboardUnavailable
 	}
-	tx, err := beginInsightsPlaysRead(ctx, pool)
+	tx, done, err := beginInsightsRead(ctx, pool, insightsReadWorkMem)
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights people read: %w", err)
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer done()
 
 	oldestHist, oldestMeas, oldestRoute, oldestMetric, dbNow, err := queryInsightsGlobalBounds(ctx, tx)
 	if err != nil {

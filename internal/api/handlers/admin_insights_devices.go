@@ -32,11 +32,11 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 	if err := validateInsightsScope(q.AdminInsightsWindowQuery); err != nil {
 		return nil, err
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	tx, done, err := beginInsightsRead(ctx, pool, "")
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights devices read: %w", err)
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer done()
 
 	oldestHist, oldestMeas, oldestRoute, oldestMetric, dbNow, err := queryInsightsGlobalBounds(ctx, tx)
 	if err != nil {

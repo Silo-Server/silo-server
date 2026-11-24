@@ -219,11 +219,11 @@ func queryAdminInsightsActivity(ctx context.Context, pool *pgxpool.Pool, q Admin
 	if err := validateInsightsScope(q); err != nil {
 		return nil, err
 	}
-	tx, err := beginInsightsPlaysRead(ctx, pool)
+	tx, done, err := beginInsightsRead(ctx, pool, insightsReadWorkMem)
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights activity read: %w", err)
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer done()
 
 	oldestHist, oldestMeas, oldestRoute, oldestMetric, dbNow, err := queryInsightsGlobalBounds(ctx, tx)
 	if err != nil {

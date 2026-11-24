@@ -35,11 +35,11 @@ func queryAdminInsightsTitles(ctx context.Context, pool *pgxpool.Pool, q AdminIn
 	if err := validateInsightsScope(q.AdminInsightsWindowQuery); err != nil {
 		return nil, err
 	}
-	tx, err := beginInsightsPlaysRead(ctx, pool)
+	tx, done, err := beginInsightsRead(ctx, pool, insightsReadWorkMem)
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights titles read: %w", err)
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer done()
 
 	win, err := resolveInsightsPlaysWindow(ctx, tx, q.AdminInsightsWindowQuery)
 	if err != nil {
@@ -252,11 +252,11 @@ func queryAdminInsightsTitle(ctx context.Context, pool *pgxpool.Pool, q AdminIns
 	if contentID == "" {
 		return nil, fmt.Errorf("%w: content_id is required", ErrInvalidInsightsQuery)
 	}
-	tx, err := beginInsightsPlaysRead(ctx, pool)
+	tx, done, err := beginInsightsRead(ctx, pool, insightsReadWorkMem)
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights title read: %w", err)
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer done()
 
 	ref, err := resolveInsightsTitle(ctx, tx, contentID)
 	if err != nil {

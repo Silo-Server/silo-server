@@ -18,11 +18,11 @@ func queryAdminInsightsBandwidth(ctx context.Context, pool *pgxpool.Pool, q Admi
 	if pool == nil {
 		return nil, ErrAdminDashboardUnavailable
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	tx, done, err := beginInsightsRead(ctx, pool, "")
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights bandwidth read: %w", err)
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer done()
 
 	_, _, oldestRoute, oldestMetric, dbNow, err := queryInsightsGlobalBounds(ctx, tx)
 	if err != nil {
