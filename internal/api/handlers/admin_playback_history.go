@@ -470,7 +470,11 @@ func (h *AdminHandler) ReadAdminPlaybackHistoryEntry(ctx context.Context, sessio
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	defer func() {
+		rollbackCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), adminHistoryRollbackTimeout)
+		defer cancel()
+		_ = tx.Rollback(rollbackCtx)
+	}()
 	page, err := readAdminPlaybackHistoryPage(ctx, tx, AdminPlaybackHistoryFilter{SessionID: sessionID}, nil, 1)
 	if err != nil || len(page.Items) == 0 {
 		return nil, err
