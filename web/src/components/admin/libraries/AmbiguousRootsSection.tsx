@@ -255,10 +255,7 @@ export function AmbiguousRootsSection({
                         <div className="space-y-1">
                           {/* A title can be in either script: it reads in its own direction, so
                               "100% Wolf" keeps its digits first in a right-to-left page. */}
-                          <div
-                            dir="auto"
-                            className="bidi-text block w-fit max-w-full truncate text-sm font-medium"
-                          >
+                          <div dir="auto" className="bidi-text truncate text-sm font-medium">
                             {row.label}
                           </div>
                           <code
