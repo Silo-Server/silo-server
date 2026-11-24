@@ -82,7 +82,7 @@ Settled on 2026-11-23, after a review of the Apple TV player:
 | --- | --- |
 | How long do the prompt and the undo pill stay up? | 10 seconds, not 15. `PROMPT_SECONDS = 10` times both. |
 | Does the untimed skip offer that returns with the controls hold a buffering pill back? | Yes. A skip pill counts while it is on screen, with or without its timer (see *Presentation rules*). |
-| Do stalls under the undo pill still count once it hides? | Yes, unchanged. An undo pill shown at adoption now ends no later than the new plan's own startup grace, which starts with that plan's first frame or wait and lasts the same 10 seconds, so under such a plan a stall can count while the pill is up only after a pause or a higher-priority pill froze its timer. A replacement adopted before any plan of the attempt has played has no grace of its own and keeps the attempt's original one, which may already be over; a stall under its pill counts as before. `visible_undo_retains_stall_history` uses a pause, which keeps the pill on screen. |
+| Do stalls under the undo pill still count once it hides? | Yes, unchanged. An undo pill shown at adoption now ends no later than the new plan's own startup grace, which starts with that plan's first frame or wait and lasts the same 10 seconds, so under such a plan a stall can count while the pill is up only after its timer was frozen by a pause, a higher-priority pill, or a player that could not show it. A replacement adopted before any plan of the attempt has played has no grace of its own and keeps the attempt's original one, which may already be over; a stall under its pill counts as before. `visible_undo_retains_stall_history` uses a pause, which keeps the pill on screen. |
 
 ## Motivation
 
