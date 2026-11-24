@@ -84,6 +84,10 @@ type signInSpend struct {
 	key       string
 	source    string
 	spentName bool
+	// derived marks a budget name taken from what was typed rather than the
+	// name that signed in (Jellyfin's "alice#Kids"), which can be another
+	// account's.
+	derived bool
 }
 
 func newSignInSpend(ctx context.Context, name string) *signInSpend {
@@ -152,6 +156,13 @@ func (s *Service) finishSignIn(ctx context.Context, spend *signInSpend, user *mo
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
+	if own := signInTrustKeys("", user); spend.derived && !slices.Contains(own, spend.key) {
+		// The budget is another account's: an account named "alice#Kids"
+		// spends alice's on a Jellyfin sign-in. Clearing or extending it here
+		// would let that account's owner guess at alice without end.
+		s.signInAttempts.Trust(ctx, own, spend.source)
+		return
+	}
 	if spend.spentName {
 		s.signInAttempts.Reset(ctx, spend.key, spend.source, SignInLaneName)
 	}

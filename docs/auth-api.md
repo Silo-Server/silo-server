@@ -422,7 +422,9 @@ it checks. Names are trimmed and compared without regard to case, as sign-in loo
 accounts, so ` Alice` and `alice` share one budget; a username and the same account's
 email address are two names. A Jellyfin name with a `#`, such as `alice#Kids`, spends the
 budget of the part before the `#`, even when it signs in to an account whose own name
-contains the `#`, so the budget does not depend on which accounts exist. Such an account's
+contains the `#`, so the budget does not depend on which accounts exist. That account's
+success clears no count of the shorter name's budget and makes its address known only for
+its own names, so it cannot clear guesses at the account named before the `#`. Such an account's
 native sign-ins spend the budget of its whole name, so it has two budgets. A name with no account has a budget like any other and is refused the same way, so
 the budget does not reveal which names exist.
 

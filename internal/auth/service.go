@@ -234,12 +234,14 @@ func (s *Service) CompatLogin(ctx context.Context, username, password, deviceNam
 // username when budgetName is empty: a caller that resolved username from
 // what was typed by looking accounts up passes a name that depends only on
 // the typed text, so the budget cannot tell a stranger what the lookup
-// found. A success clears the same budget.
+// found. A success clears the same budget, unless budgetName names another
+// account than the one that signed in.
 func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, password, fallback, deviceName, ip, budgetName string) (pair *TokenPair, user *models.User, usedFallback bool, err error) {
 	if budgetName == "" {
 		budgetName = username
 	}
 	spend := newSignInSpend(ctx, budgetName)
+	spend.derived = spend.key != signInAttemptKey(username)
 	if err = s.reserveSignIn(ctx, spend); err != nil {
 		return nil, nil, false, err
 	}
