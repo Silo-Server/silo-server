@@ -33,6 +33,7 @@ vi.mock("@/hooks/queries/admin/aiProviders", () => ({
   }),
   useRefreshAIProviders: () => vi.fn(),
   useAIProviderModels: () => ({ data: { models: [] } }),
+  useAIProviderCreatePending: () => false,
 }));
 vi.mock("@/hooks/queries/admin/chatgpt", () => ({
   useAdminAICapabilities: () =>
