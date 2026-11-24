@@ -30,8 +30,8 @@ const (
 	// PlaybackEndAborted: the server abandoned the play, because its media
 	// went missing or a replacement transport failed to commit.
 	PlaybackEndAborted PlaybackEndReason = "aborted"
-	// PlaybackEndReplaced: a Jellyfin client switched play method, and the
-	// play continues under a new session.
+	// PlaybackEndReplaced: a Jellyfin client switched play method or
+	// version, and the play continues under a new session.
 	PlaybackEndReplaced PlaybackEndReason = playback.EndReasonReplaced
 )
 

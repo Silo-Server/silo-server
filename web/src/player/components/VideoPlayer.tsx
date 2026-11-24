@@ -28,6 +28,7 @@ import { MarkerEditPanel } from "./MarkerEditPanel";
 import { usePlaybackRealtime } from "../hooks/usePlaybackRealtime";
 import { useWatchProgress } from "../hooks/useWatchProgress";
 import type { PlaybackConnectionStatus } from "../hooks/usePlaybackSession";
+import type { PlaybackSessionEndReason } from "../player-fetch";
 import { useKeyboardShortcuts } from "../hooks/useKeyboardShortcuts";
 import { usePlayerFullscreenRoot } from "../context/PlayerFullscreenContext";
 import { isNativeVideoFullscreen, isPlayerFullscreen, toggleFullscreen } from "../utils/fullscreen";
@@ -299,6 +300,8 @@ interface VideoPlayerProps {
   /** Why reconnecting gave up, while `connectionStatus` is `lost`. */
   connectionErrorTitle?: string | null;
   connectionError?: string | null;
+  /** Why the server ended the session, while `connectionStatus` is `ended`. */
+  connectionEndReason?: PlaybackSessionEndReason | null;
   /**
    * Replan for a plan the server invalidated over the realtime
    * `plan_invalidated` command. Resolving false rejects the command, which is
@@ -563,6 +566,7 @@ export function VideoPlayer({
   connectionStatus = "connected",
   connectionErrorTitle = null,
   connectionError = null,
+  connectionEndReason = null,
   onPlanInvalidated,
   onReanchorSeek,
   onSeek,
@@ -2051,8 +2055,13 @@ export function VideoPlayer({
   useMediaSkipHandlers(displayMode !== "postroll", skipActions.back, skipActions.forward);
 
   // -- Watch progress reporting --
-  const [progressSessionEnded, setProgressSessionEnded] = useState(false);
-  const markSessionEnded = useCallback(() => setProgressSessionEnded(true), []);
+  const [progressSessionEnded, setProgressSessionEnded] = useState<PlaybackSessionEndReason | null>(
+    null,
+  );
+  const markSessionEnded = useCallback(
+    (reason: PlaybackSessionEndReason) => setProgressSessionEnded(reason),
+    [],
+  );
   const flushWatchProgress = useWatchProgress(
     sessionId,
     videoRef,
@@ -2230,20 +2239,28 @@ export function VideoPlayer({
   }, [handleLeave]);
 
   // The server ended the session for good (an administrator stopped it while
-  // this player could not be told directly): leave instead of reconnecting.
+  // this player could not be told directly, or it stayed paused too long):
+  // leave instead of reconnecting.
   const sessionEndedHandledRef = useRef(false);
   // Set when an administrator's stop or terminate already showed the notice,
   // with its reason; the exit below must still run.
   const adminEndNoticeShownRef = useRef(false);
   useEffect(() => {
-    if (connectionStatus !== "ended" && !progressSessionEnded) return;
+    const endReason =
+      progressSessionEnded ??
+      (connectionStatus === "ended" ? (connectionEndReason ?? "ended") : null);
+    if (!endReason) return;
     if (sessionEndedHandledRef.current) return;
     sessionEndedHandledRef.current = true;
-    if (!adminEndNoticeShownRef.current) {
+    if (endReason === "paused_timeout") {
+      toast.info(tRef.current("web.player.session.endedPausedTimeout"), {
+        id: SESSION_ENDED_TOAST_ID,
+      });
+    } else if (!adminEndNoticeShownRef.current) {
       toast.info(tRef.current("web.player.session.endedByAdmin"), { id: SESSION_ENDED_TOAST_ID });
     }
     void handleExit();
-  }, [connectionStatus, handleExit, progressSessionEnded]);
+  }, [connectionEndReason, connectionStatus, handleExit, progressSessionEnded]);
 
   const handleMinimize = useCallback(async () => {
     await handleLeave("minimize");
@@ -5528,6 +5545,7 @@ export function VideoPlayer({
     onCommand: executeRealtimeCommand,
     onEvent: handleRealtimeEvent,
     supportedCommands: VIDEO_PLAYBACK_COMMANDS,
+    onSessionEnded: markSessionEnded,
   });
 
   useEffect(() => {

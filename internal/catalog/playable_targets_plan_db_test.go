@@ -75,6 +75,26 @@ func (p playableTargetPlan) work() (joinComparisons, progressLookupLoops float64
 	return joinComparisons, progressLookupLoops
 }
 
+func (p playableTargetPlan) usesIndex(name string) bool {
+	if p.Index == name {
+		return true
+	}
+	return slices.ContainsFunc(p.Children, func(child playableTargetPlan) bool { return child.usesIndex(name) })
+}
+
+// progressRowsRead counts the progress rows the plan's scans read, including
+// those a filter then discarded.
+func (p playableTargetPlan) progressRowsRead() float64 {
+	var rows float64
+	if p.Relation == "user_watch_progress" {
+		rows = (p.Rows + p.FilterRows) * p.Loops
+	}
+	for _, child := range p.Children {
+		rows += child.progressRowsRead()
+	}
+	return rows
+}
+
 func (p playableTargetPlan) progressRows() float64 {
 	var rows float64
 	if p.Relation == "user_watch_progress" {
@@ -118,7 +138,28 @@ func explainPlayableTargetPlan(t *testing.T, pool *pgxpool.Pool, query string, a
 // Statistics can briefly describe an empty profile after a bulk history import.
 // Ensure completed membership remains a unique-key lookup instead of comparing
 // every requested episode with every materialized profile progress row.
-func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
+// explainOnePlayableTargetPlan explains the captured statement and decodes
+// its single plan.
+func explainOnePlayableTargetPlan(t *testing.T, pool *pgxpool.Pool, capture *playableTargetSQLCapture, label string) (playableTargetPlan, []byte) {
+	t.Helper()
+	raw := explainPlayableTargetPlan(t, pool, capture.query, capture.args)
+	var documents []struct {
+		Plan playableTargetPlan `json:"Plan"`
+	}
+	if err := json.Unmarshal(raw, &documents); err != nil {
+		t.Fatal(err)
+	}
+	if len(documents) != 1 {
+		t.Fatalf("expected one %s query plan, got %d", label, len(documents))
+	}
+	return documents[0].Plan, raw
+}
+
+// openPlayableTargetPlanDB opens a one-connection pool over temporary tables
+// shaped like the play-target query's inputs, with a tracer that captures the
+// resolver's statement for EXPLAIN.
+func openPlayableTargetPlanDB(t *testing.T) (*pgxpool.Pool, *playableTargetSQLCapture) {
+	t.Helper()
 	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
 	if dsn == "" {
 		t.Skip("SILO_TEST_DATABASE_URL is not set")
@@ -135,7 +176,6 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
-	const episodeCount = 4200
 	_, err = pool.Exec(t.Context(), `
 		CREATE TEMP TABLE media_folders (id integer PRIMARY KEY, enabled boolean);
 		CREATE TEMP TABLE episodes (content_id text PRIMARY KEY, series_id text, season_number integer, episode_number integer);
@@ -157,6 +197,12 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return pool, capture
+}
+
+func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
+	pool, capture := openPlayableTargetPlanDB(t)
+	const episodeCount = 4200
 	for _, statement := range []string{
 		`INSERT INTO episodes SELECT 'episode-' || n, 'series', 1, n FROM generate_series(1, $1) n`,
 		`INSERT INTO media_files SELECT n, 'series', 'episode-' || n, 1, '1080p', NULL FROM generate_series(1, $1) n`,
@@ -186,17 +232,8 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 	if capture.query == "" {
 		t.Fatal("PostgreSQL winner query was not captured")
 	}
-	raw := explainPlayableTargetPlan(t, pool, capture.query, capture.args)
-	var documents []struct {
-		Plan playableTargetPlan `json:"Plan"`
-	}
-	if err := json.Unmarshal(raw, &documents); err != nil {
-		t.Fatal(err)
-	}
-	if len(documents) != 1 {
-		t.Fatalf("expected one query plan, got %d", len(documents))
-	}
-	comparisons, lookups := documents[0].Plan.work()
+	plan, raw := explainOnePlayableTargetPlan(t, pool, capture, "stale")
+	comparisons, lookups := plan.work()
 	if comparisons > episodeCount*2 || lookups < episodeCount {
 		t.Fatalf("stale profile caused %.0f join comparisons and %.0f unique progress lookups; want linear comparisons and at least %d unique lookups\n%s",
 			comparisons, lookups, episodeCount, raw)
@@ -212,15 +249,8 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 	if err != nil || targets[input.Key()] != "episode-1" {
 		t.Fatalf("unseen target = %#v, err %v; want episode-1", targets, err)
 	}
-	raw = explainPlayableTargetPlan(t, pool, capture.query, capture.args)
-	documents = nil
-	if err := json.Unmarshal(raw, &documents); err != nil {
-		t.Fatal(err)
-	}
-	if len(documents) != 1 {
-		t.Fatalf("expected one unseen query plan, got %d", len(documents))
-	}
-	comparisons, lookups = documents[0].Plan.work()
+	plan, raw = explainOnePlayableTargetPlan(t, pool, capture, "unseen")
+	comparisons, lookups = plan.work()
 	if comparisons > episodeCount*2 || lookups < 1 || lookups >= episodeCount/2 {
 		t.Fatalf("unseen profile caused %.0f join comparisons and %.0f unique progress lookups; want an early indexed winner\n%s", comparisons, lookups, raw)
 	}
@@ -261,23 +291,120 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 			t.Fatalf("card %s target = %q, want %q", card.ContentID, targets[card.Key()], want)
 		}
 	}
-	raw = explainPlayableTargetPlan(t, pool, capture.query, capture.args)
-	documents = nil
-	if err := json.Unmarshal(raw, &documents); err != nil {
-		t.Fatal(err)
-	}
-	if len(documents) != 1 {
-		t.Fatalf("expected one page query plan, got %d", len(documents))
-	}
-	rows := documents[0].Plan.progressRows()
+	plan, raw = explainOnePlayableTargetPlan(t, pool, capture, "page")
+	rows := plan.progressRows()
 	if rows > 2*resumableCount {
 		t.Fatalf("%d cards read %.0f progress rows; want at most %d, since a pass per card reads %d\n%s",
 			cardCount, rows, 2*resumableCount, cardCount*resumableCount, raw)
 	}
 	t.Logf("%d cards read %.0f progress rows with %d resumable", cardCount, rows, resumableCount)
 
-	// Season cards of a long series each read their own season. Only every
-	// season's last episode has a file, so each card walks its whole season.
+	checkSeasonCardsReadOwnSeason(t, pool, capture, resolver, query, resumableCount)
+}
+
+// A provider-anchored series' completed episodes are read as one primary-key
+// range per requested series. Pin that the read never scans the profile's
+// other history or its completed-cursor index (which cannot bound the range,
+// so each series would rescan every completed row), that completion
+// membership is a hashed set while the set fits the server's hash memory, and
+// that a set too large for it falls back to one key lookup per walked episode
+// instead of an unbounded hash.
+func TestPlayableTargetResolverAnchoredCompletedRangePlan(t *testing.T) {
+	pool, capture := openPlayableTargetPlanDB(t)
+	// Match the production schema where the read depends on it: content IDs
+	// compare bytewise, and the completed-history cursor index, whose leading
+	// updated_at cannot bound a media_item_id range, is available.
+	if _, err := pool.Exec(t.Context(), `
+		ALTER TABLE episodes ALTER COLUMN content_id TYPE text COLLATE "C", ALTER COLUMN series_id TYPE text COLLATE "C";
+		ALTER TABLE media_files ALTER COLUMN content_id TYPE text COLLATE "C", ALTER COLUMN episode_id TYPE text COLLATE "C";
+		ALTER TABLE user_watch_progress ALTER COLUMN media_item_id TYPE text COLLATE "C";
+		ALTER TABLE user_history_hidden_items ALTER COLUMN media_item_id TYPE text COLLATE "C";
+		CREATE INDEX user_watch_progress_completed_cursor ON user_watch_progress (user_id, profile_id, updated_at DESC, media_item_id DESC) WHERE completed;
+	`); err != nil {
+		t.Fatal(err)
+	}
+	const seriesCount, seriesLength, watched, otherHistory = 20, 200, 190, 20000
+	for _, seed := range []struct {
+		sql  string
+		args []any
+	}{
+		{`INSERT INTO episodes SELECT 'episode-tvdb-' || s || '-1-' || e, 'series-tvdb-' || s, 1, e FROM generate_series(1, $1) s, generate_series(1, $2) e`, []any{seriesCount, seriesLength}},
+		{`INSERT INTO media_files SELECT row_number() OVER (), 'series-tvdb-' || s, 'episode-tvdb-' || s || '-1-' || e, 1, '1080p', NULL FROM generate_series(1, $1) s, generate_series(1, $2) e`, []any{seriesCount, seriesLength}},
+		{`INSERT INTO user_watch_progress SELECT 1, 'profile', 'episode-tvdb-' || s || '-1-' || e, 0, TRUE, now() FROM generate_series(1, $1) s, generate_series(1, $2) e`, []any{seriesCount, watched}},
+		// History outside the requested series, which the read must not touch.
+		{`INSERT INTO user_watch_progress SELECT 1, 'profile', 'episode-tvdb-9' || n || '-1-1', 0, TRUE, now() FROM generate_series(1, $1) n`, []any{otherHistory}},
+	} {
+		if _, err := pool.Exec(t.Context(), seed.sql, seed.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// VACUUM sets the visibility map, as autovacuum does in production, so an
+	// index-only scan of the cursor index is costed as cheap as it really is.
+	for _, statement := range []string{`VACUUM ANALYZE user_watch_progress`, `ANALYZE episodes; ANALYZE media_files; SET work_mem = '256kB'; SET hash_mem_multiplier = 2`} {
+		if _, err := pool.Exec(t.Context(), statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := pgstore.NewPostgresProvider(pool).ForUser(t.Context(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	query := PlayableTargetQuery{
+		UserID: 1, ProfileID: "profile", ProgressStore: store, Access: AccessFilter{AllowedLibraryIDs: []int{1}},
+	}
+	for s := 1; s <= seriesCount; s++ {
+		query.Items = append(query.Items, PlayableTargetInput{ContentID: fmt.Sprintf("series-tvdb-%d", s), Type: "series"})
+	}
+	resolver := NewPlayableTargetResolver(pool)
+	resolveAnchored := func(label string) (playableTargetPlan, []byte) {
+		t.Helper()
+		targets, err := resolver.Resolve(t.Context(), query)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for s, card := range query.Items {
+			if want := fmt.Sprintf("episode-tvdb-%d-1-%d", s+1, watched+1); targets[card.Key()] != want {
+				t.Fatalf("%s: card %s target = %q, want %q", label, card.ContentID, targets[card.Key()], want)
+			}
+		}
+		plan, raw := explainOnePlayableTargetPlan(t, pool, capture, label)
+		if plan.usesIndex("user_watch_progress_completed_cursor") {
+			t.Fatalf("%s: completed progress read the completed-cursor index, which rescans the profile's completed history per series\n%s", label, raw)
+		}
+		return plan, raw
+	}
+
+	// The cap reads both settings, so the test fixes both: 256kB at a
+	// multiplier of 2 grants a hash 512kB, which holds the set's IDs.
+	plan, raw := resolveAnchored("fitting set")
+	// The requested series' completed rows, plus one row per series of slack.
+	// Filtered rows count too: a scan that reads the profile and filters it
+	// down to the range returns few rows but reads them all.
+	if rows, limit := plan.progressRowsRead(), seriesCount*(watched+1); rows > float64(limit) {
+		t.Fatalf("%d series cards read %.0f progress rows; want at most %d, the requested series' rows\n%s",
+			seriesCount, rows, limit, raw)
+	}
+	if _, lookups := plan.work(); !strings.Contains(string(raw), "content_id = (hashed SubPlan") || lookups > seriesCount {
+		t.Fatalf("a fitting set made %.0f key lookups; want membership in the hashed set\n%s", lookups, raw)
+	}
+
+	// At 64kB (a 128kB hash) the set no longer fits: one key lookup per
+	// walked episode.
+	if _, err := pool.Exec(t.Context(), `SET work_mem = '64kB'`); err != nil {
+		t.Fatal(err)
+	}
+	plan, raw = resolveAnchored("oversized set")
+	if _, lookups := plan.work(); lookups < seriesCount*watched {
+		t.Fatalf("an oversized set made %.0f key lookups; want one per walked episode (%d) instead of hashing it\n%s",
+			lookups, seriesCount*watched, raw)
+	}
+}
+
+// checkSeasonCardsReadOwnSeason pins that season cards of a long series each
+// read their own season. Only every season's last episode has a file, so each
+// card walks its whole season; resumableCount resumable rows already exist.
+func checkSeasonCardsReadOwnSeason(t *testing.T, pool *pgxpool.Pool, capture *playableTargetSQLCapture, resolver *PlayableTargetResolver, query PlayableTargetQuery, resumableCount int) {
+	t.Helper()
 	const seasonCount, seasonLength = 30, 100
 	for _, statement := range []string{
 		`INSERT INTO episodes SELECT 'long-' || s || '-' || e, 'long', s, e FROM generate_series(1, $1) s, generate_series(1, $2) e`,
@@ -296,7 +423,7 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 			ContentID: fmt.Sprintf("long-season-%d", season), Type: "season", SeriesID: "long", SeasonNumber: &season,
 		})
 	}
-	targets, err = resolver.Resolve(t.Context(), query)
+	targets, err := resolver.Resolve(t.Context(), query)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,16 +432,9 @@ func TestPlayableTargetResolverStaleCompletedProgressPlan(t *testing.T) {
 			t.Fatalf("season card %s target = %q, want %q", card.ContentID, targets[card.Key()], want)
 		}
 	}
-	raw = explainPlayableTargetPlan(t, pool, capture.query, capture.args)
-	documents = nil
-	if err := json.Unmarshal(raw, &documents); err != nil {
-		t.Fatal(err)
-	}
-	if len(documents) != 1 {
-		t.Fatalf("expected one season query plan, got %d", len(documents))
-	}
+	plan, raw := explainOnePlayableTargetPlan(t, pool, capture, "season")
 	// The resumable pass reads one episode per resumable progress row.
-	episodeRows := documents[0].Plan.episodeRowsRead()
+	episodeRows := plan.episodeRowsRead()
 	if limit := float64(2*seasonCount*seasonLength + 2*resumableCount); episodeRows > limit {
 		t.Fatalf("%d season cards read %.0f episode rows; want at most %.0f, since walking the series per card reads %d\n%s",
 			seasonCount, episodeRows, limit, seasonCount*seasonCount*seasonLength, raw)

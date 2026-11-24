@@ -1,11 +1,14 @@
 package handlers
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log/slog"
-	"sort"
+	"slices"
+	"strings"
 	"sync"
+	"time"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -108,11 +111,12 @@ func (h *RecommendationsHandler) watchTonight(ctx context.Context, userID int, p
 	// Merge everything into a single scored list.
 	byID := make(map[string]mergedItem, len(recResult.Items)+len(cwItems)+len(nextUpItems))
 
-	// Insert recommendation items first.
-	for _, item := range recResult.Items {
+	// Insert recommendation items first, keeping the reader's order.
+	for i, item := range recResult.Items {
 		byID[item.MediaItemID] = mergedItem{
-			scored: item,
-			source: "recommendation",
+			scored:  item,
+			source:  "recommendation",
+			recRank: i,
 		}
 	}
 
@@ -134,8 +138,9 @@ func (h *RecommendationsHandler) watchTonight(ctx context.Context, userID int, p
 					Score:       baseCWScore,
 					Reason:      "continue_watching",
 				},
-				source: "continue_watching",
-				meta:   &cw.meta,
+				source:  "continue_watching",
+				meta:    &cw.meta,
+				recRank: len(recResult.Items),
 			}
 		}
 	}
@@ -160,8 +165,9 @@ func (h *RecommendationsHandler) watchTonight(ctx context.Context, userID int, p
 					Score:       baseNextUpScore,
 					Reason:      "next_up",
 				},
-				source: "next_up",
-				meta:   &nu.meta,
+				source:  "next_up",
+				meta:    &nu.meta,
+				recRank: len(recResult.Items),
 			}
 		}
 	}
@@ -171,9 +177,7 @@ func (h *RecommendationsHandler) watchTonight(ctx context.Context, userID int, p
 	for _, m := range byID {
 		merged = append(merged, m)
 	}
-	sort.Slice(merged, func(i, j int) bool {
-		return merged[i].scored.Score > merged[j].scored.Score
-	})
+	slices.SortStableFunc(merged, compareWatchTonight)
 	if len(merged) > limit {
 		merged = merged[:limit]
 	}
@@ -263,6 +267,37 @@ type mergedItem struct {
 	scored recommendations.ScoredItem
 	source string // "continue_watching", "next_up", "recommendation"
 	meta   *sections.SectionItemMeta
+	// recRank is the item's place in the reader's list; items not in it
+	// share the rank after the last.
+	recRank int
+}
+
+// compareWatchTonight orders Watch Tonight's merged items: highest score
+// first. Equal scores, such as every Continue Watching or Next Up item the
+// recommendations do not hold, go most recent activity first (progress for
+// Continue Watching; for Next Up the time its row ranks by, the last watch
+// or, with new releases first, a later release), then in the reader's
+// order, then by content ID, so every read answers the same list.
+func compareWatchTonight(a, b mergedItem) int {
+	if c := cmp.Compare(b.scored.Score, a.scored.Score); c != 0 {
+		return c
+	}
+	if c := b.activityAt().Compare(a.activityAt()); c != 0 {
+		return c
+	}
+	if c := cmp.Compare(a.recRank, b.recRank); c != 0 {
+		return c
+	}
+	return strings.Compare(a.scored.MediaItemID, b.scored.MediaItemID)
+}
+
+// activityAt is when the profile last acted on the item's Continue Watching
+// or Next Up entry; zero for a recommendation only.
+func (m mergedItem) activityAt() time.Time {
+	if m.meta == nil {
+		return time.Time{}
+	}
+	return m.meta.SortTimestamp
 }
 
 type scoredCWItem struct {
@@ -345,6 +380,12 @@ func (h *RecommendationsHandler) fetchLiveCWAndNextUp(ctx context.Context, userI
 		position := entry.PositionSeconds
 		duration := entry.DurationSeconds
 		updatedAt := entry.UpdatedAt
+		// Stores that keep only the whole-second string leave
+		// UpdatedAtTime zero.
+		progressAt := entry.UpdatedAtTime
+		if progressAt.IsZero() {
+			progressAt, _ = time.Parse(time.RFC3339, entry.UpdatedAt)
+		}
 		cwItems = append(cwItems, scoredCWItem{
 			contentID: entry.MediaItemID,
 			meta: sections.SectionItemMeta{
@@ -352,6 +393,7 @@ func (h *RecommendationsHandler) fetchLiveCWAndNextUp(ctx context.Context, userI
 				DurationSeconds:   &duration,
 				ProgressUpdatedAt: &updatedAt,
 				ItemSource:        "in_progress",
+				SortTimestamp:     progressAt,
 			},
 		})
 	}

@@ -3481,11 +3481,14 @@ func appendSubtitleMediaStreams(streams []mediaStreamDTO, routeItemID, mediaSour
 	return streams
 }
 
+// compatNegotiationVariant writes source ids in their canonical spelling, so a
+// negotiation stored while media-source ids still had dashes is replaced by the
+// same negotiation made after the upgrade.
 func compatNegotiationVariant(sources []PlaybackMediaSource) string {
 	var variant strings.Builder
 	for _, source := range sources {
 		fmt.Fprintf(&variant, "%s|a=%s|s=%s|r=%t|ts=%t|ta=%t|dv=%t;",
-			source.ID,
+			canonicalCompatID(source.ID),
 			compatOptionalIndex(source.SelectedAudioStreamIndex),
 			compatOptionalIndex(source.SelectedSubtitleStreamIndex),
 			source.HLSRemux,

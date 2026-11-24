@@ -294,6 +294,7 @@ receipt is `{outcome, accepted?}`, where `accepted` is the latest committed
 | Equal sequence, different payload | 409 `progress_conflict` |
 | Session owned by another profile | 403 |
 | Attempt ended by an administrator | 410 `playback_session_ended` |
+| Attempt ended after it stayed paused too long | 410 `playback_session_paused_timeout` when the start listed `paused_timeout_v1`, otherwise 410 `playback_session_ended` |
 | Attempt already stopped otherwise, or unknown | 404 |
 
 An applied sample is persisted through the shared progress writers (resume
@@ -347,6 +348,19 @@ session at the same position, which is how it recovers from the `404` of an
 expired session or a server restart. A stop the client made first keeps its
 own receipt.
 
+A session left paused longer than the administrator's
+`playback.paused_session_timeout_minutes` (default 15, `0` turns it off) is
+stopped under a fourth server-minted `stop_id` and recorded as `expired`. Its
+progress, replan and control-ticket requests answer `410`: with
+`playback_session_paused_timeout` when the start listed client feature
+`paused_timeout_v1`, and with `playback_session_ended` otherwise. A player that
+gets either leaves playback as it does after an administrator's end; one that
+listed the feature says the pause ran too long instead of naming an
+administrator. Watch Together members, Cast receivers and audio-only files are
+never ended this way, and neither is a client that stopped reporting progress,
+which the idle expiry ends instead
+([playback lifecycle](architecture/playback-lifecycle.md#paused-timeout)).
+
 ## Replan and route events
 
 `replanPlayback` covers failure recovery, seek re-anchor, and track, quality and
@@ -354,8 +368,10 @@ output changes, with the v3 body plus `installation_id`. It is idempotent on `re
 plus the body digest: the same request replays its committed decision; a reused
 id with different input, a superseded plan, or an identical replan still in
 progress is `409`; a session owned by another profile is `403`; a session an
-administrator ended is `410 playback_session_ended`; any other ended session is
-`404`.
+administrator ended is `410 playback_session_ended`; a session ended after it
+stayed paused too long is `410 playback_session_paused_timeout` for an attempt
+that listed `paused_timeout_v1` and `410 playback_session_ended` otherwise; any
+other ended session is `404`.
 
 Route events take the v3 event plus `installation_id` and a client-minted
 `event_id`. `202` acknowledges queueing, not a durable write. A retry with the

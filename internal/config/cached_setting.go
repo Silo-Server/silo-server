@@ -43,12 +43,22 @@ func NewCachedSetting[T any](settings SettingReader, key string, ttl time.Durati
 
 // Get returns the parsed setting.
 func (c *CachedSetting[T]) Get(ctx context.Context) T {
+	value, _ := c.Lookup(ctx)
+	return value
+}
+
+// Lookup is Get that also reports whether the answer is the stored setting:
+// it is false only while every read has failed, when the answer is the parse
+// of "". A caller whose default acts on its own, rather than only shaping a
+// response, can wait for the administrator's value instead. With no reader
+// the parse of "" is the setting, so it reports true.
+func (c *CachedSetting[T]) Lookup(ctx context.Context) (T, bool) {
 	if c == nil {
 		var zero T
-		return zero
+		return zero, false
 	}
 	if c.settings == nil {
-		return c.parse("")
+		return c.parse(""), true
 	}
 	c.mu.Lock()
 	cached, fresh := c.value, c.now().Before(c.expires)
@@ -58,7 +68,7 @@ func (c *CachedSetting[T]) Get(ctx context.Context) T {
 	generation := c.started
 	c.mu.Unlock()
 	if fresh {
-		return cached
+		return cached, true
 	}
 
 	raw, err := c.settings.Get(ctx, c.key)
@@ -69,9 +79,9 @@ func (c *CachedSetting[T]) Get(ctx context.Context) T {
 		latest, read := c.value, c.read
 		c.mu.Unlock()
 		if read {
-			return latest
+			return latest, true
 		}
-		return c.parse("")
+		return c.parse(""), false
 	}
 	value := c.parse(raw)
 
@@ -79,9 +89,9 @@ func (c *CachedSetting[T]) Get(ctx context.Context) T {
 	defer c.mu.Unlock()
 	if generation < c.published {
 		// A read that started later already cached its answer.
-		return c.value
+		return c.value, true
 	}
 	c.value, c.read, c.published = value, true, generation
 	c.expires = c.now().Add(c.ttl)
-	return value
+	return value, true
 }

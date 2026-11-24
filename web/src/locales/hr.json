@@ -521,6 +521,12 @@
       "value": "Ova je sesija reprodukcije završila. Ponovno pokrenite reprodukciju."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Reprodukcija je zaustavljena jer je predugo bila pauzirana. Ponovno pokrenite reprodukciju."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -74159,6 +74165,24 @@
       "value": "Spremi u medijateku"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pauzirana reprodukcija"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Završi pauziranu reprodukciju nakon"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "Od 0 do 1440. Završava reprodukciju videozapisa koji je toliko dugo pauziran u aplikaciji Silo i oslobađa njegov stream i transkodiranje, ako postoji; ponovna reprodukcija nastavlja se s istog mjesta. Ne utječe na Zajedničko gledanje, emitiranje ni audioknjige. Vrijednost 0 isključuje ovu opciju."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -74661,6 +74685,12 @@
     {
       "type": 0,
       "value": "dana"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minuta"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -80622,6 +80652,12 @@
       "value": "Omogući softversko HDR mapiranje tonova"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Završi pauziranu reprodukciju nakon (minuta)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -80680,6 +80716,12 @@
     {
       "type": 0,
       "value": "Izvor oznaka"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pauzirana reprodukcija"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -82698,6 +82740,36 @@
     {
       "type": 0,
       "value": "Najprije uključite pružatelja prijave. Ako je prijava lozinkom isključena i nijedan pružatelj nije uključen, mogli bi se prijaviti samo administratori za hitni pristup."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Od 8 do 72 znaka. Pravila se primjenjuju kada netko odabere ili promijeni lozinku; već postavljene lozinke i dalje rade."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Najmanja duljina lozinke"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Bilo koji interpunkcijski znak ili simbol, poput ! ili #. Slova, znamenke i razmaci se ne računaju."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Zahtijevaj poseban znak"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Zahtijevaj veliko slovo"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -95372,6 +95444,20 @@
       "value": "Postavljanje…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Sami je podijelite s korisnikom "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -98159,10 +98245,80 @@
       "value": " ne dopušta ovom uređaju prijavu na ovaj poslužitelj."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Najmanje "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znak."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Najmanje "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaka."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Najmanje "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znakova."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Lozinke se ne podudaraju."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Uključite barem jedan poseban znak, poput ! ili #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Uključite barem jedno veliko slovo."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -98175,6 +98331,64 @@
     {
       "type": 0,
       "value": "Upotrijebite najmanje 8 znakova."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Upotrijebite najmanje "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znak."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Upotrijebite najmanje "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaka."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Upotrijebite najmanje "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znakova."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -135468,6 +135682,12 @@
     {
       "type": 0,
       "value": "Administrator je prekinuo ovu sesiju reprodukcije."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Reprodukcija je zaustavljena jer je predugo bila pauzirana."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

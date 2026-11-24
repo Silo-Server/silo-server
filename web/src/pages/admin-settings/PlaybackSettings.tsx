@@ -29,6 +29,7 @@ import { SaveBar } from "@/components/SaveBar";
 import { useT } from "@/i18n";
 import { FieldGroup } from "./FieldGroup";
 import { MarkerTasksCard } from "./MarkerTasksCard";
+import { PausedPlaybackGroup } from "./PausedPlaybackGroup";
 import { TrickplayNodeCapacityField } from "./TrickplayNodeCapacityField";
 import { DEFAULT_FFMPEG_PATH, DEFAULT_TRANSCODE_DIR } from "./settingsPathDefaults";
 import {
@@ -277,6 +278,8 @@ export default function PlaybackSettings() {
             restartRequired={restartKeys.has("playback.min_resume_threshold")}
           />
         </FieldGroup>
+
+        <PausedPlaybackGroup form={form} />
 
         <FieldGroup
           label={t("web.admin.settings.playback.transcoding.group")}

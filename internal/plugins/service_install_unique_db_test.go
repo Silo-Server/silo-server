@@ -169,3 +169,48 @@ func (f *archiveLinkFixture) slowInstall(t *testing.T, version string) chan erro
 	}
 	return done
 }
+
+// A build stored for another platform is served only for the package it
+// was fetched for, and a fetch that an update overtook stores nothing.
+func TestPlatformArchiveFollowsTheInstalledPackageDB(t *testing.T) {
+	f := newArchiveLinkFixture(t)
+	ctx := context.Background()
+	first, err := f.service.InstallRemote(ctx, InstallArchiveRequest{ArchiveURL: f.url("1.0.0")})
+	if err != nil {
+		t.Fatalf("InstallRemote(1.0.0) = %v", err)
+	}
+	stored, err := f.store.GetArchive(ctx, first.Installation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	build := &InstallationArchive{ManifestJSON: stored.ManifestJSON, Checksum: "build-checksum", Bytes: []byte("build")}
+	repo := "https://github.com/Silo-Server/silo-plugin-example"
+	save := func(inst *Installation) bool {
+		t.Helper()
+		saved, err := f.store.SavePlatformArchive(ctx, SavePlatformArchiveInput{
+			Installation: inst, OS: "linux", Arch: "riscv64", BaseChecksum: stored.Checksum, Archive: build,
+			Signature: Signature{State: SignatureStateVerified, SourceRepo: &repo},
+		})
+		if err != nil {
+			t.Fatalf("SavePlatformArchive() = %v", err)
+		}
+		return saved
+	}
+	if !save(first.Installation) {
+		t.Fatal("SavePlatformArchive() for the installed package stored nothing")
+	}
+	if got, err := f.store.GetPlatformArchive(ctx, first.Installation.ID, "linux", "riscv64", stored.Checksum); err != nil ||
+		got.Archive.Checksum != build.Checksum || got.Signature.State != SignatureStateVerified || got.Signature.SourceRepo == nil || *got.Signature.SourceRepo != repo {
+		t.Fatalf("GetPlatformArchive() = %+v, %v; want the stored build and its signature", got, err)
+	}
+	if _, err := f.store.GetPlatformArchive(ctx, first.Installation.ID, "linux", "riscv64", "another-package"); !errors.Is(err, ErrArchiveNotFound) {
+		t.Fatalf("GetPlatformArchive() for another package = %v, want ErrArchiveNotFound", err)
+	}
+
+	if _, err := f.service.InstallRemote(ctx, InstallArchiveRequest{ArchiveURL: f.url("2.0.0")}); err != nil {
+		t.Fatalf("InstallRemote(2.0.0) = %v", err)
+	}
+	if save(first.Installation) {
+		t.Fatal("a build fetched for the replaced package was stored")
+	}
+}

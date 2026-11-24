@@ -521,6 +521,12 @@
       "value": "\u200F\u202EThis playback session ended. Start playing again.\u202C"
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlayback stopped because it was paused for too long. Start playing again.\u202C"
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -70893,6 +70899,24 @@
       "value": "\u200F\u202ESave to library\u202C"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPaused playback\u202C"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnd paused playback after\u202C"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202E0 to 1440. Ends a video paused this long in a Silo app, freeing its stream and any transcode; playing it again continues from the same spot. Watch Together, casting and audiobooks are not affected. 0 turns this off.\u202C"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -71363,6 +71387,12 @@
     {
       "type": 0,
       "value": "\u200F\u202Edays\u202C"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "\u200F\u202Eminutes\u202C"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -77525,6 +77555,12 @@
       "value": "\u200F\u202EEnable Software HDR Tone Mapping\u202C"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEnd paused playback after (minutes)\u202C"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -77583,6 +77619,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EMarker source\u202C"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPaused playback\u202C"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -79577,6 +79619,36 @@
     {
       "type": 0,
       "value": "\u200F\u202ETurn on a sign-in provider first. With password sign-in off and no provider on, only break-glass admins could sign in.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EFrom 8 to 72 characters. Rules apply when someone chooses or changes a password; passwords already set keep working.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMinimum password length\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAny punctuation mark or symbol, such as ! or #. Letters, digits and spaces don’t count.\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequire a special character\u202C"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERequire a capital letter\u202C"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -91963,6 +92035,20 @@
       "value": "\u200F\u202ESetting...\u202C"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShare it with \u202C"
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "\u202E yourself.\u202C"
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -94619,10 +94705,64 @@
       "value": "\u202E doesn't allow this device to sign in to this server.\u202C"
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EAt least \u202C"
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E character.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EAt least \u202C"
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E characters.\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "\u200F\u202EPasswords do not match.\u202C"
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInclude at least one special character, such as ! or #.\u202C"
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EInclude at least one capital letter.\u202C"
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -94635,6 +94775,48 @@
     {
       "type": 0,
       "value": "\u200F\u202EUse at least 8 characters.\u202C"
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EUse at least \u202C"
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E character.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EUse at least \u202C"
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E characters.\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -130653,6 +130835,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EAn administrator ended this playback session.\u202C"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlayback stopped because it was paused for too long.\u202C"
     }
   ],
   "web.player.shuffle.scopeWithParent": [

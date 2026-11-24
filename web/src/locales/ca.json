@@ -521,6 +521,12 @@
       "value": "Aquesta sessió de reproducció ha finalitzat. Torna a començar la reproducció."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "La reproducció s’ha aturat perquè ha estat en pausa massa estona. Torna a començar la reproducció."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -74139,6 +74145,24 @@
       "value": "Desa a la biblioteca"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Reproducció en pausa"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Finalitza la reproducció en pausa després de"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "De 0 a 1440. Finalitza un vídeo que ha estat en pausa aquest temps en una aplicació de Silo, cosa que allibera la transmissió i qualsevol transcodificació; si el tornes a reproduir, continua des del mateix punt. No afecta Veure junts, l’emissió a altres dispositius ni els audiollibres. Amb 0, aquesta opció es desactiva."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -74641,6 +74665,12 @@
     {
       "type": 0,
       "value": "dies"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minuts"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -80610,6 +80640,12 @@
       "value": "Activa el mapatge de tons HDR per programari"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Finalitza la reproducció en pausa després de (minuts)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -80668,6 +80704,12 @@
     {
       "type": 0,
       "value": "Font dels marcadors"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Reproducció en pausa"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -82686,6 +82728,36 @@
     {
       "type": 0,
       "value": "Activa primer un proveïdor d’inici de sessió. Amb l’inici de sessió amb contrasenya desactivat i cap proveïdor activat, només podrien iniciar la sessió els administradors d’emergència."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "De 8 a 72 caràcters. Les regles s’apliquen quan algú tria o canvia una contrasenya; les contrasenyes que ja s’han definit continuen funcionant."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Longitud mínima de la contrasenya"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Qualsevol signe de puntuació o símbol, com ara ! o #. Les lletres, les xifres i els espais no compten."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Requereix un caràcter especial"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Requereix una lletra majúscula"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -95320,6 +95392,20 @@
       "value": "S’està definint…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Comparteix-la tu amb "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -98111,10 +98197,80 @@
       "value": " no permet iniciar la sessió en aquest servidor des d’aquest dispositiu."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Com a mínim "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caràcter."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Com a mínim "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " de caràcters."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Com a mínim "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caràcters."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Les contrasenyes no coincideixen."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Inclou com a mínim un caràcter especial, com ara ! o #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Inclou com a mínim una lletra majúscula."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -98127,6 +98283,64 @@
     {
       "type": 0,
       "value": "Utilitza com a mínim 8 caràcters."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Utilitza com a mínim "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caràcter."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Utilitza com a mínim "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " de caràcters."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Utilitza com a mínim "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caràcters."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -135523,6 +135737,12 @@
     {
       "type": 0,
       "value": "Un administrador ha finalitzat aquesta sessió de reproducció."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "La reproducció s’ha aturat perquè ha estat en pausa massa estona."
     }
   ],
   "web.player.shuffle.scopeWithParent": [
