@@ -103,10 +103,6 @@ function draftForType(type: AIProviderType, capability: AICapability): AIProvide
   };
 }
 
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
-}
-
 /**
  * Connected AI providers, each as a settings row whose panel edits it in
  * place, and the dialog that connects a new one. Provider writes save at once:
@@ -502,7 +498,7 @@ function ProviderPanel({
     } catch (error) {
       setTest({
         ok: false,
-        message: errorMessage(error, t("web.admin.settings.ai.providers.checkFailed")),
+        message: readableErrorText(error, t("web.admin.settings.ai.providers.checkFailed")),
         at: Date.now(),
         durationMs: Date.now() - started,
       });
@@ -538,7 +534,7 @@ function ProviderPanel({
       toast.success(t("web.admin.settings.ai.providers.removed", { name: provider.name }));
       onDone();
     } catch (error) {
-      toast.error(errorMessage(error, t("web.admin.settings.ai.providers.removeFailed")));
+      toast.error(readableErrorText(error, t("web.admin.settings.ai.providers.removeFailed")));
     } finally {
       setConfirmDelete(false);
     }

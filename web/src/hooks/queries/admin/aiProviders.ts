@@ -68,13 +68,17 @@ function useProviderWrite<TInput, TResult>(
     // while a create is pending, and a paused one would hold it shut.
     networkMode: "always",
     retry: false,
-    onSettled: async () => {
-      await Promise.all([
+    onSettled: (_data, error) => {
+      const refreshed = Promise.all([
         qc.invalidateQueries({ queryKey: providersKey }),
         changesSettings
           ? qc.invalidateQueries({ queryKey: adminKeys.serverSettings() })
           : Promise.resolve(),
       ]);
+      // A failed write refreshes in the background. Waiting would keep the
+      // write pending, and the add dialog shut, for the list read's own
+      // deadline after a create had already given up.
+      return error ? undefined : refreshed;
     },
   });
 }

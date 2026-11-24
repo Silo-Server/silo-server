@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { AIProvider } from "@/hooks/queries/admin/aiProviders";
+import { useAIProviders, type AIProvider } from "@/hooks/queries/admin/aiProviders";
 
 import { AddAIProviderDialog, AIProvidersList } from "./AIProviders";
 
@@ -93,6 +93,11 @@ describe("AIProvidersList", () => {
   });
 });
 
+function ProviderList() {
+  useAIProviders();
+  return null;
+}
+
 describe("AddAIProviderDialog", () => {
   // A caller such as the setup wizard stages the new provider from onCreated.
   // Closing the dialog while Add is pending would let the caller move on
@@ -159,7 +164,9 @@ describe("AddAIProviderDialog", () => {
   });
 
   // Writes get no deadline by default. A create the server never answers
-  // would hold the dialog shut for good, so it gives up and lets it close.
+  // would hold the dialog shut for good, so it gives up and lets it close,
+  // without also waiting out the provider list's refresh (mounted here, as on
+  // the pages that open the dialog).
   it("lets the dialog close when the server never answers an add", async () => {
     const { v2 } = await vi.importActual<typeof import("@/api/v2/request")>("@/api/v2/request");
     mocks.v2.mockReset().mockImplementation(v2);
@@ -177,14 +184,17 @@ describe("AddAIProviderDialog", () => {
       const onOpenChange = vi.fn();
       const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
       render(
-        <AddAIProviderDialog open onOpenChange={onOpenChange} types={types} onCreated={vi.fn()} />,
+        <>
+          <ProviderList />
+          <AddAIProviderDialog open onOpenChange={onOpenChange} types={types} onCreated={vi.fn()} />
+        </>,
       );
       await user.click(screen.getByRole("button", { name: "Continue" }));
       await user.type(screen.getByLabelText("API key"), "sk-test");
       await user.click(screen.getByRole("button", { name: "Add provider" }));
       expect(screen.queryByRole("button", { name: "Close" })).not.toBeInTheDocument();
 
-      await vi.advanceTimersByTimeAsync(60_000);
+      await vi.advanceTimersByTimeAsync(31_000);
       await waitFor(() =>
         expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument(),
       );
