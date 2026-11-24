@@ -3619,7 +3619,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "เล่นทันที"
+      "value": "เล่นตอนถัดไป"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -99598,6 +99598,104 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "ล้าง"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "คะแนนของคุณ"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "คะแนนซีรีส์ของคุณ"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "ไม่มีคะแนน"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "ให้คะแนน"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "ให้คะแนนเรื่องนี้"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "ให้คะแนนซีรีส์"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "นำคะแนนออกแล้ว"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "เลิกทำ"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " จาก 5"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "คุณ"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "คะแนนของคุณ "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " จาก 5"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "คะแนนซีรีส์ของคุณ "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " จาก 5"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -114224,7 +114322,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "เล่นทันที"
+      "value": "เล่นตอนถัดไป"
     }
   ],
   "web.player.nextEpisode.regionLabel": [

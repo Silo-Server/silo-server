@@ -3652,7 +3652,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "Esita kohe"
+      "value": "Esita järgmine osa"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -108926,6 +108926,104 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "Tühjenda"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "Teie hinnang"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "Teie hinnang sarjale"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "Hinnang puudub"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "Hinda"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "Hinda seda"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "Hinda sarja"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "Hinnang eemaldatud"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "Võta tagasi"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " 5-st"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "Teie"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "Teie hinnang: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " 5-st"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "Teie hinnang sarjale: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " 5-st"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -124578,7 +124676,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "Esita kohe"
+      "value": "Esita järgmine osa"
     }
   ],
   "web.player.nextEpisode.regionLabel": [

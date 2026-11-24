@@ -3672,7 +3672,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "Şimdi oynat"
+      "value": "Sıradaki bölümü oynat"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -107084,6 +107084,96 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "Temizle"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "Puanınız"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "Dizi puanınız"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "Puan yok"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "Puanla"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "Bunu puanla"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "Diziyi puanla"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "Puan kaldırıldı"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "Geri al"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 0,
+      "value": "5 üzerinden "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "Siz"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "Puanınız, 5 üzerinden "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "Dizi puanınız, 5 üzerinden "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -122392,7 +122482,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "Şimdi oynat"
+      "value": "Sıradaki bölümü oynat"
     }
   ],
   "web.player.nextEpisode.regionLabel": [

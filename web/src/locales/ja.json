@@ -3627,7 +3627,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "今すぐ再生"
+      "value": "次のエピソードを再生"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -98218,6 +98218,96 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "クリア"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "自分の評価"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "シリーズの自分の評価"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "評価なし"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "評価する"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "この作品を評価"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "シリーズを評価"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "評価を削除しました"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "元に戻す"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 0,
+      "value": "5点中"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "自分"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "自分の評価：5点中"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "シリーズの自分の評価：5点中"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -112520,7 +112610,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "今すぐ再生"
+      "value": "次のエピソードを再生"
     }
   ],
   "web.player.nextEpisode.regionLabel": [

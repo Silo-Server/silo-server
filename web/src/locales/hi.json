@@ -3672,7 +3672,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "अभी चलाएँ"
+      "value": "अगला एपिसोड चलाएँ"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -107610,6 +107610,96 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "साफ़ करें"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "आपकी रेटिंग"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "सीरीज़ के लिए आपकी रेटिंग"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "कोई रेटिंग नहीं"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "रेटिंग दें"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "इसे रेटिंग दें"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "सीरीज़ को रेटिंग दें"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "रेटिंग हटा दी गई"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "पहले जैसा करें"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 0,
+      "value": "5 में से "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "आप"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "आपकी रेटिंग, 5 में से "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "सीरीज़ के लिए आपकी रेटिंग, 5 में से "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -123026,7 +123116,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "अभी चलाएँ"
+      "value": "अगला एपिसोड चलाएँ"
     }
   ],
   "web.player.nextEpisode.regionLabel": [

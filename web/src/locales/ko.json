@@ -3627,7 +3627,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "지금 재생"
+      "value": "다음 에피소드 재생"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -98784,6 +98784,108 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "지우기"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "내 평점"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "내 시리즈 평점"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "평점 없음"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "평가"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "평가하기"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "시리즈 평가하기"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "평점을 삭제했어요."
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "실행 취소"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 0,
+      "value": "5점 중 "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "점"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "나"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "내 평점, 5점 중 "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "점"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "내 시리즈 평점, 5점 중 "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "점"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -113432,7 +113534,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "지금 재생"
+      "value": "다음 에피소드 재생"
     }
   ],
   "web.player.nextEpisode.regionLabel": [
