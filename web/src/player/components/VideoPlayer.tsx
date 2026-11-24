@@ -2773,10 +2773,12 @@ export function VideoPlayer({
   });
 
   // Recap, credits and preview pills follow the intro's `ask` table whatever
-  // the intro mode is. One pill shows at a time: a range that begins under an
-  // intro pill waits, and starts its full timer when that pill has gone. The
-  // Next Up screen covers the player without ending the range, so there the
-  // pill is held as if paused instead of dropped.
+  // the intro mode is. One pill shows at a time, and the intro pill wins. It
+  // and the Next Up screen cover a segment pill without ending its range, so
+  // the pill is held as if paused instead of dropped: one that already showed
+  // comes back with the time it had left, one that timed out stays timed out,
+  // and one that became due under the cover starts its full timer when it
+  // first shows.
   const autoRecapKey = activeRecap
     ? `${sessionId}:${activeFileId ?? "unknown"}:${activeRecap.start}:${activeRecap.end}`
     : null;
@@ -2792,15 +2794,14 @@ export function VideoPlayer({
     intro: activeSkipMarker ?? null,
     introKey: segmentKey,
     currentTime,
-    playing: playing && displayMode === "foreground",
-    covered: displayMode === "postroll",
+    playing: playing && displayMode === "foreground" && activeIntroPrompt === null,
+    covered: displayMode === "postroll" || activeIntroPrompt !== null,
     controlsVisible,
     enabled:
       (displayMode === "foreground" || displayMode === "postroll") &&
       isPlayerReady &&
       !awaitingFirstFrame &&
       introPromptCanSeek &&
-      activeIntroPrompt === null &&
       // An automatic recap skip answers the pill, unless the seek did not take.
       !(autoSkipRecap && activeSkipMarker?.kind === "recap" && failedAutoRecapKey !== autoRecapKey),
     onSeek: handlePlayerSeek,
@@ -3891,8 +3892,9 @@ export function VideoPlayer({
     }, 0);
   }, [resetControlsTimer]);
 
-  // At most one of the intro and segment prompts exists, so each wrapper acts
-  // on whichever is on screen.
+  // Each wrapper asks the intro prompt first. A segment prompt can sit hidden
+  // under it, but the intro prompt answers every Select while it shows, and an
+  // untimed intro pill takes no Back, so neither reaches the hidden one.
   const selectIntroPrompt = useCallback(() => {
     if (!selectActiveIntroPrompt() && !selectActiveSegmentPrompt()) return false;
     // A press on the prompt is the viewer's seek; automatic skips are not.

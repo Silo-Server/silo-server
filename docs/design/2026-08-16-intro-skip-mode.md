@@ -209,6 +209,11 @@ Also:
 - At most one actionable pill shows, in this order: intro, then recap or credits, then
   buffering. A recap or credits pill that becomes due while the intro pill shows waits, and
   starts its full timer when it first shows.
+- A recap or credits pill that has shown is covered while the intro pill shows, as when the
+  controls bring back an intro pill that timed out over the same stretch: it is hidden and
+  its timer is frozen, and it comes back with the time it had left when the intro pill
+  hides. A pill whose timer ran out does not come back timed; it returns without a timer,
+  with the controls, only while no intro pill shows.
 - While the Next Up screen covers the player the pill is hidden and its timer is frozen.
   That screen still opens `playback.next_up_prompt_seconds` before the end of the file,
   whatever the credits marker says.

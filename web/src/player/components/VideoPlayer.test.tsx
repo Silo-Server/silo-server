@@ -1563,3 +1563,102 @@ describe("VideoPlayer automatic recap skip", () => {
     expect(await findByRole("button", { name: "Skip Recap" })).toBeTruthy();
   });
 });
+
+// An intro that overlaps a recap: the intro pill has priority, so a recap pill
+// that has shown is covered by it, hidden with its timer frozen, rather than
+// dropped and restarted.
+describe("VideoPlayer recap pill under the intro pill", () => {
+  const PROMPT_MS = 10_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  async function setup(recap: { start: number; end: number }) {
+    const rendered = renderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      }),
+      intro: { start: 10, end: 60 },
+      recap,
+    });
+    const video = rendered.container.querySelector("video")!;
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    const at = (seconds: number) => {
+      video.currentTime = seconds;
+      fireFrameTimeUpdate(video);
+    };
+    const pill = (name: string) => rendered.queryByRole("button", { name });
+    const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+    // Moving the pointer brings the controls up; they hide 3 s later.
+    const showControls = () => fireEvent.mouseMove(rendered.container.firstElementChild!);
+    at(5);
+    fireEvent.play(video);
+    await advance(3_000);
+    at(11);
+    expect(pill("Skip Intro")).not.toBeNull();
+    return { at, pill, advance, showControls };
+  }
+
+  it("hides a shown recap pill under the intro pill and resumes it with the time left", async () => {
+    const { at, pill, advance, showControls } = await setup({ start: 25, end: 40 });
+    await advance(PROMPT_MS);
+    expect(pill("Skip Intro")).toBeNull();
+    at(26);
+    expect(pill("Skip Recap")).not.toBeNull();
+    await advance(4_000);
+
+    showControls();
+    expect(pill("Skip Intro")).not.toBeNull();
+    expect(pill("Skip Recap")).toBeNull();
+    await advance(2_999);
+    expect(pill("Skip Recap")).toBeNull();
+    await advance(1);
+
+    expect(pill("Skip Intro")).toBeNull();
+    expect(pill("Skip Recap")).not.toBeNull();
+    await advance(5_999);
+    expect(pill("Skip Recap")).not.toBeNull();
+    await advance(1);
+    expect(pill("Skip Recap")).toBeNull();
+  });
+
+  it("starts a recap pill that became due under the intro pill with its full timer", async () => {
+    const { at, pill, advance } = await setup({ start: 12, end: 40 });
+    at(13);
+    expect(pill("Skip Recap")).toBeNull();
+    await advance(PROMPT_MS);
+
+    expect(pill("Skip Intro")).toBeNull();
+    expect(pill("Skip Recap")).not.toBeNull();
+    await advance(PROMPT_MS - 1);
+    expect(pill("Skip Recap")).not.toBeNull();
+    await advance(1);
+    expect(pill("Skip Recap")).toBeNull();
+  });
+
+  it("does not restart a timed-out recap pill after the intro pill goes", async () => {
+    const { at, pill, advance, showControls } = await setup({ start: 25, end: 40 });
+    await advance(PROMPT_MS);
+    at(26);
+    await advance(PROMPT_MS);
+    expect(pill("Skip Recap")).toBeNull();
+
+    showControls();
+    expect(pill("Skip Intro")).not.toBeNull();
+    await advance(3_000);
+    expect(pill("Skip Intro")).toBeNull();
+    expect(pill("Skip Recap")).toBeNull();
+  });
+});
