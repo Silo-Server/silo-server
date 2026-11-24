@@ -52,10 +52,10 @@ function alphaOf(hex: string): number {
 // border colour yields to the accent in presets that paint the accent there.
 // A solid fill without a chosen text colour gets black or white text, since
 // the preset's own colour was picked for its own fill or for the artwork. A
-// see-through fill in a preset that draws a fill gets white text, since its
-// own colour was picked for that fill and the text sits on the artwork again;
-// any see-through fill adds a text shadow when the preset has none, unless
-// the viewer turned shadows off. An accent the preset writes as
+// see-through fill in a preset that fills with the accent gets white text,
+// since its own colour was picked for that fill and the text sits on the
+// artwork again. Any see-through fill adds a text shadow when the preset has
+// none, unless the viewer turned shadows off. An accent the preset writes as
 // text that would not read on a solid fill tints it instead.
 export function applyOverlayStyle(
   preset: OverlayPreset,
