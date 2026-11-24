@@ -60,17 +60,19 @@ func (s *Service) LinkCredentialsIdentity(ctx context.Context, in CredentialsLin
 	if s.users == nil {
 		return nil, ErrProviderUnavailable
 	}
-	if _, err := confirmLocalPassword(ctx, s.users, in.UserID, in.Password); err != nil {
+	user, err := confirmLocalPassword(ctx, s.users, in.UserID, in.Password)
+	if err != nil {
 		return nil, err
 	}
 	username := strings.TrimSpace(in.DirectoryUsername)
 	if username == "" || in.DirectoryPassword == "" {
 		return nil, ErrInvalidCredentials
 	}
-	if err = s.reserveSignIn(ctx, username); err != nil {
+	spend := s.newSignInSpend(ctx, username, "")
+	if err = s.reserveSignIn(ctx, spend); err != nil {
 		return nil, err
 	}
-	defer func() { s.finishSignIn(ctx, username, err) }()
+	defer func() { s.finishSignIn(ctx, spend, user, err) }()
 	_, identityID, err := provider.authenticateCredentials(ctx, Credentials{Username: username, Password: in.DirectoryPassword}, in.UserID)
 	if err != nil {
 		return nil, err

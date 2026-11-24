@@ -47,8 +47,9 @@ var QuickConnectCodePolicy = AttemptPolicy{MaxAttempts: 20, Window: 15 * time.Mi
 // then fifteen minutes locked. The client address budgets cannot bound
 // guessing at one name from many addresses; this holds it near a thousand
 // guesses a day, while a person who mistypes a few times never meets it.
-// The lock is temporary, so a stranger cannot shut an account out for good.
-// auth.Service keys it by name (auth.SignInAttemptLimiter).
+// The lock holds only for addresses the account is not known to sign in
+// from, so a stranger who keeps spending it cannot shut the account's people
+// out where they usually sign in (SignInLimiter).
 var SignInNamePolicy = AttemptPolicy{MaxAttempts: 10, Window: 15 * time.Minute}
 
 // AttemptLimiter counts attempts at a secret per key under an AttemptPolicy.
@@ -93,14 +94,6 @@ func NewProfilePINAttemptLimiter(client *redis.Client) *AttemptLimiter {
 // limiter.
 func NewQuickConnectCodeAttemptLimiter(client *redis.Client) *AttemptLimiter {
 	return newSharedAttemptLimiter(client, QuickConnectCodePolicy)
-}
-
-// NewSignInNameAttemptLimiter returns the per-name password sign-in limiter,
-// shared through Redis on the same terms as the profile PIN limiter. A
-// process builds one and gives it to every auth.Service it runs, so the
-// native, Jellyfin and Audiobookshelf listeners spend one count per name.
-func NewSignInNameAttemptLimiter(client *redis.Client) *AttemptLimiter {
-	return newSharedAttemptLimiter(client, SignInNamePolicy)
 }
 
 func newSharedAttemptLimiter(client *redis.Client, p AttemptPolicy) *AttemptLimiter {

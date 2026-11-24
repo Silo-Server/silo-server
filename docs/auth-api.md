@@ -419,7 +419,11 @@ many addresses the attempts come from: native `login`, Jellyfin
 `POST /Users/AuthenticateByName`, Audiobookshelf `/login` (beta), and
 `linkAccountIdentityWithCredentials`, which spends the budget of the directory username
 it checks. Names are trimmed and compared without regard to case, as sign-in looks up
-accounts, so ` Alice` and `alice` share one budget; a username and the same account's
+accounts, so ` Alice` and `alice` share one budget. The database folds the case with the
+`lower()` that `citext` compares by, so budgets follow its collation: with the C collation
+`Älice` and `älice` are two accounts and two budgets, and two accounts never share one. If
+that query fails, the attempt still counts, under a name folded by the server, but its
+success clears and extends nothing; a username and the same account's
 email address are two names. A Jellyfin name with a `#`, such as `alice#Kids`, spends the
 budget of the part before the `#`, even when it signs in to an account whose own name
 contains the `#`, so the budget does not depend on which accounts exist. Such an account's
@@ -428,10 +432,39 @@ the budget does not reveal which names exist.
 
 The limit is `ratelimit.SignInNamePolicy`: ten attempts per name. The first attempt
 starts a 15-minute window, and the tenth locks the name for 15 minutes from that attempt.
-While a name is locked every attempt is refused before any password is checked, the
-right password included. A successful sign-in while the name is not locked clears the
-count, and so does the right temporary password on a Jellyfin or Audiobookshelf sign-in,
-which is refused only because those apps cannot change it. Every other failure counts,
+While a name is locked, every attempt from an address the account is not known to sign
+in from is refused before any password is checked, the right password included. A
+successful sign-in while the name is not locked clears the count, and so does the right
+temporary password on a Jellyfin or Audiobookshelf sign-in, which is refused only because
+those apps cannot change it. A success clears and extends only a budget whose name belongs
+to the account that signed in: one of its own names, or a name no account answers to,
+such as its directory username. A directory identity of a separate account with the
+same login name, or an `alice#Kids` account signing in through Jellyfin with the `alice`
+budget, leaves that budget's counts alone and makes its address known only for its own
+names, so it cannot clear guesses at the account the name finds.
+
+An address becomes known for an account's username and email address when a password
+sign-in to the account succeeds from it (including signup, invitation acceptance and a
+completed password reset) or one of the account's login sessions refreshes from it (a
+Jellyfin app's session refreshes its login session as the app keeps using it), and
+stays known for 30 days after the last of those (`ratelimit.SignInTrustTTL`). A name
+keeps the 32 addresses it used most recently (`ratelimit.SignInTrustMaxAddresses`), so
+refreshes that each name a new address cannot grow the store without bound. While the
+name is locked, each known address spends a budget of its own instead,
+`ratelimit.SignInSourcePolicy` (ten attempts, then 15 minutes locked), which a success
+from it clears. Addresses count as the per-address request budgets count them: an IPv4
+address on its own and a public IPv6 client by its /64. A request through a network
+access provider counts from the overlay peer the provider named, apart from the same
+address on another provider installation or outside the overlay. A request with no
+address that says where the person is never becomes known and never spends a known
+address's budget: one a forwarder sent for a client the server could not identify (its
+address is the forwarder's), one from loopback (a proxy, plugin or relay on the server's
+host), and an overlay request without a peer. So someone who keeps a name
+locked from elsewhere does not lock its people out where they usually sign in, and
+guessing stays bounded: ten attempts per window from every unknown address together,
+plus ten from each known one. Impersonation and remote-playback handoff sessions do not make an address known. Nor does an account's email when it
+is another account's username, which only accounts from before the single login identity
+space can have: that name signs in to the account with the username, whose name it stays. Every other failure counts,
 including one caused by an unavailable directory or database, or by a server too busy to
 check the password ([`503`](#when-the-server-is-too-busy-to-check-a-password)). A count that never reaches
 ten expires 15 minutes after its first attempt. A Jellyfin or Audiobookshelf sign-in whose
@@ -446,15 +479,19 @@ A locked name answers 429 with `Retry-After` giving the seconds left:
 - Jellyfin: `{"Error":"TooManyRequests",...}`, as for its other 429s.
 - Audiobookshelf: a plain-text 429.
 
-The count lives in Redis whenever the server has Redis configured, so every node and
-every listener share it, independent of `ratelimit.backend` and of whether request rate
-limiting is enabled. Only a server without Redis keeps it in process memory. A Redis
-error fails open and is logged; a request whose own context was canceled is refused.
+The counts and known addresses live in Redis whenever the server has Redis configured,
+so every node and every listener share them, independent of `ratelimit.backend` and of
+whether request rate limiting is enabled. Only a server without Redis keeps them in
+process memory, and forgets known addresses when it restarts, until the account's
+devices sign in or refresh again. A Redis error on a count fails open and is logged; a
+failed lookup of a known address counts it as unknown. A request whose own context was
+canceled is refused.
 
-The lock is temporary, but anyone who knows a name can keep it locked by spending the
-budget every 15 minutes. While that lasts, the account's existing sessions keep working
-and refreshing, completing a password reset or an invitation signs in without spending
-the budget, and a signed-in device can approve a new one through device sign-in.
+Anyone who knows a name can keep it locked for unknown addresses by spending the budget
+every 15 minutes. While that lasts, the account's people still sign in from known
+addresses, existing sessions keep working and refreshing, completing a password reset or
+an invitation signs in without spending the budget, and a signed-in device can approve a
+new one through device sign-in.
 
 ## Authenticated account allowance
 

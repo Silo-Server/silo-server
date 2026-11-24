@@ -7,27 +7,56 @@ import (
 	"testing"
 	"time"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// countingSignInAttempts allows max attempts per key, then refuses until the
-// key is reset or its window passes (expire), like the ratelimit
-// AttemptLimiter without a clock. This package cannot import ratelimit.
+// countingSignInAttempts allows max attempts per name, then refuses until
+// the name is reset or its window passes (expire), except from an address
+// trusted for the name, which gets max attempts of its own: the
+// ratelimit.SignInLimiter without a clock or address grouping. This package
+// cannot import ratelimit.
 type countingSignInAttempts struct {
 	max    int
 	counts map[string]int
+	known  map[string]bool
 }
 
-func (c *countingSignInAttempts) Reserve(_ context.Context, key string) (time.Duration, bool) {
-	if c.counts[key] >= c.max {
-		return 7 * time.Minute, false
+func newCountingSignInAttempts(maxAttempts int) *countingSignInAttempts {
+	return &countingSignInAttempts{max: maxAttempts, counts: map[string]int{}, known: map[string]bool{}}
+}
+
+func (c *countingSignInAttempts) Reserve(_ context.Context, key, source string) (SignInLane, time.Duration, bool) {
+	if c.counts[key] < c.max {
+		c.counts[key]++
+		return SignInLaneName, 0, true
 	}
-	c.counts[key]++
-	return 0, true
+	pair := key + "|" + source
+	if source == "" || !c.known[pair] {
+		return SignInLaneName, 7 * time.Minute, false
+	}
+	if c.counts[pair] >= c.max {
+		return SignInLaneSource, 7 * time.Minute, false
+	}
+	c.counts[pair]++
+	return SignInLaneSource, 0, true
 }
 
-func (c *countingSignInAttempts) Reset(_ context.Context, key string) { delete(c.counts, key) }
+func (c *countingSignInAttempts) Reset(_ context.Context, key, source string, lane SignInLane) {
+	if lane == SignInLaneSource {
+		key += "|" + source
+	}
+	delete(c.counts, key)
+}
+
+func (c *countingSignInAttempts) Trust(_ context.Context, keys []string, source string) {
+	for _, key := range keys {
+		c.known[key+"|"+source] = true
+	}
+}
 
 func (c *countingSignInAttempts) expire() { clear(c.counts) }
 
@@ -42,7 +71,7 @@ func TestSignInNameBudgetDB(t *testing.T) {
 	user := env.localAccount(t, "signin-budget", models.RoleUser)
 	users, sessions := NewUserRepository(env.pool), NewSessionRepository(env.pool)
 	svc := NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-signin-budget-secret-0123456789", time.Minute, 24*time.Hour), sessions, users, nil, nil, nil)
-	limiter := &countingSignInAttempts{max: 3, counts: map[string]int{}}
+	limiter := newCountingSignInAttempts(3)
 	svc.SetSignInAttempts(limiter)
 
 	const right, wrong = "correct horse battery", "wrong horse battery"
@@ -137,6 +166,183 @@ func TestSignInNameBudgetDB(t *testing.T) {
 		limiter.expire()
 		if err := native(user.Username, right); err != nil {
 			t.Fatalf("after the window: %v", err)
+		}
+	})
+
+	// A sign-in spends the budget of the name typed, also when it signs in to
+	// another account than the one that name finds: a Jellyfin name with a
+	// '#' to an account whose own name has it, or a directory identity of a
+	// separate account. That success must not clear the name's count or make
+	// its address known for the name, or its owner could guess at the
+	// account the name finds without end.
+	t.Run("a sign-in to another account cannot clear a name's budget", func(t *testing.T) {
+		victim := env.localAccount(t, "signin-budget-victim", models.RoleUser)
+		hashed := env.localAccount(t, "signin-budget-hashed", models.RoleUser)
+		if _, err := env.pool.Exec(t.Context(), `UPDATE users SET username = $1 WHERE id = $2`, victim.Username+"#x", hashed.ID); err != nil {
+			t.Fatal(err)
+		}
+		// The directory's person has the victim's username, so signing them in
+		// creates a separate account.
+		directory := &directoryPlugin{users: map[string]*pluginv1.AuthenticateResponse{victim.Username + "\x00" + right: {
+			ExternalSubject: "uid=" + env.name("signin-budget-directory"), Issuer: "ldaps://ldap.example.test",
+			Username: victim.Username, Email: env.name("signin-budget-directory") + "@example.test",
+			ManagedRole: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_USER,
+		}}}
+		directoryID := PluginProviderID(env.installationID, "ldap")
+		svc.SetPluginProviderSource(staticProviderSource{{
+			Info: LoginProviderInfo{ID: directoryID, Mode: ProviderModeCredentials, InstallationID: env.installationID},
+			Provider: NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: env.installationID, CapabilityID: "ldap", AutoProvision: true},
+				sessions, env.resolver, func(context.Context) (pluginAuthClient, error) { return directory, nil }),
+		}})
+		defer svc.SetPluginProviderSource(nil)
+		from := clientip.SetContext(t.Context(), "198.51.100.66")
+
+		for label, signIn := range map[string]func() error{
+			"a Jellyfin name with a '#'": func() error {
+				_, _, _, err := svc.CompatLoginWithLocalFallback(from, victim.Username+"#x", right, "", "test", "", victim.Username)
+				return err
+			},
+			"a directory identity of another account": func() error {
+				_, _, err := svc.LoginWithProvider(from, directoryID, victim.Username, right, "test", "")
+				return err
+			},
+		} {
+			t.Run(label, func(t *testing.T) {
+				defer limiter.expire()
+				for range limiter.max - 1 {
+					_, _, err := svc.LoginWithProvider(from, "", victim.Username, wrong, "test", "")
+					wantInvalid(t, err)
+				}
+				if err := signIn(); err != nil {
+					t.Fatalf("sign-in to the other account: %v", err)
+				}
+				_, _, err := svc.LoginWithProvider(from, "", victim.Username, wrong, "test", "")
+				wantThrottled(t, err)
+			})
+		}
+	})
+
+	// An account kept from before the single login identity space can have
+	// another account's username as its email. The name signs in to the
+	// account with that username, so only that account's sign-ins make an
+	// address known for it.
+	t.Run("a legacy duplicate identifier is not an account's own name", func(t *testing.T) {
+		defer limiter.expire()
+		ctx := t.Context()
+		victim := env.localAccount(t, "signin-budget-legacy-victim", models.RoleUser)
+		holder := env.name("signin-budget-legacy-holder")
+		tx, err := env.pool.Begin(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		if _, err := tx.Exec(ctx, "SET LOCAL session_replication_role = replica"); err != nil {
+			t.Skipf("cannot bypass triggers to seed a legacy collision: %v", err)
+		}
+		var holderID int
+		if err := tx.QueryRow(ctx, `INSERT INTO users
+			(username, email, password_hash, role, permissions, local_password_login_enabled, access_group_id)
+			VALUES ($1, $2, $3, 'user', $4, true, (SELECT id FROM access_groups WHERE is_default)) RETURNING id`,
+			holder, victim.Username, externalSignInPasswordHash, DefaultUserPermissions()).Scan(&holderID); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.Exec(ctx, `INSERT INTO user_login_identifiers (identifier, user_id, legacy_duplicate)
+			VALUES ($1, $2, false), ($3, $2, true)`, holder, holderID, victim.Username); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			t.Fatal(err)
+		}
+
+		from := func(ip string) context.Context { return clientip.SetContext(ctx, ip) }
+		victimHome, signedIn, refreshed := "198.51.100.78", "198.51.100.77", "203.0.113.77"
+		if _, _, err := svc.LoginWithProvider(from(victimHome), "", victim.Username, right, "test", ""); err != nil {
+			t.Fatalf("victim sign-in: %v", err)
+		}
+		pair, _, err := svc.LoginWithProvider(from(signedIn), "", holder, right, "test", "")
+		if err != nil {
+			t.Fatalf("holder sign-in: %v", err)
+		}
+		if _, err := svc.Refresh(from(refreshed), pair.RefreshToken); err != nil {
+			t.Fatalf("holder refresh: %v", err)
+		}
+		for range limiter.max {
+			_, _, err := svc.LoginWithProvider(from("192.0.2.77"), "", victim.Username, wrong, "test", "")
+			wantInvalid(t, err)
+		}
+		for _, ip := range []string{signedIn, refreshed} {
+			_, _, err := svc.LoginWithProvider(from(ip), "", victim.Username, wrong, "test", "")
+			wantThrottled(t, err)
+		}
+		if _, _, err := svc.LoginWithProvider(from(victimHome), "", victim.Username, right, "test", ""); err != nil {
+			t.Fatalf("name locked: victim sign-in from home: %v, want it to succeed", err)
+		}
+	})
+
+	// A stranger who keeps a name locked does not lock its account out of the
+	// addresses it signs in from: a sign-in or a refresh makes the address
+	// known for the account's username and email, and a known address then
+	// spends a budget of its own. Every other address stays locked.
+	t.Run("a known address keeps signing in while the name is locked", func(t *testing.T) {
+		defer limiter.expire()
+		home, travel, stranger := "198.51.100.7", "203.0.113.20", "192.0.2.99"
+		from := func(ip string) context.Context { return clientip.SetContext(t.Context(), ip) }
+		signInFrom := func(ip, name, password string) (*TokenPair, error) {
+			pair, _, err := svc.LoginWithProvider(from(ip), "", name, password, "test", ip)
+			return pair, err
+		}
+
+		pair, err := signInFrom(home, user.Username, right)
+		if err != nil {
+			t.Fatalf("sign-in from home: %v", err)
+		}
+		for _, name := range []string{user.Username, user.Email} {
+			for range limiter.max {
+				if _, err := signInFrom(stranger, name, wrong); !errors.Is(err, ErrInvalidCredentials) {
+					t.Fatalf("stranger's guess at %s: err = %v, want ErrInvalidCredentials", name, err)
+				}
+			}
+			if _, err := signInFrom(stranger, name, right); err == nil {
+				t.Fatalf("%s locked: the stranger's address signed in", name)
+			}
+			if _, err := signInFrom(home, name, right); err != nil {
+				t.Fatalf("%s locked: sign-in from home: %v, want it to succeed", name, err)
+			}
+		}
+
+		// The known address's own budget bounds guessing from it too.
+		for range limiter.max {
+			if _, err := signInFrom(home, user.Username, wrong); !errors.Is(err, ErrInvalidCredentials) {
+				t.Fatalf("guess from home: err = %v, want ErrInvalidCredentials", err)
+			}
+		}
+		_, err = signInFrom(home, user.Username, right)
+		wantThrottled(t, err)
+
+		// Once the name's lock has passed, a success from home clears home's
+		// own count too, so locking the name again does not shut home out.
+		nameKey, _ := svc.signInNameKeys(t.Context(), user.Username)
+		delete(limiter.counts, nameKey[0])
+		if _, err := signInFrom(home, user.Username, right); err != nil {
+			t.Fatalf("sign-in from home after the name's lock passed: %v", err)
+		}
+		for range limiter.max {
+			if _, err := signInFrom(stranger, user.Username, wrong); !errors.Is(err, ErrInvalidCredentials) {
+				t.Fatalf("stranger's guess: err = %v, want ErrInvalidCredentials", err)
+			}
+		}
+		if _, err := signInFrom(home, user.Username, right); err != nil {
+			t.Fatalf("name locked again: sign-in from home: %v, want it to succeed", err)
+		}
+
+		// A refresh makes its address known as well.
+		_, err = signInFrom(travel, user.Username, right)
+		wantThrottled(t, err)
+		if _, err := svc.Refresh(from(travel), pair.RefreshToken); err != nil {
+			t.Fatalf("refresh from travel: %v", err)
+		}
+		if _, err := signInFrom(travel, user.Username, right); err != nil {
+			t.Fatalf("sign-in from travel after a refresh there: %v", err)
 		}
 	})
 }
