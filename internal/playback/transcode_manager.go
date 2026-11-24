@@ -988,9 +988,11 @@ func (m *TranscodeManager) registerReconstructedSession(ctx context.Context, s *
 // affinity, each front-end that misses the in-memory session will reconstruct its
 // OWN local ffmpeg — a split-brain with divergent segment dirs. Integrated
 // transcode is therefore only safe single-front-end or with session affinity at
-// the load balancer. Remote transcode-node sessions are unaffected: their
-// non-empty TranscodeNodeURL routes every front-end to the same ffmpeg via the
-// proxy path, so ReconstructTranscode is never reached for them.
+// the load balancer. Remote transcode-node sessions are served by relaying to
+// their node. A front-end whose own copy of the session is stale (another
+// front-end replanned it onto a node) can still reach this with the node's
+// card, so a card with a TranscodeNodeURL is refused here rather than started
+// locally.
 //
 // This constraint is currently documented, not enforced: a robust fix needs a
 // per-session owning-instance claim in a store shared across front-ends (e.g.
@@ -1022,6 +1024,16 @@ func (m *TranscodeManager) ReconstructTranscodeWithError(ctx context.Context, se
 	// directly so we never enter single-flight only to discard a duplicate.
 	if existing := m.GetTranscodeSession(sessionID); existing != nil {
 		return existing, nil
+	}
+	// A card whose committed route runs on a node is served by relaying to that
+	// node, never by an FFmpeg on this server. Without session affinity a
+	// replica can hold a stale copy of a session that another replica replanned
+	// onto a node, and must not start a second, local encode for it (#4601).
+	// Moving a transcode here clears the node from the card before calling.
+	if card.TranscodeNodeURL != "" {
+		slog.WarnContext(ctx, "refusing to rebuild a node transcode on this server", "component", "playback",
+			"session", sessionID, "playback_session_id", sessionID, "requested_segment", requestedSegment)
+		return nil, nil
 	}
 
 	v, err, _ := m.reconstructGroup.Do(sessionID, func() (interface{}, error) {
