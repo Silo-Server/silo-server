@@ -120,6 +120,8 @@ func playbackControlSocketProblem(err error) *Problem {
 		return NewProblem(TypeNotFound, "Playback session not found.")
 	case errors.Is(err, handlers.ErrPlaybackControlSocketSessionEnded):
 		return NewProblem(TypePlaybackSessionEnded, "The playback session has ended; start a new one.")
+	case errors.Is(err, handlers.ErrPlaybackControlSocketPausedTimeout):
+		return NewProblem(TypePlaybackSessionPausedTimeout, "Playback stopped because it was paused for too long.")
 	case errors.Is(err, handlers.ErrPlaybackControlSocketSessionResuming):
 		return NewProblem(TypeDependencyUnavailable, "The playback session is not active on this server yet; retry shortly.").WithRetryAfter(playbackControlSocketResumeRetrySeconds)
 	case errors.Is(err, handlers.ErrPlaybackControlSocketNotOwner):

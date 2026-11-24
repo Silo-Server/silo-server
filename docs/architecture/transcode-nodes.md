@@ -449,7 +449,15 @@ their records. `HandleReport`:
    60-second TTL, indexed by `silo:nodesessions:<node id>`, and indexed keys the
    report no longer lists are deleted. The node URL and name in each record
    come from the registered row (the registry's copy, so a Postgres outage does
-   not stop reports), never from the report.
+   not stop reports), never from the report. A session whose transcode has read
+   its source to the end also carries `stream_end_seconds`, where the media
+   ends, and `stream_planned_seconds`, the stored duration it was planned with. The API server takes it only when a playback session it holds runs
+   that transport on the reporting node for the file the session names
+   (`playback.SessionManager.RemoteTranscode`), so a node cannot shorten a file
+   it is not transcoding, and passes it to
+   `playback.StreamEndRecorder`, which lowers the file's stored duration to it
+   (see the end-of-stream rules in
+   [playback-protocol-v3](playback-protocol-v3.md)).
 3. **Telemetry** replaces the snapshot of publisher `node:<node id>`
    (`nodecontrol.PublisherID`). The core's clock sets the capture time, and any
    reported time more than 30 seconds past the core's clock is moved back to

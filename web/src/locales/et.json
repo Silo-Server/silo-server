@@ -521,6 +521,12 @@
       "value": "See esitusseanss lõppes. Alustage esitamist uuesti."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Esitus lõpetati, sest see oli liiga kaua peatatud. Alustage esitamist uuesti."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67817,6 +67823,24 @@
       "value": "Salvesta meediakogusse"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Peatatud esitus"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Lõpeta peatatud esitus pärast"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0–1440. Lõpetab Silo rakenduses nii kaua peatatud video esituse ning vabastab selle voo ja võimaliku transkodeerimise; uuesti esitamisel jätkub video samast kohast. See ei mõjuta funktsiooni „Vaata koos“, ülekandmist ega audioraamatuid. Väärtus 0 lülitab selle välja."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -68279,6 +68303,12 @@
     {
       "type": 0,
       "value": "päeva"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minutit"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -74217,6 +74247,12 @@
       "value": "Luba tarkvaraline HDR-toonivastendus"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Lõpeta peatatud esitus pärast (minutit)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -74275,6 +74311,12 @@
     {
       "type": 0,
       "value": "Märkide allikas"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Peatatud esitus"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -76261,6 +76303,36 @@
     {
       "type": 0,
       "value": "Lülitage kõigepealt sisse sisselogimise teenusepakkuja. Kui parooliga sisselogimine on väljas ja ükski teenusepakkuja pole sees, saaksid sisse logida ainult hädaolukorra administraatorid."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "8–72 tähemärki. Reeglid kehtivad, kui keegi valib või muudab parooli; juba määratud paroolid toimivad edasi."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Parooli minimaalne pikkus"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Mis tahes kirjavahemärk või sümbol, näiteks ! või #. Tähti, numbreid ja tühikuid ei arvestata."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Nõua erimärki"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Nõua suurtähte"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -88207,6 +88279,20 @@
       "value": "Määramine…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Andke see kasutajale "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ise edasi."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -90731,10 +90817,64 @@
       "value": " ei luba sellel seadmel sellesse serverisse sisse logida."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vähemalt "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tähemärk."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vähemalt "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tähemärki."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Paroolid ei ühti."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Lisage vähemalt üks erimärk, näiteks ! või #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Lisage vähemalt üks suurtäht."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -90747,6 +90887,48 @@
     {
       "type": 0,
       "value": "Kasutage vähemalt 8 tähemärki."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Kasutage vähemalt "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tähemärki."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Kasutage vähemalt "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tähemärki."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -125225,6 +125407,12 @@
     {
       "type": 0,
       "value": "Administraator lõpetas selle esitusseansi."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Esitus lõpetati, sest see oli liiga kaua peatatud."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

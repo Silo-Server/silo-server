@@ -521,6 +521,12 @@
       "value": "Diese Wiedergabesitzung ist beendet. Starte die Wiedergabe erneut."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Die Wiedergabe wurde beendet, weil sie zu lange pausiert war. Starte die Wiedergabe erneut."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67009,6 +67015,24 @@
       "value": "In Mediathek speichern"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pausierte Wiedergabe"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Pausierte Wiedergabe beenden nach"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 bis 1440. Beendet ein Video, das in einer Silo-App so lange pausiert ist, gibt seinen Stream frei und beendet, was dafür transkodiert wird; bei erneuter Wiedergabe geht es an derselben Stelle weiter. Gemeinsam schauen, Casting und Hörbücher sind nicht betroffen. 0 schaltet diese Option aus."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67479,6 +67503,12 @@
     {
       "type": 0,
       "value": "Tage"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "Minuten"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73417,6 +73447,12 @@
       "value": "Software-HDR-Tone-Mapping aktivieren"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Pausierte Wiedergabe beenden nach (Minuten)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73475,6 +73511,12 @@
     {
       "type": 0,
       "value": "Markerquelle"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pausierte Wiedergabe"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -75457,6 +75499,36 @@
     {
       "type": 0,
       "value": "Aktiviere zuerst einen Anmeldeanbieter. Wäre die Anmeldung mit Passwort aus und kein Anbieter aktiv, könnten sich nur Notfall-Admins anmelden."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "8 bis 72 Zeichen. Die Regeln gelten, wenn jemand ein Passwort festlegt oder ändert; bereits festgelegte Passwörter funktionieren weiterhin."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Mindestlänge des Passworts"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Jedes Satz- oder Sonderzeichen, etwa ! oder #. Buchstaben, Ziffern und Leerzeichen zählen nicht."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Sonderzeichen verlangen"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Großbuchstaben verlangen"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -87303,6 +87375,20 @@
       "value": "Wird festgelegt…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Teile es "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " selbst mit."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -89827,10 +89913,64 @@
       "value": " erlaubt diesem Gerät nicht, sich bei diesem Server anzumelden."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mindestens "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " Zeichen."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mindestens "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " Zeichen."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Die Passwörter stimmen nicht überein."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Verwende mindestens ein Sonderzeichen, etwa ! oder #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Verwende mindestens einen Großbuchstaben."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -89843,6 +89983,48 @@
     {
       "type": 0,
       "value": "Verwende mindestens 8 Zeichen."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Verwende mindestens "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " Zeichen."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Verwende mindestens "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " Zeichen."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -123807,6 +123989,12 @@
     {
       "type": 0,
       "value": "Ein Administrator hat diese Wiedergabesitzung beendet."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Die Wiedergabe wurde beendet, weil sie zu lange pausiert war."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

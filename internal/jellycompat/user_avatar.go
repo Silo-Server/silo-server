@@ -3,7 +3,6 @@ package jellycompat
 import (
 	"bytes"
 	"context"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -20,13 +19,11 @@ import (
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
-// compatUserID formats a pseudo-user id as Jellyfin serializes a Guid in JSON:
-// 32 lowercase hex digits without dashes. Clients that validate the shape
-// (Seerr's avatar proxy accepts only /^[a-f0-9]{32}$/) reject the dashed form.
-// Only user ids take this form; item and server ids keep theirs, because
-// clients store those and a format change would orphan the stored copies.
+// compatUserID formats a pseudo-user id in Jellyfin's Guid form (jellyfinGUID).
+// Clients that validate the shape (Seerr's avatar proxy accepts only
+// /^[a-f0-9]{32}$/) reject the dashed form.
 func compatUserID(id uuid.UUID) string {
-	return hex.EncodeToString(id[:])
+	return jellyfinGUID(id)
 }
 
 // isPseudoUser reports whether raw names id. It accepts the 32-digit form

@@ -4,6 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 func TestProvisionWriterRestartsAfterRestoreHoldDB(t *testing.T) {
@@ -121,6 +124,8 @@ func TestProvisionWriterOrphanedSessionDB(t *testing.T) {
 	if err := orphan.Close(ctx); err != nil {
 		t.Fatal(err)
 	}
+	// The old backend drops the lock when it exits, after the client hangs up.
+	waitForProvisionLockRelease(t, pool)
 	if acquired, err := writer.tryWriter(ctx); err != nil || !acquired {
 		t.Fatalf("reacquiring the released lock: %v, %v", acquired, err)
 	}
@@ -132,5 +137,24 @@ func TestProvisionWriterOrphanedSessionDB(t *testing.T) {
 	}
 	if acquired, err := writer.tryWriter(ctx); err != nil || acquired {
 		t.Fatalf("expected a permanent refusal with a different writer, got %v, %v", acquired, err)
+	}
+}
+
+// waitForProvisionLockRelease blocks until no session holds the provisioning
+// writer lock, then releases it again.
+func waitForProvisionLockRelease(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Release()
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_lock($1::int,$2::int)`, provisionLockNamespace, provisionLockID); err != nil {
+		t.Fatalf("waiting for the old session to release the lock: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `SELECT pg_advisory_unlock($1::int,$2::int)`, provisionLockNamespace, provisionLockID); err != nil {
+		t.Fatal(err)
 	}
 }

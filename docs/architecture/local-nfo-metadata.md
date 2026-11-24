@@ -54,6 +54,17 @@ metadata (NFO text and sidecar artwork), then remote providers (TMDB, TVDB,
   chain-less fallback and person refresh, whatever priority a row stores.
   `SetChain`, chain seeding and the startup sync store builtin rows first, so
   the API and the chain editor show the order that runs.
+- **A refresh that names no library uses the item's libraries' chains.** The
+  scheduled refresh, the on-demand stale refresh, trailer recovery and the
+  `RefreshItem` that an admin merge, split or stale-ID rematch runs all pass
+  folder 0, which has no chain rows. `withItemChainScope`
+  (`internal/metadata/chain_scope.go`) scopes them to the libraries that hold
+  the item (the series, for a season or episode), leaving out a disabled
+  library while an enabled one also holds it. For folder 0, `resolveChainCached` then hands those libraries to
+  `resolveLibrariesChain`, which merges their chains in library ID order with
+  the local tier first. An item no library holds keeps the all-providers
+  fallback, as does a library with no chain rows of its own, just as on that
+  library's own refresh.
 - **Fields the NFO sets win.** Phase 2 folds provider results fill-empty in
   chain order, so the NFO wins every scalar it supplies.
 - **Lists the NFO supplies are the whole list.** Genres, studios, networks,

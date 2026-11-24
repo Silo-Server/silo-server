@@ -35,8 +35,26 @@ const (
 	cacheJobTimeout         = 45 * time.Minute
 	globalRowsJobTimeout    = 10 * time.Minute
 
-	staleSweepInterval = 5 * time.Minute
-	staleSweepBatch    = 50
+	// staleSweepInterval spaces each server's stale sweep attempts. A sweep
+	// drains every mark older than its start, so the interval is about the
+	// most a mark that no server queued (an access change, stored
+	// embeddings, a deferred or failed refresh) waits for a sweep to start.
+	// Two minutes keeps that wait short while an idle attempt, one advisory
+	// lock and one index probe, stays cheap. Each server times it from the
+	// end of its own last attempt, so one server's long sweeps leave gaps,
+	// but in a cluster another server's attempt can follow at once. An
+	// embeddings reset that a running sweep refuses answers the admin with a
+	// conflict to try again.
+	staleSweepInterval = 2 * time.Minute
+	// staleSweepBatch is how many stale profiles the sweep reads at a time.
+	staleSweepBatch = 50
+	// staleSweepBudget bounds how long one sweep starts new refreshes. The
+	// sweep holds staleSweepLock throughout, and an embeddings reset is
+	// refused while it does, so a large backlog is drained over several
+	// sweeps instead of one long one. The refresh running when the budget
+	// runs out finishes, but is not run again for changes made during it:
+	// their marks wait for the next sweep.
+	staleSweepBudget = time.Minute
 
 	// embedMissingInterval spaces the catch-up passes that embed newly
 	// matched items between nightly embedding runs.
@@ -92,8 +110,14 @@ type Worker struct {
 	profileRefreshPending map[string]struct{}
 	// profileRefreshAgain holds pending profiles whose signals changed while
 	// their refresh ran; see runProfileRefresh.
-	profileRefreshAgain  map[string]struct{}
-	refreshesNow         atomic.Int32 // RefreshProfileNow refreshes running
+	profileRefreshAgain map[string]struct{}
+	refreshesNow        atomic.Int32 // RefreshProfileNow refreshes running
+	// embedMissingAgain records a catch-up pass EmbedMissingNow asked for
+	// while an embeddings job ran here; the job runs it before it ends.
+	embedMissingAgain bool
+	// embedPassFailed records that the last embedding pass here failed, so
+	// a catch-up asked for during it waits for the next catch-up tick.
+	embedPassFailed      bool
 	readRefreshes        refreshThrottle
 	cancelFunc           context.CancelFunc
 	embeddingsJobTimeout time.Duration
@@ -195,6 +219,32 @@ func (w *Worker) setRunning(name JobName, v bool) {
 	w.running[name] = v
 }
 
+// finishJob marks a job as no longer running. Its cluster lock is already
+// released, so when an embeddings job ends with a catch-up pass still asked
+// for, which EmbedMissingNow can do after the job last checked, finishJob
+// starts that pass (see releaseJob).
+func (w *Worker) finishJob(name JobName) {
+	if w.releaseJob(name) {
+		go w.EmbedMissingNow()
+	}
+}
+
+// releaseJob marks a job as no longer running and reports whether a
+// catch-up pass asked for during it should start now: only for an embeddings
+// job whose last pass did not fail. A failed pass (a provider error, a quota,
+// the job's timeout) drops the request instead of retrying at once; the
+// catch-up tick tries again later.
+func (w *Worker) releaseJob(name JobName) bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.running[name] = false
+	if name != JobEmbeddings || !w.embedMissingAgain {
+		return false
+	}
+	w.embedMissingAgain = false
+	return !w.embedPassFailed
+}
+
 // tryStart attempts to mark a job as running. Returns false if already running.
 func (w *Worker) tryStart(name JobName) bool {
 	w.mu.Lock()
@@ -258,13 +308,54 @@ func (w *Worker) embedMissingJob() job {
 	}
 }
 
-// EmbedMissingNow starts the catch-up pass in the background unless an
-// embedding run holds the job here or on another server. Startup calls it
-// when items need embeddings, so an interrupted backfill resumes at once.
+// EmbedMissingNow starts the catch-up pass in the background. Startup calls
+// it when items need embeddings, so an interrupted backfill resumes at once.
+// When an embeddings job is already running on this server, it asks that job
+// to run the catch-up pass again before it ends: content IDs are not ordered
+// by age, so the running pass can have walked past items added since it
+// started. Requests made during one run come to one more pass. When the job
+// runs on another server, the request is dropped; that run and the next
+// catch-up tick cover the items. A request that lands as a run here
+// finishes, after it last checked, starts a pass once the run lets go of
+// the job (see finishJob).
 func (w *Worker) EmbedMissingNow() {
-	if err := w.runJob(w.embedMissingJob(), true); err != nil {
-		slog.Info("embedding catch-up not started", "component", "recommendations", "reason", err)
+	for {
+		err := w.runJob(w.embedMissingJob(), true)
+		if errors.Is(err, ErrJobRunning) {
+			if w.askEmbedMissingAgain() {
+				slog.Info("embedding run in progress; catch-up pass queued after it", "component", "recommendations")
+				return
+			}
+			continue // the run ended in between: start one
+		}
+		if err != nil {
+			slog.Info("embedding catch-up not started", "component", "recommendations", "reason", err)
+		}
+		return
 	}
+}
+
+// askEmbedMissingAgain asks the embeddings job running on this server to run
+// the catch-up pass again before it ends. It reports false when none is
+// running.
+func (w *Worker) askEmbedMissingAgain() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.running[JobEmbeddings] {
+		return false
+	}
+	w.embedMissingAgain = true
+	return true
+}
+
+// takeEmbedMissingAgain reports whether a catch-up pass was asked for since
+// the last call, and clears the request.
+func (w *Worker) takeEmbedMissingAgain() bool {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	again := w.embedMissingAgain
+	w.embedMissingAgain = false
+	return again
 }
 
 // embedMissingLoop runs the catch-up pass every embedMissingInterval.
@@ -582,13 +673,35 @@ func newEmbeddingsResult(counts EmbedCounts, err error, missingOnly bool) embedd
 }
 
 func (w *Worker) doEmbeddings(ctx context.Context, held clusterLock) (embeddingsResult, error) {
-	counts, err := w.engine.embed(ctx, held, true)
+	counts, err := w.embedAsked(ctx, held, true)
 	return newEmbeddingsResult(counts, err, false), err
 }
 
 func (w *Worker) doEmbedMissing(ctx context.Context, held clusterLock) (embeddingsResult, error) {
-	counts, err := w.engine.embed(ctx, held, false)
+	counts, err := w.embedAsked(ctx, held, false)
 	return newEmbeddingsResult(counts, err, true), err
+}
+
+// embedAsked runs one embedding run, then the catch-up pass again for as long
+// as EmbedMissingNow asked for one during the last pass, and adds up their
+// counts. A pass that fails ends it, and a request made during it waits for
+// the next catch-up tick (see releaseJob). A request made before the run
+// started is served by it.
+func (w *Worker) embedAsked(ctx context.Context, held clusterLock, includeTextStale bool) (EmbedCounts, error) {
+	w.takeEmbedMissingAgain()
+	counts, err := w.engine.embed(ctx, held, includeTextStale)
+	for err == nil && w.takeEmbedMissingAgain() {
+		var more EmbedCounts
+		more, err = w.engine.embed(ctx, held, false)
+		counts.Embedded += more.Embedded
+		counts.Truncated += more.Truncated
+		counts.Failed += more.Failed
+		counts.Skipped += more.Skipped
+	}
+	w.mu.Lock()
+	w.embedPassFailed = err != nil
+	w.mu.Unlock()
+	return counts, err
 }
 
 type tasteProfilesResult struct {
@@ -1156,22 +1269,25 @@ func (w *Worker) cacheUserRows(ctx context.Context, repo *Repo, userID int, prof
 
 // stalenessLoop refreshes stale taste profiles every few minutes.
 func (w *Worker) stalenessLoop(ctx context.Context) {
-	ticker := time.NewTicker(staleSweepInterval)
-	defer ticker.Stop()
+	// This server's next attempt is timed from the end of its last one, so a
+	// sweep that overran its budget is not followed at once by another here.
+	timer := time.NewTimer(staleSweepInterval)
+	defer timer.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			w.refreshStaleProfiles(ctx)
+			timer.Reset(staleSweepInterval)
 		}
 	}
 }
 
 // staleSweepResult counts one stale sweep's profiles.
 type staleSweepResult struct {
-	// Stale counts the marked profiles the sweep took, up to its batch.
+	// Stale counts the marked profiles the sweep took.
 	Stale     int `json:"stale"`
 	Refreshed int `json:"refreshed"`
 	// Failed counts refreshes that failed; their profiles are marked stale
@@ -1183,6 +1299,9 @@ type staleSweepResult struct {
 	// server.
 	Deferred int `json:"deferred"`
 	Queued   int `json:"queued"`
+	// OutOfTime marks a sweep that stopped at staleSweepBudget with
+	// profiles left for the next one.
+	OutOfTime bool `json:"out_of_time,omitempty"`
 }
 
 // refreshStaleProfiles refreshes the profiles marked stale. One server sweeps
@@ -1204,7 +1323,7 @@ func (w *Worker) refreshStaleProfiles(ctx context.Context) {
 	defer held.Release()
 
 	started := time.Now()
-	res, err := w.sweepStaleProfiles(ctx, held)
+	res, err := w.sweepStaleProfiles(ctx, held, started.Add(staleSweepBudget))
 	if err == nil && res.Refreshed == 0 && res.Failed == 0 {
 		return
 	}
@@ -1214,43 +1333,70 @@ func (w *Worker) refreshStaleProfiles(ctx context.Context) {
 	case res.Failed > 0:
 		slog.WarnContext(ctx, "stale profile sweep completed with errors", "component", "recommendations", "stale", res.Stale, "refreshed", res.Refreshed, "failed", res.Failed)
 	}
-	data, _ := json.Marshal(res) // only ints: it cannot fail
+	data, _ := json.Marshal(res) // ints and a bool: it cannot fail
 	w.recordRun(staleSweepTaskKey, started, time.Now(), data, err)
 }
 
-func (w *Worker) sweepStaleProfiles(ctx context.Context, held clusterLock) (staleSweepResult, error) {
+// sweepStaleProfiles refreshes, one at a time on held's connection, the
+// profiles marked stale when it starts, in mark order, until none is left or
+// deadline passes. It takes each profile at most once: it pages past the ones
+// it took, including those already queued here, which keep their mark until
+// the queue clears it, and leaves out marks newer than its start, which a
+// deferred or failed refresh, or a change during a refresh, sets. Those wait
+// for the next sweep.
+func (w *Worker) sweepStaleProfiles(ctx context.Context, held clusterLock, deadline time.Time) (staleSweepResult, error) {
 	var res staleSweepResult
-	stale, err := w.engine.repo.GetStaleProfiles(ctx, staleSweepBatch)
+	markedBy, err := w.engine.repo.Now(ctx)
 	if err != nil {
-		return res, fmt.Errorf("list stale profiles: %w", err)
+		return res, fmt.Errorf("read the sweep's start: %w", err)
 	}
-	res.Stale = len(stale)
-	if len(stale) == 0 {
-		return res, nil
-	}
-
-	slog.InfoContext(ctx, "refreshing stale taste profiles", "component", "recommendations", "count", len(stale))
+	page := StaleProfilesPage{MarkedBy: markedBy, Limit: staleSweepBatch}
 	// A sweep cut short by shutdown leaves the rest marked for the next one.
-	for i := 0; i < len(stale) && ctx.Err() == nil; i++ {
-		p := stale[i]
-		key := profileRefreshKey(p.UserID, p.ProfileID)
-		if !w.claimProfileRefresh(key) {
-			res.Queued++ // already queued or refreshing on this server
-			continue
+	for ctx.Err() == nil {
+		stale, err := w.engine.repo.GetStaleProfiles(ctx, page)
+		if err != nil {
+			return res, fmt.Errorf("list stale profiles: %w", err)
 		}
-		switch err := w.runProfileRefresh(ctx, held, p.UserID, p.ProfileID, w.refreshProfile); {
-		case err == nil:
-			res.Refreshed++
-		case errors.Is(err, errProfileRefreshElsewhere), errors.Is(err, errPolicyNotLoaded):
-			res.Deferred++
-		case errors.Is(err, errJobLockLost):
-			res.Failed++
-			return res, err
-		default:
-			res.Failed++
+		if len(stale) == 0 {
+			return res, nil
+		}
+		page.After = &stale[len(stale)-1]
+		slog.InfoContext(ctx, "refreshing stale taste profiles", "component", "recommendations", "count", len(stale))
+		for i := 0; i < len(stale) && ctx.Err() == nil; i++ {
+			p := stale[i]
+			if !time.Now().Before(deadline) {
+				res.OutOfTime = true
+				return res, nil
+			}
+			res.Stale++
+			if err := w.sweepStaleProfile(ctx, held, p, deadline, &res); err != nil {
+				return res, err
+			}
 		}
 	}
 	return res, nil
+}
+
+// sweepStaleProfile refreshes one stale profile for the sweep and counts the
+// outcome in res. It returns an error only when the sweep must stop.
+func (w *Worker) sweepStaleProfile(ctx context.Context, held clusterLock, p StaleProfile, deadline time.Time, res *staleSweepResult) error {
+	key := profileRefreshKey(p.UserID, p.ProfileID)
+	if !w.claimProfileRefresh(key) {
+		res.Queued++ // already queued or refreshing on this server
+		return nil
+	}
+	switch err := w.runProfileRefreshUntil(ctx, held, p.UserID, p.ProfileID, w.refreshProfile, deadline); {
+	case err == nil:
+		res.Refreshed++
+	case errors.Is(err, errProfileRefreshElsewhere), errors.Is(err, errPolicyNotLoaded):
+		res.Deferred++
+	case errors.Is(err, errJobLockLost):
+		res.Failed++
+		return err
+	default:
+		res.Failed++
+	}
+	return nil
 }
 
 func (w *Worker) profileRefreshLoop(ctx context.Context) {
@@ -1284,6 +1430,14 @@ const profileRefreshMaxRuns = 3
 // hold the refresh queue, or the sweep's lock, for as long as it lasts: each
 // signal change marked the profile stale before asking.
 func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID int, profileID string, refresh profileRefresh) error {
+	return w.runProfileRefreshUntil(ctx, held, userID, profileID, refresh, time.Time{})
+}
+
+// runProfileRefreshUntil is runProfileRefresh that, once deadline has passed
+// (a zero deadline never does), does not run the refresh again for changes
+// made during it. Those changes marked the profile stale, so the stale sweep
+// takes it later.
+func (w *Worker) runProfileRefreshUntil(ctx context.Context, held clusterLock, userID int, profileID string, refresh profileRefresh, deadline time.Time) error {
 	key := profileRefreshKey(userID, profileID)
 	for run := 1; ; run++ {
 		// A request made before this run started is read by it.
@@ -1302,6 +1456,11 @@ func (w *Worker) runProfileRefresh(ctx context.Context, held clusterLock, userID
 			return err
 		}
 		if !w.finishProfileRefresh(key) {
+			return nil
+		}
+		if !deadline.IsZero() && !time.Now().Before(deadline) {
+			slog.InfoContext(ctx, "stale sweep out of time; profile changes left for the next sweep", "component", "recommendations", "user_id", userID, "profile_id", profileID)
+			w.clearProfileRefreshPending(key)
 			return nil
 		}
 		if run == profileRefreshMaxRuns {

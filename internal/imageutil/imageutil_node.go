@@ -31,6 +31,9 @@ func EncodeWebPWidth([]byte, int) ([]byte, error) { return nil, errNodeBuild }
 // Rasterize fails in a node build.
 func Rasterize([]byte) ([]byte, error) { return nil, errNodeBuild }
 
+// RasterizeWithin fails in a node build.
+func RasterizeWithin([]byte, int) ([]byte, error) { return nil, errNodeBuild }
+
 // EncodePNGWithin fails in a node build.
 func EncodePNGWithin([]byte, int, int) (out []byte, width, height int, err error) {
 	return nil, 0, 0, errNodeBuild

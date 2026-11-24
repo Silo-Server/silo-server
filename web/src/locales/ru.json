@@ -521,6 +521,12 @@
       "value": "Сеанс воспроизведения завершён. Запустите воспроизведение снова."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Воспроизведение остановлено, потому что пауза длилась слишком долго. Запустите воспроизведение снова."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -82030,6 +82036,24 @@
       "value": "Сохранять в медиатеку"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Воспроизведение на паузе"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Завершать воспроизведение на паузе через"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "От 0 до 1440. Завершает воспроизведение видео в приложении Silo, если пауза длится столько времени, и освобождает поток и транскодирование; при повторном запуске воспроизведение продолжится с того же места. Совместный просмотр, трансляция на другие устройства и аудиокниги не затрагиваются. Значение 0 выключает эту функцию."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -82564,6 +82588,12 @@
     {
       "type": 0,
       "value": "дн."
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "мин"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -88620,6 +88650,12 @@
       "value": "Включить программный тонмаппинг HDR"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Завершать воспроизведение на паузе через (мин)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -88678,6 +88714,12 @@
     {
       "type": 0,
       "value": "Источник маркеров"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Воспроизведение на паузе"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -90732,6 +90774,36 @@
     {
       "type": 0,
       "value": "Сначала включите провайдер входа. Если вход по паролю выключен и ни один провайдер не включён, войти смогут только аварийные администраторы."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "От 8 до 72 символов. Правила применяются, когда кто-то выбирает или меняет пароль; уже заданные пароли продолжают работать."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Минимальная длина пароля"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Любой знак препинания или символ, например ! или #. Буквы, цифры и пробелы не учитываются."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Требовать специальный символ"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Требовать заглавную букву"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -104242,6 +104314,20 @@
       "value": "Сохранение…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Сообщите его пользователю "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " самостоятельно."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -107272,10 +107358,96 @@
       "value": " не разрешает этому устройству входить на этот сервер."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Минимум "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " символ."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Минимум "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " символа."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Минимум "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " символов."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Минимум "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " символа."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Пароли не совпадают."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Используйте хотя бы один специальный символ, например ! или #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Используйте хотя бы одну заглавную букву."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -107288,6 +107460,80 @@
     {
       "type": 0,
       "value": "Используйте не менее 8 символов."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Используйте минимум "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " символ."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Используйте минимум "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " символа."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Используйте минимум "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " символов."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Используйте минимум "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " символа."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -147757,6 +148003,12 @@
     {
       "type": 0,
       "value": "Администратор завершил этот сеанс воспроизведения."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Воспроизведение остановлено, потому что пауза длилась слишком долго."
     }
   ],
   "web.player.shuffle.scopeWithParent": [
