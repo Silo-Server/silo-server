@@ -75,17 +75,21 @@ export function useRestoreJob(jobId: string | null) {
     enabled: context !== null && jobId !== null,
     refetchInterval: (query) => (query.state.data?.terminal ? false : RESTORE_POLL_MS),
   });
-  const ended = job.data?.terminal ?? false;
-  // Once the job ends, read the jobs list again. A list read sent before that
-  // can still be in flight, and a first read with nothing cached yet is joined
-  // rather than replaced by a refetch, so drop it first. Otherwise the list
-  // keeps saying running once this read leaves the cache.
+  const ended = job.data?.terminal ? job.data : null;
+  // Once the job ends, put that in the jobs list and read the list again. A
+  // list read sent before that can still be in flight, and a first read with
+  // nothing cached yet is joined rather than replaced by a refetch, so drop it
+  // first. Otherwise the list keeps saying running once this read leaves the
+  // cache. The refetch joins a read the page has started since.
   useEffect(() => {
     if (!ended) return;
     const queryKey = restoreJobsKey();
-    void queryClient
-      .cancelQueries({ queryKey })
-      .then(() => queryClient.invalidateQueries({ queryKey }));
+    void queryClient.cancelQueries({ queryKey }).then(() => {
+      queryClient.setQueryData<RestoreJob[]>(queryKey, (jobs) =>
+        jobs?.map((item) => (item.id === ended.id ? ended : item)),
+      );
+      return queryClient.invalidateQueries({ queryKey }, { cancelRefetch: false });
+    });
   }, [queryClient, ended]);
   return job;
 }
