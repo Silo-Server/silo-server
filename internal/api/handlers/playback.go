@@ -1595,6 +1595,8 @@ func (h *PlaybackHandler) recordAdminEnd(ctx context.Context, session *playback.
 	}
 	entry.EndReason = reason
 	entry.SubtitleAt = subtitleAt
+	// The sweep reads the route facts from the same row as the subtitle.
+	entry.RouteFactsAt = subtitleAt
 	if subtitleAt.IsZero() {
 		h.recordCommittedSubtitle(ctx, session, entry)
 	}

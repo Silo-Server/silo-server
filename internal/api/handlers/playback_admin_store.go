@@ -110,6 +110,10 @@ type AdminPlaybackHistoryEntry struct {
 	// is before EndedAt: a sweep ending a play whose attempt is gone only
 	// knows the subtitle its live or start row last synced. Zero is EndedAt.
 	SubtitleAt time.Time
+	// RouteFactsAt is when the route facts were last known, when that is
+	// before EndedAt; a sweep reads them from the same row as the subtitle.
+	// Zero is EndedAt.
+	RouteFactsAt time.Time
 }
 
 // subtitleAt is when the entry's subtitle was last known to be showing.
@@ -118,6 +122,14 @@ func (entry AdminPlaybackHistoryEntry) subtitleAt() string {
 		return entry.EndedAt
 	}
 	return entry.SubtitleAt.UTC().Format(time.RFC3339Nano)
+}
+
+// routeFactsAt is when the entry's route facts were last known.
+func (entry AdminPlaybackHistoryEntry) routeFactsAt() string {
+	if entry.RouteFactsAt.IsZero() {
+		return entry.EndedAt
+	}
+	return entry.RouteFactsAt.UTC().Format(time.RFC3339Nano)
 }
 
 // PlaybackAdminStore persists finalized playback history and manages the
@@ -189,10 +201,12 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 		OR ` + laterStretch + `)`
 	// routeSnapshotReplace: a finalization carrying recorded route facts
 	// replaces the route snapshot atomically when the existing row has none or
-	// this finalization ended at or after the stored end time. Replacing the
-	// whole tuple avoids mixing cleared node IDs or obsolete transcode targets
-	// from an earlier plan with a later replan.
-	const routeSnapshotReplace = `(EXCLUDED.route_facts_recorded AND (NOT admin_playback_history.route_facts_recorded OR EXCLUDED.ended_at >= admin_playback_history.ended_at))`
+	// its facts are at least as recent as the row's (route_facts_at, or
+	// ended_at for a row recorded before that column). Replacing the whole
+	// tuple avoids mixing cleared node IDs or obsolete transcode targets from
+	// an earlier plan with a later replan.
+	const rowRouteFactsAt = `COALESCE(admin_playback_history.route_facts_at, admin_playback_history.ended_at)`
+	const routeSnapshotReplace = `(EXCLUDED.route_facts_recorded AND (NOT admin_playback_history.route_facts_recorded OR EXCLUDED.route_facts_at >= ` + rowRouteFactsAt + `))`
 	const routeSnapshotDistinct = `ROW(
 			EXCLUDED.play_method, EXCLUDED.video_decision, EXCLUDED.audio_decision,
 			EXCLUDED.effective_media_file_id, EXCLUDED.audio_track_index,
@@ -227,14 +241,14 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			 adaptation_reasons, reporting_node, stream_location, compat_origin,
 			 routing_execution, routing_execution_node_id, routing_egress, routing_egress_node_id,
 			 route_facts_recorded, effective_media_file_id, audio_track_index,
-			 routing_execution_node_name, routing_egress_node_name, subtitle_at)
+			 routing_execution_node_name, routing_egress_node_name, subtitle_at, route_facts_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::inet, $14, $15, $16, $17, $18, $19,
 			$20, $21, $22, $23, $24, $25, $26::text, CASE WHEN $26::text IS NOT NULL THEN $9::timestamptz END, $27,
 			$28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45,
 			$46, $47,
 			COALESCE(NULLIF(BTRIM($48::text), ''), (SELECT NULLIF(BTRIM(name), '') FROM stream_nodes WHERE id = $42)),
 			COALESCE(NULLIF(BTRIM($49::text), ''), (SELECT NULLIF(BTRIM(name), '') FROM stream_nodes WHERE id = $44)),
-			$50::timestamptz)
+			$50::timestamptz, CASE WHEN $45 THEN $51::timestamptz END)
 		ON CONFLICT (session_id) DO UPDATE SET
 			play_method = CASE WHEN `+routeSnapshotReplace+` AND EXCLUDED.play_method <> ''
 				THEN EXCLUDED.play_method ELSE admin_playback_history.play_method END,
@@ -288,11 +302,13 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			routing_egress = CASE WHEN `+routeSnapshotReplace+` THEN EXCLUDED.routing_egress ELSE admin_playback_history.routing_egress END,
 			routing_egress_node_id = CASE WHEN `+routeSnapshotReplace+` THEN EXCLUDED.routing_egress_node_id ELSE admin_playback_history.routing_egress_node_id END,
 			routing_egress_node_name = CASE WHEN `+routeSnapshotReplace+` THEN EXCLUDED.routing_egress_node_name ELSE admin_playback_history.routing_egress_node_name END,
+			route_facts_at = CASE WHEN `+routeSnapshotReplace+` THEN EXCLUDED.route_facts_at ELSE admin_playback_history.route_facts_at END,
 			route_facts_recorded = admin_playback_history.route_facts_recorded OR EXCLUDED.route_facts_recorded
 		WHERE `+watchAdvanced+`
 			OR (EXCLUDED.route_facts_recorded AND NOT admin_playback_history.route_facts_recorded)
-			OR (EXCLUDED.ended_at > admin_playback_history.ended_at
-				AND EXCLUDED.route_facts_recorded AND `+routeSnapshotDistinct+`)
+			OR (EXCLUDED.route_facts_recorded
+				AND EXCLUDED.route_facts_at > `+rowRouteFactsAt+`
+				AND `+routeSnapshotDistinct+`)
 	`,
 		entry.SessionID,
 		entry.UserID,
@@ -344,6 +360,7 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 		nullableString(entry.RoutingExecutionNodeName),
 		nullableString(entry.RoutingEgressNodeName),
 		entry.subtitleAt(),
+		entry.routeFactsAt(),
 	)
 	queueHistoryFacts(batch, entry)
 	return batch
@@ -612,6 +629,7 @@ func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 			audio_track_index = CASE WHEN `+backfillRoute+` THEN $29 ELSE audio_track_index END,
 			routing_execution_node_name = CASE WHEN `+backfillRoute+` THEN COALESCE(NULLIF(BTRIM($30::text), ''), (SELECT NULLIF(BTRIM(name), '') FROM stream_nodes WHERE id = $24)) ELSE routing_execution_node_name END,
 			routing_egress_node_name = CASE WHEN `+backfillRoute+` THEN COALESCE(NULLIF(BTRIM($31::text), ''), (SELECT NULLIF(BTRIM(name), '') FROM stream_nodes WHERE id = $26)) ELSE routing_egress_node_name END,
+			route_facts_at = CASE WHEN `+backfillRoute+` THEN $34::timestamptz ELSE route_facts_at END,
 			route_facts_recorded = route_facts_recorded OR $27,
 			subtitle = CASE WHEN `+laterSubtitle+` THEN $32::jsonb ELSE subtitle END,
 			subtitle_at = CASE WHEN `+laterSubtitle+` THEN $33::timestamptz ELSE subtitle_at END
@@ -659,5 +677,6 @@ func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 		nullableString(entry.RoutingEgressNodeName),
 		entry.Subtitle,
 		entry.subtitleAt(),
+		entry.routeFactsAt(),
 	)
 }

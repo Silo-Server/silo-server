@@ -1079,6 +1079,56 @@ func assertFinalRouteFactsDB(t *testing.T, pool *pgxpool.Pool, sessionID string,
 	}
 }
 
+// TestAdminPlaybackHistoryRouteFactsOrderDB pins that route facts keep their
+// own freshness: copies that know no more watch time leave ended_at alone,
+// so a delayed copy with older facts must not replace newer ones.
+func TestAdminPlaybackHistoryRouteFactsOrderDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	ctx := t.Context()
+	pool, err := pgxpool.New(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	suffix := uuid.NewString()
+	var account int
+	if err = pool.QueryRow(ctx, `INSERT INTO users(username,role) VALUES($1,'user') RETURNING id`, "route-order-"+suffix).Scan(&account); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, account) }()
+
+	started := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
+	store := NewPGPlaybackAdminStore(pool, nil)
+	sessionID := "route-order-" + suffix
+	record := func(endedAfter time.Duration, resolution string) {
+		t.Helper()
+		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+			SessionID: sessionID, UserID: account, ProfileID: "p-1", PlayMethod: "transcode",
+			StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(endedAfter).Format(time.RFC3339Nano),
+			EndPositionSeconds: 600, TargetVideoCodec: "h264", TargetResolution: resolution,
+			RouteFactsRecorded: true,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	record(10*time.Minute, "1080p")
+	record(15*time.Minute, "720p") // newer facts, no more watch time
+	record(12*time.Minute, "480p") // delayed copy with older facts
+
+	var resolution string
+	var endedAt time.Time
+	if err := pool.QueryRow(ctx, `SELECT COALESCE(target_resolution, ''), ended_at FROM admin_playback_history WHERE session_id = $1`, sessionID).
+		Scan(&resolution, &endedAt); err != nil {
+		t.Fatal(err)
+	}
+	if resolution != "720p" || !endedAt.Equal(started.Add(10*time.Minute)) {
+		t.Fatalf("route facts = %q, ended %v; want the 15-minute copy's 720p and the recorded end", resolution, endedAt)
+	}
+}
+
 func TestApplyAttemptPlanFactsReplan(t *testing.T) {
 	session := &playback.Session{
 		PlayMethod:          playback.PlayDirect,
