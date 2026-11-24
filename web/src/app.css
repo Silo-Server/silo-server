@@ -954,10 +954,12 @@ html[data-navigation-direction]::view-transition-new(main-content) {
      rem, so Button's fixed heights stop fitting it. This floor (one line, plus
      the borders on bordered variants) grows a text button only when its label
      no longer fits: at normal settings it is shorter than every size. It lives
-     in the base layer so a caller's min-h-* and the components layer's touch
-     targets still win over it. Icon sizes are left alone. Only Button carries
-     both data-variant and data-size; data-slot is not used because a Radix
-     trigger rendered asChild replaces it. */
+     in the base layer so a caller's min-h-* still wins over it. The 44px touch
+     targets (TOUCH_TARGETS, the admin page header, the item detail stream
+     buttons) win too, so they fold the floor in with max(2.75rem, 1lh + 2px).
+     Icon sizes are left alone. Only Button carries both data-variant and
+     data-size; data-slot is not used because a Radix trigger rendered asChild
+     replaces it. */
   [data-variant][data-size]:not([data-size^="icon"]) {
     min-height: 1lh;
   }
@@ -2519,6 +2521,10 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
 
     .admin-shell .page-header [data-slot="button"] {
+      min-height: 2.75rem;
+    }
+
+    .admin-shell .page-header [data-slot="button"]:not([data-size^="icon"]) {
       min-height: max(2.75rem, calc(1lh + 2px));
     }
   }
