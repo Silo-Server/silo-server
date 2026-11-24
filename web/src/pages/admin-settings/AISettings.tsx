@@ -244,6 +244,7 @@ function TextModelTile({
   reasoningLevels,
   reasoningAttention,
   serviceTier,
+  savedServiceTier,
   serviceTiers,
   serviceTierDirty,
   chatGPTSupported,
@@ -274,6 +275,8 @@ function TextModelTile({
    */
   reasoningAttention: boolean;
   serviceTier: string;
+  /** The saved tier, which a kept row always offers so the edit can be undone. */
+  savedServiceTier: string;
   serviceTiers: string[];
   serviceTierDirty: boolean;
   chatGPTSupported: boolean;
@@ -312,9 +315,16 @@ function TextModelTile({
   const serviceTierKept = !supportsServiceTier && serviceTierDirty;
   const showServiceTier = supportsServiceTier || serviceTierKept;
   // A kept tier may not be one the current model lists, and the list is empty
-  // while capabilities load or after they fail; Default is always offered so
-  // the kept tier can still be set back.
-  const tierOptions = [...new Set(["default", ...serviceTiers, serviceTier || "default"])];
+  // while capabilities load or after they fail; Default and the saved tier are
+  // always offered so the kept edit can still be set back.
+  const tierOptions = [
+    ...new Set([
+      "default",
+      ...serviceTiers,
+      savedServiceTier || "default",
+      serviceTier || "default",
+    ]),
+  ];
 
   return (
     <ProviderTile
@@ -913,6 +923,7 @@ export default function AISettings() {
               reasoningLevels={capabilities.data?.reasoning_levels ?? []}
               reasoningAttention={form.isDirty("ai.reasoning_effort") || reasoningUnsupported}
               serviceTier={value("ai.service_tier")}
+              savedServiceTier={form.getPersistedValue("ai.service_tier")}
               serviceTiers={capabilities.data?.openai_service_tiers ?? []}
               serviceTierDirty={form.isDirty("ai.service_tier")}
               chatGPTSupported={chatGPTSupported}

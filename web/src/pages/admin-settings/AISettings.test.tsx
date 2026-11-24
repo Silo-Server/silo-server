@@ -113,6 +113,24 @@ describe("AI text model edits stay where the admin can see them", () => {
     expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
   });
 
+  it("lets a kept service tier go back to the saved tier while capabilities are unavailable", async () => {
+    settings.current["ai.service_tier"] = "ultrafast";
+    const { rerender } = render(page);
+    await openTextTile();
+    const advanced = screen.getAllByRole("button", { name: /Advanced/ })[0]!;
+    if (advanced.getAttribute("aria-expanded") !== "true") await userEvent.click(advanced);
+    await pick("Service tier", "Fast/Priority");
+    capabilitiesFailed.current = true;
+    rerender(
+      <MemoryRouter>
+        <AISettings />
+      </MemoryRouter>,
+    );
+    await pick("Service tier", "Ultrafast");
+
+    expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
+  });
+
   it("takes back a staged provider when the ChatGPT plan is chosen", async () => {
     render(page);
     await openTextTile();
