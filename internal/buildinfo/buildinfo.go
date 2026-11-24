@@ -25,9 +25,9 @@ var (
 // Builds outside Docker can set versionOverride with -ldflags instead.
 const versionFile = "/usr/share/silo/version"
 
-// releaseVersion matches a release tag without its leading v: 0.24.0 or
-// 1.0.0-rc.1. Anything else in the file or the ldflag is ignored.
-var releaseVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.[1-9][0-9]*)?$`)
+// releaseVersion matches a release tag without its leading v: 0.24.0,
+// 1.0.0-beta.1 or 1.0.0-rc.1. Anything else in the file or the ldflag is ignored.
+var releaseVersion = regexp.MustCompile(`^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-(beta|rc)\.[1-9][0-9]*)?$`)
 
 // Info describes the running Silo build from Go VCS metadata and CI-injected
 // container identity. Display is the release version for a release build and

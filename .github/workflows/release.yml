@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Version, for example 0.24.0 or 1.0.0-rc.1. A version with -rc.N is a prerelease."
+        description: "Version, for example 0.24.0, 1.0.0-beta.1 or 1.0.0-rc.1. A version with -beta.N or -rc.N is a prerelease."
         required: true
         type: string
 
@@ -68,9 +68,9 @@ jobs:
         run: python3 scripts/release/release_version.py check "$VERSION" | tee -a "$GITHUB_OUTPUT"
 
       # The notes start at this tag, so an empty range means a release with
-      # nothing new, such as a second candidate on the same commit. A stable
+      # nothing new, such as a second beta on the same commit. A stable
       # release's range starts at the previous stable one, so promoting a
-      # candidate's commit still passes.
+      # beta's or candidate's commit still passes.
       - name: Require new commits since the previous release
         if: steps.version.outputs.previous_tag != ''
         env:

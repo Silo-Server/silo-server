@@ -242,12 +242,12 @@ func TestWithVersion(t *testing.T) {
 func TestValidVersion(t *testing.T) {
 	t.Parallel()
 
-	for _, v := range []string{"0.24.0", "1.0.0", "1.0.0-rc.1", "1.1.0-rc.12"} {
+	for _, v := range []string{"0.24.0", "1.0.0", "1.0.0-beta.1", "1.0.0-rc.1", "1.1.0-rc.12"} {
 		if got := validVersion(v); got != v {
 			t.Errorf("validVersion(%q) = %q, want it kept", v, got)
 		}
 	}
-	for _, v := range []string{"", "v0.24.0", "0.24", "1.0.0-RC1", "1.0.0-beta.1", "1.0.0-rc.0", "01.0.0", "0.24.0\nrm -rf"} {
+	for _, v := range []string{"", "v0.24.0", "0.24", "1.0.0-RC1", "1.0.0-alpha.1", "1.0.0-beta.0", "1.0.0-rc.0", "01.0.0", "0.24.0\nrm -rf"} {
 		if got := validVersion(v); got != "" {
 			t.Errorf("validVersion(%q) = %q, want it rejected", v, got)
 		}

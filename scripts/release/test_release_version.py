@@ -34,8 +34,16 @@ class CheckTest(unittest.TestCase):
         tags = [f"v1.0.0-rc.{n}" for n in range(1, 10)]
         self.assertEqual("v1.0.0-rc.9", release.check(tags, "1.0.0-rc.10")["previous_tag"])
 
+    def test_betas_sort_before_release_candidates(self):
+        result = release.check(["v0.24.0", "v1.0.0-beta.9"], "1.0.0-beta.10")
+        self.assertEqual(("true", "v1.0.0-beta.9"), (result["prerelease"], result["previous_tag"]))
+        self.assertEqual("v1.0.0-beta.10", release.check(["v1.0.0-beta.10"], "1.0.0-rc.1")["previous_tag"])
+        with self.assertRaisesRegex(release.ReleaseError, "older than"):
+            release.check(["v1.0.0-rc.1"], "1.0.0-beta.11")
+        self.assertEqual("v0.24.0", release.check(["v0.24.0", "v1.0.0-beta.1", "v1.0.0-rc.1"], "1.0.0")["previous_tag"])
+
     def test_refuses_bad_versions(self):
-        for version in ["1.0", "1.0.0-RC1", "1.0.0-beta.1", "1.0.0-rc.0", "01.0.0"]:
+        for version in ["1.0", "1.0.0-RC1", "1.0.0-alpha.1", "1.0.0-beta", "1.0.0-beta.0", "1.0.0-rc.0", "01.0.0"]:
             with self.subTest(version), self.assertRaisesRegex(release.ReleaseError, "look like"):
                 release.check([], version)
 
@@ -56,6 +64,16 @@ class DockerTagsTest(unittest.TestCase):
     def test_one_zero_release_candidates_move_latest(self):
         self.assertEqual(["1.0.0-rc.1", "latest"], release.docker_tags(["v0.24.0"], "1.0.0-rc.1"))
         self.assertEqual(["1.0.0-rc.2", "latest"], release.docker_tags(["v0.24.0", "v1.0.0-rc.1"], "1.0.0-rc.2"))
+
+    def test_one_zero_betas_move_latest(self):
+        self.assertEqual(["1.0.0-beta.1", "latest"], release.docker_tags([], "1.0.0-beta.1"))
+        self.assertEqual(["1.0.0-beta.2", "latest"], release.docker_tags(["v0.24.0", "v1.0.0-beta.1"], "1.0.0-beta.2"))
+        self.assertEqual(["1.0.0-rc.1", "latest"], release.docker_tags(["v1.0.0-beta.2"], "1.0.0-rc.1"))
+        self.assertEqual(["1.0.0-beta.2"], release.docker_tags(["v1.0.0-beta.2", "v1.0.0-rc.1"], "v1.0.0-beta.2"))
+
+    def test_other_betas_get_only_their_own_tag(self):
+        self.assertEqual(["1.1.0-beta.1"], release.docker_tags(["v1.0.0"], "1.1.0-beta.1"))
+        self.assertEqual(["0.25.0-beta.1"], release.docker_tags(["v0.24.0"], "0.25.0-beta.1"))
 
     def test_stable_release(self):
         tags = ["v0.24.0", "v1.0.0-rc.1"]

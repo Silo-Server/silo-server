@@ -1,17 +1,23 @@
 # Release versioning
 
 Silo uses GitHub Releases as the public record of shipped versions and their
-changes. Releases start at `v0.24.0` and continue with `0.x` releases, then
-`v1.0.0-rc.1`, `v1.0.0-rc.2`, and so on until `v1.0.0`.
+changes. The releases before 1.0 are betas, `v1.0.0-beta.1`, `v1.0.0-beta.2`,
+and so on, then release candidates from `v1.0.0-rc.1`, until `v1.0.0`. The
+clients name their tester builds the same way. `0.x` releases such as `v0.24.0`
+are also accepted.
 
 ## Version format
 
 Release tags follow [Semantic Versioning](https://semver.org/) with a leading
-`v`. The Release workflow accepts two forms:
+`v`. The Release workflow accepts three forms:
 
 - Release: `vMAJOR.MINOR.PATCH`, for example `v0.24.0` or `v1.0.0`
-- Release candidate: `vMAJOR.MINOR.PATCH-rc.N`, for example `v1.0.0-rc.1`. It is
-  published as a GitHub prerelease. `rc.10` sorts after `rc.9`.
+- Beta: `vMAJOR.MINOR.PATCH-beta.N`, for example `v1.0.0-beta.1`
+- Release candidate: `vMAJOR.MINOR.PATCH-rc.N`, for example `v1.0.0-rc.1`
+
+Betas and release candidates are published as GitHub prereleases. Within one
+`MAJOR.MINOR.PATCH`, every beta sorts before every release candidate, and both
+sort before the release. `beta.10` sorts after `beta.9`.
 
 For releases below `v1.0.0`, a minor release may include breaking changes. Every
 release note must call out upgrade, configuration, and compatibility impact when
@@ -61,16 +67,16 @@ PostgreSQL, Redis, and Meilisearch; see [Omnibus image](architecture/omnibus-ima
 | `dev` | every successful `main` build | The newest build. Follow it to get every change as it merges. |
 | `build-N` | never | One `main` build. A larger number is newer; gaps from unsuccessful runs are expected. |
 | Full commit SHA | never | The exact source of one `main` build. |
-| `latest` | each release | The newest release: `0.x` releases, the `v1.0.0` release candidates, then `v1.0.0` and later releases. Until the first release it follows every `main` build. |
-| `X.Y.Z`, `X.Y.Z-rc.N` | never | One release, for example `0.24.0` or `1.0.0-rc.1`. |
-| `X.Y` | each release in that line | The newest `X.Y.Z` release, for example `0.24`. Release candidates never move it. |
+| `latest` | each release | The newest release: `0.x` releases, the `v1.0.0` betas and release candidates, then `v1.0.0` and later releases. Until the first release it follows every `main` build. |
+| `X.Y.Z`, `X.Y.Z-beta.N`, `X.Y.Z-rc.N` | never | One release, for example `0.24.0`, `1.0.0-beta.1` or `1.0.0-rc.1`. |
+| `X.Y` | each release in that line | The newest `X.Y.Z` release, for example `0.24`. Betas and release candidates never move it. |
 | `X` | each release in that major version, from 1 on | The newest `X.Y.Z` release, for example `1`. There is no `0` tag. |
 
 A release image is the image CI built and tested for that commit, plus one file,
 `/usr/share/silo/version`, from which the server reads its version. The file
 stays in the image, so a macOS transcode node binary copied out of a release
-image reports its revision, not the version. Release candidates other than
-`v1.0.0`'s, such as `v0.25.0-rc.1` or `v1.1.0-rc.1`, get only their own tag.
+image reports its revision, not the version. Betas and release candidates other
+than `v1.0.0`'s, such as `v0.25.0-rc.1` or `v1.1.0-beta.1`, get only their own tag.
 
 Build numbers are not release versions and do not carry compatibility or
 support guarantees. Pin a release tag, `build-N`, commit-SHA tag, or image
@@ -89,8 +95,8 @@ announcing a release.
 1. Wait until CI has passed on the `main` commit you want to release and the
    **Docker Image** workflow has published it. The release reuses that image.
 2. Open **Actions > Release > Run workflow** from the `main` branch and enter the
-   version, for example `0.24.0` or `1.0.0-rc.1`. A version with `-rc.N` is a
-   prerelease.
+   version, for example `1.0.0-beta.1` or `1.0.0-rc.1`. A version with `-beta.N`
+   or `-rc.N` is a prerelease.
 3. Edit the draft release. Add upgrade, configuration, and compatibility notes.
    The first release has no earlier tag, so its notes are written by hand.
 4. Publish the draft. **Release published** then tags the commit's image with the
@@ -104,8 +110,9 @@ than the newest release, a run from a branch other than `main`, a run while
 another draft release exists, a commit with no new commits since the previous
 release, and a commit that CI hasn't passed or whose image hasn't been
 published. Generated notes start at the previous
-release for a release candidate, and at the previous non-candidate release
-otherwise, so `v1.0.0` covers everything since the last `0.x` release. If
+release for a beta or release candidate, and at the previous stable release
+otherwise, so `v1.0.0` covers everything since the last `0.x` release, or is
+written by hand when there is none. If
 tagging the image fails, run **Release published** again with the release's tag.
 A re-run never rebuilds a version that is already published: it points the
 tags at the existing version image.
