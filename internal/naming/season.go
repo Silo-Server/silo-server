@@ -118,21 +118,26 @@ func seasonDirectoryNumber(segment, parent string, allowNumeric, topLevel bool) 
 	// A provider-tagged parent names one show, so its season folders may
 	// carry another title for it (an original-title show folder holding
 	// international-title seasons: فوضى {tmdb-227604}/Fauda - S01). A folder
-	// with its own provider tag names its own show. A word label (Series 7)
-	// also ends ordinary titles (World Series 2020), so it still needs the
-	// title match.
+	// with its own provider tag names its own show. Only the short S01 form
+	// counts there: Season and Series also appear in titles (Open Season 2,
+	// World Series 2020). A token whose title matches the parent wins over
+	// this fallback.
 	parentTagged := ParseFolderIDs(parent) != nil && ParseFolderIDs(segment) == nil
+	fallback, hasFallback := 0, false
 	for _, match := range seasonDirectoryTokenRe.FindAllStringSubmatchIndex(segment, -1) {
-		prefix := normalizeInferComparable(segment[:match[0]])
-		if prefix != "" && (parentTitle == "" || prefix != parentTitle) &&
-			(!parentTagged || wordSeasonDirectoryLabelRe.MatchString(segment[match[2]:match[3]])) {
-			continue
-		}
-		if prefix == "" && topLevel && !seasonLabelStandsAlone(segment[match[2]:match[3]], segment[match[5]:]) {
-			continue
-		}
+		label := segment[match[2]:match[3]]
 		number, _ := strconv.Atoi(segment[match[4]:match[5]])
+		prefix := normalizeInferComparable(segment[:match[0]])
+		if prefix != "" && (parentTitle == "" || prefix != parentTitle) {
+			if parentTagged && !hasFallback && strings.EqualFold(label, "s") {
+				fallback, hasFallback = number, true
+			}
+			continue
+		}
+		if prefix == "" && topLevel && !seasonLabelStandsAlone(label, segment[match[5]:]) {
+			continue
+		}
 		return number, true
 	}
-	return 0, false
+	return fallback, hasFallback
 }

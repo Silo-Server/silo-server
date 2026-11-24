@@ -546,7 +546,7 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: false,
 		},
 		{
-			// A word label also ends ordinary titles, so a tagged movie folder
+			// Season and Series also appear in titles, so a tagged movie folder
 			// does not make World Series 2020 a season.
 			name:                    "movie in a word-labeled subfolder of a tagged movie folder stays a movie",
 			path:                    "/media/Baseball (2020) {tmdb-12345}/World Series 2020/Baseball (2020).mkv",
@@ -557,6 +557,23 @@ func TestResolvePathContext(t *testing.T) {
 			wantTitle:               "Baseball",
 			wantYear:                2020,
 			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// A season token whose title matches the show folder wins over the
+			// tagged-folder fallback for an earlier token.
+			name:                    "season token matching the tagged show title wins over an earlier S token",
+			path:                    "/tv/Agent S7 (2019) {tvdb-12345}/Agent S7 - S03/E01.mkv",
+			libraryRoots:            []string{"/tv"},
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/Agent S7 (2019) {tvdb-12345}",
+			wantTitle:               "Agent S7",
+			wantYear:                2019,
+			wantSeason:              3,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     true,
 			wantMovieFolderEvidence: false,
 		},
 		{
