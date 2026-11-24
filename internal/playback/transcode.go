@@ -1161,7 +1161,16 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	// A/V sync issues during copy-mode HLS playback. Matches Jellyfin's
 	// proven fMP4 HLS pipeline.
 	if videoUsesFMP4 {
-		args = append(args, "-hls_segment_options", "movflags=+frag_discont")
+		movflags := "+frag_discont"
+		if opts.copyGroupPrefix != "" {
+			// The assembler places each group by its first sample's time.
+			// With a sidx, FFmpeg's mp4 muxer moves the first sample of every
+			// fragment after the first to the end of the previous one: at an
+			// open-GOP keyframe that is its leading B-frames' time, not the
+			// keyframe's (#4664). The assembled segments drop the sidx anyway.
+			movflags += "+skip_sidx"
+		}
+		args = append(args, "-hls_segment_options", "movflags="+movflags)
 	}
 	if opts.StartSegmentNumber > 0 && opts.copyGroupPrefix == "" {
 		args = append(args, "-start_number", fmt.Sprintf("%d", opts.StartSegmentNumber))
