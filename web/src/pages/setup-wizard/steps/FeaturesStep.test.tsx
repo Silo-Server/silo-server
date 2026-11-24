@@ -34,6 +34,7 @@ vi.mock("@/hooks/queries/admin/aiProviders", () => ({
     isLoading: false,
   }),
   useAIProviderModels: () => ({ data: { models: [] } }),
+  useAIProviderCreatePending: () => false,
 }));
 vi.mock("../WizardContext", () => ({
   useWizardContext: () => ({ markDone: vi.fn(), setSummary: vi.fn() }),
