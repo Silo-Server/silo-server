@@ -65,6 +65,7 @@ import { AdminUserCompactList } from "@/components/admin/users/AdminUserCompactL
 import {
   AdminUserRoleBadge,
   AdminUserStatusBadge,
+  BreakableEmail,
 } from "@/components/admin/users/AdminUserRowParts";
 import {
   USER_SORT_FIELDS,
@@ -487,7 +488,7 @@ function AdminUsersPage() {
                             dir={emailDir(u.email)}
                             className="align-with-page block w-fit max-w-full wrap-anywhere"
                           >
-                            {u.email}
+                            <BreakableEmail email={u.email} />
                           </span>
                         </TableCell>
                         <TableCell>
