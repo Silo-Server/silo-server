@@ -115,7 +115,7 @@ func (f *ContinueWatchingProgressFilter) SupersededEpisodeProgressIDsCached(ctx 
 
 	var completed []ProgressSnapshot
 	if lister, ok := store.(ProgressByItemsLister); ok {
-		completed, err = f.laterEpisodeCompletions(ctx, lister, profileID, inProgress, oldestInProgress)
+		completed, err = f.laterEpisodeCompletions(ctx, lister, profileID, inProgress, oldestInProgress, cache)
 	} else {
 		completed, err = cache.snapshots(ctx, store, profileID, oldestInProgress)
 	}
@@ -158,7 +158,11 @@ const laterEpisodeIDsChunk = 5000
 // reading them by item replaces the newest-first walk of the whole completed
 // history and its row cap: how much history a profile has no longer decides
 // whether an old resume point is checked.
-func (f *ContinueWatchingProgressFilter) laterEpisodeCompletions(ctx context.Context, lister ProgressByItemsLister, profileID string, inProgress []ProgressSnapshot, notBefore time.Time) ([]ProgressSnapshot, error) {
+//
+// A cache for the same profile keeps each item's answer, so a later
+// Continue Watching page reads progress only for items no earlier page asked
+// about. A nil cache, or one bound to another profile, reads fresh.
+func (f *ContinueWatchingProgressFilter) laterEpisodeCompletions(ctx context.Context, lister ProgressByItemsLister, profileID string, inProgress []ProgressSnapshot, notBefore time.Time, cache *CompletedProgressCache) ([]ProgressSnapshot, error) {
 	ids, _ := splitProgressSnapshots(inProgress)
 	rows, err := f.pool.Query(ctx, buildLaterEpisodesQuery(), ids)
 	if err != nil {
@@ -169,12 +173,28 @@ func (f *ContinueWatchingProgressFilter) laterEpisodeCompletions(ctx context.Con
 		return nil, fmt.Errorf("scanning later episodes of in-progress series: %w", err)
 	}
 
-	var completed []ProgressSnapshot
-	for start := 0; start < len(later); start += laterEpisodeIDsChunk {
-		end := min(start+laterEpisodeIDsChunk, len(later))
-		progress, err := lister.ListProgressByMediaItems(ctx, profileID, later[start:end])
+	if cache == nil || (cache.profileID != "" && cache.profileID != profileID) {
+		cache = &CompletedProgressCache{}
+	}
+	cache.profileID = profileID
+	if cache.byItem == nil {
+		cache.byItem = make(map[string]*ProgressSnapshot)
+	}
+
+	unread := make([]string, 0, len(later))
+	for _, id := range later {
+		if _, ok := cache.byItem[id]; !ok {
+			unread = append(unread, id)
+		}
+	}
+	for start := 0; start < len(unread); start += laterEpisodeIDsChunk {
+		batch := unread[start:min(start+laterEpisodeIDsChunk, len(unread))]
+		progress, err := lister.ListProgressByMediaItems(ctx, profileID, batch)
 		if err != nil {
 			return nil, fmt.Errorf("listing completed progress for superseded episodes: %w", err)
+		}
+		for _, id := range batch {
+			cache.byItem[id] = nil
 		}
 		entries := make([]userstore.WatchProgress, 0, len(progress))
 		for _, entry := range progress {
@@ -183,9 +203,14 @@ func (f *ContinueWatchingProgressFilter) laterEpisodeCompletions(ctx context.Con
 			}
 		}
 		for _, snapshot := range ProgressSnapshots(entries) {
-			if snapshot.UpdatedAt.After(notBefore) {
-				completed = append(completed, snapshot)
-			}
+			cache.byItem[snapshot.ContentID] = &snapshot
+		}
+	}
+
+	var completed []ProgressSnapshot
+	for _, id := range later {
+		if snapshot := cache.byItem[id]; snapshot != nil && snapshot.UpdatedAt.After(notBefore) {
+			completed = append(completed, *snapshot)
 		}
 	}
 	return completed, nil
@@ -287,6 +312,10 @@ type CompletedProgressCache struct {
 	// snaps then holds every completed row after it (up to the row cap).
 	readSinceAt time.Time
 	sinceValid  bool
+	// byItem holds the by-item lookup's answers: an item's completed
+	// snapshot, or nil when it has no completed progress. An item is present
+	// once it has been read.
+	byItem map[string]*ProgressSnapshot
 }
 
 // NewCompletedProgressCache returns a cache for one request.

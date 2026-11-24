@@ -204,9 +204,24 @@ func TestSupersededPastCompletedHistoryCapPostgres(t *testing.T) {
 	if len(inProgress) != 2 {
 		t.Fatalf("in-progress rows = %v, want cwcap-o2 and cwcap-e1", inProgress)
 	}
-	superseded, err := NewContinueWatchingProgressFilter(pool).SupersededEpisodeProgressIDsCached(ctx, store, profileID, inProgress, NewCompletedProgressCache())
+	counting := &countingItemsLister{UserStore: store}
+	cache := NewCompletedProgressCache()
+	filter := NewContinueWatchingProgressFilter(pool)
+	superseded, err := filter.SupersededEpisodeProgressIDsCached(ctx, counting, profileID, inProgress, cache)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A second Continue Watching page with the same cache reads no item twice.
+	read := counting.items
+	again, err := filter.SupersededEpisodeProgressIDsCached(ctx, counting, profileID, inProgress[1:], cache)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if counting.items != read {
+		t.Fatalf("second page read %d more items, want 0", counting.items-read)
+	}
+	if _, ok := again["cwcap-e1"]; !ok || len(again) != 1 {
+		t.Fatalf("second page superseded = %v, want only cwcap-e1", again)
 	}
 	// cwcap-e1 is superseded by cwcap-e2, finished a day later and followed by
 	// more completions than the cap. cwcap-o2 is in progress after its earlier
@@ -214,4 +229,14 @@ func TestSupersededPastCompletedHistoryCapPostgres(t *testing.T) {
 	if _, ok := superseded["cwcap-e1"]; !ok || len(superseded) != 1 {
 		t.Fatalf("superseded = %v, want only cwcap-e1", superseded)
 	}
+}
+
+type countingItemsLister struct {
+	userstore.UserStore
+	items int
+}
+
+func (c *countingItemsLister) ListProgressByMediaItems(ctx context.Context, profileID string, ids []string) (map[string]userstore.WatchProgress, error) {
+	c.items += len(ids)
+	return c.UserStore.ListProgressByMediaItems(ctx, profileID, ids)
 }
