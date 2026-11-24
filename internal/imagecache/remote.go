@@ -188,12 +188,23 @@ func newRemoteFetcher(client *http.Client) *RemoteFetcher {
 // same item and URL share a download. The download runs detached from the
 // first caller, and each caller stops waiting when its own context ends.
 func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteImage, error) {
-	id := key + "\x00" + rawURL
+	return f.FetchBytes(ctx, key, rawURL, func(loadCtx context.Context, maxBytes int64) ([]byte, error) {
+		return download(loadCtx, f.client, rawURL, true, maxBytes)
+	})
+}
+
+// FetchBytes reads poster bytes through load under the same bounds as Fetch:
+// concurrent requests for the same key and source share one load, at most
+// remoteFetchSlots loads run at once, outcomes are remembered within the
+// shared entry and byte budgets, bodies over 4 MiB fail with ErrRemoteTooLarge,
+// and the Content-Type comes from the bytes via ServedImageType.
+func (f *RemoteFetcher) FetchBytes(ctx context.Context, key, source string, load func(context.Context, int64) ([]byte, error)) (RemoteImage, error) {
+	id := key + "\x00" + source
 	if result, ok := f.recent(id, time.Now()); ok {
 		return result.image, result.err
 	}
 	// Shared by item and source: a request for a poster whose source just
-	// changed must not join the download of the old one.
+	// changed must not join the load of the old one.
 	flight := f.group.DoChan(id, func() (value any, err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -202,12 +213,12 @@ func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteIm
 				value, err = RemoteImage{}, errors.New("imagecache: remote image fetch panicked")
 			}
 		}()
-		// A caller that missed the memory just before the previous download
+		// A caller that missed the memory just before the previous load
 		// finished lands here after it; it takes that outcome.
 		if result, ok := f.recent(id, time.Now()); ok {
 			return result.image, result.err
 		}
-		return f.fetch(context.WithoutCancel(ctx), id, rawURL)
+		return f.fetch(context.WithoutCancel(ctx), id, load)
 	})
 	select {
 	case <-ctx.Done():
@@ -221,11 +232,11 @@ func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteIm
 	}
 }
 
-// fetch downloads rawURL in a download slot and remembers the outcome before
-// it gives the slot back, which is what bounds the memory's overshoot. A busy
-// answer is not an outcome of the artwork and is not remembered, so the next
-// request tries again.
-func (f *RemoteFetcher) fetch(ctx context.Context, id, rawURL string) (RemoteImage, error) {
+// fetch runs load in a download slot and remembers the outcome before it gives
+// the slot back, which is what bounds the memory's overshoot. A busy answer is
+// not an outcome of the artwork and is not remembered, so the next request
+// tries again.
+func (f *RemoteFetcher) fetch(ctx context.Context, id string, load func(context.Context, int64) ([]byte, error)) (RemoteImage, error) {
 	wait := time.NewTimer(remoteFetchSlotWait)
 	defer wait.Stop()
 	select {
@@ -238,15 +249,20 @@ func (f *RemoteFetcher) fetch(ctx context.Context, id, rawURL string) (RemoteIma
 	if !f.admits(id, time.Now()) {
 		return RemoteImage{}, ErrRemoteBusy
 	}
-	image, err := f.download(ctx, rawURL)
+	image, err := f.loadImage(ctx, load)
 	f.remember(id, image, err, time.Now())
 	return image, err
 }
 
-func (f *RemoteFetcher) download(ctx context.Context, rawURL string) (RemoteImage, error) {
-	data, err := download(ctx, f.client, rawURL, true, remoteResultMaxBytes)
+func (f *RemoteFetcher) loadImage(ctx context.Context, load func(context.Context, int64) ([]byte, error)) (RemoteImage, error) {
+	loadCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
+	defer cancel()
+	data, err := load(loadCtx, remoteResultMaxBytes)
 	if err != nil {
 		return RemoteImage{}, err
+	}
+	if int64(len(data)) > remoteResultMaxBytes {
+		return RemoteImage{}, ErrRemoteTooLarge
 	}
 	contentType, ok := ServedImageType(data)
 	if !ok {

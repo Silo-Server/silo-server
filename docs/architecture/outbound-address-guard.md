@@ -149,8 +149,11 @@ the store is relied on not to redirect into the local network.
 The signed poster route (`getItemPoster`) serves links from admin reads and
 household session lists. A signature covers the item's content ID and expiry
 in a separate signing domain (`artworkurl.ItemPosters`). It authorizes the
-holder to read the item's current poster. Stored artwork keys redirect the
-client to the signed object.
+holder to read the item's current poster. Stored artwork keys are read from the
+configured artwork store on the server side (after `blobstore.ValidateKey` and
+`!blobstore.Unserved`) through `imagecache.RemoteFetcher`'s shared slots,
+result memory, 4 MiB cap, and byte-sniffed `Content-Type` check, rather than
+redirecting off-server or issuing an HTTP fetch to the store's direct URL.
 
 For provider URLs and URLs returned by a plugin, `imagecache.RemoteFetcher`
 downloads the poster through the image cache's guarded transport. Every dial

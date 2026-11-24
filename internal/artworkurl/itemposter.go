@@ -29,13 +29,14 @@ type PosterPresigner interface {
 }
 
 // ItemPosters applies the admin poster rule: on the admin surfaces a
-// monitoring tool reads, a poster URL is always one this server issued, and
-// empty only when the item has no poster. Cached art resolves to its stored
-// object's URL, as everywhere else. Art that is not cached yet (a provider's
-// URL, or a plugin path whose plugin answers with one) gets a signed link to
+// monitoring tool reads, a poster URL is always on this server, and empty only
+// when the item has no poster. Cached art on local storage resolves to its
+// signed /api/v2/artwork/... path. Cached art whose stored URL would point off
+// this server (S3-compatible storage or a CDN), and art that is not cached yet
+// (a provider's URL, or a plugin path), gets a signed link to
 // GET /api/v2/item-posters/{content_id}, which serves the item's current
-// poster when it is requested. A tool on a network that cannot reach the
-// providers' image hosts can load either.
+// poster bytes through this server. A tool that may contact only this Silo
+// server can load either.
 type ItemPosters struct {
 	signer  *Signer
 	presign PosterPresigner
@@ -58,11 +59,17 @@ func (p *ItemPosters) URL(ctx context.Context, ownerID, posterPath string) strin
 		return ""
 	}
 	if IsStoredArtworkPath(posterPath) {
-		if url := p.Presign(ctx, StoredPosterVariant(posterPath)); url != "" {
+		if url := p.Presign(ctx, StoredPosterVariant(posterPath)); IsSameServerPath(url) {
 			return url
 		}
 	}
 	return p.Link(ownerID, time.Now())
+}
+
+// IsSameServerPath reports whether raw is a root-relative path on this server
+// ("/...") rather than a scheme-relative ("//host/...") or off-server URL.
+func IsSameServerPath(raw string) bool {
+	return strings.HasPrefix(raw, "/") && !strings.HasPrefix(raw, "//")
 }
 
 // Link signs a getItemPoster link for contentID issued at now, or returns ""
