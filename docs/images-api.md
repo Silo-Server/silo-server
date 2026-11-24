@@ -248,8 +248,9 @@ when the server applies this rule.
 - Art that is not cached yet resolves to a signed link to
   `GET /api/v2/item-posters/{content_id}` (`getItemPoster`). The link signs the
   item's content ID and an expiry, never a URL. Each request looks up the
-  item's current poster: cached art is read from the artwork store and answered
-  `200` with its bytes, exactly as `/api/v2/artwork/...` serves it; art that is
+  item's current poster: cached art is read from the artwork store and served
+  as `/api/v2/artwork/...` serves it, answering `200` with its bytes, `304` to a
+  matching `If-None-Match`, and `206` or `416` to a `Range`; art that is
   still remote is downloaded through the server and answered `200` with its
   bytes, and the item's image-cache job is queued.
 
@@ -278,9 +279,13 @@ Concurrent requests for one item share one download, and a
 server runs at most four at once. A server remembers a finished download for
 five minutes and a failed one for 30 seconds, so repeating a link does not
 repeat the request to the provider. An image over 4 MiB is not served from a
-link and answers `404` until the image cache has stored it. Proxied and stored
-bytes carry `Cache-Control: private, max-age=300`, and stored bytes also carry
-the object's `ETag`. A redirect to a plugin's same-server path is `no-store`.
+link and answers `404` until the image cache has stored it. From
+`getItemPoster`, proxied and stored bytes carry
+`Cache-Control: private, max-age=300`, since the link names whatever the
+item's poster is now, and stored bytes also carry the object's `ETag`. The
+signed `/api/v2/artwork/...` path keeps its own policy: a revisioned key is
+`immutable` until the link expires. A redirect to a plugin's same-server path
+is `no-store`.
 
 ### Admin request posters
 
