@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"time"
@@ -26,6 +27,7 @@ func NewSQLiteUserStore(db *sql.DB) *SQLiteUserStore {
 var _ userstore.UserStore = (*SQLiteUserStore)(nil)
 var _ userstore.DeviceRegistry = (*SQLiteUserStore)(nil)
 var _ userstore.WatchedBatchWriter = (*SQLiteUserStore)(nil)
+var _ userstore.PlaybackStopWriter = (*SQLiteUserStore)(nil)
 var _ userstore.SectionOverrideEnumerator = (*SQLiteUserStore)(nil)
 
 // ListAllSectionOverrides exposes the account-wide read capability used by
@@ -64,6 +66,52 @@ func (s *SQLiteUserStore) UpdateProgress(_ context.Context, profileID, mediaItem
 
 func (s *SQLiteUserStore) SetProgress(_ context.Context, profileID, mediaItemID string, position, duration float64, thresholds userstore.ProgressThresholds) error {
 	return SetProgress(s.db, profileID, mediaItemID, position, duration, thresholds)
+}
+
+func (s *SQLiteUserStore) CommitPlaybackStop(ctx context.Context, stop userstore.PlaybackStopWrite) ([]userstore.WatchHistoryEntry, bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	entry := stop.Entry
+	// Reserve the stop identity independently of its removable history.
+	marker, err := tx.ExecContext(ctx, `
+		INSERT INTO playback_stop_commits (id, profile_id, expires_at)
+		VALUES (?, ?, ?)
+		ON CONFLICT (id) DO NOTHING`,
+		entry.ID, entry.ProfileID, stop.ReplayUntil.Unix())
+	if err != nil {
+		return nil, false, err
+	}
+	if written, err := marker.RowsAffected(); err != nil {
+		return nil, false, err
+	} else if written == 0 {
+		return nil, true, nil
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM playback_stop_commits WHERE expires_at <= ?`, time.Now().Unix()); err != nil {
+		return nil, false, err
+	}
+	if _, err := addVisibleHistory(ctx, tx, entry); errors.Is(err, userstore.ErrHistoryEntryExists) {
+		return nil, true, tx.Commit()
+	} else if err != nil {
+		return nil, false, err
+	}
+	if err := setPlaybackProgress(tx, entry.ProfileID, entry.MediaItemID, stop.PositionSeconds, entry.DurationSeconds, stop.Thresholds); err != nil {
+		return nil, false, err
+	}
+	if _, err := updatePlaybackProgressHints(tx, entry.ProfileID, entry.MediaItemID, stop.Hints); err != nil {
+		return nil, false, err
+	}
+	spanned, err := markWatchedBatchTx(ctx, tx, entry.ProfileID, stop.SpannedTargets, stop.SpannedHistory)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return spanned, false, nil
 }
 
 func (s *SQLiteUserStore) SetProgressAt(_ context.Context, profileID, mediaItemID string, position, duration float64, completed bool, updatedAt time.Time) error {

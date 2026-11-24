@@ -40,6 +40,10 @@ const (
 	// SettingUnverifiedBackup is a setting that connects to an outside
 	// service, which a backup this server cannot verify never restores.
 	SettingUnverifiedBackup = "unverified_backup"
+	// SettingManagedByEnvironment is a setting a restore keeps as it is
+	// here: this server's environment sets it, or sets another setting of
+	// the outside-service connection it belongs to (outboundBundles).
+	SettingManagedByEnvironment = "managed_by_environment"
 )
 
 // Reasons an item cannot be chosen, is restored only in part, or was left
@@ -85,6 +89,10 @@ const (
 	// ReasonOverRestoreBudget: the item's collection metadata would take
 	// one restore, or one library, past what a restore writes.
 	ReasonOverRestoreBudget = "over_restore_budget"
+	// ReasonManagedByEnvironment: this server's environment sets every
+	// setting of the page that differs, or the connection it belongs to, so
+	// the live values stay.
+	ReasonManagedByEnvironment = "managed_by_environment"
 )
 
 // Report outcomes.
@@ -127,7 +135,12 @@ type RestoreTargets struct {
 	// runs under the settings lock with the stored values, before anything
 	// is written; its error refuses the write.
 	ApplySettings func(ctx context.Context, tx pgx.Tx, values map[string]string, check func(stored map[string]string) error) (restartKeys []string, after func(context.Context), err error)
-	Plugins       PluginRestorer
+	// EnvironmentValue is the value this server's environment sets for key,
+	// which ApplySettings refuses to change (managed_by_environment). A
+	// restore compares the backup with that value and never writes the key.
+	// Nil: the environment sets no setting.
+	EnvironmentValue func(key string) (value string, ok bool)
+	Plugins          PluginRestorer
 	// LibraryCreated runs the library editor's follow-ups for a committed
 	// new library: sections, provider chain, monitoring, and the first scan.
 	// It may run again after a crash, so each step must be idempotent and

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -29,8 +30,8 @@ const (
 	// PlaybackEndAborted: the server abandoned the play, because its media
 	// went missing or a replacement transport failed to commit.
 	PlaybackEndAborted PlaybackEndReason = "aborted"
-	// PlaybackEndReplaced: a Jellyfin client switched play method, and the
-	// play continues under a new session.
+	// PlaybackEndReplaced: a Jellyfin client switched play method or
+	// version, and the play continues under a new session.
 	PlaybackEndReplaced PlaybackEndReason = playback.EndReasonReplaced
 )
 
@@ -47,21 +48,23 @@ func (r PlaybackEndReason) userInitiated() bool {
 // AdminPlaybackHistoryEntry is the finalized admin-facing record for a
 // playback attempt.
 type AdminPlaybackHistoryEntry struct {
-	SessionID       string
-	UserID          int
-	ProfileID       string
-	ProfileName     string
-	MediaItemID     string
-	MediaFileID     int
-	PlayMethod      string
-	StartedAt       string
-	EndedAt         string
-	WatchedSeconds  float64
-	DurationSeconds *float64
-	Completed       bool
-	ClientIP        string
-	// Watch is the session's measured watch time. WatchedSeconds is where the
-	// play ended, not how much of it was watched.
+	SessionID   string
+	UserID      int
+	ProfileID   string
+	ProfileName string
+	MediaItemID string
+	MediaFileID int
+	PlayMethod  string
+	StartedAt   string
+	EndedAt     string
+	// EndPositionSeconds is where the play ended, stored in the
+	// watched_seconds column.
+	EndPositionSeconds float64
+	DurationSeconds    *float64
+	Completed          bool
+	ClientIP           string
+	// Watch is the session's measured watch time. EndPositionSeconds is
+	// where the play ended, not how much of it was watched.
 	Watch playback.WatchTime
 	// DeviceID, DevicePlatform, ClientName, ClientVersion, VideoDecision and
 	// AudioDecision describe the play itself, so the first finalization that
@@ -72,6 +75,23 @@ type AdminPlaybackHistoryEntry struct {
 	// EndReason is why this finalization ended the attempt; empty records
 	// none.
 	EndReason PlaybackEndReason
+	// Subtitle is the subtitle the session's plan delivered when the play
+	// ended; nil when it showed none. The one known later (SubtitleAt)
+	// decides it, whatever position the play ended at: a play can seek
+	// back, switch subtitles and stop before where an earlier end left it.
+	Subtitle *playback.SessionSubtitle
+	// SubtitleAt is when Subtitle was last known to be showing, when that
+	// is before EndedAt: a sweep ending a play whose attempt is gone only
+	// knows the subtitle its live or start row last synced. Zero is EndedAt.
+	SubtitleAt time.Time
+}
+
+// subtitleAt is when the entry's subtitle was last known to be showing.
+func (entry AdminPlaybackHistoryEntry) subtitleAt() string {
+	if entry.SubtitleAt.IsZero() {
+		return entry.EndedAt
+	}
+	return entry.SubtitleAt.UTC().Format(time.RFC3339Nano)
 }
 
 // PlaybackAdminStore persists finalized playback history and manages the
@@ -92,8 +112,9 @@ type AdminPlaybackHistoryEntry struct {
 // records any the row lacks, whether or not it advanced the counters, and
 // never replaces one. The end reason is the latest finalization's: one that
 // ended no earlier than the finalization that recorded the current reason
-// replaces it, and one without a reason leaves it. That order is kept apart
-// from ended_at, which only moves when a finalization gets further.
+// replaces it, and one without a reason leaves it. The subtitle is ordered
+// the same way, on its own. Both orders are kept apart from ended_at, which
+// only moves when a finalization gets further.
 type PlaybackAdminStore interface {
 	RecordHistory(ctx context.Context, entry AdminPlaybackHistoryEntry) error
 	DeleteSession(ctx context.Context, sessionID string) error
@@ -138,15 +159,19 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			 play_method, started_at, ended_at, watched_seconds, duration_seconds, completed, client_ip,
 			 start_position_seconds, played_seconds, paused_seconds, measured, measured_since, measured_until,
 			 device_id, device_platform, client_name, client_version, video_decision, audio_decision,
-			 end_reason, end_reason_at)
+			 end_reason, end_reason_at, subtitle, subtitle_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::inet, $14, $15, $16, $17, $18, $19,
-			$20, $21, $22, $23, $24, $25, $26::text, CASE WHEN $26::text IS NOT NULL THEN $9::timestamptz END)
+			$20, $21, $22, $23, $24, $25, $26::text, CASE WHEN $26::text IS NOT NULL THEN $9::timestamptz END,
+			$27, $28::timestamptz)
 		ON CONFLICT (session_id) DO UPDATE SET
 			watched_seconds = GREATEST(admin_playback_history.watched_seconds, EXCLUDED.watched_seconds),
 			duration_seconds = CASE WHEN EXCLUDED.watched_seconds > admin_playback_history.watched_seconds
 				THEN COALESCE(EXCLUDED.duration_seconds, admin_playback_history.duration_seconds)
 				ELSE admin_playback_history.duration_seconds END,
 			completed = admin_playback_history.completed OR EXCLUDED.completed,
+			-- A row recorded before subtitle_at existed ordered its subtitle
+			-- by ended_at; keep that order before ended_at moves.
+			subtitle_at = COALESCE(admin_playback_history.subtitle_at, admin_playback_history.ended_at),
 			ended_at = GREATEST(admin_playback_history.ended_at, EXCLUDED.ended_at),
 			start_position_seconds = CASE
 				WHEN NOT admin_playback_history.measured THEN EXCLUDED.start_position_seconds
@@ -177,7 +202,7 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 		entry.PlayMethod,
 		entry.StartedAt,
 		entry.EndedAt,
-		entry.WatchedSeconds,
+		entry.EndPositionSeconds,
 		duration,
 		entry.Completed,
 		nullableIP(entry.ClientIP),
@@ -194,6 +219,8 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 		nullableString(entry.VideoDecision),
 		nullableString(entry.AudioDecision),
 		nullableString(string(entry.EndReason)),
+		entry.Subtitle,
+		entry.subtitleAt(),
 	)
 	queueHistoryFacts(batch, entry)
 	return batch
@@ -201,15 +228,15 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 
 // LiveSession reads the shared live row for sessionID: the facts the replica
 // holding the session last synced, or, once no live row is left, the row
-// the session recorded when it started. ErrSessionNotFound when there is
-// neither.
+// the session recorded when it started. UpdatedAt is when the row was
+// synced. ErrSessionNotFound when there is neither.
 func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string) (*playback.Session, error) {
 	if s == nil || s.pool == nil {
 		return nil, playback.ErrSessionNotFound
 	}
 	var live playback.Session
 	var playMethod string
-	var startedAt *time.Time
+	var startedAt, syncedAt *time.Time
 	err := s.pool.QueryRow(ctx, `
 		SELECT user_id, COALESCE(profile_id, ''), COALESCE(media_file_id, 0), COALESCE(requested_media_file_id, media_file_id, 0),
 			COALESCE(play_method, ''), started_at, COALESCE(HOST(client_ip), ''),
@@ -218,7 +245,7 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 			COALESCE(device_id, ''), COALESCE(device_platform, ''),
 			COALESCE(transcode_audio, FALSE), COALESCE(target_video_codec, ''),
 			COALESCE(position_seconds, 0), COALESCE(compat_origin, FALSE),
-			COALESCE(timeline_duration_seconds, 0), adaptation_reasons
+			COALESCE(timeline_duration_seconds, 0), adaptation_reasons, subtitle, last_sync_at
 		FROM (
 			SELECT 0 AS source, live.* FROM playback_sessions_sync live WHERE live.session_id = $1
 			UNION ALL
@@ -236,7 +263,7 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 		&live.DeviceID, &live.DevicePlatform,
 		&live.TranscodeAudio, &live.TargetVideoCodec,
 		&live.Position, &live.IsJellyfinCompat,
-		&live.TimelineDuration, &live.AdaptationReasons,
+		&live.TimelineDuration, &live.AdaptationReasons, &live.Subtitle, &syncedAt,
 	)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, playback.ErrSessionNotFound
@@ -249,7 +276,40 @@ func (s *PGPlaybackAdminStore) LiveSession(ctx context.Context, sessionID string
 	if startedAt != nil {
 		live.StartedAt = *startedAt
 	}
+	if syncedAt != nil {
+		live.UpdatedAt = *syncedAt
+	}
 	return &live, nil
+}
+
+// SessionWatch is the watch-time measurement the server holding sessionID
+// last saved on its lifecycle row (when it started, then on each live-session
+// sync). ok is false when none was saved.
+func (s *PGPlaybackAdminStore) SessionWatch(ctx context.Context, sessionID string) (watch playback.WatchTime, ok bool, err error) {
+	id := lifecycleIDParam(sessionID)
+	if s == nil || s.pool == nil || id == nil {
+		return playback.WatchTime{}, false, nil
+	}
+	var raw []byte
+	err = s.pool.QueryRow(ctx, `SELECT watch FROM playback_session_lifecycle WHERE session_id = $1`, id).Scan(&raw)
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && raw == nil) {
+		return playback.WatchTime{}, false, nil
+	}
+	if err != nil {
+		return playback.WatchTime{}, false, fmt.Errorf("reading saved watch time: %w", err)
+	}
+	if err := json.Unmarshal(raw, &watch); err != nil {
+		return playback.WatchTime{}, false, fmt.Errorf("decoding saved watch time: %w", err)
+	}
+	return watch, watch.Measured, nil
+}
+
+// nullableJSON stores an absent document as NULL.
+func nullableJSON(data json.RawMessage) any {
+	if len(data) == 0 {
+		return nil
+	}
+	return string(data)
 }
 
 // HistoryEndReason is the end reason the admin log holds for sessionID, or
@@ -332,13 +392,16 @@ func nullableString(value string) any {
 }
 
 // queueHistoryFacts queues the statement that records the facts a
-// finalization knows and the row lacks, and its end reason.
+// finalization knows and the row lacks, and its end reason and subtitle.
 func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 	// The upsert above only touches a row this finalization advances. This
 	// one runs whether or not it did, so a copy that knows a fact the row
 	// lacks still records it. It runs in the batch's implicit transaction,
 	// after the upsert.
 	const laterReason = `$8::text IS NOT NULL AND (end_reason_at IS NULL OR $9::timestamptz >= end_reason_at)`
+	// A row written before subtitle_at existed ordered its subtitle by
+	// ended_at (the upsert keeps that order when it moves ended_at).
+	const laterSubtitle = `$11::timestamptz >= COALESCE(subtitle_at, ended_at)`
 	batch.Queue(`
 		UPDATE admin_playback_history SET
 			device_id = COALESCE(device_id, $2),
@@ -348,7 +411,9 @@ func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 			video_decision = COALESCE(video_decision, $6),
 			audio_decision = COALESCE(audio_decision, $7),
 			end_reason = CASE WHEN `+laterReason+` THEN $8 ELSE end_reason END,
-			end_reason_at = CASE WHEN `+laterReason+` THEN $9::timestamptz ELSE end_reason_at END
+			end_reason_at = CASE WHEN `+laterReason+` THEN $9::timestamptz ELSE end_reason_at END,
+			subtitle = CASE WHEN `+laterSubtitle+` THEN $10::jsonb ELSE subtitle END,
+			subtitle_at = CASE WHEN `+laterSubtitle+` THEN $11::timestamptz ELSE subtitle_at END
 		WHERE session_id = $1 AND (
 			(device_id IS NULL AND $2::text IS NOT NULL)
 			OR (device_platform IS NULL AND $3::text IS NOT NULL)
@@ -356,7 +421,8 @@ func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 			OR (client_version IS NULL AND $5::text IS NOT NULL)
 			OR (video_decision IS NULL AND $6::text IS NOT NULL)
 			OR (audio_decision IS NULL AND $7::text IS NOT NULL)
-			OR (`+laterReason+` AND (end_reason IS DISTINCT FROM $8 OR end_reason_at IS DISTINCT FROM $9::timestamptz)))
+			OR (`+laterReason+` AND (end_reason IS DISTINCT FROM $8 OR end_reason_at IS DISTINCT FROM $9::timestamptz))
+			OR (`+laterSubtitle+` AND (subtitle IS DISTINCT FROM $10::jsonb OR subtitle_at IS DISTINCT FROM $11::timestamptz)))
 	`,
 		entry.SessionID,
 		nullableString(entry.DeviceID),
@@ -367,5 +433,7 @@ func queueHistoryFacts(batch *pgx.Batch, entry AdminPlaybackHistoryEntry) {
 		nullableString(entry.AudioDecision),
 		nullableString(string(entry.EndReason)),
 		entry.EndedAt,
+		entry.Subtitle,
+		entry.subtitleAt(),
 	)
 }

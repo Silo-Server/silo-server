@@ -20,7 +20,7 @@ type AdminPlaybackTerminateService interface {
 type AdminPlaybackTerminateInput struct {
 	SessionID string `path:"session_id" minLength:"1" maxLength:"128"`
 	Body      struct {
-		Reason string `json:"reason,omitempty" maxLength:"1024" doc:"Free-form administrator reason shown to the player when supported"`
+		Reason string `json:"reason,omitempty" maxLength:"1024" doc:"Free-form administrator reason. A delivered realtime command carries it as the frame's top-level reason, and a player that supports it shows it with its notice for a stop or terminate"`
 	}
 }
 
@@ -29,10 +29,10 @@ type AdminPlaybackTerminateInput struct {
 type AdminPlaybackTerminateReceipt struct {
 	SessionID        string `json:"session_id" doc:"The terminated playback session"`
 	AuthorityRevoked bool   `json:"authority_revoked" doc:"The session's playback authority is durably revoked: media tokens and progress writes for it are refused from now on. Buffered media already delivered may still play out"`
-	AlreadyRevoked   bool   `json:"already_revoked" doc:"The session was already terminated before this request; the call converged without dispatching another command"`
+	AlreadyRevoked   bool   `json:"already_revoked" doc:"The session's playback attempt record already showed an administrator's end before this request: an earlier terminate, a stop the player did not confirm, or a stop the player confirmed over the control socket before its own stop reached the server. The call converged: nothing was dispatched, delivery is none and client_notified is false. A session whose record shows the player's own stop, or that expired, is not found (404), as is any ended session once its record lapses, at least 24 hours after the play started"`
 	DurableState     string `json:"durable_state" enum:"stopped" doc:"stopped: the session is stopped and its stream tokens are denied everywhere"`
-	ClientNotified   bool   `json:"client_notified" doc:"A dismissal command was written to the session's realtime lane. It is never awaited; false means no lane was open or the write failed"`
-	Delivery         string `json:"delivery" enum:"dispatched,unavailable,failed,none" doc:"dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing to notify (already revoked)"`
+	ClientNotified   bool   `json:"client_notified" doc:"A dismissal command was written to the session's realtime lane. It is never awaited; false means no lane was open, the write failed, or nothing was sent because the session was already revoked"`
+	Delivery         string `json:"delivery" enum:"dispatched,unavailable,failed,none" doc:"dispatched: written to the lane. unavailable: no realtime lane. failed: the lane write failed. none: nothing was sent because the session was already revoked"`
 	CommandID        string `json:"command_id,omitempty" doc:"The dismissal command identity when one was issued"`
 }
 type AdminPlaybackTerminateOutput struct {

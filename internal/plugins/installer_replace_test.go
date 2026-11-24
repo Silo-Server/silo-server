@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -28,7 +30,7 @@ func TestInstallerInstallBinaryPersistsPackagedArchive(t *testing.T) {
 	checksum := sha256.Sum256(binaryData)
 	manifest.Checksum = hex.EncodeToString(checksum[:])
 
-	result, err := installer.installBinary(ctx, binaryData, manifest.GetChecksum(), manifest, nil, nil, unsignedSignature)
+	result, err := installer.installBinary(ctx, binaryData, manifest.GetChecksum(), manifest, nil, nil, unsignedSignature, false)
 	if err != nil {
 		t.Fatalf("installBinary() returned error: %v", err)
 	}
@@ -36,23 +38,28 @@ func TestInstallerInstallBinaryPersistsPackagedArchive(t *testing.T) {
 	if result.Installation.ID != 1 {
 		t.Fatalf("result installation id = %d, want 1", result.Installation.ID)
 	}
-	if len(store.saveArchiveIDs) != 1 || store.saveArchiveIDs[0] != 1 {
-		t.Fatalf("SaveArchive() ids = %#v, want [1]", store.saveArchiveIDs)
+	if len(store.createInputs) != 1 {
+		t.Fatalf("Create() calls = %d, want 1", len(store.createInputs))
 	}
-	assertStoredPluginArchive(t, store.saveArchiveBytes, store.saveArchiveManifest, binaryData)
+	created := store.createInputs[0]
+	assertStoredPluginArchive(t, created.Archive.Bytes, created.Archive.ManifestJSON, binaryData)
 }
 
 func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 	ctx := context.Background()
 
-	oldDir := t.TempDir()
+	root := t.TempDir()
+	oldDir := filepath.Join(root, "silo.metadb", "0.0.18", "install-old")
+	if err := os.MkdirAll(oldDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	oldPath := filepath.Join(oldDir, "plugin")
 	if err := os.WriteFile(oldPath, []byte("#!/bin/sh\nexit 0\n"), 0755); err != nil {
 		t.Fatalf("WriteFile(%q) returned error: %v", oldPath, err)
 	}
 
 	store := newRecordingInstallationStore()
-	installer := NewInstaller(store, InstallerOptions{BaseDir: t.TempDir()})
+	installer := NewInstaller(store, InstallerOptions{BaseDir: root})
 
 	manifest := testPluginManifest(t, "silo.metadb", "0.0.19")
 	binaryData := []byte("#!/bin/sh\nexit 0\n")
@@ -70,7 +77,7 @@ func TestInstallerReplaceBinaryPreservesInstallationID(t *testing.T) {
 		Enabled:       true,
 		UpdateFailure: &UpdateFailure{Version: "0.0.19", Reason: "refused earlier"},
 		Signature:     Signature{State: SignatureStateVerified, SourceRepo: &oldRepo, VerifiedAt: &verifiedAt},
-	}, binaryData, hex.EncodeToString(checksum[:]), manifest, nil, nil, unsignedSignature)
+	}, binaryData, hex.EncodeToString(checksum[:]), manifest, nil, nil, unsignedSignature, false)
 	if err != nil {
 		t.Fatalf("prepareBinary() returned error: %v", err)
 	}
@@ -280,7 +287,7 @@ func TestInstallerReplacementRefusedAfterInstallationChangedDB(t *testing.T) {
 		return binary, checksum, manifest
 	}
 	binary, checksum, manifest := release("1.0.0")
-	installed, err := installer.installBinary(ctx, binary, checksum, manifest, nil, nil, unsignedSignature)
+	installed, err := installer.installBinary(ctx, binary, checksum, manifest, nil, nil, unsignedSignature, false)
 	if err != nil {
 		t.Fatalf("install 1.0.0: %v", err)
 	}
@@ -294,12 +301,12 @@ func TestInstallerReplacementRefusedAfterInstallationChangedDB(t *testing.T) {
 	}
 
 	binary, checksum, manifest = release("1.1.0")
-	stale, err := installer.prepareBinary(snapshot, binary, checksum, manifest, nil, nil, unsignedSignature)
+	stale, err := installer.prepareBinary(snapshot, binary, checksum, manifest, nil, nil, unsignedSignature, false)
 	if err != nil {
 		t.Fatalf("prepare 1.1.0: %v", err)
 	}
 	binary, checksum, manifest = release("2.0.0")
-	newer, err := installer.prepareBinary(snapshot, binary, checksum, manifest, nil, nil, unsignedSignature)
+	newer, err := installer.prepareBinary(snapshot, binary, checksum, manifest, nil, nil, unsignedSignature, false)
 	if err != nil {
 		t.Fatalf("prepare 2.0.0: %v", err)
 	}
@@ -342,5 +349,25 @@ func TestInstallerReplacementRefusedAfterInstallationChangedDB(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(staleRoot); len(entries) != 0 {
 		t.Fatalf("refused 1.1.0 left %d install dirs behind", len(entries))
+	}
+}
+
+// A server fetching another platform's build refuses one signed with less
+// than the installed build before running it to read its manifest.
+func TestDownloadBinaryCheckedRefusesBeforeRunningTheBinary(t *testing.T) {
+	ran := filepath.Join(t.TempDir(), "ran")
+	binary := []byte("#!/bin/sh\ntouch '" + ran + "'\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(binary) }))
+	t.Cleanup(server.Close)
+	installer := NewInstaller(nil, InstallerOptions{BaseDir: t.TempDir(), HTTPClient: server.Client()})
+	refused := errors.New("refused")
+	_, err := installer.downloadBinaryChecked(context.Background(), InstallBinaryRequest{
+		BinaryURL: server.URL + "/plugin", Checksum: sha256Hex(binary), PluginID: "example.thirdparty", Version: "1.0.0",
+	}, func([]byte, Signature) error { return refused })
+	if !errors.Is(err, refused) {
+		t.Fatalf("downloadBinaryChecked() = %v, want the accept hook's refusal", err)
+	}
+	if _, err := os.Stat(ran); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the refused binary ran: %v", err)
 	}
 }

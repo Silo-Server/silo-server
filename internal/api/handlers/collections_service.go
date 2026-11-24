@@ -54,6 +54,21 @@ func (h *CollectionHandler) ListPersonalCollections(ctx context.Context, userID 
 	}, nil
 }
 
+// collectionsHoldingItem lists every collection on userID's account that
+// stores contentID, whichever profile made it, for the card builder to keep
+// those the acting profile may see.
+func (h *CollectionHandler) collectionsHoldingItem(ctx context.Context, userID int, contentID string) ([]string, error) {
+	store, err := h.storeProvider.ForUser(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
+	reader, ok := store.(userstore.CollectionMembershipReader)
+	if !ok {
+		return nil, nil
+	}
+	return reader.CollectionsHolding(ctx, contentID)
+}
+
 // PersonalCollectionsHoldingItem returns the ids of profileID's own manual
 // collections that hold itemID. It returns none when the request's viewer
 // cannot access the title, so the answer never reveals that a hidden title

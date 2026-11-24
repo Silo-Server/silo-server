@@ -81,7 +81,7 @@ func registerAdminPluginLifecycle(reg *Registry) {
 		o.MaxBodyBytes = 64 << 10
 		return o
 	}
-	create := op(http.MethodPost, "", "createAdminPluginInstallation", "Install a plugin from a catalog repository (repository_id, plugin_id, version) or a direct archive URL, fetching over the network. An installation with the same plugin_id is stopped and replaced rather than duplicated. There is no replay identity: a lost response may follow a committed install; reconcile from the installation list and never automatically retry.", RetrySafetyNonRetryable)
+	create := op(http.MethodPost, "", "createAdminPluginInstallation", "Install a plugin from a catalog repository (repository_id, plugin_id, version) or a direct archive URL, fetching over the network. An installation with the same plugin_id is stopped and replaced rather than duplicated; an install that finds none but loses the race to create it is 409. There is no replay identity: a lost response may follow a committed install; reconcile from the installation list and never automatically retry.", RetrySafetyNonRetryable)
 	create.DefaultStatus = http.StatusCreated
 	create.Errors = append(create.Errors, http.StatusConflict)
 	Register(reg, create, func(ctx context.Context, in *AdminPluginInstallCreateInput) (*AdminPluginInstallationOutput, error) {

@@ -18,6 +18,7 @@ type CatalogSearchCapabilities struct {
 	ShowTitleRules        bool   `json:"show_title_rules,omitzero" doc:"Rule groups accept show_title to compare an episode parent show title using the text operators; non-episode rows do not match"`
 	LetterIndex           bool   `json:"letter_index,omitzero" doc:"queryCatalogLetters answers how many titles of a title-ordered query-source browse file under each letter and where each letter's first title sits, for an alphabetical jump bar"`
 	BoxSets               bool   `json:"box_sets,omitzero" doc:"searchCatalogBoxSets, getCatalogBoxSet and getCatalogItemBoxSet answer; listUserLibraries reports which libraries have box sets on"`
+	ItemCollections       bool   `json:"item_collections,omitzero" doc:"listCatalogItemCollections answers the collections a title's page lists under \"Also in\""`
 	Provider              string `json:"provider,omitempty" enum:"postgres,meilisearch"`
 	ResultWindowLimit     int    `json:"result_window_limit,omitzero" doc:"Maximum candidates in a Meilisearch ranked window; absent for PostgreSQL live queries"`
 	SessionTTLSeconds     int    `json:"session_ttl_seconds,omitzero" doc:"Fixed Meilisearch ranking-session lifetime; requests do not extend it"`
@@ -59,6 +60,7 @@ func registerCatalogSearchCapabilities(reg *Registry) {
 				ShowTitleRules:     true,
 				LetterIndex:        true,
 				BoxSets:            reg.deps.BoxSets != nil,
+				ItemCollections:    reg.deps.ItemCollections != nil && reg.deps.CatalogAccess != nil,
 				ResultWindowLimit:  result.ResultWindowLimit, SessionTTLSeconds: result.SessionTTLSeconds, MaxSessionsPerAccount: result.MaxSessionsPerAccount,
 			}}, nil
 		})

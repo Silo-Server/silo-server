@@ -218,7 +218,7 @@ export function WhereItShowsPanel({
       aria-labelledby={`${id}-heading`}
       className="surface-panel grid content-start gap-5 rounded-[22px] p-5 sm:p-6"
     >
-      <h2 id={`${id}-heading`} className="text-[17px] font-semibold">
+      <h2 id={`${id}-heading`} className="text-[1.0625rem] font-semibold">
         {t("web.collections.whereItShows.heading")}
       </h2>
       <div className="divide-border/70 -my-4 grid divide-y [&>*]:py-4">
@@ -252,7 +252,7 @@ export function WhereItShowsPanel({
                 {collectionId && savedShared && !draft.personal.shared ? (
                   <p
                     role="note"
-                    className="border-warning/50 bg-warning/10 flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-[13px]"
+                    className="border-warning/50 bg-warning/10 flex items-start gap-2.5 rounded-xl border px-3 py-2.5 text-[0.8125rem]"
                   >
                     <AlertTriangle aria-hidden className="text-warning mt-0.5 size-4 shrink-0" />
                     {unshareWarning(otherProfileNames)}

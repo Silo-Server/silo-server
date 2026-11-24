@@ -25,6 +25,7 @@ import (
 )
 
 type InstallArchiveRequest struct {
+	automatic    bool
 	ArchivePath  string
 	ArchiveURL   string
 	RepositoryID *int
@@ -35,6 +36,7 @@ type InstallArchiveRequest struct {
 }
 
 type InstallBinaryRequest struct {
+	automatic    bool
 	BinaryURL    string
 	Checksum     string // expected SHA-256 hex checksum
 	RepositoryID *int
@@ -54,6 +56,9 @@ type InstallBinaryRequest struct {
 	// SourceRepoURL is the catalog's repo_url, which the advisory signature
 	// policy checks a third-party release against.
 	SourceRepoURL string
+	// Provisioning requires a verified first-party release independently of
+	// the server's policy for ordinary catalog installs.
+	requireVerified bool
 }
 
 type InstallResult struct {
@@ -73,13 +78,12 @@ type InstallerOptions struct {
 
 type installationStore interface {
 	Create(ctx context.Context, input CreateInstallationInput) (*Installation, error)
-	SaveArchive(ctx context.Context, installationID int, manifestJSON []byte, checksum string, archiveBytes []byte) error
 	Update(ctx context.Context, id int, input UpdateInstallationInput) error
-	Delete(ctx context.Context, id int) error
 }
 
 type Installer struct {
 	installations installationStore
+	store         *InstallationStore
 	baseDir       string
 	httpClient    *http.Client
 	signatures    *SignatureChecker
@@ -98,8 +102,10 @@ func NewInstaller(installations installationStore, opts InstallerOptions) *Insta
 	if signatures == nil {
 		signatures = NewSignatureChecker(SignatureCheckerOptions{CacheRoot: baseDir})
 	}
+	store, _ := installations.(*InstallationStore)
 	return &Installer{
 		installations: installations,
+		store:         store,
 		baseDir:       baseDir,
 		httpClient:    httpClient,
 		signatures:    signatures,
@@ -143,7 +149,7 @@ func (i *Installer) InstallBinary(ctx context.Context, req InstallBinaryRequest)
 	if err != nil {
 		return nil, err
 	}
-	return i.installBinary(ctx, pkg.data, pkg.checksum, pkg.manifest, pkg.manifestJSON, req.RepositoryID, pkg.signature)
+	return i.installBinary(ctx, pkg.data, pkg.checksum, pkg.manifest, pkg.manifestJSON, req.RepositoryID, pkg.signature, req.automatic)
 }
 
 // PreparedReplacement is a downloaded package that passed the checks an
@@ -213,7 +219,7 @@ func (i *Installer) prepareBinaryReplacement(ctx context.Context, existing *Inst
 	if err != nil {
 		return nil, err
 	}
-	return i.prepareBinary(existing, pkg.data, pkg.checksum, pkg.manifest, pkg.manifestJSON, req.RepositoryID, pkg.signature)
+	return i.prepareBinary(existing, pkg.data, pkg.checksum, pkg.manifest, pkg.manifestJSON, req.RepositoryID, pkg.signature, req.automatic)
 }
 
 // downloadedBinary is a catalog binary that passed every check before
@@ -232,7 +238,20 @@ type downloadedBinary struct {
 // binary. The manifest's own plugin ID and version must then be the
 // catalog's, which ties the binary to the signed tag the policy named.
 func (i *Installer) downloadBinary(ctx context.Context, req InstallBinaryRequest) (*downloadedBinary, error) {
-	binaryData, err := fetchPackageResource(ctx, i.httpClient, req.BinaryURL, "the plugin")
+	return i.downloadBinaryChecked(ctx, req, nil)
+}
+
+// downloadBinaryChecked is downloadBinary with accept, when set, run on the
+// binary and its signature result before the binary runs.
+func (i *Installer) downloadBinaryChecked(ctx context.Context, req InstallBinaryRequest, accept func(data []byte, signature Signature) error) (*downloadedBinary, error) {
+	var limit int64
+	if req.requireVerified {
+		limit = maxProvisionBinaryBytes
+	}
+	binaryData, err := fetchPackageResourceLimited(ctx, i.httpClient, req.BinaryURL, "the plugin", limit)
+	if errors.Is(err, errPackageResourceTooLarge) {
+		return nil, packageError(err, "The plugin download exceeds the size limit.")
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -250,8 +269,16 @@ func (i *Installer) downloadBinary(ctx context.Context, req InstallBinaryRequest
 	if err != nil {
 		return nil, err
 	}
+	if req.requireVerified && signature.State != SignatureStateVerified {
+		return nil, packageError(ErrProvisionPackageUntrusted, signatureInvalidMessage)
+	}
+	if accept != nil {
+		if err := accept(binaryData, signature); err != nil {
+			return nil, err
+		}
+	}
 
-	manifest, manifestJSON, err := loadManifestFromBinary(ctx, binaryData)
+	manifest, manifestJSON, err := i.loadManifestFromBinary(ctx, binaryData)
 	if err != nil {
 		return nil, err
 	}
@@ -267,7 +294,7 @@ func (i *Installer) InstallBinaryUpload(ctx context.Context, binaryData []byte) 
 		return nil, fmt.Errorf("binary data is required")
 	}
 
-	manifest, manifestJSON, err := loadManifestFromBinary(ctx, binaryData)
+	manifest, manifestJSON, err := i.loadManifestFromBinary(ctx, binaryData)
 	if err != nil {
 		return nil, err
 	}
@@ -275,12 +302,13 @@ func (i *Installer) InstallBinaryUpload(ctx context.Context, binaryData []byte) 
 	checksum := sha256.Sum256(binaryData)
 	actualChecksum := hex.EncodeToString(checksum[:])
 
-	return i.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature)
+	return i.installBinary(ctx, binaryData, actualChecksum, manifest, manifestJSON, nil, unsignedSignature, false)
 }
 
 // binaryReplacement is a binary package that passed every check for
 // replacing an installation; only writing it is left.
 type binaryReplacement struct {
+	automatic     bool
 	existing      *Installation
 	binaryData    []byte
 	checksum      string
@@ -307,6 +335,7 @@ func (i *Installer) prepareBinary(
 	manifestJSON []byte,
 	repositoryID *int,
 	signature Signature,
+	automatic bool,
 ) (*PreparedReplacement, error) {
 	if existing == nil {
 		return nil, errors.New("existing installation is required")
@@ -344,6 +373,7 @@ func (i *Installer) prepareBinary(
 		return nil, err
 	}
 	replacement := &binaryReplacement{
+		automatic:     automatic,
 		existing:      existing,
 		binaryData:    binaryData,
 		checksum:      checksum,
@@ -394,6 +424,7 @@ func (i *Installer) writeBinaryReplacement(ctx context.Context, r *binaryReplace
 	availableVersion := ""
 	signature := r.signature
 	if err := i.installations.Update(ctx, existing.ID, UpdateInstallationInput{
+		automatic:        r.automatic,
 		Version:          &version,
 		InstallPath:      &binaryPath,
 		AvailableVersion: &availableVersion,
@@ -408,7 +439,7 @@ func (i *Installer) writeBinaryReplacement(ctx context.Context, r *binaryReplace
 	}
 
 	if filepath.Clean(filepath.Dir(existing.InstallPath)) != filepath.Clean(installDir) {
-		_ = removeInstallationFiles(ctx, existing)
+		_ = removeInstallationFiles(i.baseDir, existing)
 	}
 
 	keepInstallDir = true
@@ -432,6 +463,7 @@ func (i *Installer) writeBinaryReplacement(ctx context.Context, r *binaryReplace
 // archiveReplacement is a zip archive that passed every check for replacing
 // an installation; only writing it is left.
 type archiveReplacement struct {
+	automatic     bool
 	existing      *Installation
 	data          []byte
 	reader        *zip.Reader
@@ -474,6 +506,7 @@ func (i *Installer) prepareArchive(existing *Installation, data []byte, req Inst
 		return nil, err
 	}
 	replacement := &archiveReplacement{
+		automatic:     req.automatic,
 		existing:      existing,
 		data:          data,
 		reader:        reader,
@@ -520,6 +553,7 @@ func (i *Installer) writeArchiveReplacement(ctx context.Context, r *archiveRepla
 	// An archive, uploaded or downloaded, carries no release signature.
 	unsigned := unsignedSignature
 	if err := i.installations.Update(ctx, existing.ID, UpdateInstallationInput{
+		automatic:        r.automatic,
 		Version:          &version,
 		InstallPath:      &binaryPath,
 		AvailableVersion: &availableVersion,
@@ -534,7 +568,7 @@ func (i *Installer) writeArchiveReplacement(ctx context.Context, r *archiveRepla
 	}
 
 	if filepath.Clean(filepath.Dir(existing.InstallPath)) != filepath.Clean(installDir) {
-		_ = removeInstallationFiles(ctx, existing)
+		_ = removeInstallationFiles(i.baseDir, existing)
 	}
 
 	keepInstallDir = true
@@ -555,7 +589,7 @@ func (i *Installer) writeArchiveReplacement(ctx context.Context, r *archiveRepla
 	}, nil
 }
 
-func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checksum string, manifest *pluginv1.PluginManifest, manifestJSON []byte, repositoryID *int, signature Signature) (*InstallResult, error) {
+func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checksum string, manifest *pluginv1.PluginManifest, manifestJSON []byte, repositoryID *int, signature Signature, automatic bool) (*InstallResult, error) {
 	manifestBytes, err := binaryManifestBytes(manifest, manifestJSON)
 	if err != nil {
 		return nil, err
@@ -601,12 +635,14 @@ func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checks
 	}
 
 	createInput := CreateInstallationInput{
+		automatic:    automatic,
 		PluginID:     manifest.GetPluginId(),
 		Version:      manifest.GetVersion(),
 		InstallPath:  binaryPath,
-		Enabled:      false,
+		Enabled:      true,
 		Capabilities: capabilities,
 		Signature:    signature,
+		Archive:      ArchiveInput{ManifestJSON: manifestBytes, Checksum: checksum, Bytes: archiveBytes},
 	}
 	if repositoryID != nil {
 		createInput.RepositoryID = *repositoryID
@@ -616,24 +652,6 @@ func (i *Installer) installBinary(ctx context.Context, binaryData []byte, checks
 	if err != nil {
 		return nil, fmt.Errorf("persist plugin installation: %w", err)
 	}
-
-	if err := i.installations.SaveArchive(ctx, installation.ID, manifestBytes, checksum, archiveBytes); err != nil {
-		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("persist plugin archive: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
-		}
-		return nil, fmt.Errorf("persist plugin archive: %w", err)
-	}
-
-	enabled := true
-	if err := i.installations.Update(ctx, installation.ID, UpdateInstallationInput{
-		Enabled: &enabled,
-	}); err != nil {
-		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("enable plugin installation: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
-		}
-		return nil, fmt.Errorf("enable plugin installation: %w", err)
-	}
-	installation.Enabled = true
 
 	keepInstallDir = true
 
@@ -694,14 +712,20 @@ func (i *Installer) installArchive(ctx context.Context, data []byte, req Install
 		return nil, err
 	}
 
+	if err := extractArchiveFiles(reader, installDir); err != nil {
+		return nil, err
+	}
+
 	createInput := CreateInstallationInput{
+		automatic:    req.automatic,
 		PluginID:     manifest.GetPluginId(),
 		Version:      manifest.GetVersion(),
 		InstallPath:  binaryPath,
-		Enabled:      false,
+		Enabled:      true,
 		Capabilities: capabilities,
 		// An archive, uploaded or downloaded, carries no release signature.
 		Signature: unsignedSignature,
+		Archive:   ArchiveInput{ManifestJSON: manifestBytes, Checksum: manifest.GetChecksum(), Bytes: data},
 	}
 	if repositoryID != nil {
 		createInput.RepositoryID = *repositoryID
@@ -711,31 +735,6 @@ func (i *Installer) installArchive(ctx context.Context, data []byte, req Install
 	if err != nil {
 		return nil, fmt.Errorf("persist plugin installation: %w", err)
 	}
-
-	if err := i.installations.SaveArchive(ctx, installation.ID, manifestBytes, manifest.GetChecksum(), data); err != nil {
-		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("persist plugin archive: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
-		}
-		return nil, fmt.Errorf("persist plugin archive: %w", err)
-	}
-
-	if err := extractArchiveFiles(reader, installDir); err != nil {
-		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("extract plugin archive: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
-		}
-		return nil, err
-	}
-
-	enabled := true
-	if err := i.installations.Update(ctx, installation.ID, UpdateInstallationInput{
-		Enabled: &enabled,
-	}); err != nil {
-		if deleteErr := i.installations.Delete(ctx, installation.ID); deleteErr != nil {
-			return nil, fmt.Errorf("enable plugin installation: %w (cleanup failed: %v)", err, deleteErr) //nolint:errorlint // callers classify the install error; the cleanup failure is only reported
-		}
-		return nil, fmt.Errorf("enable plugin installation: %w", err)
-	}
-	installation.Enabled = true
 
 	keepInstallDir = true
 
@@ -760,14 +759,14 @@ func LoadManifestBytes(data []byte) (*pluginv1.PluginManifest, error) {
 
 // loadManifestFromBinary runs the plugin's manifest command and returns the
 // manifest it prints, both decoded and as printed.
-func loadManifestFromBinary(ctx context.Context, binaryData []byte) (*pluginv1.PluginManifest, []byte, error) {
-	tmpDir, err := os.MkdirTemp("", "plugin-manifest-")
+func (i *Installer) loadManifestFromBinary(ctx context.Context, binaryData []byte) (*pluginv1.PluginManifest, []byte, error) {
+	stage, err := newProvisionPackageStage(i.baseDir)
 	if err != nil {
 		return nil, nil, fmt.Errorf("create temp dir for binary manifest: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = stage.remove() }()
 
-	tmpBinary := filepath.Join(tmpDir, "plugin")
+	tmpBinary := filepath.Join(stage.dir, "plugin")
 	if err := os.WriteFile(tmpBinary, binaryData, 0755); err != nil {
 		return nil, nil, fmt.Errorf("write temp binary for manifest: %w", err)
 	}
@@ -786,8 +785,7 @@ func loadManifestFromBinary(ctx context.Context, binaryData []byte) (*pluginv1.P
 		// Only a binary that ran and failed (or timed out), or that isn't an
 		// executable for this platform, is the package's fault. Any other
 		// start failure, such as a noexec temp directory, is the server's.
-		var exitErr *exec.ExitError
-		if !errors.As(err, &exitErr) && !errors.Is(err, syscall.ENOEXEC) {
+		if _, exited := errors.AsType[*exec.ExitError](err); !exited && !errors.Is(err, syscall.ENOEXEC) {
 			return nil, nil, runErr
 		}
 		return nil, nil, packageError(runErr,

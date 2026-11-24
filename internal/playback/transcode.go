@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -26,6 +27,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/playback/dovirpu"
 	"github.com/Silo-Server/silo-server/internal/processmetrics"
+	"github.com/Silo-Server/silo-server/internal/procgroup"
 	"github.com/Silo-Server/silo-server/internal/tonemap"
 )
 
@@ -395,6 +397,29 @@ type TranscodeSession struct {
 	// closing is set once Close or CloseProcess begins. It is terminal: from
 	// then on no restart publishes a generation and no throttler is armed.
 	closing bool
+	// streamEnd is the media's last segment, learned when an FFmpeg reads
+	// its input to the end (see learnStreamEnd). It outlives later
+	// generations, since the media does not grow, and holds for the audio
+	// track it was learned with. Guarded by mu.
+	streamEnd learnedStreamEnd
+}
+
+// learnedStreamEnd is the last segment of an encoded transcode's media.
+type learnedStreamEnd struct {
+	known bool
+	// segment is the last segment that exists. Segments after it are past
+	// the end.
+	segment int
+	// seconds is where the media ends, set when a run wrote that last
+	// segment; zero when only a run that wrote nothing bounded it.
+	seconds float64
+	// plannedSeconds is the stored duration that run was planned with.
+	plannedSeconds float64
+	// readSince is when that run started: it read the file as it was then.
+	readSince time.Time
+	// audioTrack is the AudioTrackIndex the end was learned with. Another
+	// track can run longer.
+	audioTrack int
 }
 
 // NewTranscodeSessionForTest exposes only the output directory needed by tests
@@ -431,6 +456,12 @@ type SegmentProgress struct {
 	StartSegmentNumber   int
 	SegmentDuration      int
 	LastRequestedSegment int
+	// LastCompletedSegment is the highest segment the client finished
+	// downloading in the current generation, read with the rest.
+	LastCompletedSegment int
+	// Failed is a stopped FFmpeg that exited with an error, read with the
+	// rest so a restart cannot clear it between reads.
+	Failed bool
 }
 
 // SegmentRecoveryDecision tells the segment handler whether to briefly wait
@@ -626,7 +657,7 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 		return nil, fmt.Errorf("create stdin pipe: %w", err)
 	}
 	cmd.Dir = opts.OutputDir
-	cmd.Stderr = s.newStderrWriter(ctx)
+	cmd.Stderr = s.newStderrWriter(ctx, cmd)
 	cmd.WaitDelay = 3 * time.Second
 
 	// Stamp the generation before the process can write anything, so every file
@@ -650,12 +681,16 @@ func StartTranscode(ctx context.Context, opts TranscodeOpts) (*TranscodeSession,
 
 	// Monitor ffmpeg in background. The process-specific reservation is released
 	// before done closes, so waiters can safely launch a replacement process.
-	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
+	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice, opts, inheritedManifest, startedAt)
 
 	return s, nil
 }
 
-func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, done chan struct{}, releaseHWDevice func()) {
+// monitorFFmpeg waits for one FFmpeg run. run, inherited and startedAt are
+// that run's options, the playlist an earlier run left when it started, and
+// when it started: the session's own can already describe a replacement by
+// the time the run exits.
+func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, done chan struct{}, releaseHWDevice func(), run TranscodeOpts, inherited os.FileInfo, startedAt time.Time) {
 	var processExited, assemblyFinished chan struct{}
 	var assemblyErr error
 	if groups := s.copyGroups; groups != nil {
@@ -698,10 +733,17 @@ func (s *TranscodeSession) monitorFFmpeg(ctx context.Context, cmd *exec.Cmd, don
 		}
 	}
 	processmetrics.Record(processmetrics.Transcode, cmd.ProcessState, waitErr, ctx.Err())
-	s.flushStderr(ctx)
+	demuxError := s.flushStderr(ctx)
+	// FFmpeg that exits 0 without a demux error read its input to the end:
+	// being stopped or replaced kills it, and a failed read logs
+	// ffmpegDemuxErrorLine before an exit 0 that only looks clean.
+	endedCleanly := waitErr == nil && !demuxError && ctx.Err() == nil
 	s.mu.Lock()
 	s.running = false
 	s.waitErr = waitErr
+	if endedCleanly {
+		s.learnStreamEndLocked(run, inherited, startedAt)
+	}
 	s.mu.Unlock()
 	s.logWaitResult(ctx, waitErr)
 	close(done)
@@ -746,12 +788,34 @@ func IsMPEG4Part2VideoCodec(codec string) bool {
 // execution recipes must not feed to their video decoders. AVC High 10 is not
 // supported by Intel VAAPI/QSV decode; scanner rows are not perfectly uniform,
 // so either the probed bit depth or the normalized profile is sufficient.
+// Codecs no GPU decodes (see hasNoHardwareVideoDecoder) always decode on the
+// CPU.
 func RequiresSoftwareVideoDecode(codec, profile string, bitDepth int) bool {
+	if hasNoHardwareVideoDecoder(codec) {
+		return true
+	}
 	if normalizeCodecV3(codec) != transcodeCodecH264 {
 		return false
 	}
 	normalizedProfile := normalizeVideoProfile(profile)
 	return bitDepth > 8 || normalizedProfile == "high10" || normalizedProfile == "high10intra" || normalizedProfile == "hi10p"
+}
+
+// hasNoHardwareVideoDecoder reports Windows Media Video 7 and 8 and the
+// Microsoft MPEG-4 variants (ffprobe's codec names). FFmpeg has no VAAPI,
+// QSV, CUDA or VideoToolbox decoder for them, so -hwaccel decodes them on the
+// CPU anyway and hands system-memory frames to a graph that expects hardware
+// frames, which fails before the first segment. WMV3 (Windows Media Video 9)
+// is VC-1, which NVIDIA and most Intel GPUs decode, so it is not listed; a GPU
+// that lacks it fails with a hardwareDecodeUnsupportedMarkers line and takes
+// the CPU-decode retry.
+func hasNoHardwareVideoDecoder(codec string) bool {
+	switch strings.ToLower(strings.TrimSpace(codec)) {
+	case "wmv1", "wmv2", "msmpeg4v1", "msmpeg4v2", "msmpeg4v3", "msmpeg4":
+		return true
+	default:
+		return false
+	}
 }
 
 func normalizeVideoProfile(profile string) string {
@@ -1131,7 +1195,16 @@ func buildFFmpegArgs(opts TranscodeOpts) []string {
 	// A/V sync issues during copy-mode HLS playback. Matches Jellyfin's
 	// proven fMP4 HLS pipeline.
 	if videoUsesFMP4 {
-		args = append(args, "-hls_segment_options", "movflags=+frag_discont")
+		movflags := "+frag_discont"
+		if opts.copyGroupPrefix != "" {
+			// The assembler places each group by its first sample's time.
+			// With a sidx, FFmpeg's mp4 muxer moves the first sample of every
+			// fragment after the first to the end of the previous one: at an
+			// open-GOP keyframe that is its leading B-frames' time, not the
+			// keyframe's (#4664). The assembled segments drop the sidx anyway.
+			movflags += "+skip_sidx"
+		}
+		args = append(args, "-hls_segment_options", "movflags="+movflags)
 	}
 	if opts.StartSegmentNumber > 0 && opts.copyGroupPrefix == "" {
 		args = append(args, "-start_number", fmt.Sprintf("%d", opts.StartSegmentNumber))
@@ -1793,13 +1866,10 @@ func toneMappedTextSubtitleFilter(opts TranscodeOpts) string {
 func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []string {
 	subInput := fmt.Sprintf("[0:s:%d]", opts.SubtitleTrackIndex)
 	var graph string
+	before, after := bitmapSubtitleScale(opts)
 	if opts.ToneMapMode == tonemap.ModeSoftware {
 		filters := tonemap.SoftwareFilter(opts.ToneMapSourceKind, opts.ToneMapFilter)
-		graph = "[0:v:0]" + filters + "[vmain];[vmain]" + subInput + "overlay=eof_action=pass"
-		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-			graph += "," + scale
-		}
-		graph += "[vout]"
+		graph = bitmapSubtitleGraph(opts, subInput, joinFilters(filters, before), after)
 		return append(args, "-filter_complex", graph)
 	}
 
@@ -1821,19 +1891,17 @@ func appendToneMappedBitmapSubtitleArgs(args []string, opts TranscodeOpts) []str
 				vaapiScaleFilter(opts.TargetResolution) + "," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
 		}
 	case transcodeHWNVENC:
+		var filters string
 		if tonemap.IsSDRSource(opts.ToneMapSourceKind) {
-			graph = "[0:v:0]" + nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "") + "[vmain];[vmain]" + subInput + "overlay=eof_action=pass"
+			filters = nvencSDRFallbackDownload(opts) + "," + tonemap.SoftwareFilter(opts.ToneMapSourceKind, "")
 		} else {
-			graph = "[0:v:0]" + tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12[vmain];[vmain]" +
-				subInput + "overlay=eof_action=pass"
+			filters = tonemap.SourceParameters(opts.ToneMapSourceKind) + "," + tonemap.CUDAFilter(opts.ToneMapSourceKind) + ",hwdownload,format=nv12"
 		}
-		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-			graph += "," + scale
-		}
-		graph += ",format=nv12,hwupload_cuda," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		graph = bitmapSubtitleGraph(opts, subInput, joinFilters(filters, before),
+			joinFilters(after, "format=nv12,hwupload_cuda", tonemap.HDRMetadataRemovalFilter()))
 	case transcodeHWVideoToolbox:
-		graph = "[0:v:0]" + videoToolboxToneMapCPUFilter(opts) + "[vmain];[vmain]" +
-			subInput + "overlay=eof_action=pass," + tonemap.HDRMetadataRemovalFilter() + "[vout]"
+		// The VideoToolbox filter already scales to the target.
+		graph = bitmapSubtitleGraph(opts, subInput, videoToolboxToneMapCPUFilter(opts), tonemap.HDRMetadataRemovalFilter())
 	}
 	if graph == "" {
 		return args
@@ -1968,8 +2036,9 @@ func appendAACEncodeFilterArgs(args []string, sourceChannels int, targetCodec st
 // appendAudioArgs adds audio codec arguments. Supports "copy" for passthrough,
 // plus opus / aac / eac3 / ac3 as re-encode targets. EAC3 and AC3 are useful
 // when we must transcode video but want to preserve surround channels for an
-// HDMI receiver — both are legal in HLS fMP4 (not MPEG-TS; ensure the HLS
-// packager is fMP4 when emitting these).
+// HDMI receiver. HLS carries both in fMP4 and in MPEG-TS segments; the
+// surround bitstream conversion (audio_to_eac3 / audio_to_ac3) packages them
+// as the client's other copy remuxes are packaged.
 func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 	// Case-insensitive so the switch agrees with TranscodesAudio for any
 	// client-supplied spelling.
@@ -1983,13 +2052,19 @@ func appendAudioArgs(args []string, opts TranscodeOpts) []string {
 		args = append(args, "-c:a", "copy")
 	case "opus":
 		args = append(args, "-c:a", "libopus", "-b:a", "192k", "-ac", "2")
-	case "eac3":
-		// Typical Dolby Digital Plus 5.1 bitrate; let the source dictate channel
-		// count so we preserve surround when possible.
-		args = append(args, "-c:a", "eac3", "-b:a", "384k")
-	case "ac3":
-		// Legacy Dolby Digital; universal AVR support.
-		args = append(args, "-c:a", "ac3", "-b:a", "448k")
+	case audioCodecEAC3, audioCodecAC3:
+		if opts.TargetAudioChannels == surroundBitstreamChannelsV3 {
+			// The frozen audio_to_eac3 / audio_to_ac3 recipe the v3 planner
+			// promises: 48 kHz 5.1 at 640 kbps.
+			args = append(args, surroundBitstreamAudioArgsV3(codec)...)
+		} else if codec == audioCodecEAC3 {
+			// Typical Dolby Digital Plus 5.1 bitrate; let the source dictate channel
+			// count so we preserve surround when possible.
+			args = append(args, "-c:a", "eac3", "-b:a", "384k")
+		} else {
+			// Legacy Dolby Digital; universal AVR support.
+			args = append(args, "-c:a", "ac3", "-b:a", "448k")
+		}
 	default:
 		channels, bitrateKbps := ResolveAACOutputV3(opts.TargetAudioChannels, opts.TargetAudioBitrateKbps)
 		args = append(args, "-c:a", "aac", "-b:a", strconv.Itoa(bitrateKbps)+"k", "-ac", strconv.Itoa(channels))
@@ -2033,6 +2108,142 @@ func hwSurfaceToCPUFilter(opts TranscodeOpts) string {
 	return "hwdownload,format=" + tonemap.SurfaceDownloadPixelFormat(opts.SourceVideoBitDepth) + ",format=yuv420p"
 }
 
+var (
+	scaleReferenceMu    sync.Mutex
+	scaleReferenceCache map[string]bool
+	// scaleReferenceRetry holds when a probe that gave no answer may run again.
+	scaleReferenceRetry map[string]time.Time
+
+	// scaleReferenceSupported is the probe bitmap burn-in consults; tests
+	// replace it because they build arguments for fake FFmpeg paths.
+	scaleReferenceSupported = supportsScaleReference
+)
+
+// scaleReferenceRetryAfter is how long a probe that gave no answer waits
+// before it runs again, so a struggling host doesn't pay its timeout on every
+// PGS transcode.
+const scaleReferenceRetryAfter = time.Minute
+
+// supportsScaleReference reports whether the given FFmpeg binary's scale
+// filter takes a second, reference input whose size the rw and rh expressions
+// read (FFmpeg 7.1+). Older builds fail to parse the whole graph. Probed by
+// running a tiny lavfi graph. A definite answer is cached per binary path:
+// FFmpeg running the graph, or rejecting the expression as one it can't parse.
+// Anything else (a timeout, a binary that won't start, another error) answers
+// no for now and probes again after scaleReferenceRetryAfter.
+func supportsScaleReference(bin string) bool {
+	scaleReferenceMu.Lock()
+	defer scaleReferenceMu.Unlock()
+	if available, ok := scaleReferenceCache[bin]; ok {
+		return available
+	}
+	if retry, ok := scaleReferenceRetry[bin]; ok && time.Now().Before(retry) {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var stderr bytes.Buffer
+	cmd := procgroup.CommandContext(ctx, bin, "-hide_banner", "-nostdin", "-v", "error",
+		"-f", "lavfi", "-i", "color=s=16x16:d=0.04",
+		"-f", "lavfi", "-i", "color=s=32x32:d=0.04",
+		"-filter_complex", "[0:v][1:v]scale=w='min(rw,iw*rw/(ih*rdar))':h=rh",
+		"-f", "null", "-")
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	available := err == nil
+	var exitErr *exec.ExitError
+	rejected := !available && ctx.Err() == nil && errors.As(err, &exitErr) &&
+		bytes.Contains(stderr.Bytes(), []byte("Cannot parse expression"))
+	if !available && !rejected {
+		slog.Warn("could not probe ffmpeg's scale filter; PGS burn-in keeps the plain overlay for now", "ffmpeg", bin, "error", err)
+		if scaleReferenceRetry == nil {
+			scaleReferenceRetry = make(map[string]time.Time)
+		}
+		scaleReferenceRetry[bin] = time.Now().Add(scaleReferenceRetryAfter)
+		return false
+	}
+	if rejected {
+		slog.Warn("ffmpeg's scale filter has no reference input; PGS burn-in keeps the plain overlay and needs FFmpeg 7.1+ to fit cropped and scaled frames", "ffmpeg", bin)
+	}
+	if scaleReferenceCache == nil {
+		scaleReferenceCache = make(map[string]bool)
+	}
+	scaleReferenceCache[bin] = available
+	delete(scaleReferenceRetry, bin)
+	return available
+}
+
+// fitsBitmapSubtitle reports whether the burn-in fits the subtitle canvas to
+// the frame: only PGS, and only when the FFmpeg that runs the graph supports
+// scale's reference input.
+func fitsBitmapSubtitle(opts TranscodeOpts) bool {
+	return IsPGS(opts.SubtitleCodec) && scaleReferenceSupported(ResolveFFmpegPath(opts.FFmpegPath))
+}
+
+// bitmapSubtitleComposite overlays the decoded bitmap subtitle sub onto the CPU
+// frames at the pad main. A PGS canvas keeps the disc's frame size, usually
+// 1920x1080, while the frame can be smaller: an encode that cropped the black
+// bars, or video already scaled to the target. So each subtitle frame is fitted
+// inside the video frame, keeping its aspect ratio, and centered. The fit works
+// in display proportions (rdar), so an anamorphic frame doesn't stretch the
+// square-pixel canvas, and the subtitle is premultiplied before the scale so a
+// downscaled edge doesn't darken. A canvas the size of the frame stays at 0,0.
+// The fit sizes the subtitle from the video
+// frame with scale's reference input, which needs FFmpeg 7.1 or later; with an
+// older FFmpeg, PGS falls back to the plain overlay at 0,0, which other bitmap
+// codecs always use. The GPU composites (overlay_vaapi, overlay_opencl) are not
+// built here and still place the canvas at 0,0.
+func bitmapSubtitleComposite(opts TranscodeOpts, main, sub string) string {
+	if !fitsBitmapSubtitle(opts) {
+		return main + sub + "overlay=eof_action=pass"
+	}
+	return main + "split[bsmain][bsref];" +
+		sub + "premultiply=inplace=1[bspre];" +
+		"[bspre][bsref]scale=w='min(rw,iw*rw/(ih*rdar))':h='min(rh,ih*rdar*rh/iw)':eval=frame[bsub];" +
+		"[bsmain][bsub]overlay=x=(main_w-overlay_w)/2:y=(main_h-overlay_h)/2:eof_action=pass:alpha=premultiplied"
+}
+
+// bitmapSubtitleScale returns the target scale filter to run before and after
+// bitmapSubtitleComposite; at most one is non-empty. A fitted PGS track scales
+// first, so its canvas is fitted at the encoder's input size. The plain overlay
+// composites at the source size and scales after.
+func bitmapSubtitleScale(opts TranscodeOpts) (before, after string) {
+	scale := resolutionToScale(opts.TargetResolution)
+	if scale == "" {
+		return "", ""
+	}
+	if fitsBitmapSubtitle(opts) {
+		return scale, ""
+	}
+	return "", scale
+}
+
+// joinFilters joins the non-empty filters of a chain with commas.
+func joinFilters(filters ...string) string {
+	var nonEmpty []string
+	for _, f := range filters {
+		if f != "" {
+			nonEmpty = append(nonEmpty, f)
+		}
+	}
+	return strings.Join(nonEmpty, ",")
+}
+
+// bitmapSubtitleGraph labels the main video [vmain] after filters, then
+// composites the subtitle and runs tail, ending at [vout]. An empty main chain
+// becomes null, so the composite always reads a labeled pad and a deinterlace
+// prepended to [0:v:0] still feeds it.
+func bitmapSubtitleGraph(opts TranscodeOpts, sub, filters, tail string) string {
+	if filters == "" {
+		filters = "null"
+	}
+	graph := "[0:v:0]" + filters + "[vmain];" + bitmapSubtitleComposite(opts, "[vmain]", sub)
+	if tail != "" {
+		graph += "," + tail
+	}
+	return graph + "[vout]"
+}
+
 // appendBitmapSubtitleBurnInArgs adds burn-in arguments for BITMAP subtitle
 // codecs (PGS/VOBSUB/DVB). libass's subtitles= filter cannot render bitmap
 // tracks, so the decoded subtitle stream is composited onto the video with an
@@ -2040,9 +2251,10 @@ func hwSurfaceToCPUFilter(opts TranscodeOpts) string {
 // pad [vout] replaces the raw video stream in stream mapping (see
 // appendStreamSelectionArgs), so -vf must never be emitted alongside this.
 //
-// Overlay runs at the source's native resolution FIRST and any target scaling
-// happens after, so bitmap subtitle geometry is never distorted by a
-// pre-scaling mismatch between the video and subtitle planes.
+// On the CPU paths a PGS track is scaled to the target first and its canvas
+// fitted to the frame when FFmpeg supports it (see bitmapSubtitleComposite);
+// other bitmap codecs, and the GPU composites, overlay at the source resolution
+// and scale after.
 // eof_action=pass keeps the video flowing untouched once the subtitle stream
 // ends instead of freezing the last overlay frame on screen.
 //
@@ -2082,24 +2294,19 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 		graph = subInput + "format=bgra,hwupload[sub];" +
 			"[0:v:0][sub]overlay_vaapi=eof_action=pass," + vaapiScaleFilter(opts.TargetResolution) + "[vout]"
 	default:
-		// NVENC and CPU: software overlay on CPU frames. Build the overlay
-		// fragment (subtitle input + optional post-scale) once, then wire it into
-		// the encode-specific pipeline.
-		cpuFilters := subInput + "overlay=eof_action=pass"
-		if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-			cpuFilters += "," + scale
-		}
+		// NVENC and CPU: software overlay on CPU frames.
+		before, after := bitmapSubtitleScale(opts)
 		if opts.HWAccel == transcodeHWNVENC && opts.SoftwareVideoDecode {
 			// CPU-decoded frames need no download; upload the composite to the
 			// configured CUDA device.
 			graph = softwareDecodedBitmapBurnInGraph(opts, subInput, false)
 		} else if opts.HWAccel == transcodeHWNVENC {
 			// Download to CPU for the overlay, then re-upload to CUDA.
-			graph = "[0:v:0]" + hwSurfaceToCPUFilter(opts) + "[vmain];[vmain]" + cpuFilters +
-				",format=nv12,hwupload_cuda[vout]"
+			graph = bitmapSubtitleGraph(opts, subInput, joinFilters(hwSurfaceToCPUFilter(opts), before),
+				joinFilters(after, "format=nv12,hwupload_cuda"))
 		} else {
 			// CPU encoding: overlay directly on decoded frames.
-			graph = "[0:v:0]" + cpuFilters + "[vout]"
+			graph = bitmapSubtitleGraph(opts, subInput, before, after)
 		}
 	}
 
@@ -2110,15 +2317,12 @@ func appendBitmapSubtitleBurnInArgs(args []string, opts TranscodeOpts) []string 
 // the finished NV12 frames for the hardware encoder. It is the Hi10 AVC
 // counterpart of the all-hardware overlay_vaapi graph above.
 func softwareDecodedBitmapBurnInGraph(opts TranscodeOpts, subInput string, qsv bool) string {
-	filters := subInput + "overlay=eof_action=pass"
-	if scale := resolutionToScale(opts.TargetResolution); scale != "" {
-		filters += "," + scale
-	}
-	filters += ",format=nv12,hwupload"
+	before, after := bitmapSubtitleScale(opts)
+	tail := joinFilters(after, "format=nv12,hwupload")
 	if qsv {
-		filters += ",hwmap=derive_device=qsv,format=qsv"
+		tail += ",hwmap=derive_device=qsv,format=qsv"
 	}
-	return "[0:v:0]format=yuv420p[vmain];[vmain]" + filters + "[vout]"
+	return bitmapSubtitleGraph(opts, subInput, joinFilters("format=yuv420p", before), tail)
 }
 
 // appendSubtitleBurnInArgs adds subtitle burn-in filter arguments for TEXT
@@ -3147,6 +3351,8 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 		StartSegmentNumber:   opts.StartSegmentNumber,
 		SegmentDuration:      opts.SegmentDuration,
 		LastRequestedSegment: s.lastRequestedSegment,
+		LastCompletedSegment: s.lastCompletedSegment,
+		Failed:               !s.running && s.waitErr != nil,
 		GenerationStartedAt:  s.generationStartedAt,
 	}
 	s.mu.Unlock()
@@ -3192,6 +3398,34 @@ func (s *TranscodeSession) SegmentProgress(time.Time) SegmentProgress {
 	return progress
 }
 
+// OutputBoundsClient reports whether the running encoder has no lead over the
+// client: the client has completed downloading every produced segment but at
+// most the newest. Playback is then paced by how fast the server produces
+// segments, not by the link, so a stall the client reports now is the
+// server's. An encoder that keeps up runs ahead of the client up to the
+// throttle window; one that is slower than real time, such as a heavy
+// subtitle burn-in, never gets ahead. Output left by an earlier FFmpeg
+// generation is not this encoder's lead: until the running one writes its
+// own, and while a restart replaces it, the client is waiting on it. An
+// encoder that failed counts like one that runs: a client that caught up
+// with its output waits on a server fault.
+func (s *TranscodeSession) OutputBoundsClient() bool {
+	progress := s.SegmentProgress(time.Now())
+	if progress.Restarting {
+		return true
+	}
+	if !progress.Running && !progress.Failed {
+		// A finished encoder left every segment for the client to fetch.
+		return false
+	}
+	// A running encoder, or one that failed, paces a client that has caught
+	// up with its output.
+	if progressPredatesGeneration(progress) {
+		return true
+	}
+	return progress.ProducedHead-progress.LastCompletedSegment <= 1
+}
+
 // SegmentRecoveryDecision determines whether a missing segment should briefly
 // wait for ffmpeg or immediately use the seek-restart path.
 func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) SegmentRecoveryDecision {
@@ -3206,6 +3440,15 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 	}
 
 	switch {
+	case s.pastEndOfStream(segNum):
+		// The container outlasts its streams (a subtitle track or a bad
+		// duration tag): no generation, the one a restart in flight is
+		// starting included, writes this segment, and a restart there
+		// would write nothing while the player asks again. The handler
+		// answers the end of the stream (ServePastEndOfStream).
+		decision.WaitTimeout = 0
+		decision.RestartOnTimeout = false
+		decision.Reason = "past_end_of_stream"
 	// Restarting must be checked before Running: the restart window runs
 	// with running=false, and a concurrent segment request must wait out
 	// the in-flight restart rather than trigger another one. Dueling
@@ -3243,6 +3486,99 @@ func (s *TranscodeSession) SegmentRecoveryDecision(segNum int, now time.Time) Se
 	}
 
 	return decision
+}
+
+// learnStreamEndLocked records the media's last segment after the FFmpeg run
+// with options opts, started at startedAt, read its input to the end;
+// inherited is the playlist an earlier run left when it started. Only an
+// encoded transcode learns it: its synthetic playlist lists segments to the
+// stored duration, which can outlast every stream, while copy-video serves
+// FFmpeg's own playlist and a seek there re-cuts the segments at other
+// keyframes.
+//
+// A run whose own playlist lists a segment with media sets the end to the last
+// such segment, and the media ends where the run started (its seek) plus the
+// length of what it wrote; a seek need not fall on a segment boundary. A run
+// that wrote no media started past the end: FFmpeg then writes no playlist, or
+// one listing a single empty segment (EXTINF 0, no bytes). The end lies before
+// its first segment; such a run only ever lowers a known end, and one that
+// started at segment 0 shows nothing about the media. Output the session
+// cannot read teaches nothing. Must hold s.mu.
+func (s *TranscodeSession) learnStreamEndLocked(opts TranscodeOpts, inherited os.FileInfo, startedAt time.Time) {
+	if strings.EqualFold(opts.TargetCodecVideo, "copy") || s.copyPlan != nil ||
+		!CanGenerateSyntheticManifest(opts.TotalDuration, opts.SegmentDuration) {
+		return
+	}
+	manifest, err := readManifestFile(filepath.Join(s.outputDir, "stream.m3u8"), inherited)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			s.learnEndBeforeLocked(opts)
+		}
+		return
+	}
+	timeline, err := parseManifestTimeline(manifest)
+	if err != nil {
+		return
+	}
+	for i := len(timeline.entries) - 1; i >= 0; i-- {
+		entry := timeline.entries[i]
+		if entry.duration <= 0 {
+			continue
+		}
+		info, err := os.Stat(filepath.Join(s.outputDir, segmentFilename(entry.number, opts)))
+		if err != nil {
+			return
+		}
+		if info.Size() <= 0 {
+			continue
+		}
+		written := 0.0
+		for _, e := range timeline.entries[:i+1] {
+			written += e.duration
+		}
+		s.streamEnd = learnedStreamEnd{
+			known:          true,
+			segment:        entry.number,
+			seconds:        max(opts.SeekSeconds, 0) + written,
+			plannedSeconds: opts.TotalDuration,
+			readSince:      startedAt,
+			audioTrack:     opts.AudioTrackIndex,
+		}
+		return
+	}
+	s.learnEndBeforeLocked(opts)
+}
+
+// learnEndBeforeLocked records that the media ends before the first segment
+// of the run with options opts, which wrote no media. Must hold s.mu.
+func (s *TranscodeSession) learnEndBeforeLocked(opts TranscodeOpts) {
+	if opts.StartSegmentNumber <= 0 {
+		return
+	}
+	bound := opts.StartSegmentNumber - 1
+	if current := s.streamEnd; current.known && current.audioTrack == opts.AudioTrackIndex && current.segment <= bound {
+		return
+	}
+	s.streamEnd = learnedStreamEnd{known: true, segment: bound, audioTrack: opts.AudioTrackIndex}
+}
+
+// pastEndOfStream reports whether segNum lies after the media's last
+// segment for the selected audio track.
+func (s *TranscodeSession) pastEndOfStream(segNum int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	end := s.streamEnd
+	return end.known && end.audioTrack == s.opts.AudioTrackIndex && segNum > end.segment
+}
+
+// LearnedStreamEnd returns where the media ends, when a run of this session
+// wrote its last segment, with the stored duration that run was planned with
+// and when it started.
+func (s *TranscodeSession) LearnedStreamEnd() (StreamEnd, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	end := s.streamEnd
+	return StreamEnd{Seconds: end.seconds, PlannedSeconds: end.plannedSeconds, ReadSince: end.readSince}, end.known && end.seconds > 0
 }
 
 // GenerateFullManifest builds a complete VOD-style HLS manifest that lists
@@ -3805,6 +4141,11 @@ func (s *TranscodeSession) RestartSegmentSince(ctx context.Context, segNum int, 
 	if err := ctx.Err(); err != nil {
 		return SegmentRecoveryTarget{}, false, err
 	}
+	// The restart this request waited behind may have found the end: a
+	// restart past it writes nothing.
+	if s.pastEndOfStream(segNum) {
+		return SegmentRecoveryTarget{}, false, pastEndOfStreamError(segNum)
+	}
 	target, ok, err := s.ResolveSegmentRecoveryTarget(ctx, segNum)
 	if err != nil || !ok {
 		return SegmentRecoveryTarget{}, ok, err
@@ -3849,8 +4190,10 @@ const ffmpegFilterSetupFailure = "Error reinitializing filters!"
 // decoder replaces its frames context mid-stream: the rebuilt graph cannot
 // feed hardware frames to the encoder that is already open, and it fails at
 // the same frame on every restart. CPU-decoded frames reach the same graph
-// through an upload, so the restart takes that route once. The caller holds
-// s.mu.
+// through an upload, so the restart takes that route once. The same goes for
+// a generation stopped at FFmpeg's AV1 decoder rejection
+// (ffmpegAV1HardwareDecodeUnavailable): the same command would be stopped
+// again. The caller holds s.mu.
 //
 // The line also follows unrelated graph failures. Those sessions were failing
 // anyway and lose only GPU decode. NVENC is left out: with CPU decode an
@@ -3862,7 +4205,9 @@ func (s *TranscodeSession) gpuDecodeFailedFilterSetupLocked() bool {
 	if s.opts.HWAccel != transcodeHWQSV && s.opts.HWAccel != transcodeHWVAAPI {
 		return false
 	}
-	return strings.Contains(s.stderr.String(), ffmpegFilterSetupFailure)
+	stderr := s.stderr.String()
+	return strings.Contains(stderr, ffmpegFilterSetupFailure) ||
+		strings.Contains(stderr, ffmpegAV1HardwareDecodeUnavailable)
 }
 
 // crashState reports, in one read, whether FFmpeg exited with an error and has
@@ -4043,7 +4388,7 @@ func (s *TranscodeSession) restart(
 
 	log.Printf("playback: ffmpeg restart cmd: %s %s", bin, fspath.RedactRelayed(strings.Join(args, " ")))
 	if decodeOnCPU {
-		slog.WarnContext(ctx, "transcode could not configure its filter graph on GPU-decoded frames; restarting with CPU decoding",
+		slog.WarnContext(ctx, "transcode failed on GPU decoding; restarting with CPU decoding",
 			"component", "playback",
 			"playback_session_id", opts.SessionID,
 			"hw_accel", opts.HWAccel,
@@ -4067,7 +4412,7 @@ func (s *TranscodeSession) restart(
 		return fmt.Errorf("create stdin pipe: %w", err)
 	}
 	cmd.Dir = opts.OutputDir
-	cmd.Stderr = s.newStderrWriter(ctx)
+	cmd.Stderr = s.newStderrWriter(ctx, cmd)
 	cmd.WaitDelay = 3 * time.Second
 
 	// The previous process released its reservation before closing done. Keep
@@ -4130,7 +4475,7 @@ func (s *TranscodeSession) restart(
 	s.saveSubtitleSpans()
 	close(flight.done)
 
-	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice)
+	go s.monitorFFmpeg(ctx, cmd, s.done, releaseHWDevice, opts, inheritedManifest, startedAt)
 
 	if hook != nil {
 		hookCtx, cancelHook := context.WithTimeout(ctx, restartHookTimeout)
@@ -4762,6 +5107,19 @@ type ffmpegStderrWriter struct {
 	session *TranscodeSession
 	ctx     context.Context
 	partial []byte
+	// cmd is the process writing this stderr. exec.Cmd.Start sets its Process
+	// before it starts copying stderr here.
+	cmd       *exec.Cmd
+	sessionID string
+	stopped   bool
+	// demuxError records that this FFmpeg's demuxer stopped on a read
+	// error (ffmpegDemuxErrorLine), after which it still exits 0.
+	demuxError bool
+}
+
+func (w *ffmpegStderrWriter) line(line string) {
+	w.demuxError = w.demuxError || strings.Contains(line, ffmpegDemuxErrorLine)
+	w.session.logFFmpegLine(w.ctx, line)
 }
 
 func (w *ffmpegStderrWriter) Write(p []byte) (int, error) {
@@ -4775,24 +5133,64 @@ func (w *ffmpegStderrWriter) Write(p []byte) (int, error) {
 			break
 		}
 		line := strings.TrimRight(string(w.partial[:idx]), "\r")
-		w.session.logFFmpegLine(w.ctx, line)
+		w.line(line)
+		w.stopOnHardwareDecodeUnavailable(line)
 		w.partial = append([]byte(nil), w.partial[idx+1:]...)
 	}
 	return len(p), nil
+}
+
+// stopOnHardwareDecodeUnavailable kills FFmpeg when line says its AV1
+// decoder has no hardware to run on (see ffmpegAV1HardwareDecodeUnavailable).
+// It runs on the stderr copy. No frame can follow, and the process would
+// otherwise read the whole input first. The retained stderr already holds the
+// line (the session's tail buffer is written before this writer), so the
+// exit classifies as
+// ErrHardwareDecodeUnsupported and startup, or download preparation, walks
+// CPU decoding at once. A writer without a session only does this stop.
+//
+// Only the decoder's own line counts, on a command that asked for GPU
+// decoding: FFmpeg echoes input paths in other lines, and a file named after
+// the message must not stop a transcode that is working.
+func (w *ffmpegStderrWriter) stopOnHardwareDecodeUnavailable(line string) {
+	if w.stopped || w.cmd == nil || w.cmd.Process == nil ||
+		!strings.HasPrefix(line, ffmpegAV1DecoderLogPrefix) ||
+		!strings.Contains(line, ffmpegAV1HardwareDecodeUnavailable) ||
+		!slices.Contains(w.cmd.Args, "-hwaccel") {
+		return
+	}
+	w.stopped = true
+	// Wait reaps FFmpeg before it finishes copying stderr, so this line can
+	// arrive after FFmpeg exited on its own. Its group id may then belong to
+	// another process, which procgroup.Kill must not signal. The process
+	// handle knows whether it was reaped. The kill follows at once, so the
+	// window between the check and the signal stays as short as it can be.
+	if errors.Is(w.cmd.Process.Signal(syscall.Signal(0)), os.ErrProcessDone) {
+		return
+	}
+	// The whole group: a configured FFmpeg path may be a wrapper script whose
+	// real FFmpeg would otherwise read on, outside the device allocator.
+	if errors.Is(procgroup.Kill(w.cmd), os.ErrProcessDone) {
+		return
+	}
+	slog.WarnContext(w.ctx, "ffmpeg has no hardware AV1 decoder for this source; stopped it",
+		"component", "playback",
+		"playback_session_id", w.sessionID,
+	)
 }
 
 func (w *ffmpegStderrWriter) Flush() {
 	if len(w.partial) == 0 {
 		return
 	}
-	w.session.logFFmpegLine(w.ctx, strings.TrimRight(string(w.partial), "\r"))
+	w.line(strings.TrimRight(string(w.partial), "\r"))
 	w.partial = nil
 }
 
-func (s *TranscodeSession) newStderrWriter(ctx context.Context) io.Writer {
-	lineWriter := &ffmpegStderrWriter{session: s, ctx: ctx}
+func (s *TranscodeSession) newStderrWriter(ctx context.Context, cmd *exec.Cmd) io.Writer {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lineWriter := &ffmpegStderrWriter{session: s, ctx: ctx, cmd: cmd, sessionID: s.opts.SessionID}
 	if s.stderr == nil {
 		s.stderr = newBoundedTailBuffer(stderrTailMaxBytes)
 	}
@@ -4800,18 +5198,22 @@ func (s *TranscodeSession) newStderrWriter(ctx context.Context) io.Writer {
 	return io.MultiWriter(s.stderr, lineWriter)
 }
 
-func (s *TranscodeSession) flushStderr(ctx context.Context) {
+// flushStderr logs the current FFmpeg's last partial stderr line and reports
+// whether its demuxer stopped on a read error.
+func (s *TranscodeSession) flushStderr(ctx context.Context) (demuxError bool) {
 	s.mu.Lock()
 	writer := s.stderrWriter
 	s.stderrWriter = nil
 	s.mu.Unlock()
-	if writer != nil {
-		writer.Flush()
+	if writer == nil {
+		return false
 	}
+	writer.Flush()
+	return writer.demuxError
 }
 
 func (s *TranscodeSession) logFFmpegLine(ctx context.Context, line string) {
-	if s == nil || s.opts.FFmpegLogSink == nil {
+	if s == nil {
 		return
 	}
 
@@ -4824,8 +5226,13 @@ func (s *TranscodeSession) logFFmpegLine(ctx context.Context, line string) {
 		trimmed += "...[truncated]"
 	}
 
+	// A restart's replacement process writes stderr before restart publishes
+	// its options under s.mu, so read them only while holding it.
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.opts.FFmpegLogSink == nil {
+		return
+	}
 
 	if s.stderrLinesLogged >= maxPersistedFFmpegLines || s.stderrBytesLogged+len(trimmed) > maxPersistedFFmpegBytes {
 		s.stderrDroppedLines++
@@ -4847,14 +5254,17 @@ func (s *TranscodeSession) logFFmpegLine(ctx context.Context, line string) {
 }
 
 func (s *TranscodeSession) logFFmpegEvent(ctx context.Context, message, exitError string) {
-	if s == nil || s.opts.FFmpegLogSink == nil {
+	if s == nil {
 		return
 	}
 	s.mu.Lock()
+	sink, sessionID := s.opts.FFmpegLogSink, s.opts.SessionID
 	attrs := s.ffmpegAttrsLocked()
 	attrs.ExitError = exitError
 	s.mu.Unlock()
-	s.opts.FFmpegLogSink.WriteEvent(ctx, s.opts.SessionID, attrs, message)
+	if sink != nil {
+		sink.WriteEvent(ctx, sessionID, attrs, message)
+	}
 }
 
 func (s *TranscodeSession) logWaitResult(ctx context.Context, waitErr error) {

@@ -39,12 +39,22 @@ out any other name a manifest lists, so an internal event such as
 `user_state.changed` never reaches a plugin.
 
 Every identifier in a catalog payload is a JSON string. The host's
-payloads are shared with the events socket, where numeric IDs such as
-`library_id` stay JSON numbers, so the dispatcher converts them: a top-level
+payloads are shared with the events socket, where some numeric IDs, such as
+a scan's `library_id` or a job's `created_by_user_id`, stay JSON numbers (the
+catalog channel's events already send `library_id` as a string), so the
+dispatcher converts them: a top-level
 `id` or `*_id` field holding a number becomes its decimal string, and zero
 becomes absent (a job the server queued itself has no `created_by_user_id`).
 `notification.created` also gets the envelope's account as `user_id`,
 because profile IDs repeat across accounts.
+
+For `session.started`, `session.paused` and `session.resumed`, the plugin's
+live row uses `content_id`, `series_name` and `episode_name`. Its `media_title`
+and `media_type` describe the catalog item linked to the file. For a TV episode
+these are the show's title and `series`; both are empty when the file has no
+linked catalog item. The producing server passes that item to its local
+dispatcher alongside the WebSocket payload. A stopped event carries the
+playback history entry when the server could read it.
 
 Then `events.Project` rewrites the payload into the catalog's public shape:
 the fields of the SDK payload type and nothing else, in nested objects too

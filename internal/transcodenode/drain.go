@@ -17,6 +17,11 @@ const (
 	HealthStatusDrained = "drained"
 )
 
+// DefaultDrainTimeout is how long a transcode node that received SIGTERM
+// drains by default. It lets most episodes and a long tail of movie sessions
+// finish, while keeping a rolling upgrade of several nodes bounded.
+const DefaultDrainTimeout = 10 * time.Minute
+
 // drainPollInterval is how often WaitDrained and announceWhenDrained look at
 // the node's work.
 const drainPollInterval = 250 * time.Millisecond

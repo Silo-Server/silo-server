@@ -6,6 +6,8 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+
+	"github.com/Silo-Server/silo-server/internal/bookid"
 )
 
 // BookMatchRules turns on the stricter candidate selection audiobooks use.
@@ -458,7 +460,7 @@ func normaliseProviderIDs(ids map[string]string) map[string]string {
 	for provider, id := range ids {
 		provider, id = strings.ToLower(strings.TrimSpace(provider)), strings.TrimSpace(id)
 		if provider != "" && id != "" {
-			out[provider] = id
+			out[provider] = bookid.CanonicalProviderID(provider, id)
 		}
 	}
 	return out

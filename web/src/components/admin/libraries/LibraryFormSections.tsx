@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { useLibraryRealtimeMonitoring } from "@/hooks/queries/admin/libraries";
-import { useAppLanguage, useT, type Translate } from "@/i18n";
+import { numberText, useAppLanguage, useT, type Translate } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { extraKindGroupLabel, PROVIDER_TRAILER_KINDS } from "@/lib/extraKinds";
 import { languageOptions } from "@/player/utils/languageNames";
@@ -133,7 +133,7 @@ export function GeneralFields({
                 <Icon
                   className={cn("size-5", selected ? "text-primary" : "text-muted-foreground")}
                 />
-                <span className="text-center text-xs font-medium break-words sm:text-[11px]">
+                <span className="text-center text-xs font-medium break-words sm:text-[0.6875rem]">
                   {label}
                 </span>
               </button>
@@ -331,7 +331,7 @@ function ProviderLevelSection({
         type="button"
         onClick={() => setCollapsed(!collapsed)}
         aria-expanded={!collapsed}
-        className="text-primary hover:text-primary/80 mb-1.5 flex min-h-11 items-center gap-1.5 text-start text-xs font-semibold tracking-wider uppercase sm:min-h-0"
+        className="text-primary mb-1.5 flex min-h-11 items-center gap-1.5 text-start text-xs font-semibold tracking-wider uppercase hover:underline sm:min-h-0"
       >
         {collapsed ? <ChevronRight className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
         {contentLevelLabel(level)}
@@ -382,7 +382,7 @@ function ProviderLevelSection({
                   <ArrowDown className="size-4 sm:size-2.5" />
                 </Button>
               </div>
-              <span className="text-muted-foreground/70 font-mono text-[10px]">{i + 1}</span>
+              <span className="text-muted-foreground/70 font-mono text-[0.625rem]">{i + 1}</span>
             </div>
           ))}
         </div>
@@ -443,7 +443,7 @@ function BoxSetFields({ form }: { form: LibraryFormController }) {
                         : "text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    {count}
+                    {numberText(count)}
                   </button>
                 );
               })}

@@ -124,7 +124,11 @@ func (h *AdminPlaybackControlHandler) ServeRelayed(ctx context.Context, _ string
 // relayCommand runs the command on the lane owner. relayed is false when it
 // should run here.
 func (h *AdminPlaybackControlHandler) relayCommand(ctx context.Context, in AdminPlaybackCommandInput) (view AdminPlaybackCommandView, relayed bool, err error) {
-	body, outcome := h.relay.Forward(ctx, in.SessionID, adminRelayOpCommand, in)
+	var playerWait time.Duration
+	if in.Name == playback.CommandDisplayMessage {
+		playerWait = adminPlaybackMessageResultWait
+	}
+	body, outcome := h.relay.ForwardWaiting(ctx, in.SessionID, adminRelayOpCommand, in, playerWait)
 	switch outcome {
 	case playback.ControlRelayServeLocally:
 		return AdminPlaybackCommandView{}, false, nil

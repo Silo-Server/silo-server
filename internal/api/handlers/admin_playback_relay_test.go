@@ -71,13 +71,21 @@ func (o *relayTestOwners) Owner(_ context.Context, sessionID string) (string, er
 type relayTestConn struct {
 	mu       sync.Mutex
 	messages []playback.CommandEnvelope
+	// answer, when set, plays the player: it runs for each command written.
+	answer func(playback.CommandEnvelope)
 }
 
 func (c *relayTestConn) WriteJSON(v any) error {
+	env, ok := v.(playback.CommandEnvelope)
+	if !ok {
+		return nil
+	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if env, ok := v.(playback.CommandEnvelope); ok {
-		c.messages = append(c.messages, env)
+	c.messages = append(c.messages, env)
+	answer := c.answer
+	c.mu.Unlock()
+	if answer != nil {
+		answer(env)
 	}
 	return nil
 }
@@ -190,10 +198,14 @@ func TestAdminCommandRelaysToTheLaneOwner(t *testing.T) {
 		t.Fatalf("owner ledger latest = %d (%v), want 5", latest, ok)
 	}
 
-	// A message travels the same way.
+	// A message travels the same way, and the player's answer on the owner's
+	// lane reaches the replica that received the request.
+	c.conn.mu.Lock()
+	c.conn.answer = answerAsPlayer(t, c.owner, playback.RealtimeResultStatusCompleted)
+	c.conn.mu.Unlock()
 	message := sequencedInput(c.session.ID, "44444444-4444-4444-8444-444444444444", 6, playback.CommandDisplayMessage)
 	message.Message = "hello"
-	if view, err := c.other.Command(ctx, message); err != nil || view.Delivery != AdminPlaybackDeliveryDispatched {
+	if view, err := c.other.Command(ctx, message); err != nil || view.Delivery != deliveryAcknowledged {
 		t.Fatalf("relayed message = %+v, %v", view, err)
 	}
 	if sent := c.conn.sent(); len(sent) != 3 || sent[2].Name != playback.CommandDisplayMessage {
@@ -202,9 +214,19 @@ func TestAdminCommandRelaysToTheLaneOwner(t *testing.T) {
 }
 
 // TestAdminTerminateRelaysToTheLaneOwner: the owner ends its live session and
-// tells the player, instead of the receiving replica revoking blind.
+// tells the player, instead of the receiving replica revoking blind. A repeat
+// relayed while the player's lane is still open converges without telling
+// the player again.
 func TestAdminTerminateRelaysToTheLaneOwner(t *testing.T) {
 	c := newRelayTestCluster(t)
+	store := playback.NewMemoryPlanStoreV3()
+	c.owner.playback.PlanStoreV3 = store
+	c.other.playback.PlanStoreV3 = store
+	if err := store.SaveAttempt(t.Context(), playback.AttemptRecordV3{
+		PlaybackAttemptID: "attempt-" + c.session.ID, SessionID: c.session.ID, ExpiresAt: time.Now().Add(time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	view, err := c.other.Terminate(t.Context(), AdminTerminateInput{SessionID: c.session.ID, ActorID: 2, Reason: "policy"})
 	if err != nil {
@@ -219,6 +241,15 @@ func TestAdminTerminateRelaysToTheLaneOwner(t *testing.T) {
 	}
 	if _, err := c.ownerMgr.GetSession(c.session.ID); !errors.Is(err, playback.ErrSessionNotFound) {
 		t.Fatalf("the owner kept the terminated session: %v", err)
+	}
+
+	repeat, err := c.other.Terminate(t.Context(), AdminTerminateInput{SessionID: c.session.ID, ActorID: 2})
+	want := AdminTerminateView{SessionID: c.session.ID, AuthorityRevoked: true, AlreadyRevoked: true, DurableState: AdminTerminateDurableStopped, Delivery: AdminTerminateDeliveryNone}
+	if err != nil || repeat != want {
+		t.Fatalf("relayed repeat = %+v, %v; want %+v", repeat, err, want)
+	}
+	if got := len(c.conn.sent()); got != 1 {
+		t.Fatalf("lane received %d commands after the repeat, want 1", got)
 	}
 }
 

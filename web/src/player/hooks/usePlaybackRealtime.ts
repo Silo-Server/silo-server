@@ -11,6 +11,7 @@ import {
 } from "@/api/v2/playbackControlSocket";
 import { V2ProblemError, V2TransportError } from "@/api/v2/request";
 import { usePlayerConfig } from "../context/PlayerConfigContext";
+import type { PlaybackSessionEndReason } from "../player-fetch";
 import { playerV2Origin } from "../player-v2";
 import { sessionInstallation } from "../session-mutations";
 import {
@@ -35,6 +36,14 @@ interface UsePlaybackRealtimeOptions {
    * announce a command it would only reject.
    */
   supportedCommands?: PlaybackCommandName[];
+  /**
+   * Runs when a ticket mint learns the server ended the session because it
+   * stayed paused too long (410 `playback_session_paused_timeout`). A 410
+   * `playback_session_ended` is not reported: the server answers it for every
+   * stopped attempt, an expiry included, so it does not mean the player must
+   * leave.
+   */
+  onSessionEnded?: (reason: PlaybackSessionEndReason) => void;
 }
 
 interface UsePlaybackRealtimeResult {
@@ -53,12 +62,14 @@ export function usePlaybackRealtime({
   onCommand,
   onEvent,
   supportedCommands,
+  onSessionEnded,
 }: UsePlaybackRealtimeOptions): UsePlaybackRealtimeResult {
   const config = usePlayerConfig();
   const [connectionState, setConnectionState] = useState<ConnectionState>("disconnected");
   const onCommandRef = useRef(onCommand);
   const onEventRef = useRef(onEvent);
   const supportedCommandsRef = useRef(supportedCommands);
+  const onSessionEndedRef = useRef(onSessionEnded);
   const seenCommandsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
@@ -72,6 +83,10 @@ export function usePlaybackRealtime({
   useEffect(() => {
     onEventRef.current = onEvent;
   }, [onEvent]);
+
+  useEffect(() => {
+    onSessionEndedRef.current = onSessionEnded;
+  }, [onSessionEnded]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -218,6 +233,9 @@ export function usePlaybackRealtime({
             // rebuilt; minting again can only get the same answer.
             terminated = true;
             setConnectionState("disconnected");
+            if (error.problemType === "playback_session_paused_timeout") {
+              onSessionEndedRef.current?.("paused_timeout");
+            }
             return;
           }
           // Any other refusal (403 non-owner, 409 installation mismatch, 404, or

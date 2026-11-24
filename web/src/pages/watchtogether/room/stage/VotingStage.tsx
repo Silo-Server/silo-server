@@ -84,7 +84,7 @@ export function VotingStage({
         </StagedHero>
       ) : (
         <div className="surface-panel-subtle flex flex-col items-center gap-3 rounded-xl px-6 py-10 text-center">
-          <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+          <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
             {t("web.watchTogether.voting.open")}
           </p>
           <h2 className="text-xl font-semibold tracking-tight">
@@ -99,7 +99,7 @@ export function VotingStage({
       )}
       <section className="surface-panel-subtle rounded-xl px-3 py-3">
         <div className="flex items-center justify-between px-2 pb-2">
-          <h3 className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+          <h3 className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
             {t("web.watchTogether.voting.ranked")}
           </h3>
           <span className="text-muted-foreground text-xs">

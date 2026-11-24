@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/audiobooks/abs"
-	"github.com/Silo-Server/silo-server/internal/catalog"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
 const (
@@ -26,7 +26,7 @@ type ABSConfigProvider struct {
 	// JWT secret (a SensitiveSettingKey) rests as ciphertext and is transparently
 	// decrypted here. Typed as the interface so both the raw repo and the
 	// decorator satisfy it.
-	Settings catalog.SettingsStore
+	Settings serversettings.SettingsStore
 
 	// secretCache holds the generated secret so we only hit the DB once per
 	// process lifetime. Protected by mu.

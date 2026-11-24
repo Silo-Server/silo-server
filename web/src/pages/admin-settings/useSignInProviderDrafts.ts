@@ -9,6 +9,7 @@ import {
 } from "@/hooks/queries/admin/externalSignIn";
 import {
   adminSignInErrorText,
+  authBindingFieldIsManaged,
   primarySignInInstallations,
   authProviderName,
   savedAutoProvision,
@@ -32,15 +33,43 @@ interface InstallationDraft {
 
 type Drafts = Record<number, InstallationDraft>;
 
-/** An entry's draft, or a fresh one holding what is saved. */
+/** Values contains only the fields the administrator edited. */
 function entryDraftOf(draft: InstallationDraft, entry: SignInConfigEntry): ConfigDraft {
-  return draft.config[entry.schema.key] ?? { values: savedFormValues(entry), clearSecrets: [] };
+  return draft.config[entry.schema.key] ?? { values: {}, clearSecrets: [] };
 }
 
 export type SignInDraftSaveResult = { ok: true } | { ok: false; text: string };
 
 function isEmpty(draft: InstallationDraft): boolean {
   return Object.keys(draft.config).length === 0 && draft.autoProvision === undefined;
+}
+
+function dropManagedEdits(installation: PluginInstallation, draft: InstallationDraft) {
+  let next = draft;
+  if (
+    draft.autoProvision !== undefined &&
+    authBindingFieldIsManaged(installation, "auto_provision")
+  ) {
+    next = { ...next, autoProvision: undefined };
+  }
+  for (const [key, fields] of Object.entries(installation.env_managed?.config_fields ?? {})) {
+    const entry = draft.config[key];
+    if (
+      !entry ||
+      !fields.some(
+        (field) => Object.hasOwn(entry.values, field) || entry.clearSecrets.includes(field),
+      )
+    )
+      continue;
+    const values = { ...entry.values };
+    for (const field of fields) delete values[field];
+    const clearSecrets = entry.clearSecrets.filter((field) => !fields.includes(field));
+    const config = { ...next.config };
+    if (Object.keys(values).length || clearSecrets.length) config[key] = { values, clearSecrets };
+    else delete config[key];
+    next = { ...next, config };
+  }
+  return next;
 }
 
 /**
@@ -66,6 +95,20 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
       layouts.get(installation.id) ?? signInSetupLayout(installation),
     [layouts],
   );
+
+  // Discard edits as soon as the deployment claims the field. Releasing
+  // ownership later must not bring back a superseded value or secret clear.
+  let editable = drafts;
+  for (const installation of candidates) {
+    const draft = drafts[installation.id];
+    if (!draft) continue;
+    const next = dropManagedEdits(installation, draft);
+    if (next === draft) continue;
+    if (editable === drafts) editable = { ...drafts };
+    if (isEmpty(next)) delete editable[installation.id];
+    else editable[installation.id] = next;
+  }
+  if (editable !== drafts) setDrafts(editable);
 
   function update(
     installationId: number,
@@ -93,7 +136,9 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
 
   /** The values a config entry shows: its draft, else what is saved. */
   function valuesOf(installation: PluginInstallation, entry: SignInConfigEntry) {
-    return drafts[installation.id]?.config[entry.schema.key]?.values ?? savedFormValues(entry);
+    const saved = savedFormValues(entry);
+    const draft = drafts[installation.id]?.config[entry.schema.key];
+    return { ...saved, ...draft?.values };
   }
 
   function draftOf(installation: PluginInstallation, schemaKey: string): ConfigDraft | undefined {
@@ -106,6 +151,7 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
     fieldKey: string,
     value: unknown,
   ) {
+    if (entry.managedFields.includes(fieldKey)) return;
     update(installation.id, (draft) => {
       const previous = entryDraftOf(draft, entry);
       // Typing a new secret replaces the saved one, so it is no longer cleared.
@@ -124,6 +170,7 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
     entry: SignInConfigEntry,
     fieldKey: string,
   ) {
+    if (entry.managedFields.includes(fieldKey)) return;
     update(installation.id, (draft) => {
       const previous = entryDraftOf(draft, entry);
       const clearing = previous.clearSecrets.includes(fieldKey);
@@ -137,10 +184,14 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
   }
 
   function autoProvisionOf(installation: PluginInstallation): boolean {
-    return drafts[installation.id]?.autoProvision ?? savedAutoProvision(installation);
+    const saved = savedAutoProvision(installation);
+    return authBindingFieldIsManaged(installation, "auto_provision")
+      ? saved
+      : (drafts[installation.id]?.autoProvision ?? saved);
   }
 
   function setAutoProvision(installation: PluginInstallation, value: boolean) {
+    if (authBindingFieldIsManaged(installation, "auto_provision")) return;
     update(installation.id, (draft) => ({
       ...draft,
       autoProvision: value === savedAutoProvision(installation) ? undefined : value,
@@ -151,7 +202,11 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
     const draft = drafts[installation.id];
     if (!draft) return 0;
     const layout = layoutOf(installation);
-    let count = draft.autoProvision === undefined ? 0 : 1;
+    let count =
+      draft.autoProvision !== undefined &&
+      !authBindingFieldIsManaged(installation, "auto_provision")
+        ? 1
+        : 0;
     for (const [key, entryDraft] of Object.entries(draft.config)) {
       const entry = layout.entries.get(key);
       if (entry) count += changedFieldCount(entry, entryDraft);
@@ -181,12 +236,14 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
     for (const key of keys) {
       const entry = layout.entries.get(key);
       if (!entry) continue;
-      const values = { ...(config[key]?.values ?? savedFormValues(entry)) };
+      const values = { ...valuesOf(installation, entry) };
       if (extra?.schemaKey === key) values[extra.fieldKey] = extra.value;
       staged.push({
         key,
         value: stagedEntry(entry, values),
-        clear_secrets: config[key]?.clearSecrets ?? [],
+        clear_secrets: (config[key]?.clearSecrets ?? []).filter(
+          (field) => !entry.managedFields.includes(field),
+        ),
       });
     }
     return staged;
@@ -207,12 +264,14 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
         try {
           for (const [key, entryDraft] of Object.entries(draft.config)) {
             const entry = layout.entries.get(key);
-            if (!entry) continue;
+            if (!entry || changedFieldCount(entry, entryDraft) === 0) continue;
             await saveConfig.mutateAsync({
               installationId: installation.id,
               key,
-              value: stagedEntry(entry, entryDraft.values),
-              clearSecrets: entryDraft.clearSecrets,
+              value: stagedEntry(entry, valuesOf(installation, entry)),
+              clearSecrets: entryDraft.clearSecrets.filter(
+                (field) => !entry.managedFields.includes(field),
+              ),
             });
             // An edit made while this write was in flight is a newer draft;
             // it stays staged.
@@ -223,7 +282,10 @@ export function useSignInProviderDrafts(installations: PluginInstallation[] | un
               return { ...current, config };
             });
           }
-          if (draft.autoProvision !== undefined) {
+          if (
+            draft.autoProvision !== undefined &&
+            !authBindingFieldIsManaged(installation, "auto_provision")
+          ) {
             await updateBinding.mutateAsync({
               installationId: installation.id,
               body: signInBindingWrite(installation, { auto_provision: draft.autoProvision }),

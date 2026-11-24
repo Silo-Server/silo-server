@@ -30,10 +30,11 @@ import (
 type Change struct {
 	// ID is oasdiff's rule id (for example api-removed-without-deprecation).
 	ID string
-	// Level is oasdiff's level name: ERR, WARN or INFO.
+	// Level is the level name (ERR, WARN or INFO): oasdiff's, except for
+	// the rules additiveRules lowers to INFO.
 	Level string
-	// Breaking is true for ERR and WARN, the same set `oasdiff breaking`
-	// reports.
+	// Breaking is true for ERR and WARN: the set `oasdiff breaking` reports,
+	// less additiveRules.
 	Breaking bool
 	// Method and Path locate the operation; empty for a component change.
 	Method string
@@ -45,6 +46,16 @@ type Change struct {
 	// Fingerprint identifies this exact change for an approval entry: the
 	// SHA-256 of the rule id, the operation, and the rule's arguments.
 	Fingerprint string
+}
+
+// additiveRules lowers to INFO the oasdiff rules that flag a change the
+// contract policy (docs/architecture/api-contract.md) calls additive: response
+// enums gain values and clients keep an unknown fallback. Request enums stay
+// closed, so their removals keep oasdiff's level; their additions are already
+// INFO. Existing values are never renamed, so Diff keeps an addition breaking
+// when the same response property loses a value in the same diff.
+var additiveRules = map[string]checker.Level{
+	checker.ResponsePropertyEnumValueAddedId: checker.INFO,
 }
 
 // Diff compares two OpenAPI documents and lists every finding, sorted by
@@ -66,14 +77,26 @@ func Diff(base, revision []byte) ([]Change, error) {
 	if err != nil {
 		return nil, err
 	}
-	findings := checker.CheckBackwardCompatibilityUntilLevel(checker.NewConfig(checker.GetAllChecks()), report, sources, checker.INFO)
+	findings := checker.CheckBackwardCompatibilityUntilLevel(checker.NewConfig(checker.GetAllChecks(), checker.WithSeverityLevels(additiveRules)), report, sources, checker.INFO)
+	// oasdiff rates a removed response enum value INFO, so a rename (one value
+	// removed, one added) is breaking only through the addition.
+	renamed := map[string]bool{}
+	for _, f := range findings {
+		if f.GetId() == checker.ResponsePropertyEnumValueRemovedId {
+			renamed[enumPropertyKey(f)] = true
+		}
+	}
 	localizer := checker.NewDefaultLocalizer()
 	out := make([]Change, 0, len(findings))
 	for _, f := range findings {
+		level := f.GetLevel()
+		if f.GetId() == checker.ResponsePropertyEnumValueAddedId && renamed[enumPropertyKey(f)] {
+			level = checker.ERR
+		}
 		c := Change{
 			ID:          f.GetId(),
-			Level:       f.GetLevel().String(),
-			Breaking:    f.GetLevel().IsBreaking(),
+			Level:       level.String(),
+			Breaking:    level.IsBreaking(),
 			Method:      f.GetOperation(),
 			Path:        f.GetPath(),
 			OperationID: f.GetOperationId(),
@@ -96,6 +119,17 @@ func Diff(base, revision []byte) ([]Change, error) {
 		return a.Text < b.Text
 	})
 	return out, nil
+}
+
+// enumPropertyKey names the operation, response property and status of a
+// response enum finding; its arguments are the value, the property and the
+// status.
+func enumPropertyKey(f checker.Change) string {
+	args := f.GetArgs()
+	if len(args) < 3 {
+		return ""
+	}
+	return fmt.Sprint(f.GetOperation(), " ", f.GetPath(), " ", args[1], " ", args[2])
 }
 
 func fingerprint(c Change, args []any) string {

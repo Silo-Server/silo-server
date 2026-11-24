@@ -450,9 +450,13 @@ export default function LibraryPage() {
     <div className="relative">
       <Tabs value={activeTab} onValueChange={handleTabChange}>
         <LibraryHeader
+          // A new library starts with its tabs scrolled to the selected one,
+          // not where the last library's strip was left.
+          key={library.id}
           libraryName={library.name}
           libraryType={libraryType}
           overlay={useOverlay}
+          activeTab={activeTab}
           onShuffle={
             isShuffleLibraryType(libraryType)
               ? () => startShuffle({ kind: "library", id: String(library.id) })

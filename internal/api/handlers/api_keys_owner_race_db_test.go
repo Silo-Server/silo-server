@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -57,10 +58,22 @@ func TestAdminAPIKeyCreationHoldsOwnerRulesAgainstPromotionDB(t *testing.T) {
 	users := auth.NewUserRepository(pool)
 	h := NewAPIKeyHandler(auth.NewAPIKeyRepository(pool))
 	h.Owners = users
+	// Key creation checks the request's login session, so each actor signs
+	// in with a real one.
+	sessionCtx := func(actorID int) context.Context {
+		t.Helper()
+		sessionID := "owner-rules-" + suffix + "-" + strconv.Itoa(actorID)
+		if _, err := pool.Exec(ctx, `INSERT INTO auth_sessions (id, user_id, expires_at) VALUES ($1, $2, now() + interval '1 day')
+			ON CONFLICT (id) DO NOTHING`, sessionID, actorID); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM auth_sessions WHERE id = $1`, sessionID) })
+		return apimw.SetClaims(context.Background(), &auth.Claims{UserID: actorID, Role: "admin", TokenType: auth.TokenTypeAccess, SessionID: sessionID})
+	}
 	// The transport returns "" when it created the key, else the error code.
 	transports := map[string]func(actorID, targetID int) string{
 		"v2": func(actorID, targetID int) string {
-			_, err := h.CreateAdminAPIKey(claimsCtx(actorID), targetID, "owner-rules", nil)
+			_, err := h.CreateAdminAPIKey(sessionCtx(actorID), targetID, "owner-rules", nil)
 			if apiErr, ok := errors.AsType[*APIError](err); ok {
 				return apiErr.Code
 			}

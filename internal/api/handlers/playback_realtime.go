@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/playback"
-	"github.com/Silo-Server/silo-server/internal/userstore"
 	"github.com/Silo-Server/silo-server/internal/watchstate"
 )
 
@@ -22,13 +21,13 @@ type playbackCommandRecord struct {
 // then deleted); empty for system teardown such as an ffmpeg-exit cleanup,
 // where the card is kept so the client can reconstruct.
 func (h *PlaybackHandler) stopPlaybackSession(ctx context.Context, session *playback.Session, reason PlaybackEndReason) error {
-	_, err := h.stopPlaybackSessionWithResult(ctx, session, reason)
+	_, err := h.stopPlaybackSessionWithResult(ctx, session, reason, nil)
 	return err
 }
 
 // stopPlaybackSessionWithResult is stopPlaybackSession reporting the history
 // writer's result, which the v2 stop receipt carries.
-func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, session *playback.Session, reason PlaybackEndReason) (watchstate.PlaybackStopResult, error) {
+func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, session *playback.Session, reason PlaybackEndReason, accepted *playback.ProgressSampleV3) (watchstate.PlaybackStopResult, error) {
 	if h == nil || session == nil || session.ID == "" {
 		return watchstate.PlaybackStopResult{}, playback.ErrSessionNotFound
 	}
@@ -37,6 +36,12 @@ func (h *PlaybackHandler) stopPlaybackSessionWithResult(ctx context.Context, ses
 	current, err := h.endPlaybackSessionAuthority(ctx, session, reason.userInitiated())
 	if err != nil {
 		return watchstate.PlaybackStopResult{}, err
+	}
+	// The stopped attempt owns the final position. A heartbeat may have
+	// updated this replica's live snapshot after the stop reached PostgreSQL.
+	if accepted != nil {
+		current.Position, current.IsPaused = accepted.Position, accepted.IsPaused
+		observeEndSample(current, time.Now())
 	}
 	return h.finalizeSessionStopWithResult(ctx, current, true, "stop", reason), nil
 }
@@ -85,13 +90,19 @@ func (h *PlaybackHandler) endPlaybackSessionAuthority(ctx context.Context, sessi
 // another caller owns: the live authority and the transport go, but no
 // history or provider event is written for it.
 func (h *PlaybackHandler) dropLiveSessionByID(ctx context.Context, sessionID string) error {
+	return h.dropLiveSession(ctx, sessionID, true)
+}
+
+// dropLiveSession is dropLiveSessionByID for a caller that chooses whether
+// the end is user-initiated (see endPlaybackSessionAuthority).
+func (h *PlaybackHandler) dropLiveSession(ctx context.Context, sessionID string, userInitiated bool) error {
 	session, err := h.sessionMgr.GetSession(sessionID)
 	if err != nil {
 		return err
 	}
 	unlock := h.tm.LockSessionLifecycle(session.ID)
 	defer unlock()
-	current, err := h.endPlaybackSessionAuthority(ctx, session, true)
+	current, err := h.endPlaybackSessionAuthority(ctx, session, userInitiated)
 	if err != nil {
 		return err
 	}
@@ -195,6 +206,9 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 		// written, from the confirmed snapshot; the finalizer must not too.
 		// A competing finalizer that finishes first told them itself.
 		finalizeCtx, notice := withProviderNoticeDeferred(parent)
+		// The confirmed stop removed the live copy, so the finalizer records
+		// from the attempt row; the copy's measurement goes with it.
+		finalizeCtx = withEndWatch(finalizeCtx, session)
 		receipt = h.finalizeRealtimeStop(finalizeCtx, store, record, session.ID, receipt, stopFinalizationLease)
 		notify = notice.left
 	}
@@ -218,8 +232,8 @@ func (h *PlaybackHandler) realtimeStopHistory(parent context.Context, session *p
 	if err == nil && file != nil {
 		result.MediaItemID = playbackProgressTarget(file)
 		result.DurationSeconds = float64(file.Duration)
-		result.Completed = result.HistoryID != "" && !session.DisableProgressPersistence && result.DurationSeconds > 0 &&
-			session.Position/result.DurationSeconds > userstore.WatchedFraction(h.playbackThresholds(ctx).WatchedPct)
+		result.Completed = result.HistoryID != "" && !session.DisableProgressPersistence &&
+			h.playbackThresholdsForFile(ctx, session, file, result.DurationSeconds).Watched(session.Position, result.DurationSeconds)
 	}
 	return realtimeStopOutcome{result: result, reason: endReasonForStop(session.ID, receipt.StopID), notify: notify}
 }
@@ -254,7 +268,7 @@ func (h *PlaybackHandler) abortPlaybackSession(ctx context.Context, session *pla
 	if !claim.ownEnd(abortStopID(session.ID)) {
 		// An earlier stop won the row and never finished: finish it as
 		// that stop, then tear down as an abort without its writers.
-		h.FinishOtherEnd(ctx, claim, session.ID)
+		h.FinishOtherEnd(withEndWatch(ctx, session), claim, session.ID)
 		h.finalizeSessionAbort(ctx, session, true, "abort", nativeEndClaim{})
 		return nil
 	}
@@ -273,44 +287,6 @@ func (h *PlaybackHandler) abortPlaybackSessionByID(ctx context.Context, sessionI
 		return err
 	}
 	return h.abortPlaybackSession(ctx, session)
-}
-
-// CopySafetyPlaybackControl adapts the playback handler to the session control
-// playback.CopySafetyNotifier needs: the notifier owns the decision to withdraw
-// a plan, the handler owns realtime command bookkeeping and session teardown.
-type CopySafetyPlaybackControl struct {
-	playback *PlaybackHandler
-}
-
-// NewCopySafetyPlaybackControl returns the adapter, or nil without a handler.
-func NewCopySafetyPlaybackControl(handler *PlaybackHandler) *CopySafetyPlaybackControl {
-	if handler == nil {
-		return nil
-	}
-	return &CopySafetyPlaybackControl{playback: handler}
-}
-
-func (c *CopySafetyPlaybackControl) RememberRealtimeCommand(commandID, sessionID string, name playback.CommandName) {
-	if c == nil {
-		return
-	}
-	c.playback.rememberRealtimeCommand(commandID, sessionID, name)
-}
-
-func (c *CopySafetyPlaybackControl) ForgetRealtimeCommand(commandID string) {
-	if c == nil {
-		return
-	}
-	c.playback.forgetRealtimeCommand(commandID)
-}
-
-// StopSession ends the session as a system teardown, not a user stop: the
-// recipe card is kept so the client's recovery can rebuild from it.
-func (c *CopySafetyPlaybackControl) StopSession(ctx context.Context, sessionID string) error {
-	if c == nil {
-		return playback.ErrSessionNotFound
-	}
-	return c.playback.stopPlaybackSessionByID(ctx, sessionID, "")
 }
 
 func (h *PlaybackHandler) rememberRealtimeCommand(commandID, sessionID string, name playback.CommandName) {
@@ -333,6 +309,48 @@ func (h *PlaybackHandler) forgetRealtimeCommand(commandID string) {
 
 	h.realtimeCommandMu.Lock()
 	delete(h.realtimeCommands, commandID)
+	h.realtimeCommandMu.Unlock()
+}
+
+// realtimeResultKey names one command on one session. Command ids are chosen
+// by administrators and are only unique within a session's ledger, so a
+// waiter never matches another session's result.
+type realtimeResultKey struct {
+	sessionID string
+	commandID string
+}
+
+// awaitRealtimeResult registers interest in the player's result for one
+// command. The returned channel receives that result's status; release
+// removes the registration. Register before the command is written, so a
+// result that arrives before the caller starts waiting is not missed.
+func (h *PlaybackHandler) awaitRealtimeResult(sessionID, commandID string) (<-chan playback.RealtimeResultStatus, func()) {
+	key := realtimeResultKey{sessionID: sessionID, commandID: commandID}
+	answered := make(chan playback.RealtimeResultStatus, 1)
+	h.realtimeCommandMu.Lock()
+	if h.realtimeResultWaiters == nil {
+		h.realtimeResultWaiters = map[realtimeResultKey]chan playback.RealtimeResultStatus{}
+	}
+	h.realtimeResultWaiters[key] = answered
+	h.realtimeCommandMu.Unlock()
+	return answered, func() {
+		h.realtimeCommandMu.Lock()
+		if h.realtimeResultWaiters[key] == answered {
+			delete(h.realtimeResultWaiters, key)
+		}
+		h.realtimeCommandMu.Unlock()
+	}
+}
+
+// signalRealtimeResult hands the result's status to the waiter for this
+// session's command, if any. The first result wins.
+func (h *PlaybackHandler) signalRealtimeResult(sessionID, commandID string, status playback.RealtimeResultStatus) {
+	key := realtimeResultKey{sessionID: sessionID, commandID: commandID}
+	h.realtimeCommandMu.Lock()
+	if answered, ok := h.realtimeResultWaiters[key]; ok {
+		answered <- status // buffered for one, and removed before a second
+		delete(h.realtimeResultWaiters, key)
+	}
 	h.realtimeCommandMu.Unlock()
 }
 

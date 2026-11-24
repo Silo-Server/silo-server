@@ -1,3 +1,5 @@
+# Client diagnostics schemas
+
 The canonical client-diagnostics v1 contract lives in `v1/`.
 Clients vendor the schema files, attribute registry, and fixtures from this directory.
 Servers accept supported schema versions and ignore unknown additive fields.

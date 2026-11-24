@@ -1,4 +1,4 @@
-# Local NFO metadata and sidecar artwork (as built)
+# Local NFO metadata and sidecar artwork
 
 Implements #216: Kodi/Jellyfin-style `.nfo` files and sidecar images
 (`poster.jpg`, `fanart.jpg`, …) next to movies and shows are read by a builtin
@@ -54,6 +54,17 @@ metadata (NFO text and sidecar artwork), then remote providers (TMDB, TVDB,
   chain-less fallback and person refresh, whatever priority a row stores.
   `SetChain`, chain seeding and the startup sync store builtin rows first, so
   the API and the chain editor show the order that runs.
+- **A refresh that names no library uses the item's libraries' chains.** The
+  scheduled refresh, the on-demand stale refresh, trailer recovery and the
+  `RefreshItem` that an admin merge, split or stale-ID rematch runs all pass
+  folder 0, which has no chain rows. `withItemChainScope`
+  (`internal/metadata/chain_scope.go`) scopes them to the libraries that hold
+  the item (the series, for a season or episode), leaving out a disabled
+  library while an enabled one also holds it. For folder 0, `resolveChainCached` then hands those libraries to
+  `resolveLibrariesChain`, which merges their chains in library ID order with
+  the local tier first. An item no library holds keeps the all-providers
+  fallback, as does a library with no chain rows of its own, just as on that
+  library's own refresh.
 - **Fields the NFO sets win.** Phase 2 folds provider results fill-empty in
   chain order, so the NFO wins every scalar it supplies.
 - **Lists the NFO supplies are the whole list.** Genres, studios, networks,
@@ -583,7 +594,7 @@ sits in the chain.
   such a refresh, or one with locked artwork, leaves on its remote stand-in
   keeps its local source, as a slot left on its cached copy does.
 - Banner, thumb, clear art, disc art and the backdrops after the primary come
-  only from sidecars today, so the rule above has no provider art to fall back
+  only from sidecars, so the rule above has no provider art to fall back
   to. When a refresh searched the item level and did not return a slot's
   sidecar, the slot is cleared once the sidecar's folder answers (the file is
   missing or no longer qualifies) and kept while it does not. A refresh that

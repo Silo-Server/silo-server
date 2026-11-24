@@ -118,7 +118,7 @@ export function OverlayImageLibrary({
             ) : null}
           </div>
           {error ? <p className="text-destructive text-sm">{error}</p> : null}
-          <p className="text-muted-foreground text-[13px] leading-relaxed">
+          <p className="text-muted-foreground text-[0.8125rem] leading-relaxed">
             {t("web.settings.overlays.library.help")}
           </p>
         </>
@@ -137,8 +137,12 @@ export function OverlayImageLibrary({
               <span className="flex h-10 w-16 shrink-0 items-center justify-center rounded-md bg-gradient-to-br from-slate-700 to-slate-900 p-1">
                 <img src={image.url} alt="" className="max-h-full max-w-full object-contain" />
               </span>
-              <span className="min-w-0 flex-1 truncate text-sm" title={image.name}>
-                {image.name}
+              {/* The outer span keeps the delete button at the end; the name keeps its
+                  start when cut, in either script. */}
+              <span className="min-w-0 flex-1" title={image.name}>
+                <span dir="auto" className="block w-fit max-w-full truncate text-sm">
+                  {image.name}
+                </span>
               </span>
               <Button
                 type="button"

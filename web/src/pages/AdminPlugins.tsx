@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 
 import type { PluginCatalogEntry, PluginInstallation } from "@/api/types";
 import { CommunityCatalogControl } from "@/components/admin/plugins/CommunityCatalogControl";
+import { PluginProvisioningStatus } from "@/components/admin/plugins/PluginProvisioningStatus";
 import { FilterChips, PluginSearchField } from "@/components/admin/plugins/PluginListControls";
 import {
   PluginRepositoriesPanel,
@@ -22,6 +23,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   CHECK_PLUGIN_UPDATES_TASK_KEY,
   useAdminPlugins,
+  useAdminPluginProvisioningStatus,
   useCheckPluginUpdates,
 } from "@/hooks/queries/admin/plugins";
 import { useTask } from "@/hooks/queries/admin/tasks";
@@ -109,6 +111,7 @@ function PluginsBoard() {
   const t = useT();
   const { installations, catalog, catalogSettings, repositories, repositoriesError, isLoading } =
     useAdminPlugins();
+  const provisioning = useAdminPluginProvisioningStatus();
   const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
   const checkPluginUpdates = useCheckPluginUpdates();
@@ -167,10 +170,32 @@ function PluginsBoard() {
     />
   );
 
+  const provisioningStatus = (
+    <>
+      {provisioning.isError ? (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <p role="status" className="text-muted-foreground">
+            {t("web.admin.plugins.provisioning.loadError")}
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={provisioning.isFetching}
+            onClick={() => void provisioning.refetch()}
+          >
+            {t("common.retry")}
+          </Button>
+        </div>
+      ) : null}
+      <PluginProvisioningStatus items={provisioning.data} />
+    </>
+  );
+
   if (isLoading) {
     return (
       <div className="space-y-6 pb-4 sm:pb-6">
         {header}
+        {provisioningStatus}
         <div className="text-muted-foreground py-12 text-center text-sm">
           {t("web.admin.plugins.page.loading")}
         </div>
@@ -182,6 +207,8 @@ function PluginsBoard() {
     <div className="space-y-6 pb-4 sm:pb-6">
       {header}
 
+      {provisioningStatus}
+
       <Tabs
         value={activeTab}
         onValueChange={(value) =>
@@ -192,7 +219,7 @@ function PluginsBoard() {
           <TabsTrigger value="installed">
             {t("web.admin.plugins.page.installedTab")}
             {installations.length > 0 && (
-              <Badge variant="secondary" className="ms-1.5 text-[10px]">
+              <Badge variant="secondary" className="ms-1.5 text-[0.625rem]">
                 {installations.length}
               </Badge>
             )}
@@ -200,7 +227,7 @@ function PluginsBoard() {
           <TabsTrigger value="catalog">
             {t("web.admin.plugins.page.catalogTab")}
             {catalog.length > 0 && (
-              <Badge variant="secondary" className="ms-1.5 text-[10px]">
+              <Badge variant="secondary" className="ms-1.5 text-[0.625rem]">
                 {catalog.length}
               </Badge>
             )}
@@ -451,9 +478,9 @@ function CatalogTab({
       ) : (
         groups.map((group) => (
           <section key={group.kind} className="space-y-2.5" aria-label={t(group.titleKey)}>
-            <h2 className="flex items-baseline gap-2 text-[15px] font-semibold">
+            <h2 className="flex items-baseline gap-2 text-[0.9375rem] font-semibold">
               {t(group.titleKey)}
-              <span className="text-muted-foreground text-[13.5px] font-medium tabular-nums">
+              <span className="text-muted-foreground text-[0.84375rem] font-medium tabular-nums">
                 {group.entries.length}
               </span>
             </h2>

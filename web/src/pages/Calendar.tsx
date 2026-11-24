@@ -147,7 +147,7 @@ export default function Calendar() {
                   type="button"
                   aria-pressed={filter === opt.value}
                   onClick={() => setFilter(opt.value)}
-                  className={`rounded-full px-3 py-1 text-[12px] font-semibold transition-all duration-150 sm:px-4 sm:py-1.5 sm:text-[13px] ${
+                  className={`rounded-full px-3 py-1 text-[0.75rem] font-semibold transition-all duration-150 sm:px-4 sm:py-1.5 sm:text-[0.8125rem] ${
                     filter === opt.value
                       ? "bg-primary text-primary-foreground shadow-sm"
                       : "text-muted-foreground hover:bg-surface-hover hover:text-foreground"
@@ -161,7 +161,7 @@ export default function Calendar() {
             {/* Preset dropdown (smaller displays) */}
             <div className="lg:hidden">
               <Select value={filter} onValueChange={setFilter}>
-                <SelectTrigger className="border-border/50 bg-surface/60 h-9 w-auto min-w-[130px] rounded-full text-[12px] font-semibold backdrop-blur-sm sm:text-[13px]">
+                <SelectTrigger className="border-border/50 bg-surface/60 h-9 w-auto min-w-[130px] rounded-full text-[0.75rem] font-semibold backdrop-blur-sm sm:text-[0.8125rem]">
                   <SelectValue placeholder={t("web.calendar.presetFollowing")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -177,7 +177,7 @@ export default function Calendar() {
             {/* Library filter */}
             {libraries.data && libraries.data.length > 1 && (
               <Select value={libraryId ? String(libraryId) : "all"} onValueChange={setLibrary}>
-                <SelectTrigger className="border-border/50 bg-surface/60 h-9 w-auto min-w-[120px] rounded-full text-[12px] font-semibold backdrop-blur-sm sm:min-w-[140px] sm:text-[13px]">
+                <SelectTrigger className="border-border/50 bg-surface/60 h-9 w-auto min-w-[120px] rounded-full text-[0.75rem] font-semibold backdrop-blur-sm sm:min-w-[140px] sm:text-[0.8125rem]">
                   <SelectValue placeholder={t("web.calendar.allLibraries")} />
                 </SelectTrigger>
                 <SelectContent>
@@ -196,10 +196,11 @@ export default function Calendar() {
 
       {/* Sticky week navigator — anchors to the page-level container so the
           containing block spans every DayGroup, keeping it pinned through
-          full-page scroll. top-20 clears the mobile header; when the mobile
+          full-page scroll. 5rem clears the mobile header; when the mobile
           header auto-hides on scroll-down (Layout sets data-mobile-header-hidden
-          on <html>) we pin closer to the viewport top so the gap stays tight. */}
-      <div className="sticky top-20 z-20 px-4 pb-3 transition-[top] duration-200 ease-out sm:px-6 lg:top-2 lg:px-10 xl:px-12 [html[data-mobile-header-hidden=true]_&]:top-2">
+          on <html>) we pin closer to the viewport top so the gap stays tight.
+          Every offset starts below the impersonation banner when one shows. */}
+      <div className="sticky top-[calc(5rem+var(--impersonation-banner-height))] z-20 px-4 pb-3 transition-[top] duration-200 ease-out sm:px-6 lg:top-[calc(0.5rem+var(--impersonation-banner-height))] lg:px-10 xl:px-12 [html[data-mobile-header-hidden=true]_&]:top-[calc(0.5rem+var(--impersonation-banner-height))]">
         <WeekNavigator
           weekStart={weekStart}
           days={days}
@@ -214,7 +215,7 @@ export default function Calendar() {
       {showSelectedEmpty && (
         <div className="px-4 sm:px-6 lg:px-10 xl:px-12">
           <div
-            className="surface-panel-subtle text-muted-foreground rounded-2xl px-4 py-3 text-[13px]"
+            className="surface-panel-subtle text-muted-foreground rounded-2xl px-4 py-3 text-[0.8125rem]"
             role="status"
           >
             {t("web.calendar.nothingScheduledFor", {

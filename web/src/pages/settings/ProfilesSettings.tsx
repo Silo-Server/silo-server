@@ -24,6 +24,7 @@ import {
 } from "@/lib/profile-management";
 import { HouseholdStreamsPanel } from "@/components/profiles/HouseholdStreamsPanel";
 import { useT, type Translate } from "@/i18n";
+import { getInitial } from "@/lib/text";
 
 function getDeleteGuardReason(
   t: Translate,
@@ -184,13 +185,15 @@ export default function ProfilesSettings() {
                         <AvatarImage src={profile.avatar_url} alt={profile.name} />
                       ) : null}
                       <AvatarFallback className="text-sm font-semibold">
-                        {profile.name.charAt(0).toUpperCase()}
+                        {getInitial(profile.name)}
                       </AvatarFallback>
                     </Avatar>
 
                     <div className="min-w-0 space-y-1">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="truncate text-sm font-semibold">{profile.name}</span>
+                        <span dir="auto" className="truncate text-sm font-semibold">
+                          {profile.name}
+                        </span>
                         {profile.id === activeProfileID ? (
                           <Badge variant="outline">
                             {t("web.settings.profiles.badge.current")}

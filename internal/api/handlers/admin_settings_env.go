@@ -19,6 +19,15 @@ import (
 // storage location guard (storage moves only through a managed transition),
 // and the cross-field validation over the settings the process will run on.
 func CheckEnvironmentSettings(stored map[string]string, env config.EnvSettings, redisBootstrapAvailable bool) (config.EnvSettings, error) {
+	return CheckDeploymentSettings(stored, env, nil, "", redisBootstrapAvailable)
+}
+
+// CheckDeploymentSettings is CheckEnvironmentSettings with the machine-managed
+// settings the deployment document writes, such as the AI provider registry,
+// checked together with the environment's values: a recommendations
+// variable can name a provider the document declares. declaredBy names the
+// document's variable in errors.
+func CheckDeploymentSettings(stored map[string]string, env config.EnvSettings, declared map[string]string, declaredBy string, redisBootstrapAvailable bool) (config.EnvSettings, error) {
 	checked := make(config.EnvSettings, 0, len(env))
 	normalized := make(map[string]string, len(env))
 	for _, setting := range env {
@@ -38,6 +47,15 @@ func CheckEnvironmentSettings(stored map[string]string, env config.EnvSettings, 
 		normalized[setting.Key] = value
 	}
 
+	// A registry the document leaves unchanged isn't a change, so its binding
+	// group isn't checked again on every start.
+	declaredChanged := false
+	for key, value := range declared {
+		if stored[key] != value {
+			normalized[key] = value
+			declaredChanged = true
+		}
+	}
 	prospective := make(map[string]string, len(stored)+len(normalized))
 	maps.Copy(prospective, stored)
 	maps.Copy(prospective, normalized)
@@ -50,10 +68,39 @@ func CheckEnvironmentSettings(stored map[string]string, env config.EnvSettings, 
 		}
 	}
 
+	skipBindingsOutsideDeclaration(prospective, normalized, declaredBy)
+
 	if err := validateProspectiveAdminSettings(adminSettingsValidationSnapshot(prospective, normalized), redisBootstrapAvailable); err != nil {
-		return nil, fmt.Errorf("the settings from the environment are invalid (%s): %w", strings.Join(checked.VarsFor(nil), ", "), err)
+		vars := checked.VarsFor(nil)
+		if declaredChanged {
+			vars = append(vars, declaredBy)
+		}
+		return nil, fmt.Errorf("the settings from the environment are invalid (%s): %w", strings.Join(vars, ", "), err)
 	}
 	return checked, nil
+}
+
+// skipBindingsOutsideDeclaration leaves out of the startup check each stored
+// provider binding the deployment can't have broken: one the environment
+// doesn't set that names a provider the document doesn't declare (with no
+// document, every stored binding). Declaring never removes a provider, so
+// such a binding is as valid as it was, and one already naming a missing
+// provider (as a restore into another deployment can leave) stays the
+// admin's to fix instead of stopping startup.
+func skipBindingsOutsideDeclaration(prospective, fromEnvironment map[string]string, declaredBy string) {
+	registry, err := config.ParseAIProviderRegistry(prospective[config.AIProvidersSettingKey])
+	if err != nil {
+		return // The registry check reports it.
+	}
+	for _, key := range config.AIProviderBindingKeys() {
+		if _, set := fromEnvironment[key]; set {
+			continue
+		}
+		provider, found := registry.Find(strings.TrimSpace(prospective[key]))
+		if !found || declaredBy == "" || provider.ManagedBy != declaredBy {
+			prospective[key] = ""
+		}
+	}
 }
 
 // storageLocationKeys are the settings rejectArtworkIdentityChange compares.

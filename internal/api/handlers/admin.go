@@ -35,8 +35,10 @@ import (
 	"github.com/Silo-Server/silo-server/internal/markers"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/notifications"
+	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/policy"
 	"github.com/Silo-Server/silo-server/internal/s3client"
+	"github.com/Silo-Server/silo-server/internal/serversettings"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/settingsmigrate"
 	subtitleai "github.com/Silo-Server/silo-server/internal/subtitles/ai"
@@ -156,6 +158,10 @@ type ImpersonationService interface {
 // AdminHandler handles admin-only HTTP endpoints for user management,
 // session listing, unmatched files, and system stats.
 type AdminHandler struct {
+	// BaseContext is the server's lifetime context for background work the
+	// handler starts, such as a Jellyfin Web install. Nil means
+	// context.Background().
+	BaseContext        context.Context //nolint:containedctx // The handler starts background work that must stop with the server, not with the request.
 	ChatGPT            *chatgpt.Service
 	userRepo           UserRepository
 	pool               *pgxpool.Pool
@@ -575,14 +581,6 @@ func (h *AdminHandler) sweepWatchlistTitles(ctx context.Context, userID int) {
 	}
 }
 
-func (h *AdminHandler) loadPlaybackSessions(ctx context.Context, r *http.Request) ([]playbackSessionRow, error) {
-	loader, err := resolvePlaybackSessionsLoader(h.SessionsLoader, h.pool, h.storeProv, h.DetailSvc)
-	if err != nil {
-		return nil, err
-	}
-	return loader.Load(ctx, PlaybackSessionsQuery{})
-}
-
 // updateMayRequireSessionRevocation is updateRequiresSessionRevocation without
 // the current account to compare against: any credential or enabled change
 // might sign the user out.
@@ -751,8 +749,8 @@ type UpdateItemMetadataRequest struct {
 
 // sensitiveSettingKeys is the audited allowlist of secret-bearing settings
 // keys, shared with the at-rest encryption decorator so redaction and
-// encryption can never drift apart. See catalog.SensitiveSettingKeys.
-var sensitiveSettingKeys = catalog.SensitiveSettingKeys
+// encryption can never drift apart. See serversettings.SensitiveSettingKeys.
+var sensitiveSettingKeys = serversettings.SensitiveSettingKeys
 
 // machineManagedSettingKeys contains durable internal state that shares the
 // server_settings store but is not part of the administrator settings API.
@@ -762,6 +760,7 @@ var machineManagedSettingKeys = map[string]bool{
 	"auth.jwt_secret":                           true,
 	"audiobooks.abs.jwt_secret":                 true,
 	chatgpt.CredentialsKey:                      true,
+	plugins.ProvisionRestoreHoldKey:             true,
 	config.AIProvidersSettingKey:                true,
 	config.ArtworkStorageReconcileCheckpointKey: true,
 	config.ArtworkStorageSweepCheckpointKey:     true,
@@ -1346,8 +1345,9 @@ var adminSettingDependencyGroups = [][]string{
 	{"matcher.enable_tv_series_root_queue", "matcher.enable_tv_series_group_queue"},
 	{"ai.max_concurrent_jobs", "subtitle_ai.max_concurrent_jobs"},
 	{"ai.chat_model", "subtitle_ai.chat_model", "ai.reasoning_effort"}, //nolint:goconst // Keep the complete setting dependency explicit.
-	// A provider binding is checked against the registry it names.
-	append([]string{config.AIProvidersSettingKey}, config.AIProviderBindingKeys()...),
+	// A provider binding is checked against the registry it names, and the
+	// text binding against the auth mode that can leave it idle.
+	append([]string{config.AIProvidersSettingKey, config.AIAuthModeSettingKey}, config.AIProviderBindingKeys()...),
 	{
 		diagnostics.KeyMaxBundleBytes,
 		diagnostics.KeyMaxUncompressedBytes,
@@ -1498,10 +1498,20 @@ func redisDBRow(active map[string]string, value string) string {
 // exception: REDIS_URL keeps a server up whose saved number it cannot start
 // with, and the clear is how that number is removed.
 func (h *AdminHandler) environmentRefusesSave(key, value string) bool {
-	if !h.BootstrapSensitiveConfigured[key] {
+	if _, set := h.EnvironmentSetting(key); !set {
 		return false
 	}
 	return key != config.RedisDBSettingKey || strings.TrimSpace(value) != ""
+}
+
+// EnvironmentSetting is the value the process environment supplies for key;
+// set is false when it supplies none. A save of such a key is refused
+// (environmentRefusesSave), and a selective restore keeps it.
+func (h *AdminHandler) EnvironmentSetting(key string) (value string, set bool) {
+	if !h.BootstrapSensitiveConfigured[key] {
+		return "", false
+	}
+	return h.BootstrapSensitiveValues[key], true
 }
 
 func shouldPersistAdminSetting(stored map[string]string, key, normalized string, effectiveChanged bool) bool {

@@ -112,7 +112,7 @@ export function PlayingStage({
       </StagedHero>
       <section className="surface-panel-subtle rounded-xl px-3 py-3">
         <div className="flex items-center justify-between px-2 pb-2">
-          <h3 className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+          <h3 className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
             {t("web.watchTogether.playing.afterTitle")}
           </h3>
         </div>

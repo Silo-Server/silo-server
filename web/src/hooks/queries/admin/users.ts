@@ -9,7 +9,7 @@ import {
   getAdminDevice,
   resetAdminDeviceLearnedLimit,
 } from "@/api/v2/adminDevices";
-import { V2ProblemError } from "@/api/v2/request";
+import { readableErrorText, V2ProblemError } from "@/api/v2/request";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { captureProfileRequestContext } from "@/api/client";
@@ -33,6 +33,7 @@ import {
 export { adminUserFromV2 } from "@/api/v2/adminUsers";
 import { SETTING_DEFINITIONS, SETTING_KEYS, type SettingKey } from "@/lib/settingsContract";
 import { adminKeys } from "../keys";
+import { settingWriteOptions, toastSettingWriteError } from "../settingWriteOffline";
 import { useAdminUserProfiles } from "./history";
 import { toast } from "sonner";
 import { t } from "@/i18n";
@@ -142,11 +143,18 @@ export function settingValueFromString(key: string, raw: string): unknown {
   }
 }
 
+type AdminSettingValueRow = Awaited<ReturnType<typeof listAdminSettingValues>>["values"][number];
+
+const adminUserSettingValuesKey = (
+  authority: Parameters<typeof adminUserScope>[0],
+  userId: number,
+) => [...adminUsersKey(adminUserScope(authority)), "settings", userId];
+
 /** Every explicit canonical value the target user has stored, all scopes. */
 function useAdminUserSettingValues(userId: number) {
   const authority = captureProfileRequestContext();
   return useQuery({
-    queryKey: [...adminUsersKey(adminUserScope(authority)), "settings", userId],
+    queryKey: adminUserSettingValuesKey(authority, userId),
     queryFn: async () => {
       const response = await listAdminSettingValues(
         userId,
@@ -167,9 +175,7 @@ function invalidateAdminDeviceCaches(
 ) {
   // Device overrides derive from the canonical values list, which lives under
   // the userSettings key.
-  queryClient.invalidateQueries({
-    queryKey: [...adminUsersKey(adminUserScope(authority)), "settings", userId],
-  });
+  queryClient.invalidateQueries({ queryKey: adminUserSettingValuesKey(authority, userId) });
   queryClient.invalidateQueries({ queryKey: adminKeys.devices() });
 }
 
@@ -317,6 +323,7 @@ export function useUpdateAdminUserSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: async ({
       userId,
@@ -333,13 +340,11 @@ export function useUpdateAdminUserSetting() {
     onSuccess: (_data, variables) => {
       toast.success(t("web.admin.common.users.settingUpdated"));
       queryClient.invalidateQueries({
-        queryKey: [...adminUsersKey(adminUserScope(authority)), "settings", variables.userId],
+        queryKey: adminUserSettingValuesKey(authority, variables.userId),
       });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.common.users.settingSaveFailed"),
-      );
+      toastSettingWriteError(err, t("web.admin.common.users.settingSaveFailed"));
     },
   });
 }
@@ -348,6 +353,7 @@ export function useDeleteAdminUserSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: async ({
       userId,
@@ -369,13 +375,11 @@ export function useDeleteAdminUserSetting() {
     onSuccess: (_data, variables) => {
       toast.success(t("web.admin.common.users.settingReset"));
       queryClient.invalidateQueries({
-        queryKey: [...adminUsersKey(adminUserScope(authority)), "settings", variables.userId],
+        queryKey: adminUserSettingValuesKey(authority, variables.userId),
       });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.common.users.settingResetFailed"),
-      );
+      toastSettingWriteError(err, t("web.admin.common.users.settingResetFailed"));
     },
   });
 }
@@ -448,6 +452,7 @@ export function useUpdateAdminUserDeviceSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: async ({
       userId,
@@ -469,17 +474,32 @@ export function useUpdateAdminUserDeviceSetting() {
         settingValueFromString(key, value),
         authority,
       ),
-    onSuccess: (_data, variables) => {
+    onSuccess: async (stored, variables) => {
       toast.success(t("web.admin.common.users.deviceOverrideUpdated"));
+      // Put the stored row in the cached list before the save settles: the
+      // subtitle appearance editor builds each save on that row, and a
+      // reopened editor starts from it, so it can't wait on a refetch that may
+      // be slow, skipped (the list isn't on screen) or fail.
+      const settingsKey = adminUserSettingValuesKey(authority, variables.userId);
+      await queryClient.cancelQueries({ queryKey: settingsKey });
+      queryClient.setQueryData<AdminSettingValueRow[]>(settingsKey, (rows) => {
+        if (!rows) return rows;
+        const target = (row: AdminSettingValueRow) =>
+          row.key === stored.key &&
+          row.scope === stored.scope &&
+          row.profile_id === stored.profile_id &&
+          row.device_id === stored.device_id;
+        return rows.some(target)
+          ? rows.map((row) => (target(row) ? stored : row))
+          : [...rows, stored];
+      });
       invalidateAdminDeviceCaches(queryClient, variables.userId, authority);
       queryClient.invalidateQueries({
         queryKey: adminKeys.deviceDetail(variables.userId, variables.deviceId),
       });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.common.users.deviceOverrideSaveFailed"),
-      );
+      toastSettingWriteError(err, t("web.admin.common.users.deviceOverrideSaveFailed"));
     },
   });
 }
@@ -488,6 +508,7 @@ export function useDeleteAdminUserDeviceSetting() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: ({
       userId,
@@ -514,9 +535,7 @@ export function useDeleteAdminUserDeviceSetting() {
       });
     },
     onError: (err) => {
-      toast.error(
-        err instanceof Error ? err.message : t("web.admin.common.users.deviceOverrideResetFailed"),
-      );
+      toastSettingWriteError(err, t("web.admin.common.users.deviceOverrideResetFailed"));
     },
   });
 }
@@ -531,6 +550,7 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
   const queryClient = useQueryClient();
   const authority = captureAdminSettingAuthority();
   return useMutation({
+    ...settingWriteOptions,
     retry: false,
     mutationFn: async ({
       userId,
@@ -558,16 +578,15 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
             completed++;
             continue;
           }
+          // A failure without a readable reason (no connection) gets none: the
+          // count already says how far the reset got.
           throw new Error(
             t("web.admin.common.users.resetAllStopped", {
               count: keys.length,
               count_text: keys.length,
               completed: completed,
-              reason:
-                err instanceof Error
-                  ? err.message
-                  : t("web.admin.common.users.resetAllRemainingFailed"),
-            }),
+              reason: readableErrorText(err, ""),
+            }).trimEnd(),
           );
         }
       }
@@ -582,7 +601,7 @@ export function useDeleteAllAdminUserDeviceSettingsForDevice() {
     },
     onError: (err, variables) => {
       invalidateAdminDeviceCaches(queryClient, variables.userId, authority);
-      toast.error(err instanceof Error ? err.message : t("web.admin.common.users.resetAllFailed"));
+      toastSettingWriteError(err, t("web.admin.common.users.resetAllFailed"));
     },
   });
 }

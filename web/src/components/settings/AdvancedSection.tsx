@@ -110,7 +110,7 @@ export function AdvancedSection({
         onClick={toggle}
         className={cn(
           "text-muted-foreground hover:text-foreground flex w-full items-center gap-2.5",
-          "py-3 text-start text-[13px] transition-colors",
+          "py-3 text-start text-[0.8125rem] transition-colors",
           open && "text-foreground",
         )}
       >

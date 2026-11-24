@@ -1,4 +1,4 @@
-import { usePlaybackBarHeight } from "@/hooks/usePlaybackBarHeight";
+import { useRootHeightProperty } from "@/hooks/useRootHeightProperty";
 import { X, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useT } from "@/i18n";
 import { SeekBar } from "@/player/components/SeekBar";
@@ -9,6 +9,7 @@ import { SleepTimerMenu } from "@/player/components/SleepTimerMenu";
 import { VolumeControl } from "@/player/components/VolumeControl";
 import { CoverExpandTile } from "./CoverExpandTile";
 import { PlayerSettingsMenu } from "./PlayerSettingsMenu";
+import { AUDIOBOOK_BAR_HEIGHT_PROPERTY } from "./audiobookPlaybackContext";
 import { SkipIcon } from "./SkipIcon";
 import { SpeedControl } from "./SpeedControl";
 import type { AudiobookPlayback } from "./useAudiobookPlayback";
@@ -40,7 +41,14 @@ export function MiniBar({
   autoFocusExpand,
 }: MiniBarProps) {
   const t = useT();
-  const barRef = usePlaybackBarHeight("audiobook");
+  // Now Listening unmounts the bar while it covers the page. The height stays
+  // published meanwhile, so the padding that clears the bar doesn't drop and
+  // pull a page scrolled to its end up under it. AudiobookPlaybackProvider
+  // clears it when playback ends.
+  const barRef = useRootHeightProperty(AUDIOBOOK_BAR_HEIGHT_PROPERTY, {
+    includeBottomInset: true,
+    keepAfterUnmount: true,
+  });
   const hasChapters = playback.chapters.length > 0;
   const hasNextChapter =
     playback.currentChapter != null && playback.currentChapter.index + 1 < playback.chapters.length;
@@ -75,7 +83,7 @@ export function MiniBar({
           <div className="flex min-w-0 flex-col gap-0.5">
             {title ? (
               <div
-                className="truncate text-[14px] leading-tight font-semibold tracking-tight sm:text-[15px]"
+                className="truncate text-[0.875rem] leading-tight font-semibold tracking-tight sm:text-[0.9375rem]"
                 title={title}
               >
                 {title}
@@ -84,16 +92,16 @@ export function MiniBar({
             {playback.currentChapter ? (
               <div
                 data-testid="minibar-chapter-title"
-                className="text-muted-foreground truncate text-[11px] leading-tight"
+                className="text-muted-foreground truncate text-[0.6875rem] leading-tight"
                 title={playback.currentChapter.title}
               >
                 {playback.currentChapter.title}
               </div>
             ) : null}
-            <div className="text-muted-foreground flex items-center gap-2 text-[10px] leading-tight uppercase">
+            <div className="text-muted-foreground flex items-center gap-2 text-[0.625rem] leading-tight uppercase">
               <span
                 dir="ltr"
-                className="font-mono text-[11px] tracking-[0.12em] normal-case tabular-nums"
+                className="font-mono text-[0.6875rem] tracking-[0.12em] normal-case tabular-nums"
               >
                 {formatTime(playback.currentTime)}
                 <span className="mx-1 opacity-50">{TIME_SEPARATOR}</span>

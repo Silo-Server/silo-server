@@ -46,7 +46,7 @@ export function DownloadsWidget() {
     <Card className="h-full">
       <WidgetHeader title={t("web.admin.dashboard.widgets.downloads.title")}>
         {stats && hasDownloads ? (
-          <span className="text-muted-foreground text-[11px] tabular-nums">
+          <span className="text-muted-foreground text-[0.6875rem] tabular-nums">
             {t("web.admin.dashboard.widgets.downloads.summary24h", {
               started: stats.downloads_started_24h.toLocaleString(formatLocale()),
               finished: stats.downloads_completed_24h.toLocaleString(formatLocale()),
@@ -99,7 +99,7 @@ export function DownloadsWidget() {
 function DownloadsStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="surface-panel-subtle rounded-lg px-2.5 py-2">
-      <dt className="text-muted-foreground text-[11px] leading-none font-medium">{label}</dt>
+      <dt className="text-muted-foreground text-[0.6875rem] leading-none font-medium">{label}</dt>
       <dd className="mt-1 text-lg leading-none font-extrabold tracking-tight tabular-nums">
         {value}
       </dd>

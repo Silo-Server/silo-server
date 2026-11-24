@@ -114,7 +114,7 @@ func (s *Service) BeforeUpgrade(ctx context.Context, opts UpgradeOptions) (Held,
 		slog.InfoContext(ctx, "the backup before database migrations is still running", "component", "backup",
 			"step", step.Load(), "elapsed", elapsed.Round(time.Second).String())
 	})
-	result, err := s.backupWith(work, held, KindBeforeUpgrade, "", func(_ float64, message string) {
+	result, err := s.backupWith(work, held, KindBeforeUpgrade, "", time.Time{}, func(_ float64, message string) {
 		step.Store(message)
 		slog.InfoContext(ctx, "backup before database migrations", "component", "backup", "step", message)
 	}, nil, upgrade)

@@ -57,3 +57,7 @@ func TestSQLiteProfilePINRevisionTransactions(t *testing.T) {
 func TestSQLiteDeleteProfileRemovesProfileState(t *testing.T) {
 	storetest.RunDeleteProfileRemovesProfileState(t, newConformanceStore, false)
 }
+
+func TestSQLiteCollectionsHolding(t *testing.T) {
+	storetest.RunCollectionsHolding(t, newConformanceStore(t))
+}

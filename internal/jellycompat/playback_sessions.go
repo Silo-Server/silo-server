@@ -126,10 +126,15 @@ type PlaybackMediaSource struct {
 	TargetAudioChannels      int
 	// TargetVideoCodec fixes encoded HLS codec during PlaybackInfo negotiation.
 	// Empty values are legacy H.264 sessions.
-	TargetVideoCodec     string
-	ID                   string
-	FileID               int
-	Version              catalog.FileVersion
+	TargetVideoCodec string
+	ID               string
+	FileID           int
+	Version          catalog.FileVersion
+	// EndCreditsStart is where Version's end credits start, or 0 without any:
+	// reaching it finishes the item (markers.CreditsLimits.EndCreditsStart). PlaybackInfo
+	// resolves it with the item's kind and every marker occurrence, which a
+	// session reloaded from the durable store no longer has.
+	EndCreditsStart      float64
 	SupportsDirectPlay   bool
 	SupportsDirectStream bool
 	SupportsTranscoding  bool
@@ -143,10 +148,11 @@ type PlaybackMediaSource struct {
 	// HLS copy stream is served from a keyframe-planned playlist
 	// (playback.copy_keyframe_playlist when the session started).
 	KeyframePlaylist bool
-	// DOVIVariant marks a copy remux of Dolby Vision without a compatible base
-	// layer (HEVC profile 5, AV1 profile 10) for a client whose device profile
-	// explicitly lists DOVI. As in Jellyfin 12, the fMP4 master playlist then
-	// offers a dvh1/dav1 variant ahead of the hvc1 fallback.
+	// DOVIVariant marks a copy remux of Dolby Vision HEVC profile 5 or AV1
+	// profile 10.0, 10.1 or 10.4 (compatDOVIVariantEligible) for a client
+	// whose device profile explicitly lists DOVI. As in Jellyfin 12, the fMP4
+	// master playlist then offers a dvh1/dav1 variant ahead of the hvc1
+	// fallback.
 	DOVIVariant bool
 	// DVStripToHDR10 marks an HLS remux that strips Dolby Vision RPUs so the
 	// client receives the HDR10 base layer it accepts in place of the Dolby
