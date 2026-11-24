@@ -729,8 +729,13 @@ export function VideoPlayer({
   const backendDurationRef = useRef(propDuration ?? 0);
   const autoEnterPictureInPictureAttemptedRef = useRef(false);
   const autoSkippedRecapKeyRef = useRef<string | null>(null);
-  /** The recap whose automatic skip was refused or failed, which offers its pill instead. */
-  const [failedAutoRecapKey, setFailedAutoRecapKey] = useState<string | null>(null);
+  /**
+   * Recaps whose automatic skip was refused or failed, which offer their pill
+   * instead. A set, so a late answer for one recap cannot unmark another.
+   */
+  const [failedAutoRecapKeys, setFailedAutoRecapKeys] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const lastInputWasKeyboardRef = useRef(false);
   const endedFiredRef = useRef(false);
   const [hasEnded, setHasEnded] = useState(false);
@@ -2824,7 +2829,11 @@ export function VideoPlayer({
       !awaitingFirstFrame &&
       introPromptCanSeek &&
       // An automatic recap skip answers the pill, unless the seek did not take.
-      !(autoSkipRecap && activeSkipMarker?.kind === "recap" && failedAutoRecapKey !== autoRecapKey),
+      !(
+        autoSkipRecap &&
+        activeSkipMarker?.kind === "recap" &&
+        !failedAutoRecapKeys.has(autoRecapKey ?? "")
+      ),
     onSeek: handlePlayerSeek,
     skipLabel: activeSkipMarker ? skipMarkerLabel(t, activeSkipMarker.kind) : undefined,
   });
@@ -2845,19 +2854,17 @@ export function VideoPlayer({
     }
 
     const recapKey = autoRecapKey;
-    if (autoSkippedRecapKeyRef.current === recapKey) {
+    if (recapKey === null || autoSkippedRecapKeyRef.current === recapKey) {
       return;
     }
     autoSkippedRecapKeyRef.current = recapKey;
     // A refused or failed seek leaves the viewer in the recap, so the pill is
     // offered instead. The skip is not retried: that would repeat on every
     // position update.
-    void Promise.resolve(handlePlayerSeek(activeRecap.end)).then(
-      (accepted) => {
-        if (!accepted) setFailedAutoRecapKey(recapKey);
-      },
-      () => setFailedAutoRecapKey(recapKey),
-    );
+    const markFailed = () => setFailedAutoRecapKeys((keys) => new Set(keys).add(recapKey));
+    void Promise.resolve(handlePlayerSeek(activeRecap.end)).then((accepted) => {
+      if (!accepted) markFailed();
+    }, markFailed);
   }, [
     autoRecapKey,
     autoSkipRecap,
