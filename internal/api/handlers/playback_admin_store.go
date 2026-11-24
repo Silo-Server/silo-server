@@ -207,27 +207,6 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 	// an earlier plan with a later replan.
 	const rowRouteFactsAt = `COALESCE(admin_playback_history.route_facts_at, admin_playback_history.ended_at)`
 	const routeSnapshotReplace = `(EXCLUDED.route_facts_recorded AND (NOT admin_playback_history.route_facts_recorded OR EXCLUDED.route_facts_at >= ` + rowRouteFactsAt + `))`
-	const routeSnapshotDistinct = `ROW(
-			EXCLUDED.play_method, EXCLUDED.video_decision, EXCLUDED.audio_decision,
-			EXCLUDED.effective_media_file_id, EXCLUDED.audio_track_index,
-			EXCLUDED.target_video_codec, EXCLUDED.target_resolution, EXCLUDED.target_audio_codec,
-			EXCLUDED.target_audio_channels, EXCLUDED.output_container, EXCLUDED.output_protocol,
-			EXCLUDED.target_bitrate_kbps, EXCLUDED.transcode_hw_accel, EXCLUDED.tone_map_mode,
-			EXCLUDED.adaptation_reasons, EXCLUDED.reporting_node, EXCLUDED.stream_location,
-			EXCLUDED.compat_origin, EXCLUDED.routing_execution, EXCLUDED.routing_execution_node_id,
-			EXCLUDED.routing_execution_node_name, EXCLUDED.routing_egress, EXCLUDED.routing_egress_node_id,
-			EXCLUDED.routing_egress_node_name
-		) IS DISTINCT FROM ROW(
-			admin_playback_history.play_method, admin_playback_history.video_decision, admin_playback_history.audio_decision,
-			admin_playback_history.effective_media_file_id, admin_playback_history.audio_track_index,
-			admin_playback_history.target_video_codec, admin_playback_history.target_resolution, admin_playback_history.target_audio_codec,
-			admin_playback_history.target_audio_channels, admin_playback_history.output_container, admin_playback_history.output_protocol,
-			admin_playback_history.target_bitrate_kbps, admin_playback_history.transcode_hw_accel, admin_playback_history.tone_map_mode,
-			admin_playback_history.adaptation_reasons, admin_playback_history.reporting_node, admin_playback_history.stream_location,
-			admin_playback_history.compat_origin, admin_playback_history.routing_execution, admin_playback_history.routing_execution_node_id,
-			admin_playback_history.routing_execution_node_name, admin_playback_history.routing_egress, admin_playback_history.routing_egress_node_id,
-			admin_playback_history.routing_egress_node_name
-		)`
 	batch := &pgx.Batch{}
 	batch.Queue(`
 		INSERT INTO admin_playback_history
@@ -306,9 +285,9 @@ func historyBatch(entry AdminPlaybackHistoryEntry) *pgx.Batch {
 			route_facts_recorded = admin_playback_history.route_facts_recorded OR EXCLUDED.route_facts_recorded
 		WHERE `+watchAdvanced+`
 			OR (EXCLUDED.route_facts_recorded AND NOT admin_playback_history.route_facts_recorded)
-			OR (EXCLUDED.route_facts_recorded
-				AND EXCLUDED.route_facts_at > `+rowRouteFactsAt+`
-				AND `+routeSnapshotDistinct+`)
+			-- Newer route facts, even unchanged ones, so route_facts_at keeps
+			-- up and a delayed older copy can't take their place.
+			OR (EXCLUDED.route_facts_recorded AND EXCLUDED.route_facts_at > `+rowRouteFactsAt+`)
 	`,
 		entry.SessionID,
 		entry.UserID,

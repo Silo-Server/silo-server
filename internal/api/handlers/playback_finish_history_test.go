@@ -1102,30 +1102,44 @@ func TestAdminPlaybackHistoryRouteFactsOrderDB(t *testing.T) {
 
 	started := time.Date(2026, 3, 10, 12, 0, 0, 0, time.UTC)
 	store := NewPGPlaybackAdminStore(pool, nil)
-	sessionID := "route-order-" + suffix
-	record := func(endedAfter time.Duration, resolution string) {
-		t.Helper()
-		if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
-			SessionID: sessionID, UserID: account, ProfileID: "p-1", PlayMethod: "transcode",
-			StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(endedAfter).Format(time.RFC3339Nano),
-			EndPositionSeconds: 600, TargetVideoCodec: "h264", TargetResolution: resolution,
-			RouteFactsRecorded: true,
-		}); err != nil {
+	// Each case records copies in arrival order; none knows more watch time.
+	for _, tc := range []struct {
+		name   string
+		copies []struct {
+			endedAfter time.Duration
+			resolution string
+		}
+		want string
+	}{
+		{"newer facts, then a delayed older copy", []struct {
+			endedAfter time.Duration
+			resolution string
+		}{{10 * time.Minute, "1080p"}, {15 * time.Minute, "720p"}, {12 * time.Minute, "480p"}}, "720p"},
+		{"the same facts seen later, then a delayed older copy", []struct {
+			endedAfter time.Duration
+			resolution string
+		}{{10 * time.Minute, "1080p"}, {15 * time.Minute, "1080p"}, {12 * time.Minute, "480p"}}, "1080p"},
+	} {
+		sessionID := "route-order-" + uuid.NewString()
+		for _, c := range tc.copies {
+			if err := store.RecordHistory(ctx, AdminPlaybackHistoryEntry{
+				SessionID: sessionID, UserID: account, ProfileID: "p-1", PlayMethod: "transcode",
+				StartedAt: started.Format(time.RFC3339Nano), EndedAt: started.Add(c.endedAfter).Format(time.RFC3339Nano),
+				EndPositionSeconds: 600, TargetVideoCodec: "h264", TargetResolution: c.resolution,
+				RouteFactsRecorded: true,
+			}); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var resolution string
+		var endedAt time.Time
+		if err := pool.QueryRow(ctx, `SELECT COALESCE(target_resolution, ''), ended_at FROM admin_playback_history WHERE session_id = $1`, sessionID).
+			Scan(&resolution, &endedAt); err != nil {
 			t.Fatal(err)
 		}
-	}
-	record(10*time.Minute, "1080p")
-	record(15*time.Minute, "720p") // newer facts, no more watch time
-	record(12*time.Minute, "480p") // delayed copy with older facts
-
-	var resolution string
-	var endedAt time.Time
-	if err := pool.QueryRow(ctx, `SELECT COALESCE(target_resolution, ''), ended_at FROM admin_playback_history WHERE session_id = $1`, sessionID).
-		Scan(&resolution, &endedAt); err != nil {
-		t.Fatal(err)
-	}
-	if resolution != "720p" || !endedAt.Equal(started.Add(10*time.Minute)) {
-		t.Fatalf("route facts = %q, ended %v; want the 15-minute copy's 720p and the recorded end", resolution, endedAt)
+		if resolution != tc.want || !endedAt.Equal(started.Add(10*time.Minute)) {
+			t.Fatalf("%s: route facts = %q, ended %v; want %q and the recorded end", tc.name, resolution, endedAt, tc.want)
+		}
 	}
 }
 
