@@ -78,6 +78,18 @@ ORDER BY action, content_id), '{}') FROM catalog_search_index_events WHERE id > 
 	}
 	check("before", false)
 	migrationExec(t, tx, adminMigrationSQL(t, migration, schema, false))
+	// A static trigger statement keeps the plan from its first call on the
+	// connection. After a one-row first call, that plan compares every row
+	// of a large rewrite with every other one, which takes most of a minute
+	// here; planned per call, it takes well under a second.
+	queued("after", "unchanged one-row update", "UPDATE episodes SET updated_at = clock_timestamp() WHERE content_id = 'e2'")
+	migrationExec(t, tx, `
+INSERT INTO episodes(content_id,series_id,season_number,episode_number,title,overview)
+SELECT 'bulk-' || g, 'bulk-series', 1, g, 'Episode ' || g, repeat('An overview of typical length. ', 20) FROM generate_series(1, 8000) g`)
+	migrationExec(t, tx, "SET LOCAL statement_timeout = '10s'")
+	queued("after", "unchanged rewrite of a large series",
+		"UPDATE episodes SET updated_at = clock_timestamp() WHERE series_id = 'bulk-series'")
+	migrationExec(t, tx, "SET LOCAL statement_timeout = 0")
 	check("after", true)
 	migrationExec(t, tx, adminMigrationSQL(t, migration, schema, true))
 	check("rolled back", false)
