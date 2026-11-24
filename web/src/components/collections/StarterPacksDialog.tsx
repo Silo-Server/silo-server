@@ -210,7 +210,7 @@ export function StarterPacksDialog({
   const footerStart = running ? (
     <span
       role="status"
-      className="text-muted-foreground inline-flex items-center gap-2 text-[13px]"
+      className="text-muted-foreground inline-flex items-center gap-2 text-[0.8125rem]"
     >
       <Loader2 aria-hidden className="size-4 animate-spin" />
       {progress && progress.total > 0
@@ -224,7 +224,7 @@ export function StarterPacksDialog({
           })}
     </span>
   ) : (
-    <span className="text-muted-foreground inline-flex min-w-0 items-center gap-2 text-[13px]">
+    <span className="text-muted-foreground inline-flex min-w-0 items-center gap-2 text-[0.8125rem]">
       <RefreshCw aria-hidden className="size-4 shrink-0 max-sm:hidden" />
       {/* Phones only fit the buttons; screen readers still hear the note. */}
       <span className="truncate max-sm:sr-only">
@@ -296,7 +296,7 @@ export function StarterPacksDialog({
               ) : null}
               <div>
                 <h3 className="text-lg font-semibold tracking-[-0.02em]">{pack.title}</h3>
-                <p className="text-muted-foreground mt-1 text-[13.5px]">{pack.description}</p>
+                <p className="text-muted-foreground mt-1 text-[0.84375rem]">{pack.description}</p>
               </div>
 
               {run && finished && run.pack.id === pack.id ? (
@@ -363,7 +363,7 @@ export function StarterPacksDialog({
 function AddedTag() {
   const t = useT();
   return (
-    <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+    <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[0.6875rem] font-medium text-emerald-600 dark:text-emerald-400">
       {t("web.collections.starterPacks.added")}
     </span>
   );
@@ -551,7 +551,7 @@ function LibraryChips({
 
 function Tag({ children, pin = false }: { children: string; pin?: boolean }) {
   return (
-    <span className="border-border text-muted-foreground inline-flex h-5 shrink-0 items-center gap-1 rounded-full border px-2 text-[11px] font-medium">
+    <span className="border-border text-muted-foreground inline-flex h-5 shrink-0 items-center gap-1 rounded-full border px-2 text-[0.6875rem] font-medium">
       {pin ? <Pin aria-hidden className="size-3" /> : null}
       {children}
     </span>
@@ -616,7 +616,7 @@ function WhatWillHappen({
   } else if (loading || !plan || !result) {
     body = (
       <div role="status" className="grid gap-2">
-        <span className="text-muted-foreground text-[13px]">
+        <span className="text-muted-foreground text-[0.8125rem]">
           {t("web.collections.starterPacks.checking")}
         </span>
         <Skeleton className="h-9 w-full rounded-lg" />
@@ -634,7 +634,7 @@ function WhatWillHappen({
       <>
         <div className="border-border overflow-x-auto rounded-xl border">
           <table aria-labelledby={`${id}-label`} className="w-full text-start text-sm">
-            <thead className="text-muted-foreground text-[12.5px]">
+            <thead className="text-muted-foreground text-[0.78125rem]">
               <tr>
                 <th scope="col" className="px-3.5 py-2.5 font-medium">
                   {t("web.collections.starterPacks.columnLibrary")}
@@ -731,7 +731,7 @@ function WhatWillHappen({
           </table>
         </div>
         {newCount > SYNC_LOAD_THRESHOLD ? (
-          <p className="text-muted-foreground text-[13px]">
+          <p className="text-muted-foreground text-[0.8125rem]">
             {t("web.collections.starterPacks.syncLoad", { count: newCount })}
           </p>
         ) : null}
@@ -752,7 +752,7 @@ function WhatWillHappen({
         ) : null}
       </div>
       {body}
-      <p className="text-muted-foreground flex items-start gap-2 text-[13px] leading-normal">
+      <p className="text-muted-foreground flex items-start gap-2 text-[0.8125rem] leading-normal">
         <Layers3 aria-hidden className="mt-[3px] size-3.5 shrink-0" />
         <span>
           {t(
@@ -773,7 +773,7 @@ function PackLists({ row }: { row: PackLibraryRow }) {
     <li
       key={`${entry.templateId}-${tag ?? "new"}`}
       className={cn(
-        "border-border flex items-center gap-2 border-b py-1.5 text-[13px]",
+        "border-border flex items-center gap-2 border-b py-1.5 text-[0.8125rem]",
         tag && !pin && "text-muted-foreground",
       )}
     >
@@ -843,7 +843,7 @@ function HeroBanners({
       <div className="flex items-center justify-between gap-4">
         <div>
           <div className="text-sm font-medium">{t("web.collections.starterPacks.useHeroes")}</div>
-          <div className="text-muted-foreground text-[13px]">
+          <div className="text-muted-foreground text-[0.8125rem]">
             {t("web.collections.starterPacks.useHeroesHelp")}
           </div>
         </div>
@@ -856,7 +856,7 @@ function HeroBanners({
       </div>
       <div className={cn("grid gap-2", !on && "opacity-55")}>
         {!on ? (
-          <div className="text-[13px] font-medium">
+          <div className="text-[0.8125rem] font-medium">
             {t("web.collections.starterPacks.ifYouTurnItOn")}
           </div>
         ) : null}
@@ -940,13 +940,13 @@ function HeroLine({
   return (
     <div
       data-testid={testId}
-      className="text-muted-foreground grid grid-cols-[16px_minmax(0,1fr)] items-center gap-x-2.5 gap-y-1 text-[13px] sm:grid-cols-[16px_120px_minmax(0,1fr)]"
+      className="text-muted-foreground grid grid-cols-[16px_minmax(0,1fr)] items-center gap-x-2.5 gap-y-1 text-[0.8125rem] sm:grid-cols-[16px_120px_minmax(0,1fr)]"
     >
       {icon}
       <span>{page}</span>
       <span className="col-span-2 flex flex-wrap items-center gap-2 sm:col-span-1">
         <Select value={value} onValueChange={onChange} disabled={disabled}>
-          <SelectTrigger aria-label={label} className="h-[30px] w-auto max-w-full text-[13px]">
+          <SelectTrigger aria-label={label} className="h-7.5 w-auto max-w-full text-[0.8125rem]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -1041,7 +1041,7 @@ function ApplyResult({
       tabIndex={-1}
       aria-labelledby={`${id}-title`}
       className={cn(
-        "grid gap-1 rounded-xl border p-4 text-[13px] outline-none focus-visible:ring-[3px]",
+        "grid gap-1 rounded-xl border p-4 text-[0.8125rem] outline-none focus-visible:ring-[3px]",
         succeeded ? "border-border bg-muted/30" : "border-destructive/40 bg-destructive/5",
       )}
     >

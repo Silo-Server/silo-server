@@ -1026,6 +1026,20 @@ func (r *fakeMetadataFolderRepo) GetByID(_ context.Context, id int) (*models.Med
 	return nil, catalog.ErrFolderNotFound
 }
 
+func (r *fakeMetadataFolderRepo) ListByIDs(_ context.Context, ids []int) ([]*models.MediaFolder, error) {
+	var out []*models.MediaFolder
+	for _, id := range ids {
+		if err, ok := r.lookupErrs[id]; ok {
+			return nil, err
+		}
+		if folder, ok := r.folders[id]; ok && folder.Enabled {
+			cp := *folder
+			out = append(out, &cp)
+		}
+	}
+	return out, nil
+}
+
 // fakeRootClaimRepo implements metadataRootClaimRepo.
 type fakeRootClaimRepo struct {
 	mu     sync.Mutex

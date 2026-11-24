@@ -521,6 +521,12 @@
       "value": "Táto relácia prehrávania sa skončila. Spustite prehrávanie znova."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Prehrávanie sa zastavilo, pretože bolo príliš dlho pozastavené. Spustite prehrávanie znova."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -3724,7 +3730,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "Prehrať teraz"
+      "value": "Prehrať ďalšiu epizódu"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -28573,6 +28579,16 @@
     {
       "type": 0,
       "value": "."
+    }
+  ],
+  "web.admin.common.catalogImportSource.exportJob": [
+    {
+      "type": 0,
+      "value": "Úloha exportu "
+    },
+    {
+      "type": 1,
+      "value": "id"
     }
   ],
   "web.admin.common.connectionCheck.check": [
@@ -81249,6 +81265,24 @@
       "value": "Uložiť do knižnice"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pozastavené prehrávanie"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Ukončiť pozastavené prehrávanie po"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 až 1440. Ukončí video, ktoré je v aplikácii Silo takto dlho pozastavené, a uvoľní jeho stream aj prípadné prekódovanie; po opätovnom spustení prehrávanie pokračuje od rovnakého miesta. Spoločné sledovanie, prenos do iných zariadení a audioknihy to neovplyvní. Hodnota 0 túto funkciu vypne."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -81783,6 +81817,12 @@
     {
       "type": 0,
       "value": "dní"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "min"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -87807,6 +87847,12 @@
       "value": "Zapnúť softvérové mapovanie tónov HDR"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Ukončiť pozastavené prehrávanie po (min)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -87865,6 +87911,12 @@
     {
       "type": 0,
       "value": "Zdroj značiek"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pozastavené prehrávanie"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -89919,6 +89971,36 @@
     {
       "type": 0,
       "value": "Najprv zapnite poskytovateľa prihlásenia. Keby bolo prihlásenie heslom vypnuté a žiadny poskytovateľ zapnutý, mohli by sa prihlásiť iba núdzoví správcovia."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Od 8 do 72 znakov. Pravidlá platia, keď si niekto volí alebo mení heslo; už nastavené heslá fungujú ďalej."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Minimálna dĺžka hesla"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Akékoľvek interpunkčné znamienko alebo symbol, napríklad ! alebo #. Písmená, číslice a medzery sa nezapočítavajú."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Vyžadovať špeciálny znak"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Vyžadovať veľké písmeno"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -103393,6 +103475,20 @@
       "value": "Nastavuje sa…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Heslo odovzdajte používateľovi "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " sami."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -106427,10 +106523,96 @@
       "value": " nepovoľuje tomuto zariadeniu prihlásiť sa na tento server."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aspoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znak."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aspoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaky."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aspoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaku."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Aspoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znakov."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Heslá sa nezhodujú."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Použite aspoň jeden špeciálny znak, napríklad ! alebo #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Použite aspoň jedno veľké písmeno."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -106443,6 +106625,80 @@
     {
       "type": 0,
       "value": "Použite aspoň 8 znakov."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Použite aspoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znak."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Použite aspoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaky."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Použite aspoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaku."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Použite aspoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znakov."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -128354,6 +128610,104 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "Vymazať"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "Vaše hodnotenie"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "Vaše hodnotenie seriálu"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "Bez hodnotenia"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "Ohodnotiť"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "Ohodnotiť film"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "Ohodnotiť seriál"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "Hodnotenie bolo odstránené"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "Vrátiť späť"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " z 5"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "Vy"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "Vaše hodnotenie: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " z 5"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "Vaše hodnotenie seriálu: "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " z 5"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -146078,7 +146432,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "Prehrať teraz"
+      "value": "Prehrať ďalšiu epizódu"
     }
   ],
   "web.player.nextEpisode.regionLabel": [
@@ -146987,6 +147341,12 @@
     {
       "type": 0,
       "value": "Správca ukončil túto reláciu prehrávania."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Prehrávanie sa zastavilo, pretože bolo príliš dlho pozastavené."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

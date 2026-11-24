@@ -41,7 +41,10 @@ var loggedTables = []string{"activity_log", "operational_logs", "policy_decision
 	"task_execution_leases",
 	// Provisioning status and placement from the current deployment must not
 	// be replayed by a restored backup.
-	tablePluginProvisionStatus, "plugin_provision_placement"}
+	tablePluginProvisionStatus, "plugin_provision_placement",
+	// Plugin builds for other platforms: a server fetches its own again
+	// from the catalog.
+	"plugin_platform_archives"}
 
 const tableIntroFingerprints = "media_intro_fingerprints"
 

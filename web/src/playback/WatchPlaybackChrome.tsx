@@ -1449,7 +1449,7 @@ export function WatchPlaybackBar() {
                 </div>
               </div>
               {state.pictureInPictureActive && (
-                <div className="hidden shrink-0 items-center gap-1 rounded-full bg-white/8 px-2.5 py-1 text-[11px] font-medium text-white/75 sm:flex">
+                <div className="hidden shrink-0 items-center gap-1 rounded-full bg-white/8 px-2.5 py-1 text-[0.6875rem] font-medium text-white/75 sm:flex">
                   <PictureInPicture2 className="h-3.5 w-3.5" />
                   {t("web.player.bar.pip")}
                 </div>
@@ -1488,7 +1488,7 @@ export function WatchPlaybackBar() {
                   transport?.seekTo(nextValue);
                 }}
               />
-              <div className="flex items-center justify-between text-[11px] text-white/55 tabular-nums">
+              <div className="flex items-center justify-between text-[0.6875rem] text-white/55 tabular-nums">
                 <span>{formatTime(displayedTime)}</span>
                 <span>{formatTime(snapshot ? snapshot.duration : 0)}</span>
               </div>

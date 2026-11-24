@@ -33,7 +33,7 @@ function ShowOnlyField({
     onChange(displayFiltersToQueryDefinition(nextWatch, nextMedia));
   return (
     <fieldset className="grid gap-2" aria-describedby={`${id}-help`}>
-      <legend className="mb-2 text-[14.5px] font-semibold">
+      <legend className="mb-2 text-[0.90625rem] font-semibold">
         {t("web.collections.copy.fieldShowOnly")}
       </legend>
       <div className="grid grid-cols-2 gap-2">
@@ -68,7 +68,7 @@ function ShowOnlyField({
           </SelectContent>
         </Select>
       </div>
-      <p id={`${id}-help`} className="text-muted-foreground text-[12.5px] leading-snug">
+      <p id={`${id}-help`} className="text-muted-foreground text-[0.78125rem] leading-snug">
         {t("web.collections.details.showOnlyHelp")}
       </p>
     </fieldset>
@@ -104,7 +104,7 @@ export function DetailsPanel({
       className="surface-panel grid content-start gap-4 rounded-[22px] p-5 sm:p-6"
     >
       <div className="grid gap-2">
-        <label htmlFor={`${id}-name`} className="text-[14.5px] font-semibold">
+        <label htmlFor={`${id}-name`} className="text-[0.90625rem] font-semibold">
           {t("web.collections.copy.fieldName")}
         </label>
         <Input
@@ -119,18 +119,22 @@ export function DetailsPanel({
           }}
         />
         {nameError ? (
-          <p id={`${id}-name-error`} role="alert" className="text-destructive text-[12.5px]">
+          <p id={`${id}-name-error`} role="alert" className="text-destructive text-[0.78125rem]">
             {nameError}
           </p>
         ) : null}
         {nameNote ? (
-          <p id={`${id}-name-note`} role="status" className="text-muted-foreground text-[12.5px]">
+          <p
+            id={`${id}-name-note`}
+            role="status"
+            className="text-muted-foreground text-[0.78125rem]"
+          >
             {nameNote}
           </p>
         ) : null}
       </div>
       <div className="grid gap-2">
-        <label htmlFor={`${id}-description`} className="text-[14.5px] font-semibold">
+        <label htmlFor={`${id}-description`} className="text-[0.90625rem] font-semibold">
           {t("web.collections.details.descriptionLabel", {
             field: t("web.collections.copy.fieldDescription"),
             muted: (chunks) => <span className="text-muted-foreground font-normal">{chunks}</span>,

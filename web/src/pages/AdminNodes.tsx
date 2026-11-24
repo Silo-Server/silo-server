@@ -142,13 +142,13 @@ const METRIC_GRID = "grid grid-cols-[auto_minmax(2rem,1fr)_auto] items-center ga
 function NodeMetricRow({ metric }: { metric: ResourceMetric }) {
   return (
     <>
-      <span className="text-muted-foreground text-[11px]" title={metric.title}>
+      <span className="text-muted-foreground text-[0.6875rem]" title={metric.title}>
         {metric.label}
       </span>
       <LoadMeter fill={metric.fill} warning={metric.warning} />
       <span
         className={cn(
-          "text-end font-mono text-[11px] tabular-nums",
+          "text-end font-mono text-[0.6875rem] tabular-nums",
           metric.muted && "text-muted-foreground",
           metric.warning && "text-warning font-medium",
         )}
@@ -199,12 +199,12 @@ function NodeCapacityBlock({ node, showEgress }: { node: StreamNode; showEgress:
           reader do that subtraction on every unit. The stamp stays in the title
           for when the exact moment matters.
         */}
-        <span className="text-muted-foreground text-[11px]">
+        <span className="text-muted-foreground text-[0.6875rem]">
           {t("web.admin.nodes.unit.checked")}
         </span>
         <span />
         <span
-          className="text-end font-mono text-[11px] tabular-nums"
+          className="text-end font-mono text-[0.6875rem] tabular-nums"
           title={node.last_health_check ? formatDateTime(node.last_health_check) : undefined}
         >
           {formatRelativeTime(node.last_health_check) ?? t("web.admin.nodes.unit.never")}
@@ -305,7 +305,7 @@ function NodeEngineRow({ device }: { device: NodeGPULiveDevice }) {
   return (
     <>
       <span
-        className="text-muted-foreground max-w-[7rem] truncate font-mono text-[11px]"
+        className="text-muted-foreground max-w-[7rem] truncate font-mono text-[0.6875rem]"
         title={device.title}
       >
         {device.label}
@@ -313,14 +313,14 @@ function NodeEngineRow({ device }: { device: NodeGPULiveDevice }) {
       <LoadMeter fill={device.busyFill} />
       <span
         className={cn(
-          "text-end font-mono text-[11px] tabular-nums",
+          "text-end font-mono text-[0.6875rem] tabular-nums",
           device.busyMuted ? "text-muted-foreground" : "text-foreground",
         )}
         title={device.title}
       >
         {device.busy}
       </span>
-      <span className="text-muted-foreground text-end text-[10px] whitespace-nowrap">
+      <span className="text-muted-foreground text-end text-[0.625rem] whitespace-nowrap">
         {device.sessions}
       </span>
     </>
@@ -455,7 +455,7 @@ function GroupChip({
       )}
       <span className={cn(active && "font-medium")}>{label}</span>
       <span
-        className={cn("font-mono text-[10px] tabular-nums", !active && "text-muted-foreground")}
+        className={cn("font-mono text-[0.625rem] tabular-nums", !active && "text-muted-foreground")}
       >
         {count}
       </span>
@@ -630,7 +630,9 @@ function NodeUnit({
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-            <h3 className="text-[15px] leading-tight font-semibold tracking-tight">{node.name}</h3>
+            <h3 className="text-[0.9375rem] leading-tight font-semibold tracking-tight">
+              {node.name}
+            </h3>
             <span className="inline-flex items-center gap-1.5">
               <span
                 aria-hidden="true"
@@ -639,7 +641,7 @@ function NodeUnit({
               <span className="text-muted-foreground text-xs">{t(NODE_STATE_LABEL[state])}</span>
             </span>
             {node.group && (
-              <Badge variant="outline" className="font-mono text-[10px] font-normal">
+              <Badge variant="outline" className="font-mono text-[0.625rem] font-normal">
                 {node.group}
               </Badge>
             )}

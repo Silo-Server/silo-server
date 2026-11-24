@@ -2245,8 +2245,8 @@ first finalization that knows one records it and later ones never change it, eve
 that did not get further. `end_reason` is why the attempt ended: `stopped` (the viewer's
 client stopped it), `terminated` (an administrator stopped or terminated it), `expired`
 (the liveness reaper ended it after the client went quiet), `aborted` (the server
-abandoned it) or `replaced` (a Jellyfin client switched play method, and the play
-continues under a new session with its own row). Every end records a row, including a
+abandoned it) or `replaced` (a Jellyfin client switched play method or version, and
+the play continues under a new session with its own row). Every end records a row, including a
 stop, close or abort handled by a server that did not hold the session's live copy;
 that row takes the start time, client and device from the shared live row when one is
 left. The one exception is a Jellyfin session copy that never reported progress: it may
@@ -2256,7 +2256,13 @@ was recorded still gets its row, without the item and duration only the file gav
 an attempt is finalized more than once (copies on several servers, a retried stop), the
 end that stopped the session's lifecycle first sets the reason, and `lifecycle_seq` is
 that end's sequence number on the sessions channel (null on rows recorded before
-lifecycle numbers existed). Every one of these fields is
+lifecycle numbers existed). `subtitle` is the subtitle the play's plan delivered when it
+ended, in the live session rows' shape, or null when it showed none. Of several
+finalizations, the one that ended latest decides it, even one that did not get further
+into the play, and a subtitle change on its own never moves `ended_at`. When the lifecycle
+sweep ends a play whose attempt is gone, it only knows the subtitle the play's live or
+start row last synced, and counts it from that sync, so a subtitle a later finalization
+recorded is kept. Every one of these fields is
 null when unknown, which includes every attempt recorded before it existed; `end_reason`
 is also null for a server teardown the client never recovered from (an encoder exit).
 
@@ -2574,6 +2580,18 @@ by any other route. It answers deterministically:
 - Pause, resume and message require a live realtime lane (`409 conflict`
   otherwise). Stop without a lane answers `delivery: "fallback_scheduled"` and
   the server ends the session after the deadline.
+- `delivery: "dispatched"` means the command was written to the session's
+  realtime connection. The receipt does not say whether the player confirmed
+  it: a pause, resume or stop the player confirms later still reads
+  `dispatched`, and a connection whose player went away without closing it
+  still takes the write until the server's ping times out (about 30 seconds).
+- A message waits up to 3 seconds for the player's result before answering.
+  `delivery: "acknowledged"` means the player answered that it received the
+  message; Android answers before it shows the notice. With no answer in time,
+  or a rejection, the receipt stays `dispatched`, so the message may not have
+  been shown. A replay reports the same delivery as the first request; one
+  that arrives during the wait waits for the same answer. Other commands do
+  not wait.
 - A pause, resume or stop the player does not confirm before its deadline ends
   the session. The session's playback attempt is then
   recorded as ended by an administrator, so the player is told to leave

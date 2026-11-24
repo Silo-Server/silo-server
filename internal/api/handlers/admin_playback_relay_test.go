@@ -71,13 +71,21 @@ func (o *relayTestOwners) Owner(_ context.Context, sessionID string) (string, er
 type relayTestConn struct {
 	mu       sync.Mutex
 	messages []playback.CommandEnvelope
+	// answer, when set, plays the player: it runs for each command written.
+	answer func(playback.CommandEnvelope)
 }
 
 func (c *relayTestConn) WriteJSON(v any) error {
+	env, ok := v.(playback.CommandEnvelope)
+	if !ok {
+		return nil
+	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	if env, ok := v.(playback.CommandEnvelope); ok {
-		c.messages = append(c.messages, env)
+	c.messages = append(c.messages, env)
+	answer := c.answer
+	c.mu.Unlock()
+	if answer != nil {
+		answer(env)
 	}
 	return nil
 }
@@ -190,10 +198,14 @@ func TestAdminCommandRelaysToTheLaneOwner(t *testing.T) {
 		t.Fatalf("owner ledger latest = %d (%v), want 5", latest, ok)
 	}
 
-	// A message travels the same way.
+	// A message travels the same way, and the player's answer on the owner's
+	// lane reaches the replica that received the request.
+	c.conn.mu.Lock()
+	c.conn.answer = answerAsPlayer(t, c.owner, playback.RealtimeResultStatusCompleted)
+	c.conn.mu.Unlock()
 	message := sequencedInput(c.session.ID, "44444444-4444-4444-8444-444444444444", 6, playback.CommandDisplayMessage)
 	message.Message = "hello"
-	if view, err := c.other.Command(ctx, message); err != nil || view.Delivery != AdminPlaybackDeliveryDispatched {
+	if view, err := c.other.Command(ctx, message); err != nil || view.Delivery != deliveryAcknowledged {
 		t.Fatalf("relayed message = %+v, %v", view, err)
 	}
 	if sent := c.conn.sent(); len(sent) != 3 || sent[2].Name != playback.CommandDisplayMessage {

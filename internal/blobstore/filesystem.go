@@ -21,6 +21,8 @@ import (
 
 type Filesystem struct {
 	root string
+	// space tracks whether writes are paused for the free-space reserve.
+	space lowSpaceState
 	// identity, when set, is the recorded identity of a root that resolves to
 	// this directory by another path (see SameLocalRoot).
 	identity string
@@ -156,7 +158,7 @@ func temporary(root *os.Root, dir, prefix string) (*os.File, string, error) {
 	return f, name, err
 }
 func (f *Filesystem) Put(ctx context.Context, key string, data []byte) error {
-	return f.publish(ctx, key, false, func(w io.Writer) error {
+	return f.publish(ctx, key, int64(len(data)), false, func(w io.Writer) error {
 		_, err := w.Write(data)
 		return err
 	})
@@ -172,7 +174,7 @@ func (f *Filesystem) Put(ctx context.Context, key string, data []byte) error {
 // renamed into place; the admin job runner's upload timeout would be inert for
 // exactly the large exports it exists to bound.
 func (f *Filesystem) PutStream(ctx context.Context, key string, r io.Reader, _ string) error {
-	return f.publish(ctx, key, false, func(w io.Writer) error {
+	return f.publish(ctx, key, -1, false, func(w io.Writer) error {
 		_, err := io.Copy(w, &contextReader{ctx: ctx, r: r})
 		return err
 	})
@@ -183,7 +185,7 @@ func (f *Filesystem) PutStream(ctx context.Context, key string, r io.Reader, _ s
 // the name exists, so a concurrent writer of the same key is never replaced
 // (a rename would replace it). It returns ErrExists then.
 func (f *Filesystem) CreateExclusive(ctx context.Context, key string, r io.Reader, _ string) error {
-	return f.publish(ctx, key, true, func(w io.Writer) error {
+	return f.publish(ctx, key, -1, true, func(w io.Writer) error {
 		_, err := io.Copy(w, &contextReader{ctx: ctx, r: r})
 		return err
 	})
@@ -206,9 +208,23 @@ func (c *contextReader) Read(p []byte) (int, error) {
 
 // publish writes an object through a temporary file and renames it into place,
 // so a crash after it returns cannot leave a caller referencing a key the store
-// does not show. write fills the temporary file. exclusive links it into place
-// instead, failing with ErrExists when the key exists.
-func (f *Filesystem) publish(ctx context.Context, key string, exclusive bool, write func(io.Writer) error) error {
+// does not show. write fills the temporary file; size is how many bytes it
+// writes, or -1 when unknown. exclusive links it into place instead, failing
+// with ErrExists when the key exists.
+//
+// A write that would leave less than the free-space reserve (reserveFor)
+// available, counting the other writes in flight, fails with ErrStorageFull:
+// before any directory is created when size is known, and otherwise as soon
+// as the data reaches the reserve. A ctx from WithoutFreeSpaceReserve is not
+// limited.
+func (f *Filesystem) publish(ctx context.Context, key string, size int64, exclusive bool, write func(io.Writer) error) (err error) {
+	defer func() {
+		if err == nil {
+			f.noteWritten()
+		} else {
+			f.noteWriteError(err)
+		}
+	}()
 	if err := ValidateKey(key); err != nil {
 		return err
 	}
@@ -222,6 +238,30 @@ func (f *Filesystem) publish(ctx context.Context, key string, exclusive bool, wr
 	defer func() { _ = root.Close() }()
 	if err = check(root, key); err != nil {
 		return err
+	}
+	if exclusive {
+		// An existing key adds no bytes, so it reports ErrExists even at
+		// the reserve, which a restore run again relies on. The link in
+		// place stays the final check.
+		if _, statErr := root.Lstat(key); statErr == nil {
+			return ErrExists
+		}
+	}
+	budget := spaceBudget{limit: -1}
+	if !reserveExempt(ctx) {
+		if budget, err = f.writeBudget(); err != nil {
+			return err
+		}
+	}
+	// A write of known size claims its bytes before creating anything; a
+	// stream claims them as it writes.
+	writer := &budgetWriter{f: f, budget: budget, unchecked: reserveExempt(ctx)}
+	if size >= 0 {
+		if err = f.claim(size, budget); err != nil {
+			return err
+		}
+		defer f.settle(size, budget)
+		writer.unchecked = true
 	}
 	created, err := mkdirAllTracked(root, path.Dir(key))
 	if err != nil {
@@ -242,7 +282,8 @@ func (f *Filesystem) publish(ctx context.Context, key string, exclusive bool, wr
 		close(closed)
 	})
 	if err = tmp.Chmod(0644); err == nil {
-		err = write(tmp)
+		writer.w = tmp
+		err = write(writer)
 	}
 	if err == nil {
 		err = tmp.Sync()

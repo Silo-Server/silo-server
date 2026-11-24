@@ -7777,7 +7777,7 @@
     {
       "name": "get_library_collections_ok",
       "operation_id": "getLibraryCollections",
-      "scenario": "The library's Collections tab: curated collections in full, their groups, and the viewer's opted-in personal collections.",
+      "scenario": "The library's Collections tab: curated collections in full, their groups, and opted-in personal collections (the viewer's own, plus shared ones from other profiles on the same login).",
       "request": {
         "method": "GET",
         "path": "/api/v2/library/1/collections",
@@ -10989,7 +10989,7 @@
     {
       "name": "list_library_user_collections_ok",
       "operation_id": "listLibraryUserCollections",
-      "scenario": "The viewer's own personal collections opted into this library's tab.",
+      "scenario": "Personal collections opted into this library's tab: the viewer's own, plus shared ones from other profiles on the same login.",
       "request": {
         "method": "GET",
         "path": "/api/v2/library/1/user-collections",

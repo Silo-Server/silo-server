@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -225,6 +226,32 @@ func readCgroupStatKey(path, key string) (int64, error) {
 		return strconv.ParseInt(fields[1], 10, 64)
 	}
 	return 0, fmt.Errorf("%s not found in %s", key, path)
+}
+
+// CgroupOOMKills returns how many processes in this process's cgroup v2
+// subtree the kernel has OOM-killed, or nil when that can't be read (macOS,
+// cgroup v1, a host process at the root cgroup).
+//
+// memory.events counts kills by any OOM killer, whether the limit that ran out
+// was this cgroup's, an ancestor's, or the whole machine's. It is read only
+// from the process's own cgroup, because an ancestor's counter also counts its
+// siblings: a cgroup whose directory exists without memory.events (its parent
+// didn't enable the memory controller) has no counter. The mount root is read
+// when the process sits at it (a namespaced container) or when its reported
+// path doesn't exist under the mount, where the mount is the container's own
+// cgroup. The host's root cgroup has no memory.events.
+func CgroupOOMKills() *uint64 {
+	return cgroupOOMKills("/proc")
+}
+
+func cgroupOOMKills(procDir string) *uint64 {
+	file := path.Join(cgroupMountRoot, "memory.events")
+	if own := cgroupSelfFile(cgroupRelativePaths(procDir), file); own != "" {
+		if _, err := os.Stat(path.Dir(own)); err == nil {
+			return cgroupCounter(own, "oom_kill")
+		}
+	}
+	return cgroupCounter(file, "oom_kill")
 }
 
 // ProcessMemoryLimitBytes returns the tightest memory bound the process can

@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { act, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -14,14 +14,15 @@ const A = "/dev/dri/renderD128";
 const B = "/dev/dri/renderD129";
 const C = "/dev/dri/renderD130";
 
-const { settings } = vi.hoisted(() => ({
+const { settings, save } = vi.hoisted(() => ({
   settings: { current: {} as Record<string, string> },
+  save: vi.fn(),
 }));
 
 vi.mock("@/hooks/queries/admin/settings", () => ({
   useAdminServerSettings: () => ({ data: settings.current, isLoading: false }),
   useAdminSensitiveStatus: () => ({ data: { configured: [], managed_by_env: [] }, isError: false }),
-  useUpdateServerSettings: () => ({ mutateAsync: vi.fn(), isPending: false }),
+  useUpdateServerSettings: () => ({ mutateAsync: save, isPending: false }),
 }));
 vi.mock("@/hooks/queries/admin/system", () => ({
   useHWAccelDetection: () => ({
@@ -103,5 +104,128 @@ describe("hardware device picker kept for an unsaved change", () => {
 
     expect(screen.queryByRole("switch", { name: "GPU A" })).not.toBeInTheDocument();
     expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+  });
+});
+
+describe("marker settings kept for an unsaved change", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    settings.current = {
+      "markers.mode": "local",
+      "markers.online_storage": "stored",
+      "markers.lazy_playback": "false",
+      "markers.detection_workers": "1",
+    };
+  });
+
+  async function pick(label: string, option: string) {
+    await userEvent.click(screen.getByRole("combobox", { name: label }));
+    await userEvent.click(screen.getByRole("option", { name: option }));
+  }
+
+  it("keeps on-demand storage in view and takes its lazy playback back with it", async () => {
+    render(page);
+    await pick("Marker source", "Online preferred + server detection");
+    await pick("Save online markers", "Fetch when needed");
+    await pick("Marker source", "Detect on this server");
+
+    expect(screen.getByRole("combobox", { name: "Save online markers" })).toHaveTextContent(
+      "Fetch when needed",
+    );
+    // Lazy playback went back with online markers; only the kept storage
+    // choice is staged.
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+
+    await pick("Save online markers", "Save to library");
+    expect(screen.queryByText(/unsaved change/)).not.toBeInTheDocument();
+  });
+
+  it("takes lazy playback back with the storage edit while the source stays edited", async () => {
+    settings.current["markers.mode"] = "both";
+    render(page);
+    await pick("Save online markers", "Fetch when needed");
+    await pick("Marker source", "Online providers only");
+    await pick("Save online markers", "Save to library");
+
+    // Only the source change is left.
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+  });
+
+  it("restores the admin's own lazy playback edit when on-demand storage is taken back", async () => {
+    settings.current = {
+      ...settings.current,
+      "markers.mode": "both",
+      "markers.lazy_playback": "true",
+    };
+    render(page);
+    await userEvent.click(screen.getByRole("switch", { name: "Find markers on playback" }));
+    await pick("Save online markers", "Fetch when needed");
+    await pick("Save online markers", "Save to library");
+
+    expect(screen.getByRole("switch", { name: "Find markers on playback" })).not.toBeChecked();
+    expect(screen.getByText("1 unsaved change")).toBeInTheDocument();
+  });
+
+  it("keeps lazy playback taken back during a save staged for the next save", async () => {
+    settings.current["markers.mode"] = "both";
+    let finishSave!: (result: { values: Record<string, string> }) => void;
+    save.mockReset();
+    save.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finishSave = resolve;
+        }),
+    );
+    const { rerender } = render(page);
+    await pick("Save online markers", "Fetch when needed");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+    // The refetch that shows the write lands before the save settles, and the
+    // storage choice is taken back in between.
+    const written = { "markers.online_storage": "on_demand", "markers.lazy_playback": "true" };
+    settings.current = { ...settings.current, ...written };
+    rerender(
+      <MemoryRouter>
+        <PlaybackSettings />
+      </MemoryRouter>,
+    );
+    await pick("Save online markers", "Save to library");
+    await act(async () => finishSave({ values: written }));
+
+    expect(screen.getByRole("switch", { name: "Find markers on playback" })).not.toBeChecked();
+    expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();
+  });
+
+  it("keeps an edited detection worker count in view under online-only markers", async () => {
+    render(page);
+    const workers = screen.getByRole("spinbutton", { name: "Detection workers" });
+    await userEvent.clear(workers);
+    await userEvent.type(workers, "3");
+    await pick("Marker source", "Online providers only");
+
+    expect(screen.getByRole("spinbutton", { name: "Detection workers" })).toHaveValue(3);
+  });
+});
+
+describe("paused playback timeout", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    save.mockReset();
+    settings.current = { "playback.paused_session_timeout_minutes": "20" };
+  });
+
+  // Zero is the documented way to turn the timeout off, so it must save.
+  it("shows the stored minutes and saves zero", async () => {
+    render(page);
+    const group = within(screen.getByRole("group", { name: "Paused playback" }));
+    const field = group.getByRole("spinbutton", { name: "End paused playback after" });
+    expect(field).toHaveValue(20);
+
+    await userEvent.clear(field);
+    await userEvent.type(field, "0");
+    await userEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(save).toHaveBeenCalledWith(
+      expect.objectContaining({ "playback.paused_session_timeout_minutes": "0" }),
+    );
   });
 });

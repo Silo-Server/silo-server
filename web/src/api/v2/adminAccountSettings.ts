@@ -44,6 +44,16 @@ function numericLibraryID(value: string) {
     throw new Error("Unsupported library ID in user settings.");
   return id;
 }
+function settingValueRow<
+  Row extends { scope: string; client_family?: string; library_id?: string },
+>(row: Row) {
+  return {
+    ...row,
+    scope: row.scope as AdminSettingIdentity["scope"],
+    client_family: row.client_family as AdminSettingIdentity["clientFamily"],
+    library_id: row.library_id === undefined ? undefined : numericLibraryID(row.library_id),
+  };
+}
 export async function listAdminSettingValues(
   userId: number,
   authority = captureAdminSettingAuthority(),
@@ -72,13 +82,7 @@ export async function listAdminSettingValues(
     )
       throw new Error(t("web.admin.errors.settingsPageInvalid"));
     revision = page.revision;
-    for (const row of page.items)
-      values.push({
-        ...row,
-        scope: row.scope as AdminSettingIdentity["scope"],
-        client_family: row.client_family as AdminSettingIdentity["clientFamily"],
-        library_id: row.library_id === undefined ? undefined : numericLibraryID(row.library_id),
-      });
+    for (const row of page.items) values.push(settingValueRow(row));
     cursor = page.page.has_more ? page.page.next_cursor : undefined;
     if (cursor) visited.add(cursor);
   } while (cursor);
@@ -100,7 +104,7 @@ export async function setAdminSettingValue(
     retryAuthentication: false,
   });
   current(authority);
-  return result;
+  return settingValueRow(result);
 }
 export async function deleteAdminSettingValue(
   userId: number,

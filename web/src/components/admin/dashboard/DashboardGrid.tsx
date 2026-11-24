@@ -704,7 +704,7 @@ export function DashboardGrid({
                   {isWidgetResizing && (
                     <span
                       aria-hidden="true"
-                      className="bg-primary text-primary-foreground absolute -top-3 left-1/2 z-30 -translate-x-1/2 rounded-full px-2 py-0.5 text-[10px] font-bold whitespace-nowrap tabular-nums shadow-md"
+                      className="bg-primary text-primary-foreground absolute -top-3 left-1/2 z-30 -translate-x-1/2 rounded-full px-2 py-0.5 text-[0.625rem] font-bold whitespace-nowrap tabular-nums shadow-md"
                     >
                       {t("web.admin.dashboard.grid.sizeBadge", {
                         span: span,

@@ -649,6 +649,18 @@ var buildFFmpegArgsEmitsRecipeTokensCases = []ffmpegArgsTokenCase{
 	mpeg4Part2("qsv"),
 	mpeg4Part2("vaapi"),
 	{
+		// FFmpeg has no VAAPI decoder for WMV2: -hwaccel vaapi decoded it on
+		// the CPU and scale_vaapi could not take the frames (#4319).
+		name: "WMV2 VAAPI decodes on the CPU and uploads",
+		opts: TranscodeOpts{
+			InputPath: "/media/movie.wmv", OutputDir: "/tmp/out", SessionID: "session-wmv2", SourceVideoCodec: "wmv2",
+			TargetCodecVideo: "hevc", TargetCodecAudio: "aac", SegmentDuration: 2, HWAccel: "vaapi",
+			TargetResolution: "1080p", TargetBitrateKbps: 6360,
+		},
+		want:   []string{"-c:v hevc_vaapi", "format=nv12,hwupload"},
+		forbid: []string{"-hwaccel vaapi", "-hwaccel_output_format vaapi"},
+	},
+	{
 		name: "QSV promotes forced segment keyframes to IDR",
 		opts: TranscodeOpts{
 			InputPath: "/media/movie.mkv", OutputDir: "/tmp/out", SessionID: "session-qsv-idr", SourceVideoCodec: "vp9",

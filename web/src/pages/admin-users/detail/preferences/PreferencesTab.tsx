@@ -156,7 +156,7 @@ export function PreferencesTab({ user }: { user: AdminUser }) {
       >
         {groups.map((group) => (
           <div key={group.key} role="group" aria-label={group.title} className="pb-1">
-            <div className="text-muted-foreground px-3 pt-2.5 pb-1.5 text-[11px] font-semibold tracking-[0.08em] uppercase">
+            <div className="text-muted-foreground px-3 pt-2.5 pb-1.5 text-[0.6875rem] font-semibold tracking-[0.08em] uppercase">
               {group.title}
             </div>
             {group.levels.map((level) => {

@@ -41,6 +41,29 @@ func cleanupRecoMediaItems(t *testing.T, pool *pgxpool.Pool, prefix string) {
 	})
 }
 
+// candidateDetailsOf reads the candidate details of ids.
+func candidateDetailsOf(t *testing.T, repo *Repo, ids []string) map[string]CandidateDetails {
+	t.Helper()
+	details, err := repo.GetCandidateDetails(t.Context(), ids)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return details
+}
+
+// candidateQualities maps each of ids whose candidate details carry a
+// quality rating to it.
+func candidateQualities(t *testing.T, repo *Repo, ids []string) map[string]float64 {
+	t.Helper()
+	out := map[string]float64{}
+	for id, d := range candidateDetailsOf(t, repo, ids) {
+		if d.Quality != nil {
+			out[id] = *d.Quality
+		}
+	}
+	return out
+}
+
 func TestRecentCompletedItemIDsGroupsSeriesBeforeLimit(t *testing.T) {
 	pool := newEngineTestPool(t)
 	ctx := t.Context()

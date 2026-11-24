@@ -1,4 +1,5 @@
 import { Ellipsis, Link2, MailPlus, RotateCw, Trash2, type LucideIcon } from "lucide-react";
+import type { ReactNode } from "react";
 
 import type { AdminInvitation as Invitation, InvitationDeliveryChoice } from "@/api/v2/invitations";
 import {
@@ -9,6 +10,7 @@ import {
   DiagnosticsCardList,
 } from "@/components/admin/libraries/DiagnosticsListParts";
 import { useLibrariesTableLayout } from "@/components/admin/libraries/diagnosticsListState";
+import { LineName, MetaLine } from "@/components/MetaLine";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -83,17 +85,18 @@ function useInvitationRow(
   // A link invitation's note is how the admin told it apart, so it stays
   // after acceptance fills in the address.
   const shared = invitation.delivery === "link";
-  const details = [
+  const joinedByLink =
     !link && invitation.status === "accepted" && shared
       ? t("web.admin.settings.invitations.row.joinedByLink")
-      : "",
-    shared && invitation.note
-      ? t("web.admin.settings.invitations.row.note", { note: invitation.note })
-      : "",
-    invitation.invited_by_name
-      ? t("web.admin.settings.invitations.row.invitedBy", { name: invitation.invited_by_name })
-      : "",
-  ].filter(Boolean);
+      : "";
+  const note = shared ? invitation.note : undefined;
+  const inviter = invitation.invited_by_name;
+  // The card and the table row show the same details; `user` wraps the user text.
+  const detailParts = (user: (text: string) => ReactNode) => [
+    joinedByLink,
+    note ? t("web.admin.settings.invitations.row.note", { note: user(note) }) : "",
+    inviter ? t("web.admin.settings.invitations.row.invitedBy", { name: user(inviter) }) : "",
+  ];
 
   const actions: InvitationAction[] = [];
   if (showResend) {
@@ -137,7 +140,23 @@ function useInvitationRow(
     // a right-to-left page it keeps its order and a cut one its start. The link
     // invitation's label follows the page.
     recipientDir: link ? undefined : emailDir(invitation.email),
-    details: details.join(" · "),
+    /** The details as one string, for the card, where they wrap. */
+    details: detailParts((text) => text)
+      .filter(Boolean)
+      .join(" · "),
+    /**
+     * The details for the table row, cut short on one line. The note and the
+     * inviter's name each read in their own direction, so a cut one keeps its
+     * start, and each keeps a letter and "…".
+     */
+    detailsLine: (
+      <MetaLine
+        className="text-muted-foreground text-xs"
+        parts={detailParts((text) => (
+          <LineName name={text} />
+        ))}
+      />
+    ),
     badge: STATUS_BADGES[invitation.status],
     expires:
       invitation.status === "pending"
@@ -200,7 +219,7 @@ function InvitationRow({ invitation, shared }: RowProps) {
         <div dir={row.recipientDir} className="w-fit max-w-full truncate font-medium">
           {row.recipient}
         </div>
-        {row.details && <div className="text-muted-foreground truncate text-xs">{row.details}</div>}
+        {row.detailsLine}
       </TableCell>
       <TableCell className="text-muted-foreground capitalize">{invitation.role}</TableCell>
       <TableCell>

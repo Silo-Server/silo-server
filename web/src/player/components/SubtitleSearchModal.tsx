@@ -338,13 +338,13 @@ export function SubtitleSearchModal({
 
                   {/* HI badge */}
                   {result.hearing_impaired && (
-                    <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-[10px] text-white/60">
+                    <span className="shrink-0 rounded bg-white/10 px-1 py-0.5 text-[0.625rem] text-white/60">
                       {t("subtitleSearch.hearingImpaired")}
                     </span>
                   )}
 
                   {/* Download count */}
-                  <span className="shrink-0 text-[10px] text-white/40">
+                  <span className="shrink-0 text-[0.625rem] text-white/40">
                     {t("web.subtitles.search.downloads", {
                       downloads: result.downloads.toLocaleString(formatLocale()),
                     })}
@@ -352,7 +352,7 @@ export function SubtitleSearchModal({
 
                   {/* Provider badge */}
                   <span
-                    className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                    className="shrink-0 rounded px-1.5 py-0.5 text-[0.625rem] font-semibold"
                     style={{
                       backgroundColor: `${info?.color ?? "#6b7280"}22`,
                       color: info?.color ?? "#9ca3af",

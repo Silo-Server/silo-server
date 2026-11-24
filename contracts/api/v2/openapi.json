@@ -15502,10 +15502,11 @@
             "type": "string"
           },
           "delivery": {
-            "description": "dispatched: sent on the session's realtime lane. fallback_scheduled: no lane; the server ends the session after the deadline (stop only)",
+            "description": "dispatched: written to the session's realtime lane; the receipt does not say whether the player confirmed it, and a lane whose player went away without closing it still takes the write. fallback_scheduled: no lane; the server ends the session after the deadline (stop only). acknowledged: the player answered that it received the message within the server's short wait (message only); a player may answer before showing it",
             "enum": [
               "dispatched",
-              "fallback_scheduled"
+              "fallback_scheduled",
+              "acknowledged"
             ],
             "type": "string"
           },
@@ -15700,7 +15701,7 @@
             "type": "number"
           },
           "end_reason": {
-            "description": "Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from",
+            "description": "Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method or version). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from",
             "enum": [
               "stopped",
               "terminated",
@@ -19263,7 +19264,7 @@
             "description": "The newest sweep on any server that rebuilt or failed at least one profile. Absent until one does."
           },
           "pending": {
-            "description": "Profiles whose recommendations wait for a rebuild. The sweep rebuilds up to 50 every 5 minutes; a profile whose rebuild fails stays pending.",
+            "description": "Profiles whose recommendations wait for a rebuild. Each server tries a sweep 2 minutes after its last try ended, one server at a time; a sweep starts rebuilds, oldest first, for up to a minute, and a rebuild it started finishes even past that minute. A profile whose rebuild fails stays pending.",
             "format": "int64",
             "type": "integer"
           }
@@ -191292,7 +191293,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "The library's Collections tab: curated collections, their groups, and the viewer's opted-in personal collections.",
+        "summary": "The library's Collections tab: curated collections, their groups, and opted-in personal collections (the viewer's own, plus shared ones from other profiles on the same login).",
         "tags": [
           "libraries"
         ],
@@ -192380,7 +192381,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "The viewer's own personal collections opted into this library's tab.",
+        "summary": "Personal collections opted into this library's tab: the viewer's own, plus shared ones from other profiles on the same login.",
         "tags": [
           "libraries"
         ],
@@ -253740,6 +253741,14 @@
           "started_at_unix_nano": {
             "format": "int64",
             "type": "integer"
+          },
+          "stream_end_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "stream_planned_seconds": {
+            "format": "double",
+            "type": "number"
           },
           "tone_map_mode": {
             "type": "string"

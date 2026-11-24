@@ -714,10 +714,15 @@ func (h *PlaybackHandler) ownedAttemptV2(ctx context.Context, caller PlaybackCal
 		}
 		return nil, playbackStoreOperationError()
 	}
-	if record.UserID != caller.UserID || record.ProfileID != caller.ProfileID {
+	if !attemptOwnedBy(record, caller) {
 		return nil, playbackOperationError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
 	}
 	return record, nil
+}
+
+// attemptOwnedBy reports whether the attempt belongs to the caller's profile.
+func attemptOwnedBy(record *playback.AttemptRecordV3, caller PlaybackCaller) bool {
+	return record != nil && record.UserID == caller.UserID && record.ProfileID == caller.ProfileID
 }
 
 func acceptedProgressV2(sample *playback.ProgressSampleV3) *PlaybackAcceptedProgress {
@@ -746,19 +751,26 @@ func (h *PlaybackHandler) ReplanPlaybackV2(ctx context.Context, caller PlaybackC
 	// A stop accepted on any replica ends the attempt; a late recovery or
 	// seek must not launch a replacement transport the deny marker will
 	// refuse to serve. The store's commit predicate refuses stopped rows too.
+	// Only the attempt's owner learns how it ended; anyone else gets the 403
+	// the replan itself answers.
 	if record, err := h.PlanStoreV3.GetAttempt(ctx, sessionID); err == nil && record != nil && record.StoppedAt != nil {
+		if !attemptOwnedBy(record, caller) {
+			return playback.DecisionResponseV3{}, playbackOperationError(http.StatusForbidden, "forbidden", "Session belongs to another profile")
+		}
 		return playback.DecisionResponseV3{}, h.stoppedAttemptError(ctx, sessionID, record)
 	}
 	response, err := h.replanPlaybackApplicationV3(playbackCallerSessionRequest(ctx, caller, sessionID), sessionID, body)
 	if err != nil {
 		// A stop that lands after the check above reaches the replan as a
 		// missing live session or a refused commit, both reported as not
-		// found. Re-read the attempt so an administrator stop still answers
-		// 410 instead of the 404 the player renews from.
+		// found. Re-read the attempt so an administrator stop or the paused
+		// timeout still answers 410 instead of the 404 the player renews from.
 		var opErr *PlaybackOperationError
 		if errors.Is(err, playback.ErrAttemptStoppedV3) || (errors.As(err, &opErr) && opErr.Status == http.StatusNotFound) {
-			if record, getErr := h.PlanStoreV3.GetAttempt(ctx, sessionID); getErr == nil && attemptEndedByAdmin(record) {
-				return playback.DecisionResponseV3{}, playbackSessionEndedByAdminError()
+			if record, getErr := h.PlanStoreV3.GetAttempt(ctx, sessionID); getErr == nil && attemptOwnedBy(record, caller) {
+				if ended := endedAttemptError(record); ended != nil {
+					return playback.DecisionResponseV3{}, ended
+				}
 			}
 		}
 		if errors.Is(err, playback.ErrAttemptStoppedV3) {
@@ -850,6 +862,15 @@ func adminStopID(sessionID string) string {
 	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("silo-admin-stop:"+sessionID)).String()
 }
 
+// pausedTimeoutStopID is the server-minted stop id of an attempt the server
+// ended because it stayed paused past the administrator's timeout. It ends
+// as expired, but its requests answer 410 so the player leaves instead of
+// starting over: playback_session_paused_timeout for an attempt that
+// advertised paused_timeout_v1, playback_session_ended otherwise.
+func pausedTimeoutStopID(sessionID string) string {
+	return uuid.NewSHA1(uuid.NameSpaceOID, []byte("silo-paused-timeout:"+sessionID)).String()
+}
+
 // endReasonForStop is the end reason a winning stop id records: the
 // server-minted ids name who ended the attempt, and any other id is the
 // client's own stop.
@@ -857,7 +878,7 @@ func endReasonForStop(sessionID, stopID string) PlaybackEndReason {
 	switch stopID {
 	case adminStopID(sessionID):
 		return PlaybackEndTerminated
-	case expiredStopID(sessionID):
+	case expiredStopID(sessionID), pausedTimeoutStopID(sessionID):
 		return PlaybackEndExpired
 	case abortStopID(sessionID):
 		return PlaybackEndAborted
@@ -869,7 +890,8 @@ func endReasonForStop(sessionID, stopID string) PlaybackEndReason {
 // serverStopID reports whether stopID is one the server mints for an end it
 // makes itself.
 func serverStopID(sessionID, stopID string) bool {
-	return stopID == adminStopID(sessionID) || stopID == expiredStopID(sessionID) || stopID == abortStopID(sessionID)
+	return stopID == adminStopID(sessionID) || stopID == expiredStopID(sessionID) || stopID == abortStopID(sessionID) ||
+		stopID == pausedTimeoutStopID(sessionID)
 }
 
 func attemptEndedByAdmin(record *playback.AttemptRecordV3) bool {
@@ -880,15 +902,55 @@ func playbackSessionEndedByAdminError() *PlaybackOperationError {
 	return playbackOperationError(http.StatusGone, playbackSessionEndedErrorCode, "An administrator ended this playback session")
 }
 
+// PlaybackCodeSessionPausedTimeout is the problem type for an attempt the
+// server ended after it stayed paused too long, answered to a client that
+// advertised paused_timeout_v1.
+const PlaybackCodeSessionPausedTimeout = "playback_session_paused_timeout"
+
+// pausedTimeoutEnd reports whether an attempt was ended by the paused
+// timeout, and whether its client asked to be told so (paused_timeout_v1).
+// The features are the attempt's durable ones, which a replan cannot change.
+func pausedTimeoutEnd(sessionID, stopID string, clientFeatures []string) (ended, advertised bool) {
+	if sessionID == "" || stopID != pausedTimeoutStopID(sessionID) {
+		return false, false
+	}
+	return true, playback.HasFeatureV3(clientFeatures, playback.FeaturePausedTimeoutV3)
+}
+
+// pausedTimeoutError is the 410 for an attempt the paused timeout ended:
+// its own problem type for a client that advertised paused_timeout_v1, and
+// playback_session_ended, which every client already leaves on, otherwise.
+func pausedTimeoutError(advertised bool) *PlaybackOperationError {
+	if advertised {
+		return playbackOperationError(http.StatusGone, PlaybackCodeSessionPausedTimeout, "Playback stopped because it was paused for too long.")
+	}
+	return playbackOperationError(http.StatusGone, playbackSessionEndedErrorCode, "Playback stopped because it was paused for too long")
+}
+
+// endedAttemptError is the 410 for a stopped attempt the client must not
+// start over from (an administrator stop or the paused timeout), or nil.
+func endedAttemptError(record *playback.AttemptRecordV3) *PlaybackOperationError {
+	if record == nil || record.StoppedAt == nil {
+		return nil
+	}
+	if attemptEndedByAdmin(record) {
+		return playbackSessionEndedByAdminError()
+	}
+	if ended, advertised := pausedTimeoutEnd(record.SessionID, record.StopID, record.NormalizedRequest.ClientFeatures); ended {
+		return pausedTimeoutError(advertised)
+	}
+	return nil
+}
+
 // stoppedAttemptError is the answer for a request on an attempt that is no
-// longer live: 410 when an administrator ended it, otherwise the 404 that
-// lets the client start over.
+// longer live: 410 when an administrator or the paused timeout ended it,
+// otherwise the 404 that lets the client start over.
 func (h *PlaybackHandler) stoppedAttemptError(ctx context.Context, sessionID string, record *playback.AttemptRecordV3) *PlaybackOperationError {
 	if record == nil && h != nil && h.PlanStoreV3 != nil {
 		record, _ = h.PlanStoreV3.GetAttempt(ctx, sessionID)
 	}
-	if attemptEndedByAdmin(record) {
-		return playbackSessionEndedByAdminError()
+	if err := endedAttemptError(record); err != nil {
+		return err
 	}
 	return playbackSessionNotFoundOperationError()
 }

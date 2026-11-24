@@ -147,7 +147,9 @@ export function RowsThatShowIt({
       {listed && listed.length > 0 ? (
         <>
           <RowsList rows={listed} libraryNames={libraryNames} highlightId={highlightId} />
-          {mine ? null : <p className="text-muted-foreground text-[12.5px]">{rowsNotListed()}</p>}
+          {mine ? null : (
+            <p className="text-muted-foreground text-[0.78125rem]">{rowsNotListed()}</p>
+          )}
         </>
       ) : null}
     </SettingRow>

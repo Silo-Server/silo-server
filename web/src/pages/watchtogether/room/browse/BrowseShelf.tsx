@@ -222,11 +222,11 @@ export function BrowseShelf({
           aria-label={t("web.watchTogether.browse.searchResults")}
         >
           <div className="flex items-baseline gap-2">
-            <h3 className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+            <h3 className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
               {t("web.watchTogether.browse.searchResults")}
             </h3>
             {!search.isFetching ? (
-              <span className="text-muted-foreground text-[11px]">
+              <span className="text-muted-foreground text-[0.6875rem]">
                 {t("web.watchTogether.browse.resultCount", { count: searchItems.length })}
               </span>
             ) : null}
