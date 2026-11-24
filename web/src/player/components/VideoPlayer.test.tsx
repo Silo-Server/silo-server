@@ -1701,3 +1701,79 @@ describe("VideoPlayer session end", () => {
     await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
   });
 });
+
+// The player root routes Enter, Space and Escape to a timed credits pill, as
+// it does for Skip Intro. Once the timer has run out the keys are the player's
+// again, even with the untimed pill back over the controls.
+describe("VideoPlayer credits pill keys", () => {
+  const PROMPT_MS = 10_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+
+  async function setup() {
+    const onReanchorSeek = vi.fn(() => true);
+    const onExit = vi.fn();
+    const rendered = renderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      }),
+      credits: { start: 20, end: 50 },
+      onReanchorSeek,
+      onExit,
+    });
+    const video = rendered.container.querySelector("video")!;
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    video.currentTime = 5;
+    fireFrameTimeUpdate(video);
+    fireEvent.play(video);
+    // The controls hide 3 s after playback starts.
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    video.currentTime = 21;
+    fireFrameTimeUpdate(video);
+    const pill = () => rendered.queryByRole("button", { name: "Skip Credits" });
+    expect(pill()).not.toBeNull();
+    const press = (key: string) => fireEvent.keyDown(document.body, { key });
+    return { ...rendered, onReanchorSeek, onExit, pill, press };
+  }
+
+  it("skips in one press of Space while the timer runs", async () => {
+    const { onReanchorSeek, pill, press } = await setup();
+    expect(press(" ")).toBe(false);
+    expect(onReanchorSeek).toHaveBeenCalledWith(50);
+    expect(pill()).toBeNull();
+  });
+
+  it("hides on Escape without leaving the player", async () => {
+    const { onReanchorSeek, onExit, pill, press } = await setup();
+    expect(press("Escape")).toBe(false);
+    expect(pill()).toBeNull();
+    expect(onExit).not.toHaveBeenCalled();
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+  });
+
+  it("leaves Space and Escape to the player once the timer has run out", async () => {
+    const { container, onReanchorSeek, pill, press } = await setup();
+    await act(() => vi.advanceTimersByTimeAsync(PROMPT_MS));
+    expect(pill()).toBeNull();
+
+    fireEvent.mouseMove(container.firstElementChild!);
+    expect(pill()).not.toBeNull();
+    press(" ");
+    press("Escape");
+    expect(onReanchorSeek).not.toHaveBeenCalled();
+    expect(pill()).not.toBeNull();
+  });
+});
