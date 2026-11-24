@@ -142,3 +142,69 @@ func TestRemoteFetcherRefusesNewArtworkWhenFull(t *testing.T) {
 		t.Fatalf("provider saw %d requests with a full memory, want 0", got)
 	}
 }
+
+// Evicting stored posters read via FetchBytes must drop them cleanly so
+// revisiting them reloads from the store instead of returning ErrRemoteBusy,
+// and stored catalog walks must neither evict nor starve provider downloads.
+func TestRemoteFetcherFetchBytesEvictionReloadsAndPreservesProviders(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("\x89PNG\r\n\x1a\nprovider"))
+	}))
+	defer srv.Close()
+
+	f := newRemoteFetcher(srv.Client())
+	ctx := netguard.WithPrivateAccess(context.Background())
+
+	// Seed a provider download first so we can verify stored reads never evict it.
+	if img, err := f.Fetch(ctx, "provider-1", srv.URL+"/p.png"); err != nil || img.ContentType != "image/png" {
+		t.Fatalf("seed provider Fetch = %q, %v", img.ContentType, err)
+	}
+
+	// Fill past remoteResultsBudget with stored FetchBytes entries.
+	png := make([]byte, remoteResultMaxBytes)
+	copy(png, "\x89PNG\r\n\x1a\n")
+	var loads atomic.Int32
+	load := func(_ context.Context, _ int64) ([]byte, error) {
+		loads.Add(1)
+		return png, nil
+	}
+	posters := remoteResultsBudget/remoteResultMaxBytes + 2
+	for i := range posters {
+		if _, err := f.FetchBytes(ctx, "movie-"+strconv.Itoa(i), "store:k"+strconv.Itoa(i), load); err != nil {
+			t.Fatalf("FetchBytes(%d) = %v, want nil", i, err)
+		}
+	}
+	if f.bytes > remoteResultsBudget {
+		t.Fatalf("memory holds %d bytes, over its %d budget", f.bytes, remoteResultsBudget)
+	}
+	// Revisiting the earliest evicted stored poster reloads cleanly instead of ErrRemoteBusy.
+	before := loads.Load()
+	if img, err := f.FetchBytes(ctx, "movie-0", "store:k0", load); err != nil || img.ContentType != "image/png" {
+		t.Fatalf("revisit evicted stored poster = %q, %v; want image/png", img.ContentType, err)
+	}
+	if loads.Load() != before+1 {
+		t.Fatalf("expected evicted stored poster to reload once, loads delta = %d", loads.Load()-before)
+	}
+	// The seeded provider poster must still be in memory with its bytes, not ErrRemoteBusy.
+	providerEntry, ok := f.recent("provider-1\x00"+srv.URL+"/p.png", time.Now())
+	if !ok || providerEntry.err != nil || len(providerEntry.image.Data) == 0 {
+		t.Fatalf("provider entry after stored walk = %v (found=%v, bytes=%d), want intact image", providerEntry.err, ok, len(providerEntry.image.Data))
+	}
+
+	// A memory full of evictable stored entries must still admit both stored reads and provider fetches.
+	f2 := newRemoteFetcher(srv.Client())
+	smallLoad := func(_ context.Context, _ int64) ([]byte, error) {
+		return []byte("\x89PNG\r\n\x1a\nsmall"), nil
+	}
+	for i := range remoteResultsMax {
+		if _, err := f2.FetchBytes(ctx, "s-"+strconv.Itoa(i), "store:k"+strconv.Itoa(i), smallLoad); err != nil {
+			t.Fatalf("seed stored entry %d = %v, want nil", i, err)
+		}
+	}
+	if _, err := f2.FetchBytes(ctx, "s-new", "store:new", smallLoad); err != nil {
+		t.Fatalf("FetchBytes with memory full of stored entries = %v, want nil", err)
+	}
+	if _, err := f2.Fetch(ctx, "p-new", srv.URL+"/new.png"); err != nil {
+		t.Fatalf("Fetch with memory full of stored entries = %v, want nil", err)
+	}
+}

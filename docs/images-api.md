@@ -285,7 +285,9 @@ Concurrent requests for one item and source share one load, and a server runs
 at most four at once across remote and stored poster reads. A server remembers
 a finished load for five minutes and a failed one for 30 seconds, within a
 shared 64 MiB and 4096-entry budget, so repeating a link does not repeat the
-provider download or object-store read. Served poster bytes carry
+provider download or object-store read. Evicted object-store entries are
+dropped cleanly and reload on demand without turning into `503` cooldown
+markers or evicting provider outcomes. Served poster bytes carry
 `Cache-Control: private, max-age=300`; any same-server plugin redirect is
 `no-store`. Regular catalog reads and Jellyfin-compatible image routes keep
 redirecting to presigned object storage.
@@ -304,8 +306,8 @@ This URL follows a different rule from the catalog and session posters above:
 
 - It needs the credentials that read the row: an admin session, an admin API
   key, or a key with the `admin:monitor:read` scope. Do not send those
-  credentials to the catalog and session poster URLs, which can be the artwork
-  store's own signed URLs.
+  credentials to the catalog and session poster URLs: they are self-authorizing
+  signed links on this server and carry their own expiry and signature.
 - It never expires, so a tool can store it with the request.
 
 The route downloads the request's TMDB poster (`w500`) through the server and

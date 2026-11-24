@@ -79,9 +79,10 @@ type RemoteFetcher struct {
 }
 
 type remoteResult struct {
-	image RemoteImage
-	err   error
-	until time.Time
+	image     RemoteImage
+	err       error
+	until     time.Time
+	evictable bool
 }
 
 // recent returns the remembered outcome for id, if it has not expired.
@@ -96,20 +97,54 @@ func (f *RemoteFetcher) recent(id string, now time.Time) (remoteResult, bool) {
 }
 
 // admits reports whether id's outcome can be remembered: it already has an
-// entry, or the memory has room once expired entries are dropped. Fetch asks
-// while holding a download slot, so the memory exceeds remoteResultsMax by
-// less than remoteFetchSlots.
-func (f *RemoteFetcher) admits(id string, now time.Time) bool {
+// entry, or the memory has room once expired or evictable entries are dropped.
+// Fetch asks while holding a download slot, so the memory exceeds
+// remoteResultsMax by less than remoteFetchSlots. Evictable loads (stored
+// objects) are always admitted and drop old evictable entries or bypass caching
+// if the memory is full of provider entries.
+func (f *RemoteFetcher) admits(id string, now time.Time, evictable bool) bool {
+	if evictable {
+		return true
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.results[id]; ok || len(f.results) < remoteResultsMax {
 		return true
 	}
-	if now.Before(f.firstExpiry) {
+	if !now.Before(f.firstExpiry) {
+		f.dropExpired(now)
+	}
+	if len(f.results) < remoteResultsMax {
+		return true
+	}
+	return f.evictSoonestReusable(false)
+}
+
+// evictSoonestReusable deletes the soonest-expiring evictable entry (one read
+// from our own store rather than an external provider) so revisiting it reloads
+// cleanly instead of returning ErrRemoteBusy. The caller holds f.mu.
+func (f *RemoteFetcher) evictSoonestReusable(requireBytes bool) bool {
+	victim, soonest := "", time.Time{}
+	for key, result := range f.results {
+		if !result.evictable {
+			continue
+		}
+		if requireBytes && len(result.image.Data) == 0 {
+			continue
+		}
+		if victim == "" || result.until.Before(soonest) {
+			victim, soonest = key, result.until
+		}
+	}
+	if victim == "" {
 		return false
 	}
-	f.dropExpired(now)
-	return len(f.results) < remoteResultsMax
+	f.bytes -= len(f.results[victim].image.Data)
+	delete(f.results, victim)
+	if len(f.results) == 0 {
+		f.firstExpiry = time.Time{}
+	}
+	return true
 }
 
 // dropExpired removes expired outcomes. The caller holds f.mu.
@@ -128,9 +163,17 @@ func (f *RemoteFetcher) dropExpired(now time.Time) {
 	f.nextSweep = now.Add(remoteResultsSweep)
 }
 
-// remember keeps an outcome for later requests. Expired entries are dropped
-// at most once per remoteResultsSweep.
+// remember keeps a provider download outcome for later requests.
 func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now time.Time) {
+	f.rememberEntry(id, image, err, now, false)
+}
+
+// rememberEntry keeps an outcome for later requests. Expired entries are
+// dropped at most once per remoteResultsSweep. Evictable entries (stored
+// objects) are deleted when space is needed and never evict or starve provider
+// entries; provider entries drop evictable entries first and otherwise leave a
+// busy marker until expiry so rotating links cannot repeat provider downloads.
+func (f *RemoteFetcher) rememberEntry(id string, image RemoteImage, err error, now time.Time, evictable bool) {
 	ttl := remoteResultTTL
 	if err != nil && !errors.Is(err, ErrRemoteTooLarge) {
 		// An oversized image stays oversized; other failures may clear.
@@ -147,13 +190,57 @@ func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now ti
 	if old, ok := f.results[id]; ok {
 		f.bytes -= len(old.image.Data)
 		delete(f.results, id)
+		if len(f.results) == 0 {
+			f.firstExpiry = time.Time{}
+		}
 	}
-	// Every outcome is kept, or its link could repeat the download on every
-	// request. When the bytes do not fit, the images nearest their expiry
-	// give theirs up but stay as a marker that answers busy until that
-	// expiry, so rotating through more large posters than the budget holds
-	// still costs one download per poster per window.
-	for f.bytes+len(image.Data) > remoteResultsBudget {
+	if evictable {
+		if !f.makeRoomForEvictable(len(image.Data)) {
+			return
+		}
+	} else {
+		f.makeRoomForProvider(len(image.Data))
+	}
+	until := now.Add(ttl)
+	f.results[id] = remoteResult{image: image, err: err, until: until, evictable: evictable}
+	if len(f.results) == 1 || f.firstExpiry.IsZero() || until.Before(f.firstExpiry) {
+		f.firstExpiry = until
+	}
+	f.bytes += len(image.Data)
+}
+
+// makeRoomForEvictable frees entry and byte room by dropping only evictable
+// entries; it returns false when provider entries fill the budget so stored
+// reads never evict or starve provider outcomes. The caller holds f.mu.
+func (f *RemoteFetcher) makeRoomForEvictable(neededBytes int) bool {
+	for len(f.results) >= remoteResultsMax {
+		if !f.evictSoonestReusable(false) {
+			return false
+		}
+	}
+	for f.bytes+neededBytes > remoteResultsBudget {
+		if !f.evictSoonestReusable(true) {
+			return false
+		}
+	}
+	return true
+}
+
+// makeRoomForProvider frees entry and byte room for a provider outcome. It
+// drops evictable store entries first; when bytes still do not fit, the
+// provider images nearest their expiry give theirs up but stay as a busy
+// marker until expiry so rotating links cannot repeat provider downloads. The
+// caller holds f.mu.
+func (f *RemoteFetcher) makeRoomForProvider(neededBytes int) {
+	for len(f.results) >= remoteResultsMax {
+		if !f.evictSoonestReusable(false) {
+			break
+		}
+	}
+	for f.bytes+neededBytes > remoteResultsBudget {
+		if f.evictSoonestReusable(true) {
+			continue
+		}
 		victim, soonest := "", time.Time{}
 		for key, result := range f.results {
 			if len(result.image.Data) > 0 && (victim == "" || result.until.Before(soonest)) {
@@ -166,12 +253,6 @@ func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now ti
 		f.bytes -= len(f.results[victim].image.Data)
 		f.results[victim] = remoteResult{err: ErrRemoteBusy, until: soonest}
 	}
-	until := now.Add(ttl)
-	f.results[id] = remoteResult{image: image, err: err, until: until}
-	if len(f.results) == 1 || until.Before(f.firstExpiry) {
-		f.firstExpiry = until
-	}
-	f.bytes += len(image.Data)
 }
 
 // NewRemoteFetcher returns a fetcher on the guarded download client.
@@ -188,17 +269,21 @@ func newRemoteFetcher(client *http.Client) *RemoteFetcher {
 // same item and URL share a download. The download runs detached from the
 // first caller, and each caller stops waiting when its own context ends.
 func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteImage, error) {
-	return f.FetchBytes(ctx, key, rawURL, func(loadCtx context.Context, maxBytes int64) ([]byte, error) {
+	return f.fetchBytes(ctx, key, rawURL, false, func(loadCtx context.Context, maxBytes int64) ([]byte, error) {
 		return download(loadCtx, f.client, rawURL, true, maxBytes)
 	})
 }
 
-// FetchBytes reads poster bytes through load under the same bounds as Fetch:
-// concurrent requests for the same key and source share one load, at most
-// remoteFetchSlots loads run at once, outcomes are remembered within the
-// shared entry and byte budgets, bodies over 4 MiB fail with ErrRemoteTooLarge,
-// and the Content-Type comes from the bytes via ServedImageType.
+// FetchBytes reads stored poster bytes through load under the shared slot,
+// singleflight, 4 MiB cap, timeout, and byte-sniffed ServedImageType bounds.
+// Remembered entries share the result memory budget but are evicted cleanly
+// (reloading on the next request instead of returning ErrRemoteBusy) and never
+// evict or starve provider downloads.
 func (f *RemoteFetcher) FetchBytes(ctx context.Context, key, source string, load func(context.Context, int64) ([]byte, error)) (RemoteImage, error) {
+	return f.fetchBytes(ctx, key, source, true, load)
+}
+
+func (f *RemoteFetcher) fetchBytes(ctx context.Context, key, source string, evictable bool, load func(context.Context, int64) ([]byte, error)) (RemoteImage, error) {
 	id := key + "\x00" + source
 	if result, ok := f.recent(id, time.Now()); ok {
 		return result.image, result.err
@@ -218,7 +303,7 @@ func (f *RemoteFetcher) FetchBytes(ctx context.Context, key, source string, load
 		if result, ok := f.recent(id, time.Now()); ok {
 			return result.image, result.err
 		}
-		return f.fetch(context.WithoutCancel(ctx), id, load)
+		return f.fetch(context.WithoutCancel(ctx), id, evictable, load)
 	})
 	select {
 	case <-ctx.Done():
@@ -236,7 +321,7 @@ func (f *RemoteFetcher) FetchBytes(ctx context.Context, key, source string, load
 // the slot back, which is what bounds the memory's overshoot. A busy answer is
 // not an outcome of the artwork and is not remembered, so the next request
 // tries again.
-func (f *RemoteFetcher) fetch(ctx context.Context, id string, load func(context.Context, int64) ([]byte, error)) (RemoteImage, error) {
+func (f *RemoteFetcher) fetch(ctx context.Context, id string, evictable bool, load func(context.Context, int64) ([]byte, error)) (RemoteImage, error) {
 	wait := time.NewTimer(remoteFetchSlotWait)
 	defer wait.Stop()
 	select {
@@ -246,11 +331,11 @@ func (f *RemoteFetcher) fetch(ctx context.Context, id string, load func(context.
 	}
 	defer func() { <-f.slots }()
 
-	if !f.admits(id, time.Now()) {
+	if !f.admits(id, time.Now(), evictable) {
 		return RemoteImage{}, ErrRemoteBusy
 	}
 	image, err := f.loadImage(ctx, load)
-	f.remember(id, image, err, time.Now())
+	f.rememberEntry(id, image, err, time.Now(), evictable)
 	return image, err
 }
 
