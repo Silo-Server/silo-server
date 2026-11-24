@@ -65,7 +65,7 @@ func NewGenerator(pool *pgxpool.Pool, files FileLoader, frames FrameExtractor, c
 // another replica is generating, and stops early when no transcode node can
 // be reserved.
 func (g *Generator) Generate(ctx context.Context, limit int) (extras, posters int, err error) {
-	lock, acquired, err := pglock.TryAcquire(ctx, g.pool, lockKey)
+	lock, acquired, err := pglock.TryAcquireSession(ctx, g.pool, lockKey)
 	if err != nil || !acquired {
 		return 0, 0, err
 	}

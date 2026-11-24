@@ -262,7 +262,7 @@ func NewStoredArtworkReleaser(pool *pgxpool.Pool) *StoredArtworkReleaser {
 		debts:    NewRefreshDebtRepository(pool),
 		pageSize: storedArtworkReleasePageSize,
 		lock: func(ctx context.Context) (func(), bool, error) {
-			lock, acquired, err := pglock.TryAcquire(ctx, pool, storedArtworkReleaseAdvisoryLock)
+			lock, acquired, err := pglock.TryAcquireSession(ctx, pool, storedArtworkReleaseAdvisoryLock)
 			if err != nil || !acquired {
 				return nil, false, err
 			}

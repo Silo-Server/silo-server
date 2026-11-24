@@ -150,7 +150,7 @@ func (c *OriginalsCleaner) Exclusive(ctx context.Context, fn func() error) (bool
 	if c.pool == nil {
 		return true, fn()
 	}
-	lock, acquired, err := pglock.TryAcquire(ctx, c.pool, originalsCleanupAdvisoryLock)
+	lock, acquired, err := pglock.TryAcquireSession(ctx, c.pool, originalsCleanupAdvisoryLock)
 	if err != nil {
 		return false, fmt.Errorf("chapter thumbnail cleanup: acquiring lock: %w", err)
 	}
