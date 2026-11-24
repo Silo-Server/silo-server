@@ -494,7 +494,9 @@ function AdminUsersPage() {
                         <TableCell>
                           <AdminUserRoleBadge user={u} />
                         </TableCell>
-                        <TableCell className="whitespace-normal">
+                        {/* At least 6rem, so a squeezed table keeps a group name's
+                            ordinary words whole and gives way in the username and email. */}
+                        <TableCell className="min-w-24 whitespace-normal">
                           {row.group.kind === "admin" ? (
                             <span className="text-muted-foreground">
                               {t("web.admin.users.list.adminGroupNone")}
