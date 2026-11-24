@@ -390,6 +390,22 @@ func compatSourceHasSurroundAudio(source PlaybackMediaSource) bool {
 	return false
 }
 
+// compatRecipeFileID is the media file the play session's transcode reads,
+// when it is the file source names, or 0.
+func compatRecipeFileID(playSession *PlaybackSession, source PlaybackMediaSource) int {
+	if playSession == nil {
+		return 0
+	}
+	fileID := playSession.UpstreamMediaFileID
+	if playSession.Recipe != nil {
+		fileID = playSession.Recipe.MediaFileID
+	}
+	if fileID == 0 || fileID != source.FileID {
+		return 0
+	}
+	return fileID
+}
+
 func compatRecipeMatchesSource(recipe *playback.RecipeCard, source PlaybackMediaSource) bool {
 	return recipe != nil &&
 		recipe.MediaFileID == source.FileID &&
@@ -1285,6 +1301,9 @@ func (h *PlaybackHandler) HandleHLSSegment(w http.ResponseWriter, r *http.Reques
 		},
 	})
 	if err != nil {
+		if h.tm.ServePastEndOfStream(r.Context(), w, transcodeSession, compatRecipeFileID(playSession, *source), segmentName, err) {
+			return
+		}
 		if r.Context().Err() != nil {
 			// net/http also ends the context of a client that only
 			// half-closed and is still reading. Answer it as a timed-out
@@ -2131,6 +2150,7 @@ const (
 	compatRangeDOVIWithHLG     = "DOVIWithHLG"
 	compatRangeDOVIWithHDR     = "DOVIWithHDR10"
 	compatRangeDOVIWithHDRPlus = "DOVIWithHDR10Plus"
+	compatRangeDOVIWithSDR     = "DOVIWithSDR"
 	compatRangeHDR10Plus       = "HDR10Plus"
 	compatRangeHDR10           = "HDR10"
 	compatRangeHLG             = "HLG"
@@ -3256,9 +3276,14 @@ func (h *PlaybackHandler) ensureTranscodeSessionWithToneMapMode(
 			// A forced software failover must not reconstruct the stale hardware
 			// recipe that preceded it. If a concurrent caller already registered a
 			// runtime, also verify the returned process rather than trusting the card.
+			// Callers reach here only once the route runs on this server, so a
+			// recipe still naming an earlier node is rebuilt here; the manager
+			// refuses to start a card that names a node.
+			localRecipe := *ps.Recipe
+			localRecipe.TranscodeNodeURL = ""
 			if requiredToneMapMode != "" && ps.Recipe.ToneMapMode != requiredToneMapMode {
 				// Fall through to build a newly validated recipe in the required mode.
-			} else if reconstructed, reconstructErr := h.tm.ReconstructTranscodeWithError(ctx, upstreamSessionID, -1, *ps.Recipe); reconstructErr != nil && ps.Recipe.ToneMapMode != "" {
+			} else if reconstructed, reconstructErr := h.tm.ReconstructTranscodeWithError(ctx, upstreamSessionID, -1, localRecipe); reconstructErr != nil && ps.Recipe.ToneMapMode != "" {
 				// A frozen tone-map recipe must not be bypassed by a fresh plan after
 				// execution-time source validation fails.
 				return nil, reconstructErr
@@ -4434,7 +4459,8 @@ func generateCompatCopyVideoMasterManifestForVariant(source PlaybackMediaSource,
 		fmt.Sprintf("BANDWIDTH=%d", bandwidth),
 		fmt.Sprintf("AVERAGE-BANDWIDTH=%d", bandwidth),
 	}
-	if videoRange := compatMasterVideoRange(video, source.Version.HDR); videoRange != "" {
+	videoRange := compatMasterVideoRange(video, source.Version.HDR)
+	if videoRange != "" {
 		attributes = append(attributes, "VIDEO-RANGE="+videoRange)
 	}
 	if codecs := compatMasterCodecs(compatMasterVideoCodec(video), source, audio); codecs != "" {
@@ -4452,10 +4478,16 @@ func generateCompatCopyVideoMasterManifestForVariant(source PlaybackMediaSource,
 		// DV-capable players pick it over the hvc1 fallback at equal bandwidth.
 		// Only its CODECS sets it apart, so it needs a complete list.
 		if codecs := compatMasterCodecs(compatDOVICodecString(video), source, audio); codecs != "" {
+			// Dolby Vision keeps its base layer's range: HLG for AV1 10.4 and
+			// PQ for the rest.
+			doviRange := videoRange
+			if doviRange == "" {
+				doviRange = "PQ"
+			}
 			dovi := []string{
 				fmt.Sprintf("BANDWIDTH=%d", bandwidth),
 				fmt.Sprintf("AVERAGE-BANDWIDTH=%d", bandwidth),
-				"VIDEO-RANGE=PQ",
+				"VIDEO-RANGE=" + doviRange,
 				fmt.Sprintf("CODECS=%q", codecs),
 			}
 			dovi = append(dovi, shape...)
@@ -4479,9 +4511,9 @@ func compatMasterShapeAttributes(video models.VideoTrack) []string {
 	return attributes
 }
 
-// compatDOVICodecString is Jellyfin 12's Dolby Vision CODECS entry for a
-// stream without a compatible base layer: dvh1.PP.LL for HEVC, dav1.PP.LL for
-// AV1.
+// compatDOVICodecString is the Dolby Vision CODECS entry of the dvh1/dav1
+// variant (see compatDOVIVariantEligible): dvh1.PP.LL for HEVC, dav1.PP.LL
+// for AV1.
 func compatDOVICodecString(video models.VideoTrack) string {
 	fourCC := "dvh1"
 	if strings.EqualFold(strings.TrimSpace(video.Codec), "av1") {
@@ -4496,7 +4528,7 @@ func compatMasterVideoRange(video models.VideoTrack, versionHDR bool) string {
 		return compatRangeHLG
 	case compatRangeHDR10, compatRangeHDR10Plus, compatRangeDOVI, compatRangeDOVIWithHDR, compatRangeDOVIWithHDRPlus:
 		return "PQ"
-	case compatRangeSDR:
+	case compatRangeSDR, compatRangeDOVIWithSDR:
 		return compatRangeSDR
 	default:
 		return ""

@@ -1013,7 +1013,11 @@ request can start it again on the node. Without Redis the session exists only in
 the memory of the API process that started it, so it needs a single API replica
 or session affinity. A transcode the API executes itself (no transcode node) is
 only safe with one API replica or session affinity in any case: each replica
-that rebuilds it starts its own FFmpeg. Proxy-origin URLs
+that rebuilds it starts its own FFmpeg. A replica whose copy of the session
+predates a replan onto a transcode node made on another replica never starts
+FFmpeg for it: it relays the media request to the node the shared node recipe
+store names for the request's transport, or else the node the request's recipe
+card names, and answers 404 when that node can't be reached. Proxy-origin URLs
 (`authorized_media_origins_v1`) are unaffected: the proxy serves from the shared
 grant store rather than from an API process's memory.
 
@@ -1112,6 +1116,66 @@ form. Without it a long title's playlist exceeds 4 MiB, which some players
   negotiated form.
 
 A playlist served larger than 3.5 MiB is logged with its session id.
+
+The synthetic VOD playlist of an encoded transcode lists two-second segments
+up to the file's stored duration, which the scanner takes from the video and
+audio tracks when a subtitle track alone stretches the container. A container
+can still outlast its streams in ways the scanner cannot see, such as a bad
+duration tag, so the playlist can list segments FFmpeg never writes.
+
+The session learns the media's last segment from FFmpeg runs that read their
+input to the end: a run that exits 0, was not stopped or replaced, and did not
+log `Error during demuxing` (FFmpeg exits 0 after a read fails mid-file, such
+as a relayed source that closes early, but logs that error first). A run whose
+own playlist lists a segment with media sets the end to the last such segment;
+the media then ends at the run's seek position plus the length of the segments it
+wrote, since a seek (an audio-track switch, for one) need not fall on a segment
+boundary.
+A run that wrote no media started past the end: FFmpeg then writes no playlist,
+or one listing a single empty segment (`EXTINF:0`, no bytes). The end lies
+before that run's first segment; such a run only ever lowers a known end, and
+one that started at segment 0 shows nothing. Only an encoded transcode with a synthetic playlist learns the end:
+copy-video serves FFmpeg's own playlist, which a seek re-cuts at other
+keyframes. The end holds for the audio track of the run that learned it, since another
+track can run longer.
+
+A video segment request past the learned end answers `200` with a segment that
+holds no media: the PAT and PMT of one of the session's MPEG-TS segments (a
+generic H.264 PAT and PMT when none can be read), or an fMP4 `moof` and empty
+`mdat` that gives each track of the init segment an empty run from the
+segment's start. It never waits and never restarts FFmpeg, because a restart
+past the end writes nothing and the player would request the segment again. A
+request that waited on the restart lock checks the end again first. A seek into
+the tail before any run has reached the end restarts FFmpeg there once; it
+writes nothing, and the request answers the same segment. A crash, a kill, a
+non-zero exit, or an exit after a demux error has not reached the end, so a
+request past its output restarts it as before. A keyframe-planned copy remux
+lists only the source's own segments and keeps its own rules. The integrated
+server, transcode nodes, and the Jellyfin-compatible transcode serve this the
+same way.
+
+Players differ in how many such segments they step over. hls.js 1.6.15 treats
+a segment with no media as a gap for two segments in a row and for the
+playlist's last; past that it raises a parsing error. A zero-byte body is worse
+there: it fails hls.js's format probe and is requested again without end, which
+is why the answer is a valid segment. To keep later plays off this path, the
+server that answers past the end also lowers the file's stored
+`media_files.duration` to where the run found the media ends, rounded up to a
+whole second (`playback.StreamEndRecorder`). It never lengthens a
+duration, applies only while the stored duration is still the one the transcode
+was planned with (so an end measured on a file since replaced or probed again
+changes nothing), leaves a file with more than one audio track alone (another
+track can run longer than the one the transcode read), and leaves
+`probe_updated_at` alone. Each API process writes a given end once per ten
+minutes; an end that rounds up to the stored duration writes nothing. A
+transcode node carries each transcode's learned end and planned duration in its
+session report from the moment it learns them (`stream_end_seconds`,
+`stream_planned_seconds`), whether or not a player has asked past the end yet,
+and the core stores it the same way, whichever server or proxy relayed the
+segments. Only the API server that holds the playback session
+stores it: with several API servers, a report another one receives changes
+nothing, and the duration stays until a report reaches the holder, a later
+transcode measures it again, or the file is probed again.
 
 ---
 

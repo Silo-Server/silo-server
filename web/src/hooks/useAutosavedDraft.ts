@@ -3,6 +3,8 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 type Save<T> = (next: T) => Promise<unknown>;
 
 interface Machine<T> {
+  /** Shares this machine with a later editor for the same value while it saves. */
+  key: string | undefined;
   /** The value the server last acknowledged. */
   confirmed: T;
   /** Patch whose save is in flight. */
@@ -10,17 +12,22 @@ interface Machine<T> {
   /** Edits made while a save was in flight, merged, with the save to send them. */
   queued: Partial<T> | null;
   queuedSave: Save<T> | null;
+  /** Shows the machine's state in the editor mounted on it, if any. */
+  publish: ((m: Machine<T>) => void) | null;
 }
 
+/**
+ * Keyed machines with a save in flight. An editor closed mid-save leaves its
+ * save running; one reopened on the same key joins it instead of starting from
+ * a stored copy the save hasn't reached yet and racing it with a second queue.
+ */
+const inFlight = new Map<string, unknown>();
+
 /** Send one patch; when it settles, send whatever queued up meanwhile. */
-function send<T>(
-  m: Machine<T>,
-  patch: Partial<T>,
-  save: Save<T>,
-  publish: (m: Machine<T>) => void,
-) {
+function send<T>(m: Machine<T>, patch: Partial<T>, save: Save<T>) {
   const next = { ...m.confirmed, ...patch };
   m.sending = patch;
+  if (m.key !== undefined) inFlight.set(m.key, m);
   void save(next)
     .then(
       () => {
@@ -33,10 +40,16 @@ function send<T>(
       const { queued, queuedSave } = m;
       m.queued = null;
       m.queuedSave = null;
-      if (queued && queuedSave) send(m, queued, queuedSave, publish);
-      publish(m);
+      if (queued && queuedSave) send(m, queued, queuedSave);
+      else if (m.key !== undefined && inFlight.get(m.key) === m) inFlight.delete(m.key);
+      m.publish?.(m);
     });
 }
+
+const viewOf = <T>(m: Machine<T>) => ({
+  value: { ...m.confirmed, ...m.sending, ...m.queued } as T,
+  saving: m.sending !== null,
+});
 
 /**
  * Local draft for an editor that saves every change as it is made (a panel
@@ -55,33 +68,42 @@ function send<T>(
  * the editor is gone (where a reset or a reopened editor couldn't stop it);
  * a save already in flight still completes. Call `discardQueued` before
  * clearing the stored value while the editor is mounted.
+ *
+ * With a `key` naming the stored value, an editor opened while an earlier
+ * one's save for that key is still in flight starts from that save, not from
+ * `initial`, and queues behind it. The caller's save should settle only once
+ * the copy `initial` is read from shows the saved value.
  */
-export function useAutosavedDraft<T extends object>(initial: T) {
-  const machine = useRef<Machine<T>>({
-    confirmed: initial,
-    sending: null,
-    queued: null,
-    queuedSave: null,
-  });
-  const [view, setView] = useState({ value: initial, saving: false });
+export function useAutosavedDraft<T extends object>(initial: T, key?: string) {
+  const [joined] = useState<Machine<T>>(
+    () =>
+      (key !== undefined ? (inFlight.get(key) as Machine<T> | undefined) : undefined) ?? {
+        key,
+        confirmed: initial,
+        sending: null,
+        queued: null,
+        queuedSave: null,
+        publish: null,
+      },
+  );
+  const machine = useRef(joined);
+  const [view, setView] = useState(() => viewOf(joined));
+
+  const publish = useCallback((m: Machine<T>) => setView(viewOf(m)), []);
 
   // Layout cleanup runs inside the commit that removes the editor, so a save
   // settling before passive effects flush (a transition unmount) can't start
   // the queued one.
   useLayoutEffect(() => {
     const m = machine.current;
+    m.publish = publish;
     return () => {
+      if (m.publish !== publish) return;
+      m.publish = null;
       m.queued = null;
       m.queuedSave = null;
     };
-  }, []);
-
-  const publish = useCallback((m: Machine<T>) => {
-    setView({
-      value: { ...m.confirmed, ...m.sending, ...m.queued },
-      saving: m.sending !== null,
-    });
-  }, []);
+  }, [publish]);
 
   const edit = useCallback(
     (patch: Partial<T>, save: Save<T>) => {
@@ -90,7 +112,7 @@ export function useAutosavedDraft<T extends object>(initial: T) {
         m.queued = { ...m.queued, ...patch };
         m.queuedSave = save;
       } else {
-        send(m, patch, save, publish);
+        send(m, patch, save);
       }
       publish(m);
     },

@@ -388,6 +388,16 @@ id); clients never retry automatically and treat `429` as drop.
 | Subtitle sidecar | GET/HEAD `/api/v2/stream/{session_id}/subtitles/{track}` |
 | Subtitle fonts | GET `/api/v2/stream/{session_id}/subtitles/{track}/fonts`, JSON `{items: [{name, data}]}` |
 
+An encoded transcode's playlist can list video segments past the end of the
+media. Once an FFmpeg run of the session has exited 0 without a demux error, or a
+run started past the end and wrote nothing, a request for such a segment answers
+`200` with the segment's media type and a segment that holds no media: an
+MPEG-TS PAT and PMT, or an fMP4 fragment whose tracks have no samples. It does
+not restart FFmpeg. How far a player steps over such segments depends on the
+player; the conditions and the duration correction that follows are in the
+[protocol](architecture/playback-protocol-v3.md). Transcode nodes and the
+Jellyfin-compatible transcode answer it the same way.
+
 These reuse the shared byte-delivery handlers behind the native API listener, as the raw
 playback registry allows. The plan's URLs
 carry the signed stream reference `st`; a media element that cannot set headers
@@ -418,7 +428,8 @@ the parameter, so the plan leaves it off that proxy's URL and the stream keeps
 the `200`. The web video player opts in on Chromium browsers only. The web
 audiobook player, which has no reopen at the current position, Firefox, Safari
 and native players keep the `200`; native players skip the bytes they already
-have. A failure before the first
+have. An audio-only remux (`audio/mp4`) arrives as MP4 fragments of about 2
+seconds each, so a player can start on the first one. A failure before the first
 byte is a Problem Details response; a failure after it ends the stream. A stopped, expired or
 terminated session answers `410 playback_session_ended`. A subtitle sidecar the
 node has no room to read yet answers `503` with `Retry-After`; retry it then.

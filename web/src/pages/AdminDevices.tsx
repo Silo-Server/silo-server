@@ -1566,14 +1566,10 @@ function DeviceDetailPanel({
   const deleteProfileOverrides = useDeleteAllAdminUserDeviceSettingsForDevice();
   const [settingToReset, setSettingToReset] = useState<AdminDeviceSetting | null>(null);
   const [profileToReset, setProfileToReset] = useState<{ id: string; name: string } | null>(null);
-  // The editor target carries `isOverride` alongside the setting so the
-  // editor (raw JSON or the subtitle-appearance panel) can decide whether
-  // to surface a "Reset" affordance. The current setting always lives in
-  // `setting`, even for synthesized default rows from the manifest.
-  const [jsonEditor, setJsonEditor] = useState<{
-    setting: AdminDeviceSetting;
-    isOverride: boolean;
-  } | null>(null);
+  // The row the editor opened on: a real override or a synthesized default
+  // row from the manifest. The subtitle appearance editor reads the live row
+  // for the same target below, so it sees an override its own save created.
+  const [jsonEditor, setJsonEditor] = useState<{ setting: AdminDeviceSetting } | null>(null);
   const [jsonValue, setJsonValue] = useState("");
   const closeJsonEditor = () => {
     setJsonEditor(null);
@@ -1657,6 +1653,15 @@ function DeviceDetailPanel({
     );
   }
 
+  const editorOverride = jsonEditor
+    ? overrides.find(
+        (setting) =>
+          setting.key === jsonEditor.setting.key &&
+          (setting.profile_id || UNKNOWN_PROFILE_ID) ===
+            (jsonEditor.setting.profile_id || UNKNOWN_PROFILE_ID),
+      )
+    : undefined;
+
   const kind = classifyPlatform(data.device_platform);
   // Counted from the canonical rows rather than the endpoint's override_count,
   // which is computed over the legacy table and would disagree with the rows
@@ -1734,8 +1739,8 @@ function DeviceDetailPanel({
       */}
       {jsonEditor?.setting.key === SETTING_KEYS.PLAYBACK_SUBTITLE_APPEARANCE && (
         <AdminSubtitleAppearanceDialog
-          setting={jsonEditor.setting}
-          isOverride={jsonEditor.isOverride}
+          setting={editorOverride ?? jsonEditor.setting}
+          isOverride={editorOverride !== undefined}
           onClose={closeJsonEditor}
           onSave={(setting, value) =>
             updateSetting.mutateAsync({
@@ -1955,8 +1960,8 @@ function DeviceDetailPanel({
             onResetProfile={(profileId, profileName) =>
               setProfileToReset({ id: profileId, name: profileName })
             }
-            onEditJson={(setting, isOverride) => {
-              setJsonEditor({ setting, isOverride });
+            onEditJson={(setting) => {
+              setJsonEditor({ setting });
               setJsonValue(setting.value);
             }}
             onResetSetting={(setting) => setSettingToReset(setting)}

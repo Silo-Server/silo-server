@@ -38,6 +38,11 @@ export function useWatchProgress(
   const configRef = useRef(config);
   configRef.current = config;
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Tells the player when a refused report shows the server ended the session.
+  const reportSessionEnd = useCallback((error: unknown) => {
+    const reason = playbackSessionEndReason(error);
+    if (reason) onSessionEndedRef.current?.(reason);
+  }, []);
   const skipCleanupReportRef = useRef(false);
 
   const getProgressSnapshot = useCallback(() => {
@@ -90,16 +95,28 @@ export function useWatchProgress(
     [getProgressSnapshot, sessionId],
   );
 
+  // The session whose reports are live; a flush still in flight when the
+  // session changes must not end the replacement.
+  const liveSessionRef = useRef<string | null>(null);
+
   const flushProgress = useCallback(async () => {
     if (!sessionId) return;
 
-    await reportProgress({ isPaused: true });
+    try {
+      await reportProgress({ isPaused: true });
+    } catch (error) {
+      // A leave flushes first. When the server already ended the session,
+      // say so, as a periodic report would: a minimize then still leaves.
+      if (liveSessionRef.current === sessionId) reportSessionEnd(error);
+      throw error;
+    }
     skipCleanupReportRef.current = true;
-  }, [reportProgress, sessionId]);
+  }, [reportProgress, reportSessionEnd, sessionId]);
 
   useEffect(() => {
     if (!sessionId) return;
     skipCleanupReportRef.current = false;
+    liveSessionRef.current = sessionId;
     // A report still in flight when the session changes must not end the
     // replacement session.
     let active = true;
@@ -108,8 +125,7 @@ export function useWatchProgress(
       reportProgress().catch((error: unknown) => {
         // Best effort — don't disrupt playback on progress report failure,
         // unless the server says the session is over.
-        const reason = playbackSessionEndReason(error);
-        if (active && reason) onSessionEndedRef.current?.(reason);
+        if (active) reportSessionEnd(error);
       });
     };
     intervalRef.current = setInterval(report, 10_000);
@@ -119,6 +135,7 @@ export function useWatchProgress(
 
     return () => {
       active = false;
+      liveSessionRef.current = null;
       pauseEvents.forEach((event) => video?.removeEventListener(event, report));
       if (intervalRef.current) clearInterval(intervalRef.current);
       intervalRef.current = null;
@@ -129,7 +146,7 @@ export function useWatchProgress(
       // position before the session is deleted (e.g. after a seek).
       reportProgress({ keepalive: true, isPaused: true }).catch(() => {});
     };
-  }, [reportProgress, sessionId, videoRef]);
+  }, [reportProgress, reportSessionEnd, sessionId, videoRef]);
 
   return flushProgress;
 }

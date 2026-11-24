@@ -2025,6 +2025,31 @@ func (m *SessionManager) GetSession(sessionID string) (*Session, error) {
 	return &cp, nil
 }
 
+// RemoteTranscode returns the node URL, media file and start time of the
+// session whose remote transcode runs as transportID (its
+// TranscodeTransportID, or its ID when that is empty), when this server holds
+// it. A transport ID begins with
+// its session's 36-character UUID (see transportGenerationV3 in
+// internal/api/handlers).
+func (m *SessionManager) RemoteTranscode(transportID string) (nodeURL string, mediaFileID int, startedAt time.Time, ok bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, id := range []string{transportID, transportID[:min(len(transportID), 36)]} {
+		s, found := m.sessions[id]
+		if !found || s.TranscodeNodeURL == "" {
+			continue
+		}
+		transport := s.TranscodeTransportID
+		if transport == "" {
+			transport = s.ID
+		}
+		if transport == transportID {
+			return s.TranscodeNodeURL, s.MediaFileID, s.StartedAt, true
+		}
+	}
+	return "", 0, time.Time{}, false
+}
+
 // GetUserSessions returns all active sessions for a user.
 func (m *SessionManager) GetUserSessions(userID int) []*Session {
 	m.mu.RLock()

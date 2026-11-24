@@ -253742,6 +253742,14 @@
             "format": "int64",
             "type": "integer"
           },
+          "stream_end_seconds": {
+            "format": "double",
+            "type": "number"
+          },
+          "stream_planned_seconds": {
+            "format": "double",
+            "type": "number"
+          },
           "tone_map_mode": {
             "type": "string"
           },

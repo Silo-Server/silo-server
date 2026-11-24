@@ -51,6 +51,7 @@
 ./internal/scanner TestFileRepositoryPreservesFirstSeenScanProvenance
 ./internal/scanner TestMultiEpisodeFileServesSpannedEpisodesDB
 ./internal/scanner TestScannedGroupForItemDB
+./internal/scanner TestShortenDurationOnlyForTheFileTheRunReadDB
 ./internal/scanner TestListMarkerEditAuditClientIPHasNoNetmaskDB
 ./internal/scanner TestMatroskaTrackBackfillRecordsTrackNumbers
 ./internal/scanner TestMatroskaTrackBackfillStopsOnStalledStorage
@@ -295,6 +296,10 @@
 # and resolves the rebuilt item (#934).
 ./internal/metadata TestCompleteRefreshRebuildsSeriesDB
 
+# A scheduled refresh uses the provider chain of the item's library, not the
+# all-providers fallback of folder 0 (#4605).
+./internal/metadata TestScheduledRefreshKeepsToTheLibraryChainDB
+
 # A complete metadata refresh that merges onto an item whose match the admin
 # cleared leaves only the providers' current values and keeps locks (#4336).
 ./internal/metadata TestCompleteRefreshDropsAClearedMatchsValuesDB
@@ -380,6 +385,7 @@
 ./internal/taskmanager/tasks TestReconcileSkipsWhileAnotherReconcileRunsPostgres
 ./internal/taskmanager/tasks TestAdvisoryClusterLockLeavesASingleConnectionPoolFreePostgres
 ./internal/taskmanager/repository TestPgExecutionRepositoryPruneReportsBatchLimit
+./internal/taskmanager/repository TestPgExecutionRepositoryPruneRunsOnASingleConnectionPool
 
 # A task run whose server stops renewing its lease is recorded once, as an
 # interrupted failure ending at its last heartbeat; a renewed lease is kept.

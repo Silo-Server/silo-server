@@ -249,6 +249,9 @@ type PlaybackHandler struct {
 	SettingsRepo       PlaybackSettingsReader     // optional; reads server settings (e.g., allow_4k_transcode)
 	FileVersionFetcher PlaybackFileVersionFetcher // optional; queries sibling file versions for 4K guard
 	ProbeEnsurer       PlaybackProbeEnsurer       // optional; repairs missing probe metadata on demand
+	// StreamEnds stores where a transcode found a file's media ends; nil
+	// stores nothing.
+	StreamEnds *playback.StreamEndRecorder
 	// CopySafetyRacer resolves an unknown H.264 copy-safety verdict behind an
 	// already-issued stream-copy plan. Optional: without it an unknown verdict
 	// stays unknown, and strict web decoders and downloads treat the file as
@@ -391,6 +394,7 @@ func NewPlaybackHandler(sessionMgr SessionManagerInterface, opts ...FilePathReso
 		h.maybeStartThrottler(ctx, ts)
 	}
 	h.tm.RestoreReconstructedClient = h.restoreReconstructedClient
+	h.tm.StreamEndsFn = func() *playback.StreamEndRecorder { return h.StreamEnds }
 	h.tm.RestoreReconstructedWatch = h.restoreReconstructedWatch
 	h.tm.OnFFmpegCrash = func(ctx context.Context, sessionID string, dead *playback.TranscodeSession) {
 		// ffmpeg crash — tear the session down; a client holding a valid stream
@@ -667,6 +671,21 @@ func (h *PlaybackHandler) loadTranscodeServeSession(r *http.Request, sessionID s
 				return session, playback.SessionLoaded, nil, nil, nil
 			}
 			if card != nil {
+				if card.TranscodeNodeURL != "" {
+					if !movedHereFromCardNode(session, *card) {
+						// The card runs on a node this copy does not know
+						// about: another replica replanned the session there.
+						// The serve handler relays to the card's node; nothing
+						// is rebuilt here (#4601).
+						return session, playback.SessionLoaded, card, claims, nil
+					}
+					// This copy moved the card's transport off its node to
+					// this server, and the client still presents the token
+					// minted for that node. The local runtime was lost since:
+					// rebuild it here, as the move did.
+					local := localTranscodeCard(*card)
+					card = &local
+				}
 				session, _, status, reconstructErr := h.tm.LoadOrReconstructTranscodeWithError(r.Context(), h.sessionMgr.GetSession, sessionID, requestUserID, requestedSegment, card)
 				return session, status, card, claims, reconstructErr
 			}
@@ -2251,6 +2270,9 @@ func (h *PlaybackHandler) HandleGetTranscodeManifest(w http.ResponseWriter, r *h
 			return
 		}
 	}
+	if transcodeSession == nil && h.relayStaleCopyToCardNode(w, r, session, card, "/master.m3u8") {
+		return
+	}
 	if transcodeSession == nil {
 		// Local transcode whose process state was lost: reconstruct it from the
 		// token recipe. The manifest path has no segment context, so pass -1 (use
@@ -2388,6 +2410,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 			return
 		}
 	}
+	if transcodeSession == nil && h.relayStaleCopyToCardNode(w, r, session, card, "/segment/"+chi.URLParam(r, "name")) {
+		return
+	}
 	if transcodeSession == nil {
 		// Resume near the segment the client is fetching so reconstruct does not
 		// restart from the original seek point and stall. A non-segment name
@@ -2421,6 +2446,9 @@ func (h *PlaybackHandler) HandleGetTranscodeSegment(w http.ResponseWriter, r *ht
 		CopyLookaheadTimeout: 1200 * time.Millisecond,
 	})
 	if err != nil {
+		if h.tm.ServePastEndOfStream(r.Context(), w, transcodeSession, transcodeSession.Opts().MediaFileID, segmentName, err) {
+			return
+		}
 		if r.Context().Err() != nil {
 			// net/http also ends the context of a client that only
 			// half-closed and is still reading. Answer it as a timed-out
