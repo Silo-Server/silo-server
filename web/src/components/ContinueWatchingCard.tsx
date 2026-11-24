@@ -1,7 +1,7 @@
 import ViewTransitionLink from "@/components/ViewTransitionLink";
 import { AIR_DATE_TITLE_SEPARATOR, episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import { BookOpen, Play } from "lucide-react";
-import { Children, memo, useCallback, useRef } from "react";
+import { Children, memo, useCallback, useRef, type ReactNode } from "react";
 import { useLocation } from "react-router";
 import type { ItemDetail, SectionItem } from "@/api/types";
 import { homeDismissalForCard } from "@/hooks/queries/homeDismissals";
@@ -174,7 +174,8 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
       {card.title}
     </span>
   ) : null;
-  const episodeMeta = hasEpisodeMeta
+  // Typed as ReactNode so Children.map below accepts the date-and-title array.
+  const episodeMeta: ReactNode = hasEpisodeMeta
     ? card.airDateLabel
       ? // A date-labeled series (sports): the game's date replaces its
         // synthetic season and episode numbers. The parts are an array, not a
