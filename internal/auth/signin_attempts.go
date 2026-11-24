@@ -129,8 +129,14 @@ func (s *Service) foldSignInNames(ctx context.Context, names []string) ([]string
 // which can run detached from the request after the password matched.
 const signInLookupTimeout = 2 * time.Second
 
-// signInFoldCacheMax bounds the folded names a Service remembers.
-const signInFoldCacheMax = 4096
+// signInFoldCacheMax bounds the folded names a Service remembers, and
+// signInFoldCacheMaxName the length of a name it remembers: usernames and
+// emails are at most 255 characters, so a longer name finds no account and
+// is folded each time instead of pinning memory.
+const (
+	signInFoldCacheMax     = 4096
+	signInFoldCacheMaxName = 256
+)
 
 // signInFoldCache remembers how the database folded names, so attempts that
 // keep hitting one locked name do not each query it. A name's fold never
@@ -161,7 +167,9 @@ func (c *signInFoldCache) put(names, folded []string) {
 		c.folded = make(map[string]string, len(names))
 	}
 	for i, name := range names {
-		c.folded[name] = folded[i]
+		if len(name) <= signInFoldCacheMaxName {
+			c.folded[name] = folded[i]
+		}
 	}
 }
 
