@@ -466,7 +466,7 @@ type AdminInsightsTitles struct {
 	Movies        []AdminInsightsTitleRow   `json:"movies"`
 	Shows         []AdminInsightsTitleRow   `json:"shows"`
 	Libraries     []AdminInsightsLibraryRow `json:"libraries"`
-	LeastFinished []AdminInsightsTitleRow   `json:"least_finished" doc:"Movies and series with at least 3 plays, lowest completion rate first, up to limit"`
+	LeastFinished []AdminInsightsTitleRow   `json:"least_finished" doc:"Movies and series with at least 3 plays and at least one left unfinished, lowest completion rate first, up to limit"`
 }
 
 type AdminInsightsTitlesOutput struct {

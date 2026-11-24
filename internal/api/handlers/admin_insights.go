@@ -487,7 +487,8 @@ type AdminInsightsTitles struct {
 	Shows     []AdminInsightsTitleRow
 	Libraries []AdminInsightsLibraryRow
 	// LeastFinished lists movies and series with at least
-	// insightsLeastFinishedMinPlays plays, lowest completion rate first.
+	// insightsLeastFinishedMinPlays plays and one left unfinished, lowest
+	// completion rate first.
 	LeastFinished []AdminInsightsTitleRow
 }
 

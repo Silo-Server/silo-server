@@ -27,9 +27,16 @@ function heatmapLevel(plays: number, maxPlays: number): number {
 /**
  * Weekday × hour grid of play starts. One cell is focusable at a time (roving
  * tabindex) and the arrow keys move between cells, so the grid is one tab stop
- * however many hours it has.
+ * however many hours it has. `compact` uses shorter cells so the grid and its
+ * legend fit a three-row dashboard widget.
  */
-export function ViewingHeatmap({ cells }: { cells: readonly ViewingTimeCell[] }) {
+export function ViewingHeatmap({
+  cells,
+  compact = false,
+}: {
+  cells: readonly ViewingTimeCell[];
+  compact?: boolean;
+}) {
   const t = useT();
   const weekdayLabels = useWeekdayLabels();
   const hourLabels = useHourLabels();
@@ -86,13 +93,13 @@ export function ViewingHeatmap({ cells }: { cells: readonly ViewingTimeCell[] })
   }
 
   return (
-    <div className="space-y-3">
+    <div className={compact ? "space-y-2" : "space-y-3"}>
       <div className="overflow-x-auto">
         <div
           role="grid"
           aria-label={t("web.admin.insights.activity.heatmap.title")}
           dir="ltr"
-          className="min-w-[440px] space-y-1"
+          className={cn("min-w-[440px]", compact ? "space-y-0.5" : "space-y-1")}
         >
           <div
             role="row"
@@ -147,7 +154,8 @@ export function ViewingHeatmap({ cells }: { cells: readonly ViewingTimeCell[] })
                     onFocus={() => setActive({ dow, hour })}
                     onKeyDown={(e) => handleKeyDown(e, dow, hour)}
                     className={cn(
-                      "focus-visible:ring-ring h-5 rounded-[4px] transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:outline-none",
+                      "focus-visible:ring-ring rounded-[4px] transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:outline-none",
+                      compact ? "h-4" : "h-5",
                       LEVEL_CLASSES[heatmapLevel(plays, grid.maxPlays)],
                     )}
                   />

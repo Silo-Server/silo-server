@@ -19531,7 +19531,7 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision
        */
       from: string;
-      /** @description Movies and series with at least 3 plays, lowest completion rate first, up to limit */
+      /** @description Movies and series with at least 3 plays and at least one left unfinished, lowest completion rate first, up to limit */
       least_finished: components["schemas"]["AdminInsightsTitleRow"][];
       libraries: components["schemas"]["AdminInsightsLibraryRow"][];
       movies: components["schemas"]["AdminInsightsTitleRow"][];

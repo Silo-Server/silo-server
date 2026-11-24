@@ -19,7 +19,7 @@ import {
   formatActivityBucketLabel,
   formatInsightsCount,
   formatRatePercentNumber,
-  formatShortTimestamp,
+  formatShortCalendarDate,
 } from "./insightsHelpers";
 
 type LabeledCount = AdminInsightsDevices["subtitles"]["languages"][number];
@@ -37,10 +37,8 @@ export function DevicesUsageSections({ data }: { data: AdminInsightsDevices }) {
         <ProtocolShareCard data={data} />
         <ClientVersionsCard versions={data.client_versions} />
       </div>
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-        <SubtitleUsageCard usage={data.subtitles} />
-        <AudioUsageCard usage={data.audio} />
-      </div>
+      <SubtitleUsageCard usage={data.subtitles} />
+      <AudioUsageCard usage={data.audio} />
     </>
   );
 }
@@ -192,7 +190,7 @@ function ClientVersionsCard({ versions }: { versions: AdminInsightsDevices["clie
                       {sessionCount(row.sessions)}
                     </td>
                     <td className="text-muted-foreground py-1.5 ps-2 text-end tabular-nums">
-                      {formatShortTimestamp(row.last_seen_at)}
+                      {formatShortCalendarDate(row.last_seen_at)}
                     </td>
                   </tr>
                 ))}

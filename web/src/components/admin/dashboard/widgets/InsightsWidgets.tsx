@@ -154,7 +154,7 @@ export function InsightsViewingHoursWidget() {
             <ChartEmptyState fill message={t("web.admin.insights.activity.heatmap.empty")} />
           ) : (
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <ViewingHeatmap cells={data.heatmap} />
+              <ViewingHeatmap cells={data.heatmap} compact />
             </div>
           )
         }

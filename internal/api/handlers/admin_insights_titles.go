@@ -123,7 +123,7 @@ func queryInsightsTitlesRanking(ctx context.Context, tx pgx.Tx, scope insightsPl
 			UNION ALL
 			SELECT '%[6]s', t.*, ROW_NUMBER() OVER (
 				ORDER BY t.completed_plays::double precision / t.plays, t.plays DESC, t.watch_seconds DESC, t.id) AS rn
-			FROM totals t WHERE t.kind <> 'library' AND t.plays >= $%[7]d
+			FROM totals t WHERE t.kind <> 'library' AND t.plays >= $%[7]d AND t.completed_plays < t.plays
 		)
 		SELECT r.list, r.kind, r.id, COALESCE(mi.title, lib.name, ''), mi.year,
 			r.plays, r.viewers, r.completed_plays, r.episodes, r.watch_seconds, r.last_played_at

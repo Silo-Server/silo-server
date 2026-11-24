@@ -2356,7 +2356,7 @@ window. The implementation and its edge cases are documented in
   libraries with at least one play; titles no longer in the catalog do not rank. `viewers`
   counts distinct profiles with a play. A library row counts plays by the library of each
   play's first session. `least_finished` lists up to `limit` movies and series with at least
-  3 plays, lowest completion rate first.
+  3 plays and at least one left unfinished, lowest completion rate first.
 - `GET /api/v2/admin/insights/titles/{content_id}` (`getAdminInsightsTitle`) reads one movie or
   series with the same window and filters: totals, plays per bucket, the profiles with a play
   (most recent first, capped at 100, `viewers_truncated`), and a series' episodes with a play

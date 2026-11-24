@@ -14317,7 +14317,7 @@
             "type": "string"
           },
           "least_finished": {
-            "description": "Movies and series with at least 3 plays, lowest completion rate first, up to limit",
+            "description": "Movies and series with at least 3 plays and at least one left unfinished, lowest completion rate first, up to limit",
             "items": {
               "$ref": "#/components/schemas/AdminInsightsTitleRow"
             },
