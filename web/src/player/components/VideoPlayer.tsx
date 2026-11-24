@@ -6112,6 +6112,7 @@ export function VideoPlayer({
       {/* Intro skip / undo prompt */}
       {!isDetached && activeIntroPrompt && (
         <IntroSkipButton
+          key={introKey}
           onSkip={selectIntroPrompt}
           label={activeIntroPrompt.label}
           caption={activeIntroPrompt.caption}

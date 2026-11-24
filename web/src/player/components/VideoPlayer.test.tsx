@@ -1809,6 +1809,39 @@ describe("VideoPlayer credits pill keys", () => {
     expect(onReanchorSeek).toHaveBeenCalledWith(50);
   });
 
+  // Focus is taken as the pill appears or not at all: a pill that came up
+  // during a scrub stays unfocused when the viewer moves on.
+  it("does not take focus later in its timer", async () => {
+    const rendered = renderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      }),
+      credits: { start: 20, end: 50 },
+    });
+    const video = rendered.container.querySelector("video")!;
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    video.currentTime = 5;
+    fireFrameTimeUpdate(video);
+    fireEvent.play(video);
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    fireEvent.mouseMove(rendered.container.firstElementChild!);
+    const slider = rendered.container.querySelector<HTMLElement>("[data-player-seek-slider]")!;
+    slider.focus();
+    fireEvent.keyDown(slider, { key: "ArrowRight" });
+    video.currentTime = 21;
+    fireFrameTimeUpdate(video);
+    const pill = rendered.getByRole("button", { name: "Skip Credits" });
+    expect(document.activeElement).toBe(slider);
+
+    slider.blur();
+    fireEvent.keyDown(document.body, { key: "Tab" });
+    video.currentTime = 22;
+    fireFrameTimeUpdate(video);
+    expect(document.activeElement).not.toBe(pill);
+  });
+
   it("leaves Space and Escape to the player once the timer has run out", async () => {
     const { container, onReanchorSeek, pill, press } = await setup();
     await act(() => vi.advanceTimersByTimeAsync(PROMPT_MS));

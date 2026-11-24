@@ -54,9 +54,12 @@ export function IntroSkipButton({
   const buttonRef = useRef<HTMLButtonElement>(null);
   const [now, setNow] = useState(() => Date.now());
 
+  // Decided once as the pill appears: a pill that came up unfocused, under a
+  // menu or during a scrub, must not take focus later in its timer.
+  const [takeFocus] = useState(focusOnMount);
   useEffect(() => {
-    if (focusOnMount) buttonRef.current?.focus({ preventScroll: true });
-  }, [focusOnMount]);
+    if (takeFocus) buttonRef.current?.focus({ preventScroll: true });
+  }, [takeFocus]);
 
   // A timed pill that runs out can stay on screen as the untimed offer. It
   // gives up the focus it held, as it did when it unmounted, so the next Space
