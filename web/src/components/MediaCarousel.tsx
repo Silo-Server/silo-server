@@ -252,7 +252,7 @@ export default function MediaCarousel({
   // With actions, the heading stacks above them so the pin's enlarged tap area
   // can't take taps on heading text when the pin starts the next line. A word
   // too long for the column breaks rather than running under "Explore all".
-  const titleClass = `inline font-semibold [overflow-wrap:anywhere] ${headerActions ? "relative z-10 me-2" : ""} ${
+  const titleClass = `inline font-semibold wrap-anywhere ${headerActions ? "relative z-10 me-2" : ""} ${
     compact ? "text-muted-foreground tracking-[0.18em] uppercase" : "text-foreground tracking-tight"
   }`;
   const hasExploreAll = Boolean(viewAllHref || onViewAll);
