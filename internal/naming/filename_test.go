@@ -560,6 +560,47 @@ func TestResolvePathContext(t *testing.T) {
 			wantMovieFolderEvidence: false,
 		},
 		{
+			// An S followed by more title text is part of the title.
+			name:                    "S token inside a title under a tagged show folder yields to a later season token",
+			path:                    "/tv/別題 {tvdb-12345}/Agent S7 (2019) - S03/E01.mkv",
+			libraryRoots:            []string{"/tv"},
+			libraryType:             "series",
+			wantType:                "series",
+			wantRoot:                "/tv/別題 {tvdb-12345}",
+			wantTitle:               "別題",
+			wantSeason:              3,
+			wantEpisode:             1,
+			wantEpisodePattern:      true,
+			wantSeasonStructure:     true,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// A spaced S, as in an abbreviation, is not the short season form.
+			name:                    "spaced S folder under a tagged movie folder stays a movie",
+			path:                    "/media/Documentary (2020) {tmdb-12345}/U.S. 2020/Documentary (2020).mkv",
+			libraryRoots:            []string{"/media"},
+			libraryType:             "mixed",
+			wantType:                "movie",
+			wantRoot:                "/media/Documentary (2020) {tmdb-12345}/U.S. 2020/Documentary (2020)",
+			wantTitle:               "Documentary",
+			wantYear:                2020,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: false,
+		},
+		{
+			// Release details before an S token name a release, not a season.
+			name:                    "release folder with an S-like group under a tagged movie folder stays a movie",
+			path:                    "/media/Movie (2020) {tmdb-1}/Movie.2020.2160p.WEB-DL.DDP5.1-S3/Movie.2020.2160p.mkv",
+			libraryRoots:            []string{"/media"},
+			libraryType:             "mixed",
+			wantType:                "movie",
+			wantRoot:                "/media/Movie (2020) {tmdb-1}/Movie.2020.2160p.WEB-DL.DDP5.1-S3",
+			wantTitle:               "Movie",
+			wantYear:                2020,
+			wantSeasonStructure:     false,
+			wantMovieFolderEvidence: true,
+		},
+		{
 			// A season token whose title matches the show folder wins over the
 			// tagged-folder fallback for an earlier token.
 			name:                    "season token matching the tagged show title wins over an earlier S token",

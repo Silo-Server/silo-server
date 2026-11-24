@@ -55,9 +55,12 @@ func isBareSeasonFolder(segment, fileTitle string) bool {
 // number (or, in the number-first form, after the label): only years,
 // provider tags, and release tokens may follow.
 func seasonLabelStandsAlone(label, rest string) bool {
-	if !wordSeasonDirectoryLabelRe.MatchString(label) {
-		return true
-	}
+	return !wordSeasonDirectoryLabelRe.MatchString(label) || onlyReleaseDetailsFollow(rest)
+}
+
+// onlyReleaseDetailsFollow reports whether rest, the text after a season
+// number, holds nothing but years, provider tags, and release tokens.
+func onlyReleaseDetailsFollow(rest string) bool {
 	rest = stripFolderTags(rest)
 	for {
 		rest = strings.TrimLeft(rest, " ._-[](){}")
@@ -95,6 +98,13 @@ func mayBeShowFolder(segment, fileStem string) bool {
 // Season 2 needs no parent evidence.
 // topLevel marks a folder directly in the library folder, which may be the show.
 func seasonDirectoryNumber(segment, parent string, allowNumeric, topLevel bool) (int, bool) {
+	return seasonDirectoryNumberUnder(segment, parent, allowNumeric, topLevel, true)
+}
+
+// seasonDirectoryNumberUnder is seasonDirectoryNumber for a parent that may
+// not be a show folder: a configured library folder's provider IDs name no
+// show, so with parentMayBeShow false only a matching title counts.
+func seasonDirectoryNumberUnder(segment, parent string, allowNumeric, topLevel, parentMayBeShow bool) (int, bool) {
 	segment = strings.TrimSpace(segment)
 	if specialsDirRe.MatchString(segment) {
 		return 0, true
@@ -119,17 +129,21 @@ func seasonDirectoryNumber(segment, parent string, allowNumeric, topLevel bool) 
 	// carry another title for it (an original-title show folder holding
 	// international-title seasons: فوضى {tmdb-227604}/Fauda - S01). A folder
 	// with its own provider tag names its own show. Only the short S01 form
-	// counts there: Season and Series also appear in titles (Open Season 2,
-	// World Series 2020). A token whose title matches the parent wins over
-	// this fallback.
-	parentTagged := ParseFolderIDs(parent) != nil && ParseFolderIDs(segment) == nil
+	// counts there, with the number right after the S and only release
+	// details after it: Season and Series also appear in titles (Open Season
+	// 2, World Series 2020), as do a spaced S (U.S. 2020) and an S inside a
+	// title (35mm S1 Scan), and a prefix with release details is a release
+	// name whose group may look like one (Movie.2160p.WEB-DL-S3). A token
+	// whose title matches the parent wins over this fallback.
+	parentTagged := parentMayBeShow && ParseFolderIDs(parent) != nil && ParseFolderIDs(segment) == nil
 	fallback, hasFallback := 0, false
 	for _, match := range seasonDirectoryTokenRe.FindAllStringSubmatchIndex(segment, -1) {
 		label := segment[match[2]:match[3]]
 		number, _ := strconv.Atoi(segment[match[4]:match[5]])
 		prefix := normalizeInferComparable(segment[:match[0]])
 		if prefix != "" && (parentTitle == "" || prefix != parentTitle) {
-			if parentTagged && !hasFallback && strings.EqualFold(label, "s") {
+			if parentTagged && !hasFallback && strings.EqualFold(label, "s") && match[3] == match[4] &&
+				onlyReleaseDetailsFollow(segment[match[5]:]) && !inferTechnicalSuffixRe.MatchString(segment[:match[0]]) {
 				fallback, hasFallback = number, true
 			}
 			continue
