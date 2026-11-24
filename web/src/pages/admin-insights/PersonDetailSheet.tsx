@@ -156,7 +156,7 @@ export function PersonDetailSheet({
                 >
                   <SelectTrigger
                     aria-label={t("web.admin.insights.personDetail.profileLabel")}
-                    className="h-8 w-[165px] text-xs"
+                    className="h-8 max-w-[14rem] min-w-[8.5rem] text-xs"
                   >
                     <SelectValue />
                   </SelectTrigger>

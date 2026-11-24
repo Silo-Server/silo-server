@@ -378,7 +378,7 @@ export default function AdminPlaybackHistory() {
           </div>
 
           <Select value={selectedUser} onValueChange={(value) => updateFilter("user_id", value)}>
-            <SelectTrigger className="h-9 w-[160px] text-xs">
+            <SelectTrigger className="h-9 max-w-[14rem] min-w-[8.5rem] text-xs">
               <SelectValue placeholder={t("web.admin.history.filter.allUsers")} />
             </SelectTrigger>
             <SelectContent>
@@ -396,7 +396,7 @@ export default function AdminPlaybackHistory() {
             onValueChange={(value) => updateFilter("profile_id", value)}
             disabled={selectedUser === ALL_VALUE}
           >
-            <SelectTrigger className="h-9 w-[155px] text-xs">
+            <SelectTrigger className="h-9 max-w-[16rem] min-w-[9.5rem] text-xs">
               <SelectValue
                 placeholder={
                   selectedUser === ALL_VALUE
@@ -422,7 +422,7 @@ export default function AdminPlaybackHistory() {
             value={selectedLibrary}
             onValueChange={(value) => updateFilter("library_id", value)}
           >
-            <SelectTrigger className="h-9 w-[155px] text-xs">
+            <SelectTrigger className="h-9 max-w-[14rem] min-w-[8.5rem] text-xs">
               <SelectValue placeholder={t("web.admin.history.filter.allLibraries")} />
             </SelectTrigger>
             <SelectContent>
@@ -441,7 +441,7 @@ export default function AdminPlaybackHistory() {
             value={selectedMethod}
             onValueChange={(value) => updateFilter("play_method", value)}
           >
-            <SelectTrigger className="h-9 w-[140px] text-xs">
+            <SelectTrigger className="h-9 max-w-[12rem] min-w-[8rem] text-xs">
               <SelectValue placeholder={t("web.admin.history.filter.allMethods")} />
             </SelectTrigger>
             <SelectContent>
@@ -458,7 +458,7 @@ export default function AdminPlaybackHistory() {
             value={selectedCompleted}
             onValueChange={(value) => updateFilter("completed", value)}
           >
-            <SelectTrigger className="h-9 w-[135px] text-xs">
+            <SelectTrigger className="h-9 max-w-[12rem] min-w-[8rem] text-xs">
               <SelectValue placeholder={t("web.admin.history.filter.allAttempts")} />
             </SelectTrigger>
             <SelectContent>
@@ -472,7 +472,7 @@ export default function AdminPlaybackHistory() {
             value={selectedLocation}
             onValueChange={(value) => updateFilter("stream_location", value)}
           >
-            <SelectTrigger className="h-9 w-[135px] text-xs">
+            <SelectTrigger className="h-9 max-w-[12rem] min-w-[8rem] text-xs">
               <SelectValue placeholder={t("web.admin.history.filter.allLocations")} />
             </SelectTrigger>
             <SelectContent>

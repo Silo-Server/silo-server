@@ -319,7 +319,7 @@ export default function AdminInsights() {
                     });
                   }}
                 >
-                  <SelectTrigger className="h-8 w-[165px] text-xs">
+                  <SelectTrigger className="h-8 max-w-[14rem] min-w-[8.5rem] text-xs">
                     <SelectValue placeholder={t("web.admin.insights.filter.allLibraries")} />
                   </SelectTrigger>
                   <SelectContent>
@@ -348,7 +348,7 @@ export default function AdminInsights() {
                     });
                   }}
                 >
-                  <SelectTrigger className="h-8 w-[165px] text-xs">
+                  <SelectTrigger className="h-8 max-w-[14rem] min-w-[8.5rem] text-xs">
                     <SelectValue placeholder={t("web.admin.insights.filter.allAccounts")} />
                   </SelectTrigger>
                   <SelectContent>
@@ -379,7 +379,7 @@ export default function AdminInsights() {
                 >
                   <SelectTrigger
                     aria-label={t("web.admin.insights.filter.timezone")}
-                    className="h-8 w-[185px] text-xs"
+                    className="h-8 max-w-full min-w-[7.5rem] text-xs"
                   >
                     <SelectValue />
                   </SelectTrigger>
