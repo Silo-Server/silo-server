@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -175,8 +176,8 @@ func (s *Service) finishSignIn(ctx context.Context, spend *signInSpend, user *mo
 
 // ownsSignInBudget reports whether the name whose budget spend spent belongs
 // to user, the account that signed in, so its success may clear and extend
-// that budget. One of user's own names does. So does a name no other account
-// answers to, such as user's directory username. A name that finds another
+// that budget. One of user's own names does. So does an ASCII name no
+// account answers to, such as user's directory username. A name that finds an
 // account does not: a directory identity of a separate account with the same
 // login name, or a Jellyfin "alice#Kids" signing in to the account named
 // that, whose budget name is derived from the typed text and counts only when
@@ -191,11 +192,16 @@ func (s *Service) ownsSignInBudget(ctx context.Context, spend *signInSpend, user
 	if spend.derived || s.users == nil {
 		return false
 	}
-	found, err := LookupLogin(ctx, s.users, spend.name)
-	if IsNotFound(err) {
-		return true
+	// The budget key folds case in Go and the lookup folds it in the
+	// database (citext), which agree on ASCII under any collation but not
+	// beyond it: under the C collation "Älice" finds no "älice" account
+	// though both have one key. So only an ASCII name can count as no one
+	// else's.
+	if strings.ContainsFunc(spend.name, func(r rune) bool { return r > unicode.MaxASCII }) {
+		return false
 	}
-	return err == nil && found.ID == user.ID
+	_, err := LookupLogin(ctx, s.users, spend.name)
+	return IsNotFound(err)
 }
 
 // trustSignInSource records the request's address as one user's names sign

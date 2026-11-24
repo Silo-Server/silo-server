@@ -433,8 +433,9 @@ in from is refused before any password is checked, the right password included. 
 successful sign-in while the name is not locked clears the count, and so does the right
 temporary password on a Jellyfin or Audiobookshelf sign-in, which is refused only because
 those apps cannot change it. A success clears and extends only a budget whose name belongs
-to the account that signed in: one of its own names, or a name no other account answers
-to, such as its directory username. A directory identity of a separate account with the
+to the account that signed in: one of its own names, or a name made of ASCII characters
+that no account answers to, such as its directory username (lookups fold case in the
+database, which can differ from how the budget folds other letters). A directory identity of a separate account with the
 same login name, or an `alice#Kids` account signing in through Jellyfin with the `alice`
 budget, leaves that budget's counts alone and makes its address known only for its own
 names, so it cannot clear guesses at the account the name finds.
