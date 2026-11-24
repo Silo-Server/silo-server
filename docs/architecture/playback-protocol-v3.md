@@ -1163,10 +1163,15 @@ was planned with (so an end measured on a file since replaced or probed again
 changes nothing), leaves a file with more than one audio track alone (another
 track can run longer than the one the transcode read), and leaves
 `probe_updated_at` alone. Each API process writes a given end once per ten
-minutes. A transcode
-node carries each transcode's learned end and planned duration in its session
-report (`stream_end_seconds`, `stream_planned_seconds`), and the core stores it the same way, whichever server or
-proxy relayed the segments.
+minutes; an end that rounds up to the stored duration writes nothing. A
+transcode node carries each transcode's learned end and planned duration in its
+session report from the moment it learns them (`stream_end_seconds`,
+`stream_planned_seconds`), whether or not a player has asked past the end yet,
+and the core stores it the same way, whichever server or proxy relayed the
+segments. Only the API server that holds the playback session
+stores it: with several API servers, a report another one receives changes
+nothing, and the duration stays until a report reaches the holder, a later
+transcode measures it again, or the file is probed again.
 
 ---
 

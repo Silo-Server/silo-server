@@ -110,13 +110,20 @@ func readTSProgramTables(root *os.Root, name string) []byte {
 	return nil
 }
 
-// patProgramMapPID returns the PMT PID of the first program in a PAT packet.
+// patProgramMapPID returns the PMT PID of the first program in a PAT packet,
+// or -1 when the packet holds none, including when its lengths overrun it.
 func patProgramMapPID(packet []byte) int {
+	if packet[3]&0x10 == 0 { // no payload
+		return -1
+	}
 	payload := packet[4:]
 	if adaptation := packet[3] & 0x30; adaptation == 0x30 {
+		if 1+int(payload[0]) > len(payload) {
+			return -1
+		}
 		payload = payload[1+int(payload[0]):]
 	}
-	if len(payload) < 1 {
+	if len(payload) < 1 || 1+int(payload[0]) > len(payload) {
 		return -1
 	}
 	section := payload[1+int(payload[0]):] // pointer field
@@ -124,6 +131,9 @@ func patProgramMapPID(packet []byte) int {
 		return -1
 	}
 	sectionLength := int(binary.BigEndian.Uint16(section[1:3]) & 0x0fff)
+	if 3+sectionLength-4 < 8 {
+		return -1
+	}
 	programs := section[8:min(len(section), 3+sectionLength-4)]
 	for i := 0; i+4 <= len(programs); i += 4 {
 		if binary.BigEndian.Uint16(programs[i:i+2]) != 0 { // 0 names the network PID

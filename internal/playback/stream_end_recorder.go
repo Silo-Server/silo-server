@@ -77,6 +77,11 @@ func (r *StreamEndRecorder) Note(ctx context.Context, mediaFileID int, end Strea
 	// Rounded up, as the scanner stores a span: the last partial second
 	// holds the last segment. The planned duration is a stored whole number.
 	seconds, from := int(math.Ceil(end.Seconds)), int(math.Round(end.PlannedSeconds))
+	if seconds >= from {
+		// The end rounds up to the stored duration: nothing to shorten, as
+		// for most transcodes a node reports once they finish.
+		return
+	}
 	now := time.Now()
 	r.mu.Lock()
 	if last, ok := r.noted[mediaFileID]; ok && last.from == from && last.seconds == seconds && now.Sub(last.at) < notedStreamEndTTL {

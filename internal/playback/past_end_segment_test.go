@@ -34,6 +34,19 @@ func TestPastEndTSProgramTables(t *testing.T) {
 	if got := readTSProgramTables(root, "seg_00074.ts"); !bytes.Equal(got, generic) {
 		t.Fatalf("readTSProgramTables() = % x, want the PAT and PMT", got)
 	}
+
+	// A PAT packet whose lengths overrun it names no PMT rather than panic.
+	for name, mutate := range map[string]func(p []byte){
+		"adaptation field": func(p []byte) { p[3], p[4] = 0x30, 0xff },
+		"pointer field":    func(p []byte) { p[4] = 0xff },
+		"section length":   func(p []byte) { p[6], p[7] = 0xb0, 0x05 },
+	} {
+		packet := append([]byte(nil), generic[:tsPacketSize]...)
+		mutate(packet)
+		if got := patProgramMapPID(packet); got != -1 {
+			t.Errorf("%s: patProgramMapPID() = %d, want -1", name, got)
+		}
+	}
 }
 
 // The past-end fMP4 fragment gives each track of the init segment an empty
@@ -76,7 +89,8 @@ func (f streamEndStoreFunc) ShortenDuration(ctx context.Context, fileID, from, s
 
 // The recorder stores a file's end once, rounded up so the partial last
 // second keeps its segment, and only from the duration the transcode was
-// planned with; an end at or past that duration writes nothing.
+// planned with; an end at or past that duration, or that rounds up to it,
+// writes nothing.
 func TestStreamEndRecorder(t *testing.T) {
 	calls := make(chan int, 4)
 	r := NewStreamEndRecorder(streamEndStoreFunc(func(_ context.Context, _, from, seconds int) (bool, error) {
@@ -105,6 +119,7 @@ func TestStreamEndRecorder(t *testing.T) {
 	}
 	note(160, 149.5)
 	note(149, 149.5)
+	note(150, 149.4) // rounds up to the planned duration
 	note(160, 140.2)
 	if got := next(); got != 141 {
 		t.Fatalf("stored %d s, want the repeated end skipped and 141 next", got)
