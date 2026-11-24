@@ -131,7 +131,7 @@ func cachedInsightsRead[T comparable](ctx context.Context, p *AdminInsightsProvi
 		return v, nil
 	}
 	gen := p.generation()
-	shared, err, _ := p.fills.Do(fmt.Sprintf("%s#%d", key, gen), func() (any, error) {
+	fill := p.fills.DoChan(fmt.Sprintf("%s#%d", key, gen), func() (any, error) {
 		fillCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), adminHistoryReadTimeout)
 		defer cancel()
 		v, err := load(fillCtx)
@@ -146,14 +146,22 @@ func cachedInsightsRead[T comparable](ctx context.Context, p *AdminInsightsProvi
 		return insightsFill[T]{v}, nil
 	})
 	var zero T
-	if err != nil {
-		return zero, err
+	// A caller whose request ends stops waiting; the fill carries on for
+	// anyone else sharing it, within its own deadline.
+	var res singleflight.Result
+	select {
+	case res = <-fill:
+	case <-ctx.Done():
+		return zero, ctx.Err()
 	}
-	fill, ok := shared.(insightsFill[T])
+	if res.Err != nil {
+		return zero, res.Err
+	}
+	filled, ok := res.Val.(insightsFill[T])
 	if !ok {
-		return zero, fmt.Errorf("insights cache fill for %s returned %T", key, shared)
+		return zero, fmt.Errorf("insights cache fill for %s returned %T", key, res.Val)
 	}
-	return fill.v, nil
+	return filled.v, nil
 }
 
 // insightsFill carries a fill's value through singleflight's untyped result.
