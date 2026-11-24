@@ -26,6 +26,36 @@ export function leadingGraphemes(text: string, count: number): string {
   return out;
 }
 
+// Without Intl.Segmenter: a skin tone and the tag characters of a subdivision
+// flag belong to the emoji before them, and regional indicators pair into flags.
+const ATTACHES_TO_EMOJI = /^[\p{Emoji_Modifier}\u{e0020}-\u{e007f}]$/u;
+const REGIONAL_INDICATOR = /^\p{Regional_Indicator}$/u;
+
+/**
+ * Where each character of `text` starts, as a reader sees them, in UTF-16 code
+ * units: a cut at one of these offsets never splits an emoji, a flag, or a
+ * letter from its accents. Without Intl.Segmenter it gives code point starts,
+ * leaving out the one between a flag's two letters and the ones at a skin tone
+ * or a tag character; a mark or a joiner still gets one, so callers that cut
+ * must check for those.
+ */
+export function graphemeStarts(text: string): Set<number> {
+  const starts = new Set<number>();
+  if (graphemes) {
+    for (const { index } of graphemes.segment(text)) starts.add(index);
+    return starts;
+  }
+  let at = 0;
+  let pairing = false;
+  for (const char of text) {
+    const regional = REGIONAL_INDICATOR.test(char);
+    if (!(regional && pairing) && !ATTACHES_TO_EMOJI.test(char)) starts.add(at);
+    pairing = regional && !pairing;
+    at += char.length;
+  }
+  return starts;
+}
+
 /**
  * The first `count` characters of `text`, upper-cased by the interface
  * language's rules: Turkish makes "i" into "İ", as CSS `uppercase` does under
