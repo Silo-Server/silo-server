@@ -234,63 +234,53 @@ cached.
 The admin reads a monitoring tool uses follow a stricter rule: `poster_url` on
 `GET /api/v2/admin/sessions` rows, on the rows embedded in
 `session.started`, `session.paused` and `session.resumed` events, and on
-`GET /api/v2/admin/catalog/items` items is always a root-relative path on this
-Silo server, and absent only when the title has no poster.
-`GET /api/v2/profiles/household/sessions` reads the same session rows, so a
-household manager's session list follows the rule too. An episode carries its
-series' poster. `GET /api/v2/admin/catalog/capabilities` reports
-`item_posters: true` when the server applies this rule.
+`GET /api/v2/admin/catalog/items` items is always a path on this server, and
+absent only when the title has no poster. `GET /api/v2/profiles/household/sessions`
+reads the same session rows, so a household manager's session list follows the
+rule too. An episode carries its series'
+poster. `GET /api/v2/admin/catalog/capabilities` reports `item_posters: true`
+when the server applies this rule.
 
-- Cached art on local artwork storage resolves to its signed
-  `/api/v2/artwork/...` route, which already lives on this server.
-- Cached art whose stored URL would point off this server (S3-compatible object
-  storage or a CDN), and art that is not cached yet, resolves to a signed link
-  to `GET /api/v2/item-posters/{content_id}` (`getItemPoster`). The link signs
-  the item's content ID and an expiry, never a URL. Each request looks up the
-  item's current poster: cached art is read from the artwork store on the server
-  side and answered `200` with its bytes; art that is still remote is downloaded
-  from its provider through the server, answered `200` with its bytes, and
-  queued for caching. A metadata plugin that resolves to a same-server path
-  still answers `302` to that path.
+- Cached art resolves to the signed `/api/v2/artwork/...` route of its
+  card-size stored object on every storage backend. With S3-compatible storage
+  that route reads the object through this server, even though catalog reads
+  hand out the store's direct URL.
+- Art that is not cached yet resolves to a signed link to
+  `GET /api/v2/item-posters/{content_id}` (`getItemPoster`). The link signs the
+  item's content ID and an expiry, never a URL. Each request looks up the
+  item's current poster: cached art is read from the artwork store and answered
+  `200` with its bytes, exactly as `/api/v2/artwork/...` serves it; art that is
+  still remote is downloaded through the server and answered `200` with its
+  bytes, and the item's image-cache job is queued.
 
-Resolve the returned root-relative path against the server's base URL. The link
-needs no credentials (it is also rendered directly by `<img>` elements in web
-admin and household session views) and expires with the configured artwork
-lifetime (`s3.metadata_presign_expiry`, default 4 hours), changing at most every
-15 minutes, so read a fresh one from a later page or session row rather than
-storing it long-term. A link issued while art was uncached keeps working after
-the image-cache job finishes, serving the cached bytes directly from this
-server instead of redirecting off-server.
+URLs may be root-relative; resolve them against the server's base URL. The link
+needs no credentials and expires with the artwork lifetime
+(`s3.metadata_presign_expiry`), changing at most every 15 minutes, so read a
+fresh one from a later page or session row. It keeps working after the art is
+cached, answering with the stored bytes from then on.
 
 `getItemPoster` has its own budget per client address. The default allows
 600 requests per minute with a burst of 400 so a dashboard can load a page of
 posters. Admins can adjust `auth_endpoints.item_poster` in the rate limit
 configuration. Requests over the poster or server-wide budget receive
-`429 rate_limited` with `Retry-After`. Busy downloads, busy store reads,
-unavailable storage, or busy plugin lookups return `503` with `Retry-After`
-when busy.
+`429 rate_limited` with `Retry-After`. Busy downloads or plugin lookups return
+`503` with `Retry-After`.
 
 An invalid or expired link, a missing item or poster, and a refused or failed
-download all return `404`. Every remote download and redirect hop must reach a
-public address, including URLs under the artwork store's direct URL prefix.
-Cached artwork is read directly from the configured artwork store on the server
-side rather than over an unauthenticated HTTP fetch. Both cached and remote
-reads enforce the 4 MiB cap and sniff `Content-Type` from the bytes for JPEG,
-PNG, WebP or GIF, returning `X-Content-Type-Options: nosniff` and
-`Content-Security-Policy: default-src 'none'; sandbox`; a larger image is
-refused and remembered for five minutes. See the
-[outbound address guard](architecture/outbound-address-guard.md#serving-catalog-artwork).
+download all return `404`. Every download and redirect hop must reach a public
+address, including URLs under the artwork store's direct URL prefix. The
+server serves an image of up to 4 MiB from a link and checks the bytes for
+JPEG, PNG, WebP or GIF; a larger original is refused, and that answer is kept
+for five minutes, until the image-cache job stores resized copies. Stored art
+is the server's own resized copy and skips those checks. See the [outbound address guard](architecture/outbound-address-guard.md#serving-catalog-artwork).
 
-Concurrent requests for one item and source share one load, and a server runs
-at most four at once across remote and stored poster reads. A server remembers
-a finished load for five minutes and a failed one for 30 seconds, within a
-shared 64 MiB and 4096-entry budget, so repeating a link does not repeat the
-provider download or object-store read. Evicted object-store entries are
-dropped cleanly and reload on demand without turning into `503` cooldown
-markers or evicting provider outcomes. Served poster bytes carry
-`Cache-Control: private, max-age=300`; any same-server plugin redirect is
-`no-store`. Regular catalog reads and Jellyfin-compatible image routes keep
-redirecting to presigned object storage.
+Concurrent requests for one item share one download, and a
+server runs at most four at once. A server remembers a finished download for
+five minutes and a failed one for 30 seconds, so repeating a link does not
+repeat the request to the provider. An image over 4 MiB is not served from a
+link and answers `404` until the image cache has stored it. Proxied and stored
+bytes carry `Cache-Control: private, max-age=300`, and stored bytes also carry
+the object's `ETag`. A redirect to a plugin's same-server path is `no-store`.
 
 ### Admin request posters
 
@@ -306,8 +296,8 @@ This URL follows a different rule from the catalog and session posters above:
 
 - It needs the credentials that read the row: an admin session, an admin API
   key, or a key with the `admin:monitor:read` scope. Do not send those
-  credentials to the catalog and session poster URLs: they are self-authorizing
-  signed links on this server and carry their own expiry and signature.
+  credentials to the catalog and session poster URLs, which are signed links
+  that authorize themselves.
 - It never expires, so a tool can store it with the request.
 
 The route downloads the request's TMDB poster (`w500`) through the server and

@@ -85,11 +85,28 @@ func (reg *Registry) serveArtwork(w http.ResponseWriter, r *http.Request) {
 		writeProblem(w, r, NewProblem(TypeNotFound, "Artwork not found."))
 		return
 	}
-	reader, info, err := reg.deps.ArtworkStore.Get(r.Context(), key)
+	// A revisioned key never changes content, so it may be cached for the
+	// URL's remaining lifetime. A mutable key (an avatar, library poster, or
+	// collection image replaced in place) keeps its URL within the issuance
+	// bucket, so clients must revalidate; the ETag turns that into a 304.
+	cache := cacheControlPrivateNoCache
+	if artworkkey.Revision(key) != "" {
+		seconds := max(exp-time.Now().Unix(), 0)
+		cache = "private, max-age=" + strconv.FormatInt(seconds, 10) + ", immutable"
+	}
+	serveStoredArtwork(w, r, reg.deps.ArtworkStore, reg.deps.ArtworkRepair, key, cache)
+}
+
+// serveStoredArtwork streams the stored object key from store with the
+// artwork route's headers and cache, which is the Cache-Control value. A
+// missing revisioned key queues a repair of its revision and answers 404. The
+// caller has validated key and checked that the route may serve it.
+func serveStoredArtwork(w http.ResponseWriter, r *http.Request, store blobstore.Store, repair ArtworkRepairService, key, cache string) {
+	reader, info, err := store.Get(r.Context(), key)
 	if err != nil {
 		if errors.Is(err, blobstore.ErrNotFound) {
-			if artworkkey.Revision(key) != "" && reg.deps.ArtworkRepair != nil {
-				_, _ = reg.deps.ArtworkRepair.EnqueueArtworkRepair(r.Context(), []string{artworkkey.OriginalOf(key)}, 1)
+			if artworkkey.Revision(key) != "" && repair != nil {
+				_, _ = repair.EnqueueArtworkRepair(r.Context(), []string{artworkkey.OriginalOf(key)}, 1)
 			}
 			writeProblem(w, r, NewProblem(TypeNotFound, "Artwork not found."))
 			return
@@ -105,15 +122,6 @@ func (reg *Registry) serveArtwork(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
-	// A revisioned key never changes content, so it may be cached for the
-	// URL's remaining lifetime. A mutable key (an avatar, library poster, or
-	// collection image replaced in place) keeps its URL within the issuance
-	// bucket, so clients must revalidate; the ETag turns that into a 304.
-	cache := cacheControlPrivateNoCache
-	if artworkkey.Revision(key) != "" {
-		seconds := max(exp-time.Now().Unix(), 0)
-		cache = "private, max-age=" + strconv.FormatInt(seconds, 10) + ", immutable"
-	}
 	w.Header().Set("Cache-Control", cache)
 	if r.Header.Get(ifNoneMatchField) != "" && r.Header.Get(ifNoneMatchField) == info.ETag {
 		w.WriteHeader(http.StatusNotModified)

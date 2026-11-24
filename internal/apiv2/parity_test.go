@@ -12,11 +12,9 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/clientip"
-	"github.com/Silo-Server/silo-server/internal/imagecache"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -432,7 +430,7 @@ func TestItemPosterAddressBudget(t *testing.T) {
 	if err := mw.Reload(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	posters := artworkurl.NewItemPosters("test-secret", time.Hour, &posterPresignFake{})
+	posters := newTestItemPosters(&posterPresignFake{})
 	source := &posterSourceFake{paths: map[string]string{"movie": "tmdb/movies/1/poster.jpg"}}
 	store := blobstoretest.New()
 	if err := store.Put(t.Context(), "tmdb/movies/1/poster.jpg", []byte("\x89PNG\r\n\x1a\nrest")); err != nil {
@@ -440,7 +438,7 @@ func TestItemPosterAddressBudget(t *testing.T) {
 	}
 	h := NewHandler(Dependencies{
 		BucketRateLimit: mw.AuthEndpointHandler, ItemPosters: posters, ItemPosterSource: source,
-		ArtworkStore: store, RemotePosters: imagecache.NewRemoteFetcher(),
+		ArtworkStore: store,
 	})
 	link := posters.Link("movie", time.Now())
 	get := func(ip string) *httptest.ResponseRecorder {

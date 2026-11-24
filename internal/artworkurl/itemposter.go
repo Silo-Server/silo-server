@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/artworkkey"
+	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
 // The item poster capability signs a catalog item's content ID, never a URL:
@@ -29,24 +30,28 @@ type PosterPresigner interface {
 }
 
 // ItemPosters applies the admin poster rule: on the admin surfaces a
-// monitoring tool reads, a poster URL is always on this server, and empty only
-// when the item has no poster. Cached art on local storage resolves to its
-// signed /api/v2/artwork/... path. Cached art whose stored URL would point off
-// this server (S3-compatible storage or a CDN), and art that is not cached yet
-// (a provider's URL, or a plugin path), gets a signed link to
+// monitoring tool reads, a poster URL is always a path on this server, and
+// empty only when the item has no poster. Cached art resolves to a signed
+// GET /api/v2/artwork/{key} path on every storage backend, which streams the
+// stored object through this server even when catalog reads presign object
+// storage URLs. Art that is not cached yet (a provider's URL, or a plugin path
+// whose plugin answers with one) gets a signed link to
 // GET /api/v2/item-posters/{content_id}, which serves the item's current
-// poster bytes through this server. A tool that may contact only this Silo
-// server can load either.
+// poster when it is requested. A tool that may contact only this Silo server
+// can load either.
 type ItemPosters struct {
 	signer  *Signer
+	artwork *Signer
 	presign PosterPresigner
 }
 
 // NewItemPosters builds the rule with links valid for ttl (the artwork
-// lifetime, metadata_presign_expiry).
-func NewItemPosters(jwtSecret string, ttl time.Duration, presign PosterPresigner) *ItemPosters {
+// lifetime, metadata_presign_expiry). artwork is the server's artwork signer;
+// without one (no artwork store), cached art gets an item poster link too.
+func NewItemPosters(jwtSecret string, ttl time.Duration, presign PosterPresigner, artwork *Signer) *ItemPosters {
 	return &ItemPosters{
 		signer:  newSigner(jwtSecret, itemPosterDomain, itemPosterLabel, ItemPosterRoute, ttl),
+		artwork: artwork,
 		presign: presign,
 	}
 }
@@ -58,12 +63,26 @@ func (p *ItemPosters) URL(ctx context.Context, ownerID, posterPath string) strin
 	if p == nil || posterPath == "" || posterPath == "-" {
 		return ""
 	}
-	if IsStoredArtworkPath(posterPath) {
-		if url := p.Presign(ctx, StoredPosterVariant(posterPath)); IsSameServerPath(url) {
-			return url
-		}
+	now := time.Now()
+	if url := p.storedURL(posterPath, now); url != "" {
+		return url
 	}
-	return p.Link(ownerID, time.Now())
+	return p.Link(ownerID, now)
+}
+
+// storedURL returns the signed same-server artwork path of a stored poster's
+// card rung issued at now, or "" when posterPath is not a stored key the
+// artwork route serves or there is no artwork signer.
+func (p *ItemPosters) storedURL(posterPath string, now time.Time) string {
+	if p.artwork == nil || !IsStoredArtworkPath(posterPath) {
+		return ""
+	}
+	key := StoredPosterVariant(posterPath)
+	if blobstore.ValidateKey(key) != nil {
+		return ""
+	}
+	url, _ := p.artwork.Sign(key, now)
+	return url
 }
 
 // IsSameServerPath reports whether raw is a root-relative path on this server
@@ -90,7 +109,7 @@ func (p *ItemPosters) Verify(contentID string, exp int64, sig string, now time.T
 	return p.signer.Verify(contentID, exp, sig, now)
 }
 
-// Presign resolves a stored path the way URL does.
+// Presign resolves a plugin image path through the catalog's resolver.
 func (p *ItemPosters) Presign(ctx context.Context, path string) string {
 	if p == nil || p.presign == nil {
 		return ""

@@ -9281,7 +9281,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read a catalog item's current poster from a signed link that admin reads return in poster_url. Cached art is read from the artwork store and served through this server; art not cached yet is fetched from its provider through the server and queued for caching. */
+    /** Read a catalog item's current poster from a signed link that admin reads return in poster_url for art not cached yet. Once the art is cached, the link serves the stored object through this server; until then the art is fetched from its provider through the server and queued for caching. */
     get: operations["getItemPoster"];
     put?: never;
     post?: never;
@@ -16057,7 +16057,7 @@ export interface components {
       networks?: string[];
       /**
        * Format: uri-reference
-       * @description Card-size poster of a movie or series, or of an episode's series, as a path on this server: the local /api/v2/artwork/... route when artwork is stored locally, or a signed getItemPoster link when artwork lives in object storage or is not cached yet. Never a metadata provider's or off-server object store's URL. Absent when there is no poster, and on a server that cannot issue poster links (the capabilities then report item_posters false). The URL expires; read it again from a later page or session row
+       * @description Card-size poster of a movie or series, or of an episode's series, as a path on this server: a signed getArtwork path when the art is cached, on any storage backend, or a signed getItemPoster link while it is not cached yet. Never a metadata provider's or off-server object store's URL. Absent when there is no poster, and on a server that cannot issue poster links (the capabilities then report item_posters false). The URL expires; read it again from a later page or session row
        */
       poster_url?: string;
       /**
@@ -20125,7 +20125,7 @@ export interface components {
       position_seconds: number;
       /**
        * Format: uri-reference
-       * @description Card-size poster of the title (an episode's series poster) as a path on this server: the local /api/v2/artwork/... route when artwork is stored locally, or a signed getItemPoster link when artwork lives in object storage or is not cached yet. Never a metadata provider's or off-server object store's URL. Absent when there is no poster, and on a server that cannot issue poster links unless cached locally (the catalog capabilities then report item_posters false)
+       * @description Card-size poster of the title (an episode's series poster) as a path on this server: a signed getArtwork path when the art is cached, on any storage backend, or a signed getItemPoster link while it is not cached yet. Never a metadata provider's or off-server object store's URL. Absent when there is no poster, and on a server that cannot issue poster links (the catalog capabilities then report item_posters false)
        */
       poster_url?: string;
       profile_id: string;
@@ -32470,7 +32470,7 @@ export interface components {
       position_seconds: number;
       /**
        * Format: uri-reference
-       * @description Card-size poster of the title as a path on this server (local /api/v2/artwork/... or a signed getItemPoster link); empty when there is none
+       * @description Card-size poster of the title as a path on this server (a signed getArtwork path for cached art, or a signed getItemPoster link); empty when there is none
        * @example /api/v2/item-posters/movie-tmdb-278?exp=1795503600&sig=example
        */
       poster_url: string;
@@ -120698,7 +120698,10 @@ export interface operations {
         exp: number;
         sig: string;
       };
-      header?: never;
+      header?: {
+        "If-None-Match"?: string;
+        Range?: string;
+      };
       path: {
         /** @description Content ID of the movie or series whose poster the link names. */
         content_id: string;
@@ -120707,8 +120710,17 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Poster bytes, whether cached in the artwork store or fetched from its provider */
+      /** @description Poster bytes, read from the artwork store once cached or fetched from its provider until then */
       200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "image/*": string;
+        };
+      };
+      /** @description Partial bytes of a cached poster */
+      206: {
         headers: {
           [name: string]: unknown;
         };
@@ -120720,6 +120732,13 @@ export interface operations {
       302: {
         headers: {
           Location?: string;
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Cached poster not modified */
+      304: {
+        headers: {
           [name: string]: unknown;
         };
         content?: never;

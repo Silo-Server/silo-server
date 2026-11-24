@@ -69,12 +69,12 @@ episode has `series_id`, `series_title`, `season_number` and `episode_number`;
 its `year` is its air-date year.
 
 `poster_url` is the card-size poster of a movie or series, or of an episode's
-series, and is absent only when there is none. It is always a root-relative path
-served by this Silo server — `/api/v2/artwork/...` when artwork is stored
-locally, or a signed `getItemPoster` link when artwork lives in object storage
-or is not cached yet — never a metadata provider's or off-server object store's
-URL (see "Admin poster URLs" in [images-api.md](images-api.md)). The URL
-expires: read it again from a later page rather than storing it.
+series, and is absent only when there is none. It is always a path on this
+server, never a metadata provider's or the artwork store's URL, so a tool that
+may contact only this server can load it: cached art comes through a signed
+`/api/v2/artwork/...` path and art not cached yet through a signed
+`getItemPoster` link (see "Admin poster URLs" in [images-api.md](images-api.md)).
+The URL expires: read it again from a later page rather than storing it.
 
 A movie or series also carries its stored metadata, so a tool can match rules
 across a library without reading each item as a profile: `genres`,
