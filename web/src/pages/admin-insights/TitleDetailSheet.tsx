@@ -112,7 +112,9 @@ export function TitleDetailSheet({
       >
         <SheetHeader className="border-border/70 border-b px-5 py-4">
           <div className="min-w-0 space-y-1 pe-8">
-            <SheetTitle className="truncate text-base font-bold">{heading}</SheetTitle>
+            <SheetTitle dir="auto" className="bidi-text truncate text-base font-bold">
+              {heading}
+            </SheetTitle>
             <SheetDescription className="truncate text-xs">{description}</SheetDescription>
           </div>
           {data ? (
@@ -270,7 +272,8 @@ function TitleDetailBody({
                         person: viewer.user_id,
                         profile: viewer.profile_id,
                       })}
-                      className="hover:text-primary block truncate text-sm font-medium hover:underline"
+                      dir="auto"
+                      className="hover:text-primary bidi-text block truncate text-sm font-medium hover:underline"
                     >
                       {viewer.profile_name}
                     </Link>

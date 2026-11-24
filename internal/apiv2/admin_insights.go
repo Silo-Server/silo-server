@@ -314,6 +314,15 @@ type AdminInsightsDevices struct {
 	SourceResolutions    []AdminInsightsLabeledCount     `json:"source_resolutions" doc:"Sessions by source resolution class (480p, 720p, 1080p, 2160p, 4320p, unknown), on the scale media_files.resolution uses"`
 	DeliveredResolutions []AdminInsightsLabeledCount     `json:"delivered_resolutions" doc:"Sessions by delivered resolution class; transcodes recorded before route facts are unknown"`
 	ResolutionChanges    []AdminInsightsResolutionChange `json:"resolution_changes" doc:"Sessions delivered at a lower resolution class than their source, by source and delivered class"`
+	TopTranscoders       []AdminInsightsTranscoderRow    `json:"top_transcoders" doc:"Up to 10 clients ranked by transcoded sessions, whatever min_sessions is"`
+}
+
+type AdminInsightsTranscoderRow struct {
+	ClientName        string `json:"client_name"`
+	DevicePlatform    string `json:"device_platform"`
+	IsJellyfinClient  bool   `json:"is_jellyfin_client"`
+	TotalSessions     int64  `json:"total_sessions"`
+	TranscodeSessions int64  `json:"transcode_sessions"`
 }
 
 type AdminInsightsDevicesOutput struct {
@@ -697,6 +706,10 @@ func adminInsightsDevicesOf(res *handlers.AdminInsightsDevices) AdminInsightsDev
 		SourceResolutions:    adminInsightsLabeledCountsOf(res.SourceResolutions),
 		DeliveredResolutions: adminInsightsLabeledCountsOf(res.DeliveredResolutions),
 		ResolutionChanges:    make([]AdminInsightsResolutionChange, 0, len(res.ResolutionChanges)),
+		TopTranscoders:       make([]AdminInsightsTranscoderRow, 0, len(res.TopTranscoders)),
+	}
+	for _, r := range res.TopTranscoders {
+		body.TopTranscoders = append(body.TopTranscoders, AdminInsightsTranscoderRow(r))
 	}
 	for _, c := range res.ResolutionChanges {
 		body.ResolutionChanges = append(body.ResolutionChanges, AdminInsightsResolutionChange(c))

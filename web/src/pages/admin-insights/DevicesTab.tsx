@@ -89,38 +89,31 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
   const topTranscoderItems = useMemo<BarListItem[]>(() => {
     if (!data) return [];
     const unknownClient = t("web.admin.insights.devices.unknownClient");
-    return [...data.matrix]
-      .filter((row) => row.transcode_sessions > 0)
-      .sort(
-        (a, b) =>
-          b.transcode_sessions - a.transcode_sessions ||
-          b.total_sessions - a.total_sessions ||
-          a.client_name.localeCompare(b.client_name),
-      )
-      .slice(0, 10)
-      .map((row) => {
-        const clientLabel = row.client_name || unknownClient;
-        const label = row.device_platform ? `${clientLabel} · ${row.device_platform}` : clientLabel;
-        return {
-          id: `${row.client_name}:${row.device_platform}`,
-          label,
-          value: row.transcode_sessions,
-          secondary: t("web.admin.insights.devices.topTranscoders.transcodeShare", {
-            transcodes: row.transcode_sessions.toLocaleString(formatLocale()),
-            total: row.total_sessions.toLocaleString(formatLocale()),
-            total_count: row.total_sessions,
-          }),
-          to: buildHistoryDrilldownHref({
-            clientName: row.client_name || "unknown",
-            devicePlatform: row.device_platform || "unknown",
-            playMethod: "transcode",
-            libraryId: filters.libraryId,
-            userId: filters.userId,
-            startedAfter: data.from,
-            startedBefore: data.to,
-          }),
-        };
-      });
+    // Ranked on the server without the matrix's sample threshold, so a client
+    // with only a few sessions still shows when it transcodes.
+    return data.top_transcoders.map((row) => {
+      const clientLabel = row.client_name || unknownClient;
+      const label = row.device_platform ? `${clientLabel} · ${row.device_platform}` : clientLabel;
+      return {
+        id: `${row.client_name}:${row.device_platform}`,
+        label,
+        value: row.transcode_sessions,
+        secondary: t("web.admin.insights.devices.topTranscoders.transcodeShare", {
+          transcodes: row.transcode_sessions.toLocaleString(formatLocale()),
+          total: row.total_sessions.toLocaleString(formatLocale()),
+          total_count: row.total_sessions,
+        }),
+        to: buildHistoryDrilldownHref({
+          clientName: row.client_name || "unknown",
+          devicePlatform: row.device_platform || "unknown",
+          playMethod: "transcode",
+          libraryId: filters.libraryId,
+          userId: filters.userId,
+          startedAfter: data.from,
+          startedBefore: data.to,
+        }),
+      };
+    });
   }, [data, filters.libraryId, filters.userId, t]);
 
   const hwAccelItems = useMemo<BarListItem[]>(() => {

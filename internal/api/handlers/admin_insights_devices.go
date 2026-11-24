@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 
@@ -59,6 +60,7 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 		AdaptationReasons: make([]AdminInsightsAdaptationReason, 0),
 		HWAccelBreakdown:  make([]AdminInsightsLabeledCount, 0), ToneMapBreakdown: make([]AdminInsightsLabeledCount, 0),
 		SubtitleBurnInCodecs: make([]AdminInsightsLabeledCount, 0),
+		TopTranscoders:       make([]AdminInsightsTranscoderRow, 0),
 		SourceResolutions:    make([]AdminInsightsLabeledCount, 0), DeliveredResolutions: make([]AdminInsightsLabeledCount, 0),
 		ResolutionChanges: make([]AdminInsightsResolutionChange, 0),
 	}
@@ -177,6 +179,7 @@ func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL str
 		return err
 	}
 
+	out.TopTranscoders = topInsightsTranscoders(slices.Collect(maps.Values(rowMap)))
 	codecTotals := make(map[string]int64)
 	for _, row := range rowMap {
 		if row.TotalSessions < int64(minSessions) {
@@ -359,4 +362,39 @@ func sortedLabeledCounts(m map[string]int64) []AdminInsightsLabeledCount {
 		return cmp.Compare(a.Key, b.Key)
 	})
 	return res
+}
+
+// insightsTopTranscodersLimit caps the Devices tab's transcoder ranking.
+const insightsTopTranscodersLimit = 10
+
+// topInsightsTranscoders ranks clients by transcoded sessions. It ignores the
+// matrix's minimum-session threshold, which keeps direct-play rates from
+// resting on a handful of sessions; a client that transcodes still belongs in
+// this ranking however few sessions it has.
+func topInsightsTranscoders(rows []*AdminInsightsClientMatrixRow) []AdminInsightsTranscoderRow {
+	out := make([]AdminInsightsTranscoderRow, 0, insightsTopTranscodersLimit)
+	for _, row := range rows {
+		if row.TranscodeSessions > 0 {
+			out = append(out, AdminInsightsTranscoderRow{
+				ClientName: row.ClientName, DevicePlatform: row.DevicePlatform, IsJellyfinClient: row.IsJellyfinClient,
+				TotalSessions: row.TotalSessions, TranscodeSessions: row.TranscodeSessions,
+			})
+		}
+	}
+	slices.SortFunc(out, func(a, b AdminInsightsTranscoderRow) int {
+		if c := cmp.Compare(b.TranscodeSessions, a.TranscodeSessions); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(b.TotalSessions, a.TotalSessions); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(strings.ToLower(a.ClientName), strings.ToLower(b.ClientName)); c != 0 {
+			return c
+		}
+		return cmp.Compare(strings.ToLower(a.DevicePlatform), strings.ToLower(b.DevicePlatform))
+	})
+	if len(out) > insightsTopTranscodersLimit {
+		out = out[:insightsTopTranscodersLimit]
+	}
+	return out
 }

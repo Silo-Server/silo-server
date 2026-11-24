@@ -397,9 +397,9 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
                           </TableCell>
                           <TableCell className="text-end tabular-nums">
                             <div className="inline-flex items-center justify-end gap-2">
-                              <div className="bg-muted h-1.5 w-16 overflow-hidden rounded-full">
+                              <div className="bg-muted h-1.5 w-16 overflow-hidden rounded-full forced-colors:bg-transparent forced-colors:outline forced-colors:outline-[CanvasText]">
                                 <div
-                                  className="bg-primary h-full rounded-full"
+                                  className="bg-primary h-full rounded-full forced-colors:bg-[Highlight]"
                                   style={{ width: `${sharePct}%` }}
                                 />
                               </div>

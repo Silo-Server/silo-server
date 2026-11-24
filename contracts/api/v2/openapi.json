@@ -12885,6 +12885,13 @@
             },
             "type": "array"
           },
+          "top_transcoders": {
+            "description": "Up to 10 clients ranked by transcoded sessions, whatever min_sessions is",
+            "items": {
+              "$ref": "#/components/schemas/AdminInsightsTranscoderRow"
+            },
+            "type": "array"
+          },
           "tz": {
             "type": "string"
           }
@@ -12903,7 +12910,8 @@
           "subtitle_burn_in_codecs",
           "source_resolutions",
           "delivered_resolutions",
-          "resolution_changes"
+          "resolution_changes",
+          "top_transcoders"
         ],
         "type": "object"
       },
@@ -13913,6 +13921,36 @@
           "movies",
           "shows",
           "libraries"
+        ],
+        "type": "object"
+      },
+      "AdminInsightsTranscoderRow": {
+        "additionalProperties": false,
+        "properties": {
+          "client_name": {
+            "type": "string"
+          },
+          "device_platform": {
+            "type": "string"
+          },
+          "is_jellyfin_client": {
+            "type": "boolean"
+          },
+          "total_sessions": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "transcode_sessions": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "client_name",
+          "device_platform",
+          "is_jellyfin_client",
+          "total_sessions",
+          "transcode_sessions"
         ],
         "type": "object"
       },

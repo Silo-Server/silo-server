@@ -321,6 +321,17 @@ type AdminInsightsDevices struct {
 	SourceResolutions    []AdminInsightsLabeledCount
 	DeliveredResolutions []AdminInsightsLabeledCount
 	ResolutionChanges    []AdminInsightsResolutionChange
+	TopTranscoders       []AdminInsightsTranscoderRow
+}
+
+// AdminInsightsTranscoderRow is a client and platform in the Devices tab's
+// ranking by transcoded sessions.
+type AdminInsightsTranscoderRow struct {
+	ClientName        string
+	DevicePlatform    string
+	IsJellyfinClient  bool
+	TotalSessions     int64
+	TranscodeSessions int64
 }
 
 // AdminInsightsBandwidthSummary aggregates KPIs for the Bandwidth tab.

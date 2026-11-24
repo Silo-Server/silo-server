@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -567,11 +568,23 @@ func assertDevicesCaseInsensitiveMergeDB(t *testing.T, pool *pgxpool.Pool, h *Ad
 			t.Fatal(err)
 		}
 	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_playback_history
+			(session_id, user_id, profile_id, media_item_id, media_file_id, play_method, started_at, ended_at, client_name, device_platform)
+		VALUES ($1, $2, 'p-alice', 'movie-1', $3, 'transcode', $4, $5, 'RareApp', 'TV')`,
+		"sess-rare-"+uuid.NewString(), userID, hevcFileID, base, base.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
 	devs, err := h.ReadAdminInsightsDevices(ctx, AdminInsightsDevicesQuery{
 		AdminInsightsWindowQuery: AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"}, MinSessions: 5,
 	}, true)
 	if err != nil {
 		t.Fatal(err)
+	}
+	// A client under the matrix threshold still ranks among the transcoders.
+	if slices.ContainsFunc(devs.Matrix, func(r AdminInsightsClientMatrixRow) bool { return r.ClientName == "RareApp" }) ||
+		!slices.ContainsFunc(devs.TopTranscoders, func(r AdminInsightsTranscoderRow) bool { return r.ClientName == "RareApp" }) {
+		t.Fatalf("RareApp: want it out of the min_sessions=5 matrix and in the transcoder ranking; ranking %+v", devs.TopTranscoders)
 	}
 	var merged *AdminInsightsClientMatrixRow
 	for i := range devs.Matrix {

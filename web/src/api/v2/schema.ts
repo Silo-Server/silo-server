@@ -18999,6 +18999,8 @@ export interface components {
        */
       to: string;
       tone_map_breakdown: components["schemas"]["AdminInsightsLabeledCount"][];
+      /** @description Up to 10 clients ranked by transcoded sessions, whatever min_sessions is */
+      top_transcoders: components["schemas"]["AdminInsightsTranscoderRow"][];
       tz: string;
     };
     AdminInsightsDevicesSummary: {
@@ -19387,6 +19389,15 @@ export interface components {
       username: string;
       /** Format: int64 */
       watch_seconds: number;
+    };
+    AdminInsightsTranscoderRow: {
+      client_name: string;
+      device_platform: string;
+      is_jellyfin_client: boolean;
+      /** Format: int64 */
+      total_sessions: number;
+      /** Format: int64 */
+      transcode_sessions: number;
     };
     AdminInvitation: {
       /**

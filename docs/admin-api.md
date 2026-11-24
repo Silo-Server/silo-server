@@ -2359,8 +2359,10 @@ window. The implementation and its edge cases are documented in
   `library_id`, `user_id`, `profile_id`, and `min_sessions` (default 5), returning, per
   session, the normalized `(client_name, device_platform)` × source video codec direct-play
   matrix, canonical `adaptation_reasons` counts, hardware acceleration and HDR tone-mapping
-  breakdowns, burn-in subtitle codecs, and source vs delivered resolution classes
-  (`source_resolutions`, `delivered_resolutions`, `resolution_changes`). Resolution classes
+  breakdowns, burn-in subtitle codecs, source vs delivered resolution classes
+  (`source_resolutions`, `delivered_resolutions`, `resolution_changes`), and
+  `top_transcoders`, up to 10 clients ranked by transcoded sessions whatever `min_sessions` is
+  (the threshold applies to the matrix only). Resolution classes
   use the scanner's width-and-height buckets (`480p`, `720p`, `1080p`, `2160p`, `4320p`,
   `unknown`); a transcode target, stored as its exact output height, is classified with the
   source's aspect ratio, and transcodes recorded before route facts are `unknown`.

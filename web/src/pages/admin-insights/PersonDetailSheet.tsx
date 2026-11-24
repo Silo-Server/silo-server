@@ -133,7 +133,9 @@ export function PersonDetailSheet({
       >
         <SheetHeader className="border-border/70 border-b px-5 py-4">
           <div className="min-w-0 space-y-1 pe-8">
-            <SheetTitle className="truncate text-base font-bold">{heading}</SheetTitle>
+            <SheetTitle dir="auto" className="bidi-text truncate text-base font-bold">
+              {heading}
+            </SheetTitle>
             <SheetDescription className="truncate text-xs">
               {[names.profileLabel ? names.accountName : undefined, windowLabel]
                 .filter(Boolean)
