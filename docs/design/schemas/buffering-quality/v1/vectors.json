@@ -2736,7 +2736,7 @@
     },
     {
       "name": "visible_undo_retains_stall_history",
-      "note": "The undo pill and p2's startup grace both start at 134000 and last 10 seconds, so stalls under a running pill fall in the grace and never count. The pause from 135000 to 140000 freezes the pill until 149000; the stalls at 144000 and 146000 count under it and trigger at the next playing after it hides.",
+      "note": "The undo pill and p2's startup grace both start at 134000 and last 10 seconds, so stalls under a running pill fall in the grace and never count. The pause from 135000 to 140000 freezes the pill's timer, so it runs until 149000; the stalls at 144000 and 146000 count under it and trigger at the next playing after it hides.",
       "events": [
         {
           "t": 0,
