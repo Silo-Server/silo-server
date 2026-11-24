@@ -419,7 +419,10 @@ many addresses the attempts come from: native `login`, Jellyfin
 `POST /Users/AuthenticateByName`, Audiobookshelf `/login` (beta), and
 `linkAccountIdentityWithCredentials`, which spends the budget of the directory username
 it checks. Names are trimmed and compared without regard to case, as sign-in looks up
-accounts, so ` Alice` and `alice` share one budget; a username and the same account's
+accounts, so ` Alice` and `alice` share one budget. Case folds as the database folds it
+(`auth.ConfigureSignInNameFold` asks it at startup): every letter with a Unicode collation,
+ASCII letters only with the C collation, where `Älice` and `älice` are two accounts and two
+budgets; a username and the same account's
 email address are two names. A Jellyfin name with a `#`, such as `alice#Kids`, spends the
 budget of the part before the `#`, even when it signs in to an account whose own name
 contains the `#`, so the budget does not depend on which accounts exist. Such an account's
@@ -433,9 +436,8 @@ in from is refused before any password is checked, the right password included. 
 successful sign-in while the name is not locked clears the count, and so does the right
 temporary password on a Jellyfin or Audiobookshelf sign-in, which is refused only because
 those apps cannot change it. A success clears and extends only a budget whose name belongs
-to the account that signed in: one of its own names, or a name made of ASCII characters
-that no account answers to, such as its directory username (lookups fold case in the
-database, which can differ from how the budget folds other letters). A directory identity of a separate account with the
+to the account that signed in: one of its own names, or a name no account answers to,
+such as its directory username. A directory identity of a separate account with the
 same login name, or an `alice#Kids` account signing in through Jellyfin with the `alice`
 budget, leaves that budget's counts alone and makes its address known only for its own
 names, so it cannot clear guesses at the account the name finds.

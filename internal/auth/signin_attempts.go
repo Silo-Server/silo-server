@@ -9,8 +9,10 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
-	"unicode"
+
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -70,12 +72,49 @@ func (s *Service) SetSignInAttempts(l SignInAttemptLimiter) {
 
 // signInAttemptKey is the budget key of a sign-in name. Names match accounts
 // trimmed and without regard to case (usernames and emails are citext), so
-// they count that way too; a name typed as an email and the same account's
-// username are two names. The hash keeps keys short and names out of the
-// limiter's logs.
+// they count that way too, folded as the database folds them; a name typed
+// as an email and the same account's username are two names. The hash keeps
+// keys short and names out of the limiter's logs.
 func signInAttemptKey(name string) string {
-	sum := sha256.Sum256([]byte(strings.ToLower(NormalizeUsername(name))))
+	sum := sha256.Sum256([]byte(foldSignInName(name, signInFoldsASCIIOnly.Load())))
 	return "signin_name:" + hex.EncodeToString(sum[:])
+}
+
+// signInFoldsASCIIOnly records that the database folds the case of ASCII
+// letters only (the C collation), where "Älice" and "älice" are two
+// accounts. Budget keys then fold the same way, so two accounts never share
+// a key.
+var signInFoldsASCIIOnly atomic.Bool
+
+// ConfigureSignInNameFold asks the database how it folds case, which is how
+// citext matches accounts, and makes sign-in budget keys fold names the same
+// way. Until it runs, keys fold every letter, as a database with a Unicode
+// collation does. A process runs against one database, so the setting is
+// process-wide; call it once at startup.
+func ConfigureSignInNameFold(ctx context.Context, db interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}) error {
+	var foldsUnicode bool
+	if err := db.QueryRow(ctx, `SELECT lower('Ä') = 'ä'`).Scan(&foldsUnicode); err != nil {
+		return err
+	}
+	signInFoldsASCIIOnly.Store(!foldsUnicode)
+	return nil
+}
+
+// foldSignInName trims name and folds its case: ASCII letters only when
+// asciiOnly, every letter otherwise.
+func foldSignInName(name string, asciiOnly bool) string {
+	name = NormalizeUsername(name)
+	if !asciiOnly {
+		return strings.ToLower(name)
+	}
+	return strings.Map(func(r rune) rune {
+		if 'A' <= r && r <= 'Z' {
+			return r + ('a' - 'A')
+		}
+		return r
+	}, name)
 }
 
 // signInSpend is what one sign-in spent of a name's budget: the name and its
@@ -176,8 +215,9 @@ func (s *Service) finishSignIn(ctx context.Context, spend *signInSpend, user *mo
 
 // ownsSignInBudget reports whether the name whose budget spend spent belongs
 // to user, the account that signed in, so its success may clear and extend
-// that budget. One of user's own names does. So does an ASCII name no
-// account answers to, such as user's directory username. A name that finds an
+// that budget. One of user's own names does. So does a name no account
+// answers to, such as user's directory username: the lookup and the budget
+// key fold case alike (ConfigureSignInNameFold). A name that finds an
 // account does not: a directory identity of a separate account with the same
 // login name, or a Jellyfin "alice#Kids" signing in to the account named
 // that, whose budget name is derived from the typed text and counts only when
@@ -190,14 +230,6 @@ func (s *Service) ownsSignInBudget(ctx context.Context, spend *signInSpend, user
 		return true
 	}
 	if spend.derived || s.users == nil {
-		return false
-	}
-	// The budget key folds case in Go and the lookup folds it in the
-	// database (citext), which agree on ASCII under any collation but not
-	// beyond it: under the C collation "Älice" finds no "älice" account
-	// though both have one key. So only an ASCII name can count as no one
-	// else's.
-	if strings.ContainsFunc(spend.name, func(r rune) bool { return r > unicode.MaxASCII }) {
 		return false
 	}
 	_, err := LookupLogin(ctx, s.users, spend.name)
