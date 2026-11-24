@@ -27,8 +27,11 @@ it.each([
   ["a list read from before the run ended lands after the job read", true],
 ])("lists a job as ended once its own read says so: %s", async (_, listLandsLast) => {
   let answerList: (page: { items: unknown[] }) => void = () => {};
+  let listReads = 0;
   request.mockImplementation((operation: string) => {
     if (operation === "GET /api/v2/admin/jobs") {
+      // The first read is sent while the run goes on; later ones see it ended.
+      if (listReads++ > 0) return Promise.resolve({ items: [ended] });
       return listLandsLast
         ? new Promise((resolve) => (answerList = resolve))
         : Promise.resolve({ items: [running] });
@@ -59,7 +62,11 @@ it.each([
   }
 
   await waitFor(() => expect(result.current.jobs.data?.[0]?.terminal).toBe(true));
-  // Choose again drops the job from the address; the list still says ended.
+  // Choose again drops the job from the address; the list still says ended,
+  // also once the job's own read has left the cache.
   rerender({ jobId: null });
   expect(result.current.jobs.data?.[0]?.terminal).toBe(true);
+  client.removeQueries({ predicate: (query) => query.queryKey.includes("job") });
+  rerender({ jobId: null });
+  await waitFor(() => expect(result.current.jobs.data?.[0]?.terminal).toBe(true));
 });

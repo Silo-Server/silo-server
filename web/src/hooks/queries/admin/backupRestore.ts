@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 
 import { captureProfileRequestContext } from "@/api/client";
 import { captureAdminAuthority } from "@/api/v2/adminAuthority";
@@ -67,12 +68,26 @@ function restoreJobKey(jobId: string | null) {
 /** One restore job, read until it ends. */
 export function useRestoreJob(jobId: string | null) {
   const context = captureProfileRequestContext();
-  return useQuery({
+  const queryClient = useQueryClient();
+  const job = useQuery({
     queryKey: restoreJobKey(jobId),
     queryFn: () => getRestoreJob(captureAdminAuthority(), jobId!),
     enabled: context !== null && jobId !== null,
     refetchInterval: (query) => (query.state.data?.terminal ? false : RESTORE_POLL_MS),
   });
+  const ended = job.data?.terminal ?? false;
+  // Once the job ends, read the jobs list again. A list read sent before that
+  // can still be in flight, and a first read with nothing cached yet is joined
+  // rather than replaced by a refetch, so drop it first. Otherwise the list
+  // keeps saying running once this read leaves the cache.
+  useEffect(() => {
+    if (!ended) return;
+    const queryKey = restoreJobsKey();
+    void queryClient
+      .cancelQueries({ queryKey })
+      .then(() => queryClient.invalidateQueries({ queryKey }));
+  }, [queryClient, ended]);
+  return job;
 }
 
 /**
