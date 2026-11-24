@@ -8,6 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAdminInsightsTitles, type AdminInsightsTitles } from "@/hooks/queries/admin/insights";
 import { useT } from "@/i18n";
 
+import { AddToDashboardButton } from "./InsightsDashboardPins";
 import {
   buildInsightsWindowQueryParams,
   formatInsightsCount,
@@ -127,7 +128,12 @@ export function TitlesTab({ filters }: { filters: InsightsFilterState }) {
 
   return (
     <div className="space-y-5">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <AddToDashboardButton
+          widgetId="top-titles"
+          range={filters.range}
+          chartName={t("web.admin.dashboard.widgetCatalog.topTitles.title")}
+        />
         <div role="group" aria-label={t("web.admin.insights.titles.sortLabel")}>
           <WidgetViewToggle value={sort} options={sortOptions} onChange={setSort} />
         </div>

@@ -22,6 +22,7 @@ import { formatLocale } from "@/lib/appLocale";
 import { formatRelativeTime } from "@/lib/date";
 import { cn } from "@/lib/utils";
 
+import { AddToDashboardButton } from "./InsightsDashboardPins";
 import {
   buildHistoryDrilldownHref,
   buildInsightsWindowQueryParams,
@@ -156,6 +157,11 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
               className="h-8 ps-8 text-xs"
             />
           </div>
+          <AddToDashboardButton
+            widgetId="top-profiles"
+            range={filters.range}
+            chartName={t("web.admin.dashboard.widgetCatalog.topProfiles.title")}
+          />
         </CardHeader>
         <CardContent>
           {query.isLoading ? (

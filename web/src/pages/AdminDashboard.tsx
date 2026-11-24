@@ -31,7 +31,6 @@ import { useT, type Translate } from "@/i18n";
 const DASHBOARD_WIDGET_QUERY_PREFIXES = [
   adminKeys.dashboardTimeseriesRoot(),
   adminKeys.playbackActivityRoot(),
-  adminKeys.topActivityRoot(),
   adminKeys.downloadsStatsRoot(),
   adminKeys.apiClientsRoot(),
   adminKeys.serverStatus(),
@@ -154,6 +153,12 @@ export default function AdminDashboard() {
           ...DASHBOARD_WIDGET_QUERY_PREFIXES.map((queryKey) =>
             queryClient.invalidateQueries({ queryKey }),
           ),
+          // Insights-backed widgets pace themselves (dashboardInsightsInterval);
+          // only a refresh the admin asked for, or a return to the tab, re-reads
+          // them, and the server's 60-second cache still absorbs repeats.
+          ...(manual
+            ? [queryClient.invalidateQueries({ queryKey: adminKeys.insightsRoot() })]
+            : []),
         ]);
         const nextStats = await fetchAdminStats({ refresh: true, profileContext });
         if (!isCapturedProfileAuthorityActive(profileContext)) return;

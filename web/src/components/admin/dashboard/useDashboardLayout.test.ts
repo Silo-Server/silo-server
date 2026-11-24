@@ -190,11 +190,11 @@ describe("useDashboardLayout", () => {
       name: "keeps a stored window the widget allows",
       stored: [
         { id: "egress-24h", span: 6, rows: 3, range: "month" },
-        { id: "top-titles", span: 6, rows: 3, range: "day" },
+        { id: "top-titles", span: 6, rows: 3, range: "year" },
       ],
       expected: [
         { id: "egress-24h", span: 6, rows: 3, range: "month" },
-        { id: "top-titles", span: 6, rows: 3, range: "day" },
+        { id: "top-titles", span: 6, rows: 3, range: "year" },
       ],
     },
   ])("$name", ({ stored, expected }) => {
@@ -205,13 +205,15 @@ describe("useDashboardLayout", () => {
     expect(result.current.entries).toEqual(expected);
   });
 
-  // The leaderboards do not offer an hour, and an unranged widget must not
-  // start carrying a window because one was stored for it.
+  // The leaderboards do not offer an hour, a sampled chart cannot reach past
+  // the sampler's month, and an unranged widget must not start carrying a
+  // window because one was stored for it.
   it("replaces a window the widget does not offer and drops one it cannot use", () => {
     writeStored([
       { id: "top-profiles", span: 6, rows: 3, range: "hour" },
       { id: "egress-24h", span: 6, rows: 3, range: "fortnight" },
       { id: "concurrent-streams-24h", span: 6, rows: 3, range: 7 },
+      { id: "playback-24h", span: 6, rows: 3, range: "year" },
       { id: "users", span: 5, rows: 4, range: "month" },
     ]);
 
@@ -221,9 +223,10 @@ describe("useDashboardLayout", () => {
       { id: "top-profiles", span: 6, rows: 3, range: "week" },
       { id: "egress-24h", span: 6, rows: 3, range: "day" },
       { id: "concurrent-streams-24h", span: 6, rows: 3, range: "day" },
+      { id: "playback-24h", span: 6, rows: 3, range: "day" },
       { id: "users", span: 5, rows: 4 },
     ]);
-    expect(result.current.entries[3]).not.toHaveProperty("range");
+    expect(result.current.entries[4]).not.toHaveProperty("range");
   });
 
   // The Egress Total/Nodes switch is a viewing choice like the window, so it
