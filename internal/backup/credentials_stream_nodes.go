@@ -2,6 +2,7 @@ package backup
 
 import (
 	"context"
+	"fmt"
 	"slices"
 
 	"github.com/jackc/pgx/v5"
@@ -117,42 +118,28 @@ func reconcileRestoredDailyNodeEgress(ctx context.Context, tx pgx.Tx) error {
 			return err
 		}
 	}
-	_, err = tx.Exec(ctx, `
-		WITH base AS (
-			SELECT LEAST(0, COALESCE(MIN(node_id), 0)) AS min_id
-			FROM dashboard_node_egress_daily
-		),
-		remap AS (
-			SELECT
-				d.node_id AS old_id,
-				(SELECT min_id FROM base) - ROW_NUMBER() OVER (ORDER BY d.node_id)::integer AS new_id
-			FROM (
-				SELECT DISTINCT node_id
-				FROM dashboard_node_egress_daily
-				WHERE node_id > 0
-				  AND NOT EXISTS (SELECT 1 FROM matched_stream_nodes m WHERE m.id = node_id)
-			) d
-		)
-		UPDATE dashboard_node_egress_daily t
-		SET node_id = r.new_id
-		FROM remap r
-		WHERE t.node_id = r.old_id
-	`)
-	return err
+	return remapUnmatchedNodeIDs(ctx, tx, "dashboard_node_egress_daily")
 }
 
 // foldUnmatchedNodeEgressSamples folds raw per-node samples from unmatched
 // backup nodes into dashboard_node_egress_daily before deleting them from the
 // raw sample table. That preserves unarchived same-day node egress while
 // letting reconcileRestoredDailyNodeEgress remap the old node's prior days and
-// restore-day rows together under one synthetic negative node_id.
+// restore-day rows together under one synthetic negative node_id. A backup
+// from before the daily archive has nowhere to fold them, so its samples stay
+// in the raw table under synthetic negative ids instead, where they no longer
+// count toward a live node that reuses the id.
 func foldUnmatchedNodeEgressSamples(ctx context.Context, tx pgx.Tx) error {
 	okSamples, err := tableExists(ctx, tx, "dashboard_node_egress_samples")
 	if err != nil || !okSamples {
 		return err
 	}
-	if err := insertFoldedUnmatchedNodeEgress(ctx, tx); err != nil {
+	folded, err := insertFoldedUnmatchedNodeEgress(ctx, tx)
+	if err != nil {
 		return err
+	}
+	if !folded {
+		return remapUnmatchedNodeIDs(ctx, tx, "dashboard_node_egress_samples")
 	}
 	_, err = tx.Exec(ctx, `
 		DELETE FROM dashboard_node_egress_samples s
@@ -161,17 +148,20 @@ func foldUnmatchedNodeEgressSamples(ctx context.Context, tx pgx.Tx) error {
 	return err
 }
 
-func insertFoldedUnmatchedNodeEgress(ctx context.Context, tx pgx.Tx) error {
+// insertFoldedUnmatchedNodeEgress archives unmatched nodes' raw samples into
+// dashboard_node_egress_daily. folded is false when the backup's schema has no
+// archive (or one without node names) to fold them into.
+func insertFoldedUnmatchedNodeEgress(ctx context.Context, tx pgx.Tx) (folded bool, err error) {
 	okDaily, err := tableExists(ctx, tx, "dashboard_node_egress_daily")
 	if err != nil || !okDaily {
-		return err
+		return false, err
 	}
 	cols, err := tableColumns(ctx, tx, "dashboard_node_egress_daily")
 	if err != nil {
-		return err
+		return false, err
 	}
 	if !slices.Contains(cols, "node_name") || !slices.Contains(cols, "node_type") {
-		return nil
+		return false, nil
 	}
 	_, err = tx.Exec(ctx, `
 		INSERT INTO dashboard_node_egress_daily (day, node_id, node_name, node_type, egress_bytes, peak_egress_kbps, updated_at)
@@ -194,5 +184,34 @@ func insertFoldedUnmatchedNodeEgress(ctx context.Context, tx pgx.Tx) error {
 			peak_egress_kbps = GREATEST(dashboard_node_egress_daily.peak_egress_kbps, EXCLUDED.peak_egress_kbps),
 			updated_at       = now()
 	`, int64(dashmetrics.BytesPerKbpsMinute))
+	return err == nil, err
+}
+
+// remapUnmatchedNodeIDs moves the rows of table (a node egress table keyed by
+// node_id) that belong to a backup node with no live match to synthetic
+// negative ids below any already in use, one per old node, so they stay
+// readable without counting toward a live node that reuses the id.
+func remapUnmatchedNodeIDs(ctx context.Context, tx pgx.Tx, table string) error {
+	_, err := tx.Exec(ctx, fmt.Sprintf(`
+		WITH base AS (
+			SELECT LEAST(0, COALESCE(MIN(node_id), 0)) AS min_id
+			FROM %[1]s
+		),
+		remap AS (
+			SELECT
+				d.node_id AS old_id,
+				(SELECT min_id FROM base) - ROW_NUMBER() OVER (ORDER BY d.node_id)::integer AS new_id
+			FROM (
+				SELECT DISTINCT node_id
+				FROM %[1]s
+				WHERE node_id > 0
+				  AND NOT EXISTS (SELECT 1 FROM matched_stream_nodes m WHERE m.id = node_id)
+			) d
+		)
+		UPDATE %[1]s t
+		SET node_id = r.new_id
+		FROM remap r
+		WHERE t.node_id = r.old_id
+	`, table))
 	return err
 }

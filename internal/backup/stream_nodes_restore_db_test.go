@@ -123,3 +123,43 @@ func assertRestoredNodeReconciliation(t *testing.T, restored *pgxpool.Pool) {
 			execID, execName, egressID, egressName)
 	}
 }
+
+// TestCarryCredentialsKeepsNodeSamplesWithoutDailyArchiveDB pins that a backup
+// taken before dashboard_node_egress_daily existed keeps an unmatched node's
+// raw samples (re-keyed off the live node's id) instead of deleting them, since
+// there is no archive to fold them into.
+func TestCarryCredentialsKeepsNodeSamplesWithoutDailyArchiveDB(t *testing.T) {
+	live, liveURL := backuptest.Database(t)
+	restored, restoredURL := backuptest.Database(t)
+	ctx := t.Context()
+
+	dbExec(t, live, `
+		INSERT INTO stream_nodes (id, name, type, url, enabled, healthy)
+		VALUES (1, 'dst-edge', 'proxy', 'http://dst-edge:8090', TRUE, TRUE),
+		       (2, 'shared-tc', 'transcode', 'http://shared-tc:8091', TRUE, TRUE)`)
+	dbExec(t, restored, `
+		INSERT INTO stream_nodes (id, name, type, url, enabled, healthy)
+		VALUES (1, 'src-edge', 'proxy', 'http://src-edge:8090', TRUE, TRUE),
+		       (2, 'shared-tc', 'transcode', 'http://shared-tc:8091', TRUE, TRUE)`)
+	dbExec(t, restored, `DROP TABLE dashboard_node_egress_daily`)
+	dbExec(t, restored, `
+		INSERT INTO dashboard_node_egress_samples (bucket, node_id, egress_kbps)
+		VALUES ('2026-10-02T12:00:00Z', 1, 4000),
+		       ('2026-10-02T12:00:00Z', 2, 2000)`)
+
+	if _, err := (PGLoader{}).CarryCredentials(ctx, restoredURL, liveURL); err != nil {
+		t.Fatalf("CarryCredentials: %v", err)
+	}
+
+	var onLiveNode1, matched, detached int
+	if err := restored.QueryRow(ctx, `
+		SELECT COUNT(*) FILTER (WHERE node_id = 1), COUNT(*) FILTER (WHERE node_id = 2),
+		       COUNT(*) FILTER (WHERE node_id < 0 AND egress_kbps = 4000)
+		FROM dashboard_node_egress_samples`).Scan(&onLiveNode1, &matched, &detached); err != nil {
+		t.Fatal(err)
+	}
+	if onLiveNode1 != 0 || matched != 1 || detached != 1 {
+		t.Fatalf("samples after restore: on live node 1=%d, matched node 2=%d, detached src-edge=%d; want 0, 1, 1",
+			onLiveNode1, matched, detached)
+	}
+}
