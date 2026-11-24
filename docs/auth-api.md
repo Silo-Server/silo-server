@@ -422,9 +422,7 @@ it checks. Names are trimmed and compared without regard to case, as sign-in loo
 accounts, so ` Alice` and `alice` share one budget; a username and the same account's
 email address are two names. A Jellyfin name with a `#`, such as `alice#Kids`, spends the
 budget of the part before the `#`, even when it signs in to an account whose own name
-contains the `#`, so the budget does not depend on which accounts exist. That account's
-success clears no count of the shorter name's budget and makes its address known only for
-its own names, so it cannot clear guesses at the account named before the `#`. Such an account's
+contains the `#`, so the budget does not depend on which accounts exist. Such an account's
 native sign-ins spend the budget of its whole name, so it has two budgets. A name with no account has a budget like any other and is refused the same way, so
 the budget does not reveal which names exist.
 
@@ -434,7 +432,12 @@ While a name is locked, every attempt from an address the account is not known t
 in from is refused before any password is checked, the right password included. A
 successful sign-in while the name is not locked clears the count, and so does the right
 temporary password on a Jellyfin or Audiobookshelf sign-in, which is refused only because
-those apps cannot change it.
+those apps cannot change it. A success clears and extends only a budget whose name belongs
+to the account that signed in: one of its own names, or a name no other account answers
+to, such as its directory username. A directory identity of a separate account with the
+same login name, or an `alice#Kids` account signing in through Jellyfin with the `alice`
+budget, leaves that budget's counts alone and makes its address known only for its own
+names, so it cannot clear guesses at the account the name finds.
 
 An address becomes known for an account's username and email address when a password
 sign-in to the account succeeds from it (including signup, invitation acceptance and a

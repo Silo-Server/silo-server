@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	pluginv1 "github.com/Silo-Server/silo-plugin-sdk/pkg/pluginproto/silo/plugin/v1"
+
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -167,27 +169,57 @@ func TestSignInNameBudgetDB(t *testing.T) {
 		}
 	})
 
-	// A Jellyfin name with a '#' spends the budget of the part before it, also
-	// for an account whose own name has the '#'. That account's success must
-	// not clear the other account's count or make its address known for that
-	// name, or its owner could guess at the other account without end.
-	t.Run("an account named after another's budget cannot clear it", func(t *testing.T) {
-		defer limiter.expire()
+	// A sign-in spends the budget of the name typed, also when it signs in to
+	// another account than the one that name finds: a Jellyfin name with a
+	// '#' to an account whose own name has it, or a directory identity of a
+	// separate account. That success must not clear the name's count or make
+	// its address known for the name, or its owner could guess at the
+	// account the name finds without end.
+	t.Run("a sign-in to another account cannot clear a name's budget", func(t *testing.T) {
 		victim := env.localAccount(t, "signin-budget-victim", models.RoleUser)
 		hashed := env.localAccount(t, "signin-budget-hashed", models.RoleUser)
 		if _, err := env.pool.Exec(t.Context(), `UPDATE users SET username = $1 WHERE id = $2`, victim.Username+"#x", hashed.ID); err != nil {
 			t.Fatal(err)
 		}
+		// The directory's person has the victim's username, so signing them in
+		// creates a separate account.
+		directory := &directoryPlugin{users: map[string]*pluginv1.AuthenticateResponse{victim.Username + "\x00" + right: {
+			ExternalSubject: "uid=" + env.name("signin-budget-directory"), Issuer: "ldaps://ldap.example.test",
+			Username: victim.Username, Email: env.name("signin-budget-directory") + "@example.test",
+			ManagedRole: pluginv1.AuthManagedRole_AUTH_MANAGED_ROLE_USER,
+		}}}
+		directoryID := PluginProviderID(env.installationID, "ldap")
+		svc.SetPluginProviderSource(staticProviderSource{{
+			Info: LoginProviderInfo{ID: directoryID, Mode: ProviderModeCredentials, InstallationID: env.installationID},
+			Provider: NewPluginProviderWithClientFactory(PluginProviderConfig{InstallationID: env.installationID, CapabilityID: "ldap", AutoProvision: true},
+				sessions, env.resolver, func(context.Context) (pluginAuthClient, error) { return directory, nil }),
+		}})
+		defer svc.SetPluginProviderSource(nil)
 		from := clientip.SetContext(t.Context(), "198.51.100.66")
-		for range limiter.max - 1 {
-			_, _, err := svc.LoginWithProvider(from, "", victim.Username, wrong, "test", "")
-			wantInvalid(t, err)
+
+		for label, signIn := range map[string]func() error{
+			"a Jellyfin name with a '#'": func() error {
+				_, _, _, err := svc.CompatLoginWithLocalFallback(from, victim.Username+"#x", right, "", "test", "", victim.Username)
+				return err
+			},
+			"a directory identity of another account": func() error {
+				_, _, err := svc.LoginWithProvider(from, directoryID, victim.Username, right, "test", "")
+				return err
+			},
+		} {
+			t.Run(label, func(t *testing.T) {
+				defer limiter.expire()
+				for range limiter.max - 1 {
+					_, _, err := svc.LoginWithProvider(from, "", victim.Username, wrong, "test", "")
+					wantInvalid(t, err)
+				}
+				if err := signIn(); err != nil {
+					t.Fatalf("sign-in to the other account: %v", err)
+				}
+				_, _, err := svc.LoginWithProvider(from, "", victim.Username, wrong, "test", "")
+				wantThrottled(t, err)
+			})
 		}
-		if _, _, _, err := svc.CompatLoginWithLocalFallback(from, victim.Username+"#x", right, "", "test", "", victim.Username); err != nil {
-			t.Fatalf("sign-in to the account named %s#x: %v", victim.Username, err)
-		}
-		_, _, err := svc.LoginWithProvider(from, "", victim.Username, wrong, "test", "")
-		wantThrottled(t, err)
 	})
 
 	// A stranger who keeps a name locked does not lock its account out of the

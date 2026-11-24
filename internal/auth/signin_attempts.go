@@ -77,10 +77,11 @@ func signInAttemptKey(name string) string {
 	return "signin_name:" + hex.EncodeToString(sum[:])
 }
 
-// signInSpend is what one sign-in spent of a name's budget: the name's key,
-// the client address it came from, and whether an attempt spent the name's
-// own budget.
+// signInSpend is what one sign-in spent of a name's budget: the name and its
+// key, the client address it came from, and whether an attempt spent the
+// name's own budget.
 type signInSpend struct {
+	name      string
 	key       string
 	source    string
 	spentName bool
@@ -91,7 +92,7 @@ type signInSpend struct {
 }
 
 func newSignInSpend(ctx context.Context, name string) *signInSpend {
-	return &signInSpend{key: signInAttemptKey(name), source: signInSource(ctx)}
+	return &signInSpend{name: name, key: signInAttemptKey(name), source: signInSource(ctx)}
 }
 
 // signInSource is the client address a sign-in counts from and makes known,
@@ -156,11 +157,11 @@ func (s *Service) finishSignIn(ctx context.Context, spend *signInSpend, user *mo
 		return
 	}
 	ctx = context.WithoutCancel(ctx)
-	if own := signInTrustKeys("", user); spend.derived && !slices.Contains(own, spend.key) {
-		// The budget is another account's: an account named "alice#Kids"
-		// spends alice's on a Jellyfin sign-in. Clearing or extending it here
-		// would let that account's owner guess at alice without end.
-		s.signInAttempts.Trust(ctx, own, spend.source)
+	if !s.ownsSignInBudget(ctx, spend, user) {
+		// Clearing or extending another account's budget would let whoever
+		// holds this one guess at that account without end, alternating with
+		// sign-ins of their own.
+		s.signInAttempts.Trust(ctx, signInTrustKeys("", user), spend.source)
 		return
 	}
 	if spend.spentName {
@@ -170,6 +171,31 @@ func (s *Service) finishSignIn(ctx context.Context, spend *signInSpend, user *mo
 		s.signInAttempts.Reset(ctx, spend.key, spend.source, SignInLaneSource)
 	}
 	s.signInAttempts.Trust(ctx, signInTrustKeys(spend.key, user), spend.source)
+}
+
+// ownsSignInBudget reports whether the name whose budget spend spent belongs
+// to user, the account that signed in, so its success may clear and extend
+// that budget. One of user's own names does. So does a name no other account
+// answers to, such as user's directory username. A name that finds another
+// account does not: a directory identity of a separate account with the same
+// login name, or a Jellyfin "alice#Kids" signing in to the account named
+// that, whose budget name is derived from the typed text and counts only when
+// it is one of user's own names. A failed lookup counts as another's.
+func (s *Service) ownsSignInBudget(ctx context.Context, spend *signInSpend, user *models.User) bool {
+	if user == nil {
+		return false
+	}
+	if slices.Contains(signInTrustKeys("", user), spend.key) {
+		return true
+	}
+	if spend.derived || s.users == nil {
+		return false
+	}
+	found, err := LookupLogin(ctx, s.users, spend.name)
+	if IsNotFound(err) {
+		return true
+	}
+	return err == nil && found.ID == user.ID
 }
 
 // trustSignInSource records the request's address as one user's names sign

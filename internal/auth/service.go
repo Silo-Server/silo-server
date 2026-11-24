@@ -896,7 +896,9 @@ func (s *Service) loginWithProvider(
 		return nil, nil, err
 	}
 	if refusePasswordChange && user.PasswordChangeRequired {
-		return nil, nil, ErrPasswordChangeRequired
+		// The account lets the caller's sign-in budget tell whose password
+		// matched (finishSignIn); callers check the error first.
+		return nil, user, ErrPasswordChangeRequired
 	}
 
 	// Create a new session with a pre-generated ID to avoid the race condition
