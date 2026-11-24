@@ -107,7 +107,7 @@ type AdminCatalogCapabilities struct {
 	ItemMetadata          bool `json:"item_metadata" doc:"listAdminCatalogItems returns genres, content_rating, studios, networks, ratings and dates on movies and series and air_date on episodes, and accepts include_people"`
 	ItemMetadataReset     bool `json:"item_metadata_reset" doc:"refreshAdminItemMetadata accepts mode reset, which resets an item, season or episode to its providers"`
 	ItemFilePaths         bool `json:"item_file_paths" doc:"listAdminCatalogItems accepts include_file_paths from this caller: a login session, an unscoped key, or a key holding admin:catalog:paths"`
-	ItemPosters           bool `json:"item_posters" doc:"listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always URLs this server issued"`
+	ItemPosters           bool `json:"item_posters" doc:"listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always paths on this server"`
 }
 type AdminCatalogCapabilitiesOutput struct {
 	Status       int

@@ -5750,7 +5750,7 @@
             "type": "boolean"
           },
           "item_posters": {
-            "description": "listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always URLs this server issued",
+            "description": "listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always paths on this server",
             "type": "boolean"
           },
           "revision": {
@@ -185351,7 +185351,7 @@
             "description": "Partial bytes of a cached poster"
           },
           "302": {
-            "description": "Redirect to a same-server artwork path returned by a metadata plugin",
+            "description": "Redirect to a same-server path returned by a metadata plugin",
             "headers": {
               "Location": {
                 "schema": {
@@ -185366,6 +185366,9 @@
           },
           "404": {
             "description": "Link invalid or expired, item gone, no poster, or the provider or store has no servable image"
+          },
+          "416": {
+            "description": "Requested range is outside the cached poster"
           },
           "429": {
             "content": {

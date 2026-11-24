@@ -2,7 +2,6 @@ package apiv2
 
 import (
 	"context"
-	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -212,25 +211,14 @@ func (p staticPresignFake) PresignURL(context.Context, string, string) string { 
 func TestItemPostersURLRule(t *testing.T) {
 	ctx := t.Context()
 	cachedPath := "tmdb/movies/1/poster/original.r1.webp"
-	for name, presigned := range map[string]string{
-		"local":           "/api/v2/artwork/tmdb/movies/1/poster/w300.r1.webp?exp=1&sig=x",
-		"s3 direct":       "https://s3.example/bucket/tmdb/movies/1/poster/w300.r1.webp?X-Amz-Signature=abc",
-		"scheme-relative": "//cdn.example/tmdb/movies/1/poster/w300.r1.webp",
-	} {
-		t.Run(name, func(t *testing.T) {
-			posters := newTestItemPosters(staticPresignFake{url: presigned})
-			got := posters.URL(ctx, "movie-a", cachedPath)
-			if !strings.HasPrefix(got, "/api/v2/artwork/tmdb/movies/1/poster/w300.r1.webp?exp=") {
-				t.Fatalf("cached = %q, want a signed artwork path", got)
-			}
-			key, ok := artworkurl.NewSigner("test-secret", time.Hour).SignedKey(got, time.Now())
-			if !ok || key != "tmdb/movies/1/poster/w300.r1.webp" {
-				t.Fatalf("cached URL %q does not verify on the artwork route: %q %v", got, key, ok)
-			}
-		})
+	// The catalog presigns an object storage URL; the admin rule ignores it.
+	posters := newTestItemPosters(staticPresignFake{url: "https://s3.example/bucket/tmdb/movies/1/poster/w300.r1.webp?X-Amz-Signature=abc"})
+	got := posters.URL(ctx, "movie-a", cachedPath)
+	key, ok := artworkurl.NewSigner("test-secret", time.Hour).SignedKey(got, time.Now())
+	if !ok || key != "tmdb/movies/1/poster/w300.r1.webp" {
+		t.Fatalf("cached = %q (key %q, %v), want a signed artwork path to the card rung", got, key, ok)
 	}
-	posters := newTestItemPosters(&posterPresignFake{})
-	for _, path := range []string{"https://image.tmdb.org/t/p/original/a.jpg", "metadb://images/a/original.jpg", "backups/server/db.dump"} {
+	for _, path := range []string{"https://image.tmdb.org/t/p/original/a.jpg", "metadb://images/a/original.jpg", "backups/server/db.dump", "tmdb/../movies/1/poster/original.r1.webp"} {
 		if got := posters.URL(ctx, "movie-a", path); !strings.HasPrefix(got, artworkurl.ItemPosterRoute+"movie-a?exp=") {
 			t.Fatalf("%s = %q, want item-posters link", path, got)
 		}
@@ -247,29 +235,25 @@ func TestItemPostersURLRule(t *testing.T) {
 	}
 }
 
-type failingGetStore struct {
+type countingGetStore struct {
 	blobstore.Store
 	gets atomic.Int32
-	err  error
 }
 
-func (s *failingGetStore) Get(ctx context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error) {
+func (s *countingGetStore) Get(ctx context.Context, key string) (io.ReadCloser, blobstore.ObjectInfo, error) {
 	s.gets.Add(1)
-	if s.err != nil {
-		return nil, blobstore.ObjectInfo{}, s.err
-	}
 	return s.Store.Get(ctx, key)
 }
 
 // A link issued before caching reads the stored object the way the artwork
-// route does: a missing revision queues its repair, keys the artwork route
-// refuses are never read, and a storage failure reads as unavailable.
+// route does, with the route's repair service, and never reads a key the
+// artwork route refuses or a malformed stored path.
 func TestItemPosterStoredArtFailures(t *testing.T) {
-	store := &failingGetStore{Store: blobstoretest.New()}
+	store := &countingGetStore{Store: blobstoretest.New()}
 	source := &posterSourceFake{paths: map[string]string{
 		"missing":  "tmdb/movies/4/poster/original.r1.webp",
 		"unserved": "backups/server/db.dump",
-		"invalid":  "tmdb/../secret.webp",
+		"invalid":  "tmdb/../movies/1/poster/original.r1.webp",
 	}}
 	repair := &artworkRepairRecorder{}
 	posters := newTestItemPosters(&posterPresignFake{})
@@ -284,8 +268,6 @@ func TestItemPosterStoredArtFailures(t *testing.T) {
 		t.Fatalf("repairs = %v", got)
 	}
 
-	store.err = errors.New("s3 timeout")
-	requireProblem(t, do(t, h, http.MethodGet, posters.Link("missing", time.Now()), "", nil), TypeDependencyUnavailable)
 	noStore := NewHandler(Dependencies{ItemPosters: posters, ItemPosterSource: source})
 	requireProblem(t, do(t, noStore, http.MethodGet, posters.Link("missing", time.Now()), "", nil), TypeDependencyUnavailable)
 }

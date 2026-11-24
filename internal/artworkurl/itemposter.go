@@ -23,8 +23,8 @@ const (
 	itemPosterVariant = "w300"
 )
 
-// PosterPresigner resolves a stored artwork path to the URL clients load. It
-// is *catalog.DetailService.
+// PosterPresigner resolves a plugin image path (a "tmdb://..." path a plugin
+// answers for) to the URL it names. It is *catalog.DetailService.
 type PosterPresigner interface {
 	PresignURL(ctx context.Context, path string, variant string) string
 }
@@ -77,8 +77,10 @@ func (p *ItemPosters) storedURL(posterPath string, now time.Time) string {
 	if p.artwork == nil || !IsStoredArtworkPath(posterPath) {
 		return ""
 	}
+	// Validate the stored path before deriving its rung: the derivation
+	// cleans the path, which would hide a malformed row.
 	key := StoredPosterVariant(posterPath)
-	if blobstore.ValidateKey(key) != nil {
+	if blobstore.ValidateKey(posterPath) != nil || blobstore.ValidateKey(key) != nil {
 		return ""
 	}
 	url, _ := p.artwork.Sign(key, now)

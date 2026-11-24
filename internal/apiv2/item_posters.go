@@ -264,9 +264,10 @@ func registerItemPosters(reg *Registry) {
 	op.Responses = map[string]*huma.Response{
 		"200": {Description: "Poster bytes, read from the artwork store once cached or fetched from its provider until then", Content: map[string]*huma.MediaType{artworkImageMediaType: {Schema: &huma.Schema{Type: huma.TypeString, Format: artworkBinaryFormat}}}},
 		"206": {Description: "Partial bytes of a cached poster", Content: map[string]*huma.MediaType{artworkImageMediaType: {Schema: &huma.Schema{Type: huma.TypeString, Format: artworkBinaryFormat}}}},
-		"302": {Description: "Redirect to a same-server artwork path returned by a metadata plugin", Headers: map[string]*huma.Header{jobLocationHeader: {Schema: &huma.Schema{Type: huma.TypeString, Format: "uri-reference"}}}},
+		"302": {Description: "Redirect to a same-server path returned by a metadata plugin", Headers: map[string]*huma.Header{jobLocationHeader: {Schema: &huma.Schema{Type: huma.TypeString, Format: "uri-reference"}}}},
 		"304": {Description: "Cached poster not modified"},
 		"404": {Description: "Link invalid or expired, item gone, no poster, or the provider or store has no servable image"},
+		"416": {Description: "Requested range is outside the cached poster"},
 		"429": {
 			Description: "Poster request rate limit exceeded",
 			Headers:     map[string]*huma.Header{"Retry-After": {Description: "Seconds to wait before retrying.", Schema: &huma.Schema{Type: huma.TypeInteger}}},
@@ -304,7 +305,7 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if artworkurl.IsStoredArtworkPath(posterPath) {
-		h.serveStored(w, r, artworkurl.StoredPosterVariant(posterPath))
+		h.serveStored(w, r, posterPath)
 		return
 	}
 	target, proxy, ok, err := h.resolve(r.Context(), posterPath)
@@ -329,8 +330,11 @@ func (h *itemPosterHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // this server by the same code as GET /api/v2/artwork/{key}, so a link issued
 // before the art was cached keeps answering with bytes instead of pointing a
 // tool at the object store.
-func (h *itemPosterHandler) serveStored(w http.ResponseWriter, r *http.Request, key string) {
-	if blobstore.ValidateKey(key) != nil || blobstore.Unserved(key) {
+func (h *itemPosterHandler) serveStored(w http.ResponseWriter, r *http.Request, posterPath string) {
+	// Validate the stored path before deriving its rung: the derivation
+	// cleans the path, which would hide a malformed row.
+	key := artworkurl.StoredPosterVariant(posterPath)
+	if blobstore.ValidateKey(posterPath) != nil || blobstore.ValidateKey(key) != nil || blobstore.Unserved(key) {
 		writeProblem(w, r, NewProblem(TypeNotFound, "Poster not found."))
 		return
 	}
@@ -338,7 +342,7 @@ func (h *itemPosterHandler) serveStored(w http.ResponseWriter, r *http.Request, 
 		writeProblem(w, r, unavailable("artwork storage"))
 		return
 	}
-	serveStoredArtwork(w, r, h.store, h.repair, key, itemPosterProxyCache)
+	serveStoredArtwork(w, r, h.store, h.repair, key, func() string { return itemPosterProxyCache })
 }
 
 // serveRemotePoster downloads a poster that is not cached through fetcher,

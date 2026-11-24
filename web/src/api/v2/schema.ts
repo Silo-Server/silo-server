@@ -15988,7 +15988,7 @@ export interface components {
       item_metadata: boolean;
       /** @description refreshAdminItemMetadata accepts mode reset, which resets an item, season or episode to its providers */
       item_metadata_reset: boolean;
-      /** @description listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always URLs this server issued */
+      /** @description listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always paths on this server */
       item_posters: boolean;
       /** @description Opaque revision of this document */
       revision: string;
@@ -120728,7 +120728,7 @@ export interface operations {
           "image/*": string;
         };
       };
-      /** @description Redirect to a same-server artwork path returned by a metadata plugin */
+      /** @description Redirect to a same-server path returned by a metadata plugin */
       302: {
         headers: {
           Location?: string;
@@ -120745,6 +120745,13 @@ export interface operations {
       };
       /** @description Link invalid or expired, item gone, no poster, or the provider or store has no servable image */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Requested range is outside the cached poster */
+      416: {
         headers: {
           [name: string]: unknown;
         };
