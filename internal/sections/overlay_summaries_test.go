@@ -137,6 +137,7 @@ func TestOverlaySummariesRankingMatchesGo(t *testing.T) {
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{VideoRangeType: "SomethingWithHLG"}}},
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{ColorTransfer: "SMPTE2084"}}},
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{ColorTransfer: "ARIB-STD-B67"}}},
+		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{VideoRangeType: "SDR", ColorTransfer: "smpte2084"}}},
 		{Resolution: "1080p", HDR: true, VideoTracks: []models.VideoTrack{{VideoRangeType: "SDR"}}},
 		{Resolution: "1080p", VideoTracks: []models.VideoTrack{{VideoRangeType: "SDR"}, {VideoRangeType: "HDR10"}}},
 		{Resolution: "1080p", SubtitleTracks: []models.SubtitleTrack{}, ExternalSubtitles: []models.ExternalSubtitle{}},
