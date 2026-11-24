@@ -3685,7 +3685,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "Riproduci ora"
+      "value": "Avvia Prossimi episodi"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -117930,6 +117930,104 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "Cancella"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "La tua valutazione"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "La tua valutazione della serie"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "Nessuna valutazione"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "Valuta"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "Valuta questo titolo"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "Valuta la serie"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "Valutazione rimossa"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "Annulla"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " su 5"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "Tu"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "La tua valutazione, "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " su 5"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "La tua valutazione della serie, "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " su 5"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -134396,7 +134494,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "Riproduci ora"
+      "value": "Avvia Prossimi episodi"
     }
   ],
   "web.player.nextEpisode.regionLabel": [

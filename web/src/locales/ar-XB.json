@@ -3676,7 +3676,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "\u200F\u202EPlay Now\u202C"
+      "value": "\u200F\u202EPlay Next Up\u202C"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -113758,6 +113758,108 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClear\u202C"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour rating\u202C"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour series rating\u202C"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo rating\u202C"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERate\u202C"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERate this\u202C"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERate the series\u202C"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERating removed\u202C"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUndo\u202C"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of 5\u202C"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYou\u202C"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour rating, \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of 5\u202C"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EYour series rating, \u202C"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of 5\u202C"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -129954,7 +130056,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "\u200F\u202EPlay now\u202C"
+      "value": "\u200F\u202EPlay Next Up\u202C"
     }
   ],
   "web.player.nextEpisode.regionLabel": [

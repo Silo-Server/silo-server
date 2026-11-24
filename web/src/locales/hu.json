@@ -3652,7 +3652,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "Lejátszás most"
+      "value": "Következő epizód"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -107794,6 +107794,96 @@
       "value": "type"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "Törlés"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "Saját értékelés"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "Saját értékelés a sorozatról"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "Nincs értékelés"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "Értékelés"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "Értékelés megadása"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "A sorozat értékelése"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "Értékelés törölve"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "Visszavonás"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 0,
+      "value": "5-ből "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "Ön"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "Saját értékelés: 5-ből "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "Saját értékelés a sorozatról: 5-ből "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -123280,7 +123370,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "Lejátszás most"
+      "value": "Következő epizód lejátszása"
     }
   ],
   "web.player.nextEpisode.regionLabel": [

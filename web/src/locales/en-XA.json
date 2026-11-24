@@ -3708,7 +3708,7 @@
   "upNext.playNow": [
     {
       "type": 0,
-      "value": "⟦Þļåý Ñöŵ~~~~⟧"
+      "value": "⟦Þļåý Ñéẋţ Ûþ~~~~~⟧"
     }
   ],
   "upNext.shuffleContinueFailed": [
@@ -117738,6 +117738,108 @@
       "value": "~~~~~~~~~~⟧"
     }
   ],
+  "web.detail.rating.clear": [
+    {
+      "type": 0,
+      "value": "⟦Çļéåŕ~~⟧"
+    }
+  ],
+  "web.detail.rating.label": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ ŕåţîñĝ~~~~~⟧"
+    }
+  ],
+  "web.detail.rating.labelSeries": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ šéŕîéš ŕåţîñĝ~~~~~~~~⟧"
+    }
+  ],
+  "web.detail.rating.none": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ŕåţîñĝ~~~~⟧"
+    }
+  ],
+  "web.detail.rating.rate": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåţé~~⟧"
+    }
+  ],
+  "web.detail.rating.rateThis": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåţé ţĥîš~~~~⟧"
+    }
+  ],
+  "web.detail.rating.rateThisSeries": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåţé ţĥé šéŕîéš~~~~~~⟧"
+    }
+  ],
+  "web.detail.rating.removed": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåţîñĝ ŕéɱöṽéđ~~~~~~⟧"
+    }
+  ],
+  "web.detail.rating.undo": [
+    {
+      "type": 0,
+      "value": "⟦Ûñđö~~⟧"
+    }
+  ],
+  "web.detail.rating.value": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " öƒ 5~~⟧"
+    }
+  ],
+  "web.detail.rating.you": [
+    {
+      "type": 0,
+      "value": "⟦Ýöû~~⟧"
+    }
+  ],
+  "web.detail.rating.yours": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ ŕåţîñĝ, "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " öƒ 5~~~~~~~~⟧"
+    }
+  ],
+  "web.detail.rating.yoursSeries": [
+    {
+      "type": 0,
+      "value": "⟦Ýöûŕ šéŕîéš ŕåţîñĝ, "
+    },
+    {
+      "type": 1,
+      "value": "value"
+    },
+    {
+      "type": 0,
+      "value": " öƒ 5~~~~~~~~~~⟧"
+    }
+  ],
   "web.detail.request.cancelRequest": [
     {
       "type": 0,
@@ -134598,7 +134700,7 @@
   "web.player.nextEpisode.playNow": [
     {
       "type": 0,
-      "value": "⟦Þļåý ñöŵ~~~~⟧"
+      "value": "⟦Þļåý Ñéẋţ Ûþ~~~~~⟧"
     }
   ],
   "web.player.nextEpisode.regionLabel": [
