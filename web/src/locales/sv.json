@@ -521,6 +521,12 @@
       "value": "Uppspelningssessionen har avslutats. Starta uppspelningen igen."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Uppspelningen stoppades eftersom den var pausad för länge. Starta uppspelningen igen."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67117,6 +67123,24 @@
       "value": "Spara i biblioteket"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pausad uppspelning"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Avsluta pausad uppspelning efter"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 till 1440. Avslutar en video som har varit pausad så länge i en Silo-app och frigör dess stream och eventuell omkodning. Spelas den upp igen fortsätter den från samma ställe. Titta tillsammans, castning och ljudböcker påverkas inte. 0 stänger av funktionen."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67587,6 +67611,12 @@
     {
       "type": 0,
       "value": "dagar"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minuter"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73473,6 +73503,12 @@
       "value": "Aktivera HDR-tonmappning i mjukvara"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Avsluta pausad uppspelning efter (minuter)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73531,6 +73567,12 @@
     {
       "type": 0,
       "value": "Källa för markörer"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pausad uppspelning"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -75513,6 +75555,36 @@
     {
       "type": 0,
       "value": "Aktivera en inloggningsleverantör först. Med inloggning med lösenord avstängd och ingen leverantör på skulle bara nödadministratörer kunna logga in."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Från 8 till 72 tecken. Reglerna gäller när någon väljer eller ändrar ett lösenord; lösenord som redan har angetts fortsätter att fungera."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Minsta lösenordslängd"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Valfritt skiljetecken eller symbol, till exempel ! eller #. Bokstäver, siffror och mellanslag räknas inte."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Kräv ett specialtecken"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Kräv en versal"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -87339,6 +87411,20 @@
       "value": "Anger…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Dela det själv med "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -89883,10 +89969,64 @@
       "value": " tillåter inte att den här enheten loggar in på den här servern."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Minst "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tecken."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Minst "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tecken."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Lösenorden matchar inte."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Ta med minst ett specialtecken, till exempel ! eller #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Ta med minst en versal."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -89899,6 +90039,48 @@
     {
       "type": 0,
       "value": "Använd minst 8 tecken."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Använd minst "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tecken."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Använd minst "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tecken."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -124289,6 +124471,12 @@
     {
       "type": 0,
       "value": "En administratör avslutade den här uppspelningssessionen."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Uppspelningen stoppades eftersom den var pausad för länge."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

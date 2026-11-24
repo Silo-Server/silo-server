@@ -140,7 +140,7 @@ profile's rows next. The schedule that bounds it:
 | --- | --- |
 | Signal write (native and Jellyfin handlers, history imports, watch-provider syncs, media-server webhooks) | At once, on the server that took the write, after any refresh already queued there; one at a time per server, each with a 2-minute budget |
 | Taste seed | At once, on the server that took it; the request waits up to about 5 seconds |
-| Stale sweep | Every 5 minutes, up to 50 profiles with a taste profile marked stale, oldest mark first; picks up a refresh whose server dropped it |
+| Stale sweep | Each server tries 2 minutes after its last try ended, one server at a time: profiles with a taste profile marked stale before the sweep started, oldest mark first, starting refreshes for up to a minute (a refresh started near the end finishes after it); picks up a refresh whose server dropped it |
 | Read of a profile whose rows are missing | Requests a refresh at most once per 15 minutes per profile on each server |
 | Nightly jobs | Embeddings 03:00, taste profiles 04:00, co-watch 04:30, rows of every profile with a taste profile 05:00, in server-local time (the `recommendations.*_cron` settings) |
 

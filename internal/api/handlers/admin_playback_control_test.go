@@ -10,10 +10,15 @@ import (
 
 type adminPlaybackControlTestConn struct {
 	messages []any
+	// answer, when set, plays the player: it runs for each command written.
+	answer func(playback.CommandEnvelope)
 }
 
 func (c *adminPlaybackControlTestConn) WriteJSON(v any) error {
 	c.messages = append(c.messages, v)
+	if env, ok := v.(playback.CommandEnvelope); ok && c.answer != nil {
+		c.answer(env)
+	}
 	return nil
 }
 

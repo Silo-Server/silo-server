@@ -95,6 +95,7 @@ func TestPlaybackControlSocketTicketDelegatesOwnerAuthority(t *testing.T) {
 		{evt.ErrSocketTicket, TypePermissionDenied},
 		{handlers.ErrPlaybackControlSocketUnavailable, TypeDependencyUnavailable},
 		{handlers.ErrPlaybackControlSocketSessionEnded, TypePlaybackSessionEnded},
+		{handlers.ErrPlaybackControlSocketPausedTimeout, TypePlaybackSessionPausedTimeout},
 		{handlers.ErrPlaybackControlSocketSessionResuming, TypeDependencyUnavailable},
 	} {
 		f.err = mapping.err

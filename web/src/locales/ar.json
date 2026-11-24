@@ -521,6 +521,12 @@
       "value": "انتهت جلسة التشغيل هذه. ابدأ التشغيل من جديد."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "توقف التشغيل لأنه بقي متوقفًا مؤقتًا مدة طويلة جدًا. ابدأ التشغيل من جديد."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -93107,6 +93113,24 @@
       "value": "الحفظ في المكتبة"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "التشغيل المتوقف مؤقتًا"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "إنهاء التشغيل المتوقف مؤقتًا بعد"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "من 0 إلى 1440. ينهي تشغيل الفيديو المتوقف مؤقتًا هذه المدة في أحد تطبيقات Silo، فيحرّر بثه وأي عملية لتحويل الترميز؛ وعند تشغيله مجددًا يتابع من الموضع نفسه. لا تتأثر المشاهدة الجماعية والإرسال والكتب الصوتية. القيمة 0 تعطّل هذا الخيار."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -93689,6 +93713,12 @@
     {
       "type": 0,
       "value": "أيام"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "دقيقة"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -99770,6 +99800,12 @@
       "value": "تفعيل تعيين درجات HDR بالبرمجيات"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "إنهاء التشغيل المتوقف مؤقتًا بعد (بالدقائق)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -99828,6 +99864,12 @@
     {
       "type": 0,
       "value": "مصدر العلامات"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "التشغيل المتوقف مؤقتًا"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -101950,6 +101992,36 @@
     {
       "type": 0,
       "value": "فعّل مزود تسجيل دخول أولًا. مع تعطيل تسجيل الدخول بكلمة المرور وعدم تفعيل أي مزود، لن يتمكن من تسجيل الدخول إلا مسؤولو الطوارئ."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "من 8 إلى 72 حرفًا. تُطبَّق القواعد عندما يختار شخص كلمة مرور أو يغيّرها؛ وتظل كلمات المرور المعيّنة مسبقًا صالحة."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "الحد الأدنى لطول كلمة المرور"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "أي علامة ترقيم أو رمز، مثل ! أو #. لا تُحتسب الأحرف والأرقام والمسافات."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "اشتراط حرف خاص"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "اشتراط حرف كبير"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -116633,6 +116705,20 @@
       "value": "جارٍ التعيين..."
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "شاركها مع "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " بنفسك."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -120080,10 +120166,96 @@
       "value": " لهذا الجهاز بتسجيل الدخول إلى هذا الخادم."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " حرف على الأقل."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "حرف واحد على الأقل."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "حرفان على الأقل."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " أحرف على الأقل."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " حرفًا على الأقل."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " حرف على الأقل."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "كلمتا المرور غير متطابقتين."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "أضف حرفًا خاصًا واحدًا على الأقل، مثل ! أو #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "أضف حرفًا كبيرًا واحدًا على الأقل."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -120096,6 +120268,96 @@
     {
       "type": 0,
       "value": "استخدم 8 أحرف على الأقل."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "zero": {
+          "value": [
+            {
+              "type": 0,
+              "value": "استخدم "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " حرف على الأقل."
+            }
+          ]
+        },
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "استخدم حرفًا واحدًا على الأقل."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "استخدم حرفين على الأقل."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "استخدم "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " أحرف على الأقل."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "استخدم "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " حرفًا على الأقل."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "استخدم "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " حرف على الأقل."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -165369,6 +165631,12 @@
     {
       "type": 0,
       "value": "أنهى أحد المسؤولين جلسة التشغيل هذه."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "توقف التشغيل لأنه بقي متوقفًا مؤقتًا مدة طويلة جدًا."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

@@ -283,6 +283,10 @@ type PlaybackHandler struct {
 	beforeIdentityLifecycleLockV3 func()
 	realtimeCommandMu             sync.Mutex
 	realtimeCommands              map[string]playbackCommandRecord
+	// realtimeResultWaiters holds the commands an administrator request is
+	// waiting on a player's result for, keyed by session and command
+	// (playback_realtime.go). Guarded by realtimeCommandMu.
+	realtimeResultWaiters map[realtimeResultKey]chan playback.RealtimeResultStatus
 	// tm owns the transcode-session lifecycle (live map, recipe cards, and
 	// restart reconstruct) shared with the jellycompat handler. The handler
 	// delegates all transcode-session and recipe operations to it.
@@ -327,6 +331,14 @@ type PlaybackHandler struct {
 	v3ReplanSlots           chan struct{}
 	v3EventRateMu           sync.Mutex
 	v3EventRates            map[string]v3EventRate
+	// pausedTimeoutSetting caches the paused-session timeout the lifecycle
+	// sweep enforces; built on first use from SettingsRepo.
+	pausedTimeoutOnce    sync.Once
+	pausedTimeoutSetting *config.CachedSetting[time.Duration]
+	// pausedTimeoutCursor is where the paused timeout's next candidate page
+	// starts; nil starts from the oldest pause.
+	pausedTimeoutCursorMu sync.Mutex
+	pausedTimeoutCursor   *pausedTimeoutCursor
 }
 
 type PlaybackWatchScrobbler interface {

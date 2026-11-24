@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -370,6 +371,57 @@ func TestGenerateCompatCopyVideoMasterManifestMatchesJellyfinForProfile5(t *test
 	}
 	if strings.Contains(got, "SUPPLEMENTAL-CODECS") {
 		t.Fatalf("Profile 5 master must match Jellyfin 10.11 and omit a compatible-base-layer supplemental codec:\n%s", got)
+	}
+}
+
+// Both variants of an AV1 Dolby Vision profile 10 copy name the base layer's
+// range, so a player choosing between them sees one stream: PQ for 10.0 and
+// 10.1 and HLG for 10.4. 10.2, with an SDR base layer, gets only the SDR
+// av01 variant, as in Jellyfin.
+func TestGenerateCompatCopyVideoMasterManifestAV1Profile10VideoRange(t *testing.T) {
+	for _, tc := range []struct {
+		compatID int
+		transfer string
+		want     string
+		variants int
+	}{
+		{0, "smpte2084", "PQ", 2},
+		{1, "smpte2084", "PQ", 2},
+		{2, "bt709", "SDR", 1},
+		{4, "arib-std-b67", "HLG", 2},
+	} {
+		source := PlaybackMediaSource{
+			ID: "source-1",
+			Version: catalog.FileVersion{
+				Bitrate: 18_000,
+				HDR:     true,
+				VideoTracks: []models.VideoTrack{{
+					Codec: "av1", Profile: "Main", Level: 12, BitDepth: 10, ColorTransfer: tc.transfer,
+					DVProfile: 10, DVLevel: 6, DVBLCompatID: tc.compatID, VideoRangeType: compatRangeDOVI,
+				}},
+				AudioTracks: []models.AudioTrack{{Codec: compatTargetAudioCodec, Default: true}},
+			},
+			HLSRemux: true,
+		}
+		source.DOVIVariant = compatDOVIVariantEligible(source.Version)
+
+		got := string(generateCompatCopyVideoMasterManifest(source, "item-1", "play-1", ""))
+		if hasDAV1 := strings.Contains(got, `CODECS="dav1.10.06,mp4a.40.2"`); hasDAV1 != (tc.variants == 2) {
+			t.Fatalf("10.%d master has dav1 variant = %v:\n%s", tc.compatID, hasDAV1, got)
+		}
+		variants := 0
+		for line := range strings.Lines(got) {
+			if !strings.HasPrefix(line, "#EXT-X-STREAM-INF:") {
+				continue
+			}
+			variants++
+			if !slices.Contains(strings.Split(strings.TrimSpace(line), ","), "VIDEO-RANGE="+tc.want) {
+				t.Fatalf("10.%d variant %q, want VIDEO-RANGE=%s", tc.compatID, strings.TrimSpace(line), tc.want)
+			}
+		}
+		if variants != tc.variants {
+			t.Fatalf("10.%d master has %d variants, want %d:\n%s", tc.compatID, variants, tc.variants, got)
+		}
 	}
 }
 

@@ -238,6 +238,12 @@ type downloadedBinary struct {
 // binary. The manifest's own plugin ID and version must then be the
 // catalog's, which ties the binary to the signed tag the policy named.
 func (i *Installer) downloadBinary(ctx context.Context, req InstallBinaryRequest) (*downloadedBinary, error) {
+	return i.downloadBinaryChecked(ctx, req, nil)
+}
+
+// downloadBinaryChecked is downloadBinary with accept, when set, run on the
+// binary and its signature result before the binary runs.
+func (i *Installer) downloadBinaryChecked(ctx context.Context, req InstallBinaryRequest, accept func(data []byte, signature Signature) error) (*downloadedBinary, error) {
 	var limit int64
 	if req.requireVerified {
 		limit = maxProvisionBinaryBytes
@@ -265,6 +271,11 @@ func (i *Installer) downloadBinary(ctx context.Context, req InstallBinaryRequest
 	}
 	if req.requireVerified && signature.State != SignatureStateVerified {
 		return nil, packageError(ErrProvisionPackageUntrusted, signatureInvalidMessage)
+	}
+	if accept != nil {
+		if err := accept(binaryData, signature); err != nil {
+			return nil, err
+		}
 	}
 
 	manifest, manifestJSON, err := i.loadManifestFromBinary(ctx, binaryData)

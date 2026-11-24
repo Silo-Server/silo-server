@@ -127,8 +127,9 @@ func (r *ImageCacheJobRepository) DeferClaimed(ctx context.Context, id int64, lo
 }
 
 // targetHasDeferredLocalJobs reports whether a job in the target's scope is
-// waiting for a server with its storage mounted (DeferClaimed), so a manual
-// refresh does not report its artwork as done.
+// waiting for a server with its storage mounted, or for the artwork store to
+// have room (DeferClaimed), so a manual refresh does not report its artwork as
+// done.
 func (r *ImageCacheJobRepository) targetHasDeferredLocalJobs(ctx context.Context, targetContentID string) (bool, error) {
 	if r == nil || r.pool == nil {
 		return false, nil
@@ -141,9 +142,9 @@ func (r *ImageCacheJobRepository) targetHasDeferredLocalJobs(ctx context.Context
 			WHERE `+imageCacheTargetScope("$1")+`
 			  AND status = 'queued'
 			  AND next_attempt_at > NOW()
-			  AND starts_with(last_error, $2)
+			  AND (starts_with(last_error, $2) OR last_error = $3)
 		)
-	`, strings.TrimSpace(targetContentID), localImageStorageUnavailable).Scan(&deferred); err != nil {
+	`, strings.TrimSpace(targetContentID), localImageStorageUnavailable, imageCacheStorageFullError).Scan(&deferred); err != nil {
 		return false, fmt.Errorf("checking deferred local image cache jobs: %w", err)
 	}
 	return deferred, nil
