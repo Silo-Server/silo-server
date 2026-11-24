@@ -179,16 +179,17 @@ describe("marker settings kept for an unsaved change", () => {
     const { rerender } = render(page);
     await pick("Save online markers", "Fetch when needed");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    // Taken back while the save that carries on-demand storage is in flight.
-    await pick("Save online markers", "Save to library");
+    // The refetch that shows the write lands before the save settles, and the
+    // storage choice is taken back in between.
     const written = { "markers.online_storage": "on_demand", "markers.lazy_playback": "true" };
-    await act(async () => finishSave({ values: written }));
     settings.current = { ...settings.current, ...written };
     rerender(
       <MemoryRouter>
         <PlaybackSettings />
       </MemoryRouter>,
     );
+    await pick("Save online markers", "Save to library");
+    await act(async () => finishSave({ values: written }));
 
     expect(screen.getByRole("switch", { name: "Find markers on playback" })).not.toBeChecked();
     expect(screen.getByText("2 unsaved changes")).toBeInTheDocument();

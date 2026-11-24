@@ -93,13 +93,11 @@ export function useMarkerSourceDraft(
     const before = lazyBefore.current;
     if (!before) return;
     lazyBefore.current = null;
-    // Through setValue rather than resetValue: taken back while a save is in
-    // flight, the value stays staged, so the next save undoes what that save
-    // wrote.
-    form.setValue(
-      MARKER_LAZY_PLAYBACK_KEY,
-      before.dirty ? before.value : form.getPersistedValue(MARKER_LAZY_PLAYBACK_KEY),
-    );
+    // The remembered value, through setValue rather than resetValue: taken
+    // back while a save is in flight, or before the snapshot it wrote has
+    // arrived, it stays staged, so the next save undoes what that save wrote.
+    // The saved value would be wrong here once a refetch shows the write.
+    form.setValue(MARKER_LAZY_PLAYBACK_KEY, before.value);
   }
 
   return {
