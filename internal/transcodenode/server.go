@@ -460,7 +460,10 @@ type Server struct {
 	mediaSamples     *mediasample.Limiter
 	// mediaSampleWait overrides mediasample.MaxRemoteAdmissionWait in tests.
 	mediaSampleWait time.Duration
-	mu              sync.RWMutex
+	// reconstructStartupWait overrides playback.ManifestStartupTimeout for a
+	// rebuild's attempts in tests; zero keeps the default.
+	reconstructStartupWait time.Duration
+	mu                     sync.RWMutex
 	// reloadMu keeps force-reload teardown atomic with session creation and
 	// reconstruction. It is always acquired before lifecycleMu or mu.
 	reloadMu   sync.RWMutex
@@ -660,6 +663,22 @@ func (s *Server) restartSessionLocked(ctx context.Context, sessionID string, ses
 		return playback.ErrSessionSuperseded
 	}
 	return session.Restart(ctx, seekSeconds, startSegment)
+}
+
+// WithStreamEnds returns sessions with each transcode's learned media end
+// filled in (playback.TranscodeSession.LearnedStreamEnd), for the node's
+// report.
+func (s *Server) WithStreamEnds(sessions []nodesessions.SessionInfo) []nodesessions.SessionInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for i := range sessions {
+		if live, ok := s.sessions[sessions[i].SessionID]; ok {
+			if end, ok := live.LearnedStreamEnd(); ok {
+				sessions[i].StreamEndSeconds, sessions[i].StreamPlannedSeconds = end.Seconds, end.PlannedSeconds
+			}
+		}
+	}
+	return sessions
 }
 
 // restartSegmentLocked resolves and applies missing-segment recovery while the
@@ -2284,69 +2303,24 @@ func (s *Server) reconstructOpts(sessionID string, card playback.RecipeCard, cfg
 	return opts
 }
 
-// startReconstructProcess starts a rebuild's FFmpeg. Under hw_accel=auto the
-// reconstruct walks the same safer paths as a fresh start in this output
-// directory, keeping a slow process rather than duplicating it. Under an
-// explicit backend it starts once, and when the GPU decoder rejects the
-// source (a card minted where the GPU decodes it) it moves to CPU decoding.
-// An accel StartupRetryHWAccel would change (VideoToolbox, or QSV/VAAPI
-// without a render device) is not waited on by the pipeline: it keeps the
-// software-encode retry below, which has its own wait.
+// startReconstructProcess starts a rebuild's FFmpeg in the lost session's
+// output directory, with the node's fresh-start retry policy. Under
+// hw_accel=auto it walks the same safer paths as a fresh start. Under an
+// explicit backend whose early exit StartupRetryHWAccel answers with another
+// accel (VideoToolbox, or QSV/VAAPI without a render device), it waits for a
+// manifest this process wrote and retries once in software; otherwise it
+// starts once, moving to CPU decoding when the GPU decoder rejects the
+// source. Any attempt still running at its deadline is kept, not duplicated.
+// See playback.StartReconstructTranscode.
 func (s *Server) startReconstructProcess(rebuildCtx context.Context, r *http.Request, sessionID string, opts playback.TranscodeOpts) (*playback.TranscodeSession, error) {
-	pipeline := s.autoTranscodePipeline(rebuildCtx, opts)
-	retryAccel := opts.HWAccel
-	if !pipeline.Enabled() {
-		retryAccel = playback.StartupRetryHWAccel(opts)
-	}
-	var (
-		session *playback.TranscodeSession
-		err     error
-	)
-	if retryAccel != opts.HWAccel {
-		session, err = playback.StartTranscode(rebuildCtx, opts)
-	} else {
-		session, err = playback.StartReconstructTranscode(rebuildCtx, pipeline, playback.TranscodeStartup{Timeout: playback.ManifestStartupTimeout})
-	}
+	session, err := playback.StartReconstructTranscode(rebuildCtx, s.autoTranscodePipeline(rebuildCtx, opts), playback.TranscodeStartup{
+		Timeout:     s.reconstructStartupWait,
+		LegacyRetry: playback.TranscodeStartupRetryAccelChange,
+	})
 	if err != nil {
 		slog.ErrorContext(r.Context(), "transcode node reconstruct start failed", "component", "transcodenode", "error", err,
 			"session", sessionID, "playback_session_id", sessionID)
 		return nil, err
-	}
-
-	// Readiness is normally the caller's concern, but a VideoToolbox session
-	// can die at encoder init (e.g. a session the hardware cannot create at
-	// these dimensions), and registering the dead session would serve this
-	// media as permanently missing. Outside the automatic pipeline, mirror
-	// handleStart's software retry for the accel StartupRetryHWAccel would
-	// change. The rebuild reuses the lost session's output directory, so wait
-	// for a manifest this process wrote: the previous one would report a
-	// process that died at startup as ready and skip the retry (#4099).
-	if retryAccel != opts.HWAccel {
-		if _, waitErr := session.WaitForGenerationManifest(playback.ManifestStartupTimeout); waitErr != nil {
-			if session.IsRunning() {
-				slog.WarnContext(r.Context(), "reconstructed transcode slow to produce a manifest", "component", "transcodenode",
-					"error", waitErr, "session", sessionID, "playback_session_id", sessionID)
-			} else {
-				// Keep the shared output directory: the retry writes into it.
-				_ = session.CloseProcess()
-				slog.WarnContext(r.Context(), "reconstructed transcode crashed during startup; retrying with software encoding",
-					"component", "transcodenode", "error", waitErr, "session", sessionID, "playback_session_id", sessionID)
-				retryOpts := opts
-				retryOpts.HWAccel = retryAccel
-				session, err = playback.StartTranscode(rebuildCtx, retryOpts)
-				if err != nil {
-					slog.ErrorContext(r.Context(), "transcode node reconstruct retry failed", "component", "transcodenode", "error", err,
-						"session", sessionID, "playback_session_id", sessionID)
-					return nil, err
-				}
-				if _, retryErr := session.WaitForGenerationManifest(playback.ManifestStartupTimeout); retryErr != nil {
-					_ = session.Close()
-					slog.ErrorContext(r.Context(), "reconstructed software retry failed readiness check", "component", "transcodenode", "error", retryErr,
-						"session", sessionID, "playback_session_id", sessionID)
-					return nil, retryErr
-				}
-			}
-		}
 	}
 	return session, nil
 }
@@ -2926,6 +2900,9 @@ func (s *Server) handleSegment(w http.ResponseWriter, r *http.Request) {
 		},
 	})
 	if err != nil {
+		if session.ServePastEndOfStream(w, name, err) {
+			return
+		}
 		if r.Context().Err() != nil {
 			// net/http also ends the context of a client that only
 			// half-closed and is still reading. Answer it as a timed-out

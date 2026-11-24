@@ -726,12 +726,15 @@ export function EmbeddingProviderField({
   value,
   onChange,
   disabled,
+  dirty,
   restartRequired,
   managedByEnv,
 }: {
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
+  /** Marks the row as holding an unsaved edit. */
+  dirty?: boolean;
   restartRequired?: boolean;
   /** The variable that sets the embedding provider; locks the choice. */
   managedByEnv?: string;
@@ -757,6 +760,7 @@ export function EmbeddingProviderField({
         type="select"
         value={value || NO_EMBEDDING_PROVIDER}
         disabled={disabled || list.isLoading}
+        dirty={dirty}
         restartRequired={restartRequired}
         managedByEnv={managedByEnv}
         description={t("web.admin.settings.ai.embeddingProvider.description")}

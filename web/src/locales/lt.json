@@ -521,6 +521,12 @@
       "value": "Šis atkūrimo seansas baigėsi. Pradėkite leisti iš naujo."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Atkūrimas sustabdytas, nes per ilgai buvo pristabdytas. Pradėkite leisti iš naujo."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -81876,6 +81882,24 @@
       "value": "Išsaugoti bibliotekoje"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pristabdytas atkūrimas"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Baigti pristabdytą atkūrimą po"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "Nuo 0 iki 1440. Baigia „Silo“ programoje tiek laiko pristabdyto vaizdo įrašo atkūrimą ir atlaisvina jo srautą bei perkodavimą, jei jis vyksta; vėl paleidus įrašą, atkūrimas tęsiamas nuo tos pačios vietos. Funkcijai „Žiūrėti kartu“, perdavimui į kitą įrenginį ir audioknygoms tai netaikoma. Nustačius 0, ši funkcija išjungiama."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -82394,6 +82418,12 @@
     {
       "type": 0,
       "value": "d."
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "min."
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -88454,6 +88484,12 @@
       "value": "Įjungti programinį HDR tonų atvaizdavimą"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Baigti pristabdytą atkūrimą po (min.)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -88512,6 +88548,12 @@
     {
       "type": 0,
       "value": "Žymių šaltinis"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pristabdytas atkūrimas"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -90574,6 +90616,36 @@
     {
       "type": 0,
       "value": "Pirmiausia įjunkite prisijungimo teikėją. Jei prisijungimas slaptažodžiu išjungtas ir neįjungtas joks teikėjas, prisijungti galėtų tik avariniai administratoriai."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Nuo 8 iki 72 simbolių. Taisyklės taikomos, kai kas nors pasirenka ar keičia slaptažodį; jau nustatyti slaptažodžiai toliau veikia."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Mažiausias slaptažodžio ilgis"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Bet kuris skyrybos ženklas ar simbolis, pvz., ! arba #. Raidės, skaitmenys ir tarpai neįskaičiuojami."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Reikalauti specialiojo simbolio"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Reikalauti didžiosios raidės"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -104200,6 +104272,20 @@
       "value": "Nustatoma…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Patys perduokite jį naudotojui "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -107250,10 +107336,96 @@
       "value": "“ neleidžia šiam įrenginiui prisijungti prie šio serverio."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolis."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simboliai."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolio."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolių."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Slaptažodžiai nesutampa."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Įtraukite bent vieną specialųjį simbolį, pvz., ! arba #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Įtraukite bent vieną didžiąją raidę."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -107266,6 +107438,80 @@
     {
       "type": 0,
       "value": "Naudokite bent 8 simbolius."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Naudokite bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolį."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Naudokite bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolius."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Naudokite bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolio."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Naudokite bent "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " simbolių."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -148135,6 +148381,12 @@
     {
       "type": 0,
       "value": "Administratorius užbaigė šį atkūrimo seansą."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Atkūrimas sustabdytas, nes per ilgai buvo pristabdytas."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

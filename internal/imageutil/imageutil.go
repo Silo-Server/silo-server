@@ -195,12 +195,23 @@ func EncodeWebPWidth(data []byte, width int) ([]byte, error) {
 // Rasterize renders an SVG, HEIF or AVIF source to a PNG no larger than
 // MaxCachedOriginalDimension on its longest edge, which the other functions
 // here then accept. They refuse those formats themselves; see checkFormat.
+// An SVG is drawn at exactly that size; see rasterizeSVG.
 // Call it only for a source the operator chose, such as a metadata
 // provider's artwork or a cover in a library folder: the budget charges the
 // source for its declared size, which these formats can exceed many times.
 func Rasterize(data []byte) ([]byte, error) {
+	return RasterizeWithin(data, MaxCachedOriginalDimension)
+}
+
+// RasterizeWithin is Rasterize for a smaller result, maxDim on the longest
+// edge, for a caller that only shows a small copy.
+func RasterizeWithin(data []byte, maxDim int) ([]byte, error) {
 	if !NeedsRasterizing(data) {
 		return nil, fmt.Errorf("%w: not an SVG, HEIF or AVIF", ErrInvalidImage)
+	}
+	maxDim = min(max(maxDim, 1), MaxCachedOriginalDimension)
+	if bimg.DetermineImageType(data) == bimg.SVG {
+		return rasterizeSVG(data, maxDim)
 	}
 	size, release, err := reserveHeader(data)
 	if err != nil {
@@ -208,7 +219,7 @@ func Rasterize(data []byte) ([]byte, error) {
 	}
 	defer release()
 	opts := bimg.Options{Type: bimg.PNG, StripMetadata: true}
-	fitWithin(&opts, size, MaxCachedOriginalDimension)
+	fitWithin(&opts, size, maxDim)
 	out, err := bimg.NewImage(data).Process(opts)
 	if err != nil {
 		return nil, fmt.Errorf("imageutil: rasterize: %w", err)

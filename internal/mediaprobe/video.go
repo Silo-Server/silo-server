@@ -287,6 +287,15 @@ func HasHDR10Plus(sideData []SideData) bool {
 	return hasHDR10Plus(sideData)
 }
 
+// Dolby Vision range types. DOVI has no compatible base layer; the others
+// name the base layer a display without Dolby Vision shows.
+const (
+	rangeTypeDOVI          = "DOVI"
+	rangeTypeDOVIWithHDR10 = "DOVIWithHDR10"
+	rangeTypeDOVIWithSDR   = "DOVIWithSDR"
+	rangeTypeDOVIWithHLG   = "DOVIWithHLG"
+)
+
 // Dolby Vision range types whose base layer also carries HDR10+ metadata.
 const (
 	rangeTypeDOVIWithHDR10Plus   = "DOVIWithHDR10Plus"
@@ -300,7 +309,7 @@ const (
 func RangeTypeWithHDR10Plus(track models.VideoTrack) string {
 	if track.DVProfile <= 0 {
 		switch rangeType := strings.TrimSpace(track.VideoRangeType); {
-		case strings.EqualFold(rangeType, "DOVIWithHDR10"), strings.EqualFold(rangeType, rangeTypeDOVIWithHDR10Plus):
+		case strings.EqualFold(rangeType, rangeTypeDOVIWithHDR10), strings.EqualFold(rangeType, rangeTypeDOVIWithHDR10Plus):
 			return rangeTypeDOVIWithHDR10Plus
 		case strings.EqualFold(rangeType, "DOVIWithEL"), strings.EqualFold(rangeType, rangeTypeDOVIWithELHDR10Plus):
 			return rangeTypeDOVIWithELHDR10Plus
@@ -331,11 +340,34 @@ func videoRangeLabel(stream Stream, dvProfile int) string {
 	return ""
 }
 
+// Profile10RangeType returns the range type of a Dolby Vision profile 10
+// (AV1) stream from its base-layer compatibility id, as Jellyfin maps it:
+// 10.1 has an HDR10 base layer, 10.2 an SDR one and 10.4 an HLG one. Unlike
+// profile 8 it never guesses from the transfer characteristics, because a
+// 10.0 stream with no compatible base layer is PQ-tagged as well, and a
+// display without Dolby Vision cannot show it. Id 0 and any id Jellyfin does
+// not map stay DOVI.
+func Profile10RangeType(compatID int, hdr10Plus bool) string {
+	switch compatID {
+	case 1:
+		if hdr10Plus {
+			return rangeTypeDOVIWithHDR10Plus
+		}
+		return rangeTypeDOVIWithHDR10
+	case 2:
+		return rangeTypeDOVIWithSDR
+	case 4:
+		return rangeTypeDOVIWithHLG
+	default:
+		return rangeTypeDOVI
+	}
+}
+
 func videoRangeType(stream Stream, dvProfile, compatID int, hdr10Plus bool) string {
 	if dvProfile > 0 {
 		switch dvProfile {
 		case 5:
-			return "DOVI"
+			return rangeTypeDOVI
 		case 7:
 			if hdr10Plus {
 				return rangeTypeDOVIWithELHDR10Plus
@@ -347,22 +379,24 @@ func videoRangeType(stream Stream, dvProfile, compatID int, hdr10Plus bool) stri
 			}
 			switch compatID {
 			case 1:
-				return "DOVIWithHDR10"
+				return rangeTypeDOVIWithHDR10
 			case 2:
-				return "DOVIWithSDR"
+				return rangeTypeDOVIWithSDR
 			case 4:
-				return "DOVIWithHLG"
+				return rangeTypeDOVIWithHLG
 			default:
 				if isHLG(stream.ColorTransfer) {
-					return "DOVIWithHLG"
+					return rangeTypeDOVIWithHLG
 				}
 				if isHDR(stream.ColorTransfer) {
-					return "DOVIWithHDR10"
+					return rangeTypeDOVIWithHDR10
 				}
-				return "DOVIWithSDR"
+				return rangeTypeDOVIWithSDR
 			}
+		case 10:
+			return Profile10RangeType(compatID, hdr10Plus)
 		default:
-			return "DOVI"
+			return rangeTypeDOVI
 		}
 	}
 	if hdr10Plus {

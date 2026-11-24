@@ -1,8 +1,11 @@
 package recommendations
 
 import (
+	"context"
 	"fmt"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/userstore"
 )
 
 type canonicalContentKind string
@@ -92,6 +95,43 @@ type seasonAggregate struct {
 	Score        float64
 	SampleCount  int
 	LastSignalAt time.Time
+}
+
+// allFavorites returns every favorite of the profile, newest first.
+func allFavorites(ctx context.Context, store userstore.UserStore, profileID string) ([]userstore.Favorite, error) {
+	return walkListPages(func(after *userstore.ListKey) ([]userstore.Favorite, error) {
+		return store.ListFavoritesPage(ctx, profileID, after, signalPageSize)
+	}, func(f userstore.Favorite) userstore.ListKey {
+		return userstore.ListKey{AddedAt: f.AddedAt, MediaItemID: f.MediaItemID}
+	})
+}
+
+// allWatchlist returns every watchlist entry of the profile, newest first.
+func allWatchlist(ctx context.Context, store userstore.UserStore, profileID string) ([]userstore.WatchlistEntry, error) {
+	return walkListPages(func(after *userstore.ListKey) ([]userstore.WatchlistEntry, error) {
+		return store.ListWatchlistPage(ctx, profileID, after, signalPageSize)
+	}, func(w userstore.WatchlistEntry) userstore.ListKey {
+		return userstore.ListKey{AddedAt: w.AddedAt, MediaItemID: w.MediaItemID}
+	})
+}
+
+// walkListPages reads a keyset-paged list to its end, signalPageSize rows a
+// page: page reads the rows after a key, key gives a row's key.
+func walkListPages[E any](page func(after *userstore.ListKey) ([]E, error), key func(E) userstore.ListKey) ([]E, error) {
+	var all []E
+	var after *userstore.ListKey
+	for {
+		rows, err := page(after)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, rows...)
+		if len(rows) < signalPageSize {
+			return all, nil
+		}
+		last := key(rows[len(rows)-1])
+		after = &last
+	}
 }
 
 func parseSignalTime(raw string, fallback time.Time) time.Time {

@@ -138,12 +138,110 @@ func (h *PlaybackHandler) moveDeniedV3(ctx context.Context, sessionID, transport
 // of its own, the one the node serves, and a marker under it refuses the
 // relay too.
 func (h *PlaybackHandler) remoteTransportDenied(w http.ResponseWriter, r *http.Request, session *playback.Session) bool {
-	transportID := remoteTransportID(session)
-	if transportID == session.ID || !h.StreamDeny.Denied(r.Context(), transportID) {
+	return h.transportDenied(w, r, session.ID, remoteTransportID(session))
+}
+
+// transportDenied is remoteTransportDenied for a transport named by a recipe
+// card rather than by the session.
+func (h *PlaybackHandler) transportDenied(w http.ResponseWriter, r *http.Request, sessionID, transportID string) bool {
+	if transportID == sessionID || !h.StreamDeny.Denied(r.Context(), transportID) {
 		return false
 	}
 	writePlaybackSessionEnded(w)
 	return true
+}
+
+// recipeTransportID is the transport a recipe card describes: its
+// plan-scoped transport id, or the session id for a card that predates them.
+func recipeTransportID(card playback.RecipeCard) string {
+	if card.TranscodeTransportID != "" {
+		return card.TranscodeTransportID
+	}
+	return card.SessionID
+}
+
+// movedHereFromCardNode reports whether this replica's copy of the session is
+// the transport the node card describes, moved to this server. Every node
+// route has a plan-scoped transport id, a replan mints a new one (and clears
+// it for a local route), and a move keeps it. So a copy that names no node
+// but still carries the card's transport id is that transport after
+// moveTranscodeToLocalV3, and the client's token still names the node it
+// left. Any other copy predates a replan made on another replica.
+func movedHereFromCardNode(session *playback.Session, card playback.RecipeCard) bool {
+	return session != nil && session.TranscodeNodeURL == "" && session.TranscodeTransportID != "" &&
+		session.TranscodeTransportID == recipeTransportID(card)
+}
+
+// localTranscodeCard is a node card rewritten to run in this process: no node,
+// API execution, and none of the node's resolved hardware backends, which
+// reconstruction resolves again from the live configuration.
+func localTranscodeCard(card playback.RecipeCard) playback.RecipeCard {
+	local := card
+	local.TranscodeNodeURL = ""
+	local.HWAccel, local.EncoderHWAccel, local.HWDevice, local.ToneMapFilter = "", "", "", ""
+	if local.RoutingWorkload != "" {
+		local.RoutingExecution = string(noderouting.ExecutionAPI)
+		local.RoutingExecutionNodeID = 0
+	}
+	return local
+}
+
+// relayStaleCopyToCardNode serves a manifest or segment request from the node
+// the request's recipe card names when this replica's copy of the session
+// names no node. Without session affinity that copy can predate a replan made
+// on another replica. It reports whether a response was written.
+//
+// It only relays. The card may be older than this copy, so neither a local
+// rebuild nor a move to another executor is safe from it. A move off a node
+// keeps the transport id and the client's token, which still names the node
+// it left, but records the new node in the shared node recipe store, so the
+// relay goes where that record says the transport runs now and falls back to
+// the card's node without one. When that node cannot be reached the session
+// is reported missing so the client replans.
+func (h *PlaybackHandler) relayStaleCopyToCardNode(
+	w http.ResponseWriter,
+	r *http.Request,
+	session *playback.Session,
+	card *playback.RecipeCard,
+	suffix string,
+) bool {
+	if session == nil || session.TranscodeNodeURL != "" || card == nil || card.TranscodeNodeURL == "" {
+		return false
+	}
+	transportID := recipeTransportID(*card)
+	if h.transportDenied(w, r, session.ID, transportID) {
+		return true
+	}
+	h.touchSessionActivity(session.ID)
+	nodeURL := card.TranscodeNodeURL
+	if stored := h.storedTransportNodeV3(r, session, transportID); stored != "" {
+		nodeURL = stored
+	}
+	if err := h.relayToTranscodeNode(w, r, nodeURL, "/transcode/"+transportID+suffix); err != nil {
+		if marker, ok := h.NodePlanner.(transcodeNodeHealthMarkerV3); ok && marker.MarkTranscodeNodeUnreachable(nodeURL) {
+			slog.WarnContext(r.Context(), "transcode node marked unhealthy after the relay could not reach it",
+				"component", "api", "node", logredact.SanitizeURL(nodeURL), "playback_session_id", session.ID)
+		}
+		slog.WarnContext(r.Context(), "could not relay a stale session copy to its transcode node",
+			"component", "api", "node", logredact.SanitizeURL(nodeURL),
+			"playback_session_id", session.ID, "error", logredact.SanitizeText(err.Error()))
+		writeError(w, http.StatusNotFound, "not_found", "Transcode session not found")
+	}
+	return true
+}
+
+// storedTransportNodeV3 is the node the shared node recipe store says runs
+// transportID now, or "" when it has no complete recipe for this session's
+// transport.
+func (h *PlaybackHandler) storedTransportNodeV3(r *http.Request, session *playback.Session, transportID string) string {
+	if h.NodeRecipeStore == nil || !h.NodeRecipeStore.Enabled() {
+		return ""
+	}
+	stored, ok := h.NodeRecipeStore.Get(r.Context(), transportID)
+	if !ok || stored == nil || !rehomeRecipeServesV3(*stored, session, transportID) {
+		return ""
+	}
+	return stored.TranscodeNodeURL
 }
 
 // relayOrRehomeTranscode serves a manifest or segment request for a transcode
@@ -406,11 +504,7 @@ func (h *PlaybackHandler) withRecordedRenditionTracksV3(ctx context.Context, car
 // transport the session runs now and for the session's owner. A token minted
 // for an earlier plan names another transport and is ignored.
 func rehomeRecipeServesV3(card playback.RecipeCard, session *playback.Session, transportID string) bool {
-	cardTransport := card.TranscodeTransportID
-	if cardTransport == "" {
-		cardTransport = card.SessionID
-	}
-	return card.SessionID == session.ID && card.UserID == session.UserID && cardTransport == transportID &&
+	return card.SessionID == session.ID && card.UserID == session.UserID && recipeTransportID(card) == transportID &&
 		card.IsTranscodeRecipe() && playback.ValidateCopyFMP4RecipeCard(card) == nil &&
 		card.InputPath != "" && card.SegmentDuration > 0 && card.TargetCodecVideo != ""
 }
@@ -430,15 +524,7 @@ func (h *PlaybackHandler) moveTranscodeToLocalV3(
 	if capabilityErr := h.validateLocalTransportCapabilitiesV3(ctx, plan); capabilityErr != nil {
 		return capabilityErr
 	}
-	local := card
-	local.TranscodeNodeURL = ""
-	// The dead node's resolved backends describe its hardware, not this host's.
-	// Reconstruction resolves them again from the live configuration.
-	local.HWAccel, local.EncoderHWAccel, local.HWDevice, local.ToneMapFilter = "", "", "", ""
-	if local.RoutingWorkload != "" {
-		local.RoutingExecution = string(noderouting.ExecutionAPI)
-		local.RoutingExecutionNodeID = 0
-	}
+	local := localTranscodeCard(card)
 	runtime, err := h.tm.ReconstructTranscodeWithError(ctx, session.ID, requestedSegment, local)
 	if runtime == nil {
 		if err == nil {

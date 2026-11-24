@@ -4,6 +4,7 @@ import { Link } from "react-router";
 import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 
 import type { MDBListListSummary } from "@/api/types";
+import { LineName, MetaLine } from "@/components/MetaLine";
 import { Input } from "@/components/ui/input";
 import { useDebounce } from "@/hooks/useDebounce";
 import { useMDBListSearch } from "@/hooks/queries/userCollectionImports";
@@ -48,17 +49,22 @@ function listMeta(t: Translate, list: MDBListListSummary) {
     list.mediatype === "movie" || list.mediatype === "show"
       ? t("web.collections.templateGallery.listKind", { kind: list.mediatype })
       : null;
-  return [
-    t("web.collections.templateGallery.byUser", { user: list.user_name }),
-    kind,
-    t("web.collections.metaLine.titleCount", {
-      count: list.items,
-      shown: list.items.toLocaleString(formatLocale()),
-    }),
-    list.likes > 0 ? `♥ ${list.likes.toLocaleString(formatLocale())}` : null,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const user = list.user_name.trim();
+  return (
+    <MetaLine
+      parts={[
+        user
+          ? t("web.collections.templateGallery.byUser", { user: <LineName name={user} /> })
+          : null,
+        kind,
+        t("web.collections.metaLine.titleCount", {
+          count: list.items,
+          shown: list.items.toLocaleString(formatLocale()),
+        }),
+        list.likes > 0 ? `♥ ${list.likes.toLocaleString(formatLocale())}` : null,
+      ]}
+    />
+  );
 }
 
 function GroupHeading({ title, help }: { title: string; help: string }) {

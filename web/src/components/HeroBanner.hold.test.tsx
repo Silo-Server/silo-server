@@ -1,6 +1,7 @@
 /**
  * The Featured hero holds its slideshow while the pointer is over it or
- * keyboard focus is inside it, and resumes only once both have left.
+ * keyboard focus is inside it, and resumes only once both have left. It also
+ * stops while scrolled out of view, and its progress rail follows the timer.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, fireEvent, render, screen } from "@testing-library/react";
@@ -269,5 +270,58 @@ describe("HeroBanner hover and focus hold", () => {
     fireEvent.pointerDown(document.body);
     wait(20000);
     expect(announced()).toBe("Slide 1");
+  });
+});
+
+describe("HeroBanner progress rail out of view", () => {
+  let reportInView: (inView: boolean) => void = () => {};
+
+  beforeEach(() => {
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        constructor(callback: IntersectionObserverCallback) {
+          reportInView = (isIntersecting) =>
+            callback(
+              [{ isIntersecting } as IntersectionObserverEntry],
+              this as unknown as IntersectionObserver,
+            );
+        }
+        observe() {}
+        disconnect() {}
+      },
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  function scroll(inView: boolean) {
+    act(() => reportInView(inView));
+  }
+
+  function rail() {
+    const bar = document.querySelector(".hero-progress-rail > span");
+    return { bar, paused: bar?.parentElement?.getAttribute("data-paused") };
+  }
+
+  it("freezes the rail out of view and restarts it with the timer on return", () => {
+    show();
+    scroll(true);
+    expect(rail().paused).toBe("false");
+
+    scroll(false);
+    expect(rail().paused).toBe("true");
+    wait(20000);
+    expect(announced()).toBe("Slide 1");
+
+    const frozen = rail().bar;
+    scroll(true);
+    // A new bar element starts its 8s animation from empty, as the timer does.
+    expect(rail().bar).not.toBe(frozen);
+    expect(rail().paused).toBe("false");
+    wait(8100);
+    expect(announced()).toBe("Slide 2");
   });
 });
