@@ -629,9 +629,11 @@ shows the numbers.
 
 The value comes from the series' metadata provider: a plugin's series
 `MetadataItem.metadata` sets `episode_labels` (`air_date` is the only value; any
-other is ignored). It is stored on the series and kept by a refresh. Identify
-and "Replace all metadata" take it from the new answer, so matching a Sportarr
-league to a numbered show brings the numbers back. A refresh fills only empty episode dates, so
+other is ignored). It is stored on the series. Identify, Reset to Provider and
+a Complete Refresh take it from the new answer, so matching a Sportarr league
+to a numbered show brings the numbers back. Other refreshes, "Replace all
+metadata" included, keep it when the providers send none, as they keep any
+other value the providers leave out. A refresh fills only empty episode dates, so
 an episode date a provider has since corrected takes "Replace all metadata".
 
 `episode_labels` appears on:
