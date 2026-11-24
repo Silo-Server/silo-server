@@ -16,13 +16,13 @@ func TestRoutingFactsMergeDatabase(t *testing.T) {
 	ctx := t.Context()
 	insertLifecycleRequest(t, repo, "series", 1, 1399, StatusApproved)
 	captured := capturedFacts(RoutingFacts{GenreIDs: []int{18}, Anime: true, ContentRating: new("")})
-	if _, err := repo.SetRoutingFacts(ctx, "series", captured); err != nil {
+	if _, err := repo.SetRoutingFacts(ctx, "series", captured, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	// A second capture, from a caller that read the facts before they were
 	// stored, keeps the first.
-	if again, err := repo.SetRoutingFacts(ctx, "series", capturedFacts(RoutingFacts{GenreIDs: []int{35}})); err != nil ||
+	if again, err := repo.SetRoutingFacts(ctx, "series", capturedFacts(RoutingFacts{GenreIDs: []int{35}}), nil); err != nil ||
 		!again.IsAnime || !slices.Equal(again.RoutingFacts.GenreIDs, []int{18}) {
 		t.Fatalf("second capture: facts = %+v, err %v; want the first capture kept", again.RoutingFacts, err)
 	}
@@ -81,5 +81,26 @@ func TestSeasonDetailsRoundTripDatabase(t *testing.T) {
 	whole := insertLifecycleRequest(t, repo, "movie", 1, 550, StatusApproved)
 	if len(whole.SeasonDetails) != 0 {
 		t.Fatalf("request without details reads back %+v, want none", whole.SeasonDetails)
+	}
+
+	// Facts read at submission fill the details of a request made while TMDB
+	// was unreachable, and leave stored ones alone.
+	read2 := []SeasonDetail{{Number: 1, FirstAirDate: "2023-09-29", EpisodeCount: 28}}
+	if _, err := repo.CreateRequest(t.Context(), CreateRequestRecord{
+		ID:        "frieren",
+		Input:     CreateRequestInput{MediaType: MediaTypeSeries, TMDBID: 209867, Title: "Frieren", Seasons: []int{1}},
+		Status:    StatusApproved,
+		Outcome:   OutcomeActive,
+		Requester: Viewer{UserID: 1, ProfileID: "profile"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	filled, err := repo.SetRoutingFacts(t.Context(), "frieren", capturedFacts(RoutingFacts{}), read2)
+	if err != nil || !slices.Equal(filled.SeasonDetails, read2) {
+		t.Fatalf("details after the facts were read = %+v, err %v; want %+v", filled.SeasonDetails, err, read2)
+	}
+	kept, err := repo.SetRoutingFacts(t.Context(), "dandadan", capturedFacts(RoutingFacts{}), read2)
+	if err != nil || !slices.Equal(kept.SeasonDetails, details) {
+		t.Fatalf("stored details after the facts were read = %+v, err %v; want %+v kept", kept.SeasonDetails, err, details)
 	}
 }

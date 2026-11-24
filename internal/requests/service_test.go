@@ -1627,7 +1627,7 @@ func (f *fakeStore) ListRoutes(context.Context) ([]Route, error) {
 	return slices.Clone(f.routes), nil
 }
 
-func (f *fakeStore) SetRoutingFacts(_ context.Context, id string, facts RoutingFacts) (*Request, error) {
+func (f *fakeStore) SetRoutingFacts(_ context.Context, id string, facts RoutingFacts, details []SeasonDetail) (*Request, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	req := f.lookupLocked(id)
@@ -1644,6 +1644,9 @@ func (f *fakeStore) SetRoutingFacts(_ context.Context, id string, facts RoutingF
 	f.factsSet[id] = facts
 	req.RoutingFacts = facts
 	req.IsAnime = facts.Anime
+	if len(req.SeasonDetails) == 0 {
+		req.SeasonDetails = details
+	}
 	copy := *req
 	return &copy, nil
 }

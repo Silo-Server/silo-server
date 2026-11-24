@@ -60,7 +60,9 @@ type SeasonDetail struct {
 }
 
 // seasonDetails describes the requested seasons from TMDB's detail, in
-// request order. A season TMDB does not list (no detail) gets no entry.
+// request order. A season TMDB does not list (no detail) gets no entry, and
+// one without an air date yet gets no episode count either, so a plugin
+// matches it by number.
 func seasonDetails(detail *tmdb.MediaDetail, seasons []int) []SeasonDetail {
 	if detail == nil {
 		return nil
@@ -70,7 +72,11 @@ func seasonDetails(detail *tmdb.MediaDetail, seasons []int) []SeasonDetail {
 		i := slices.IndexFunc(detail.Seasons, func(s tmdb.SeasonSummary) bool { return s.Number == number })
 		if i >= 0 {
 			season := detail.Seasons[i]
-			out = append(out, SeasonDetail{Number: number, FirstAirDate: season.AirDate, EpisodeCount: season.EpisodeCount})
+			d := SeasonDetail{Number: number, FirstAirDate: season.AirDate}
+			if d.FirstAirDate != "" {
+				d.EpisodeCount = season.EpisodeCount
+			}
+			out = append(out, d)
 		}
 	}
 	return out

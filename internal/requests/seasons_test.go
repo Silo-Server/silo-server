@@ -120,3 +120,24 @@ func TestSeasonRequestDescribesItsSeasonsToTheRouter(t *testing.T) {
 		t.Fatalf("season details = %v, want %v", got, want)
 	}
 }
+
+// A season request made while TMDB was unreachable has no season details; the
+// submission reads TMDB for the routing facts and fills them from that read.
+// A season TMDB gives episodes but no air date goes with neither.
+func TestSeasonDetailsAreFilledWithTheRoutingFacts(t *testing.T) {
+	store := routingStore(RoutingFacts{})
+	req := store.requests["r1"]
+	req.MediaType, req.TMDBID, req.Seasons = MediaTypeSeries, 95396, []int{2, 3}
+	detail := severanceDetail()
+	detail.Seasons[3].EpisodeCount = 8
+	svc := newTestServiceWithTMDB(store, &fakeTMDBClient{detail: detail})
+
+	sent := *req
+	if err := svc.ensureRoutingFacts(context.Background(), &sent, testRoutes()); err != nil {
+		t.Fatal(err)
+	}
+	want := []SeasonDetail{{Number: 2, FirstAirDate: "2025-01-17", EpisodeCount: 10}, {Number: 3}}
+	if !slices.Equal(sent.SeasonDetails, want) || !slices.Equal(store.requests["r1"].SeasonDetails, want) {
+		t.Fatalf("season details = %+v sent, %+v stored; want %+v", sent.SeasonDetails, store.requests["r1"].SeasonDetails, want)
+	}
+}
