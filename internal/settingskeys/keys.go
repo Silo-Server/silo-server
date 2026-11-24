@@ -9,7 +9,7 @@
 package settingskeys
 
 // Revision is the manifest revision these bindings were generated from.
-const Revision = 30
+const Revision = 31
 
 // Setting keys, one constant per definition.
 const (
@@ -59,6 +59,8 @@ const (
 	PlaybackIntroSkipMode = "playback.intro_skip_mode"
 	// Maximum bitrate
 	PlaybackMaxBitrateKbps = "playback.max_bitrate_kbps"
+	// Show Next Up
+	PlaybackNextUpEnabled = "playback.next_up_enabled"
 	// Next up prompt
 	PlaybackNextUpPromptSeconds = "playback.next_up_prompt_seconds"
 	// Preferred quality
@@ -190,6 +192,7 @@ var Remote = []string{
 	PlaybackCellularPreferredQuality,
 	PlaybackIntroSkipMode,
 	PlaybackMaxBitrateKbps,
+	PlaybackNextUpEnabled,
 	PlaybackNextUpPromptSeconds,
 	PlaybackPreferredQuality,
 	PlaybackShowForcedSubtitles,

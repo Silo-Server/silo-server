@@ -98,9 +98,14 @@ const EXPLICIT_GROUPS: Partial<Record<string, DeviceSettingGroupId>> = {
  * state rather than a preference — it has no control in the manifest at all.
  * `playback.auto_play_next_preview` has no effect in any player, so a control
  * here would save a choice that changes nothing.
+ * `playback.next_up_enabled` belongs to the Show Next Up picker on the
+ * Playback screen, which presents it and `playback.next_up_prompt_seconds` as
+ * one choice (Off, At end, or a lead time). This screen edits one key per
+ * control, so a lone switch here would split that choice in two.
  */
 const HIDDEN_KEYS = new Set<string>([
   "playback.auto_play_next_preview",
+  "playback.next_up_enabled",
   "ui.app_language",
   "ui.theme",
   "ui.text_scale",

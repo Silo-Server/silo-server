@@ -1,6 +1,6 @@
 {
   "api_version": 1,
-  "revision": 30,
+  "revision": 31,
   "option_sets": {
     "playback_audio_languages": {
       "type": "language_tag",
@@ -741,6 +741,20 @@
       "description": "How long before the end of an episode the next-up prompt appears.",
       "recommended_control": "slider",
       "notes": "Android currently writes player.next_up_prompt_seconds. That alias is migrated to this key and removed from production writes."
+    },
+    {
+      "key": "playback.next_up_enabled",
+      "introduced_in": 31,
+      "persistence": "remote",
+      "allowed_scopes": ["profile", "profile_device"],
+      "resolution_order": ["profile_device", "profile", "default"],
+      "value_schema": { "type": "boolean" },
+      "default_value": true,
+      "category": "playback",
+      "label": "Show Next Up",
+      "description": "Show the Next Up card near the end of an episode.",
+      "recommended_control": "switch",
+      "notes": "false turns Next Up off: no card before or at the end of an episode, no countdown and no automatic next episode, whatever playback.auto_play_next says. The episode plays to its end and the player closes as its Close action does. playback.next_up_prompt_seconds only applies while this is true. Clients may show the two as one picker with an Off choice. A client that predates this key keeps showing Next Up."
     },
     {
       "key": "catalog.metadata_language",

@@ -524,9 +524,14 @@ export default function PlaybackSettings() {
     capabilities.data,
     SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE,
   );
+  const supportsNextUpOff = settingsCapabilitiesSupportKey(
+    capabilities.data,
+    SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED,
+  );
   const playbackKeys = useMemo(
     () => [
       ...BASE_PLAYBACK_KEYS,
+      ...(supportsNextUpOff ? [SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED] : []),
       ...(supportsBuffering ? [SETTING_KEYS.PLAYBACK_BUFFERING_QUALITY_MODE] : []),
       ...(supportsMarkerProvenance
         ? [SETTING_KEYS.PLAYBACK_SHOW_MARKER_CONFIDENCE, SETTING_KEYS.PLAYBACK_SHOW_MARKER_SOURCE]
@@ -535,7 +540,7 @@ export default function PlaybackSettings() {
         ? SETTING_KEYS.PLAYBACK_INTRO_SKIP_MODE
         : SETTING_KEYS.PLAYBACK_AUTO_SKIP_INTRO,
     ],
-    [supportsIntroSkipMode, supportsBuffering, supportsMarkerProvenance],
+    [supportsIntroSkipMode, supportsBuffering, supportsMarkerProvenance, supportsNextUpOff],
   );
   const { data: effective } = useEffectiveSettings({ keys: playbackKeys });
   const { save: saveProfileDefault, isSaving } = useProfileDefaultWriter(effective);
@@ -743,9 +748,11 @@ export default function PlaybackSettings() {
 
       <SettingsGroup title={t("web.settings.playback.nextEpisode.title")}>
         <NextUpPromptSetting
+          enabled={read<boolean>(SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED)}
           seconds={read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS)}
-          disabled={pending}
-          onChange={(seconds) => saveValue(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS, seconds)}
+          offOffered={supportsNextUpOff}
+          disabled={pending || capabilities.data === undefined || effective === undefined}
+          save={saveProfileDefault}
         />
 
         <AutoPlayNextSetting />
