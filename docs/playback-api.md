@@ -418,7 +418,8 @@ the parameter, so the plan leaves it off that proxy's URL and the stream keeps
 the `200`. The web video player opts in on Chromium browsers only. The web
 audiobook player, which has no reopen at the current position, Firefox, Safari
 and native players keep the `200`; native players skip the bytes they already
-have. A failure before the first
+have. An audio-only remux (`audio/mp4`) arrives as MP4 fragments of about 2
+seconds each, so a player can start on the first one. A failure before the first
 byte is a Problem Details response; a failure after it ends the stream. A stopped, expired or
 terminated session answers `410 playback_session_ended`. A subtitle sidecar the
 node has no room to read yet answers `503` with `Retry-After`; retry it then.
