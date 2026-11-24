@@ -197,7 +197,7 @@ per-item key and is **resolved** the way an intro is. *Timing*, *Input handling*
 | Controls overlay shows after the timer ran out, still inside | The pill returns without a timer, under the `ask` table's row and *When the controls are up*. |
 | Back while the timed pill shows | Pill hides. The range keeps playing. Range resolved. Press is consumed (does not hide the controls, open a menu or exit playback); the next Back behaves normally. The untimed pill does not claim Back. |
 | D-pad / arrow / pointer move away | Focus moves as normal. Timer keeps running. Pill stays until timer ends. |
-| Pause | Timer freezes and resumes on play, after `PLAYBACK_PAUSE_GRACE_MS`, as for the intro pill. Pill stays visible. |
+| Pause | Timer freezes and resumes on play, with the intro pill's pause grace: a stop counts as a pause only after `PLAYBACK_PAUSE_GRACE_MS` (*Timing*). Pill stays visible. |
 | Seek out of the range | Pill hides, timer stops. Not resolved. |
 | Seek back into the range | Same as Enter (unless resolved). Timer restarts from full. |
 
