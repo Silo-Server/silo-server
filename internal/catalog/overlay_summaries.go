@@ -68,10 +68,10 @@ const overlaySummaryHasSubtitlesSQL = `(
 			CASE jsonb_typeof(mf.subtitle_tracks) WHEN 'array' THEN jsonb_array_length(mf.subtitle_tracks) > 0 ELSE false END
 			OR CASE jsonb_typeof(mf.external_subtitles) WHEN 'array' THEN jsonb_array_length(mf.external_subtitles) > 0 ELSE false END)`
 
-// Equal-ranked files tie on these columns, ascending; the file ID must come
-// last because listOverlaySummaries reads the winner's ID from that field.
-// Sections keep their content/episode/file order; catalog lists use the file
-// ID, matching their scanner projections.
+// Equal-ranked files tie on these columns, ascending. The file ID comes last
+// so equal-ranked files always resolve to the same winner. Sections keep their
+// content/episode/file order; catalog lists use the file ID, matching their
+// scanner projections.
 var (
 	overlaySectionTieColumns = []string{cursorContentIDColumn, "episode_id", "id"}
 	overlayCatalogTieColumns = []string{"id"}
