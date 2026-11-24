@@ -43,7 +43,7 @@ func queryAdminInsightsPeopleSnapshot(ctx context.Context, pool *pgxpool.Pool, q
 			OldestHistoryAt: oldestHist, OldestMeasuredAt: oldestMeas,
 			OldestRouteFactsAt: oldestRoute, OldestMetricAt: oldestMetric,
 		},
-		Accounts: make([]AdminInsightsPersonAccount, 0),
+		Accounts: make([]AdminInsightsPersonAccount, 0), TopProfiles: make([]AdminInsightsTopProfile, 0),
 	}
 
 	liveUsers, liveProfiles, err := queryInsightsLiveUsers(ctx, tx, q.LibraryID)
@@ -58,6 +58,7 @@ func queryAdminInsightsPeopleSnapshot(ctx context.Context, pool *pgxpool.Pool, q
 	if err := queryInsightsPeopleTopClients(ctx, tx, q.LibraryID, whereSQL, whereArgs, byUser); err != nil {
 		return nil, err
 	}
+	out.TopProfiles = topInsightsProfiles(byUser)
 
 	allAccounts := finalizeInsightsPeopleAccounts(byUser, q.Search, out)
 	sortInsightsAccounts(allAccounts, q.Sort, q.Dir)
@@ -362,4 +363,41 @@ func compareTimePtr(a, b *time.Time) int {
 		return 1
 	}
 	return a.Compare(*b)
+}
+
+// insightsTopProfilesLimit caps People's cross-account profile ranking.
+const insightsTopProfilesLimit = 10
+
+// topInsightsProfiles ranks every account's profiles together by plays, then
+// watch time. It reads all accounts, so it does not depend on the account
+// sort, search or page.
+func topInsightsProfiles(byUser map[int]*AdminInsightsPersonAccount) []AdminInsightsTopProfile {
+	out := make([]AdminInsightsTopProfile, 0, insightsTopProfilesLimit)
+	for _, acc := range byUser {
+		for _, p := range acc.Profiles {
+			if p.Plays == 0 {
+				continue
+			}
+			out = append(out, AdminInsightsTopProfile{
+				UserID: acc.UserID, Username: acc.Username, ProfileID: p.ProfileID, ProfileName: p.ProfileName,
+				Plays: p.Plays, WatchSeconds: p.WatchSeconds,
+			})
+		}
+	}
+	slices.SortFunc(out, func(a, b AdminInsightsTopProfile) int {
+		if c := cmp.Compare(b.Plays, a.Plays); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(b.WatchSeconds, a.WatchSeconds); c != 0 {
+			return c
+		}
+		if c := cmp.Compare(a.UserID, b.UserID); c != 0 {
+			return c
+		}
+		return cmp.Compare(a.ProfileID, b.ProfileID)
+	})
+	if len(out) > insightsTopProfilesLimit {
+		out = out[:insightsTopProfilesLimit]
+	}
+	return out
 }

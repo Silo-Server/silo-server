@@ -55,5 +55,15 @@
         }
       ]
     }
+  ],
+  "top_profiles": [
+    {
+      "user_id": "7",
+      "username": "alex",
+      "profile_id": "p-main",
+      "profile_name": "Alex",
+      "plays": 18,
+      "watch_seconds": 40000
+    }
   ]
 }
