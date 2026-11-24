@@ -260,11 +260,6 @@ func (e *remuxStderr) snapshot() (tail string, demuxError bool) {
 // demuxer failed, so its output ends before the source does.
 var errRemuxSourceEndedEarly = errors.New("ffmpeg stopped reading the source on a demux error")
 
-// audioOnlyRemuxFragmentMicros is the fragment length of an audio-only remux,
-// in microseconds: 2 seconds, so a client gets its first audio at once and
-// then a fragment every couple of seconds.
-const audioOnlyRemuxFragmentMicros = "2000000"
-
 // RemuxDVMode makes Profile 7 handling an explicit byte-level recipe choice.
 // The empty/legacy mode exists only for pre-v3 callers and old stream tokens.
 type RemuxDVMode string
@@ -574,7 +569,8 @@ func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekS
 	if audioOnly {
 		// frag_keyframe only cuts at video keyframes, so audio-only output
 		// would be one fragment that FFmpeg writes when the whole book is done.
-		args = append(args, "-frag_duration", audioOnlyRemuxFragmentMicros)
+		// Cut one every 2 seconds (in microseconds) so the first audio arrives at once.
+		args = append(args, "-frag_duration", "2000000")
 	}
 	args = append(args, "pipe:1")
 
@@ -585,9 +581,6 @@ func buildRemuxArgsWithLeadingPictureDropV3(filePath, outputFormat string, seekS
 // When transcodeAudio is false the command is:
 //
 //	ffmpeg -i {input} -c copy -f {format} -movflags frag_keyframe+delay_moov+default_base_moof pipe:1
-//
-// Audio-only output also gets -frag_duration, since it has no video keyframes
-// for frag_keyframe to cut at.
 //
 // When transcodeAudio is true video is copied but audio is transcoded to AAC.
 // The caller must call Close() when done to clean up resources.
