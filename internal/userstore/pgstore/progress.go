@@ -883,7 +883,7 @@ func (s *PostgresUserStore) queryProgressRows(ctx context.Context, query string,
 
 func (s *PostgresUserStore) ListProgress(ctx context.Context, profileID, status string, limit, offset int) ([]userstore.WatchProgress, error) {
 	query := progressListSelect + progressStatusPredicate(status) + `
-		ORDER BY updated_at DESC
+		ORDER BY updated_at DESC, media_item_id
 		LIMIT $3 OFFSET $4`
 	return s.queryProgressRows(ctx, query, s.userID, profileID, limit, offset)
 }

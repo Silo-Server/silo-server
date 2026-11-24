@@ -21,6 +21,7 @@ interface SeasonCarouselProps {
 
 export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselProps) {
   useAppLanguage();
+  const t = useT();
   const sorted = seasons.slice().sort((a, b) => a.season_number - b.season_number);
   const prefetchSeason = usePrefetchCatalogSeason(libraryId);
   const { prefs: overlayPrefs } = useOverlayPrefs();
@@ -79,9 +80,13 @@ export default function SeasonCarousel({ seasons, libraryId }: SeasonCarouselPro
 
                   {/* Completed checkmark: black, like CardWatchStatus; white on this green is under 3:1 */}
                   {isCompleted && (
-                    // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
-                    <div className="absolute top-2.5 right-2.5 z-20 rounded-full bg-green-500/90 p-1 text-black shadow-sm">
-                      <Check className="size-3.5" strokeWidth={3} />
+                    <div
+                      role="img"
+                      aria-label={t("web.common.overlays.watched")}
+                      // eslint-disable-next-line silo/no-physical-direction -- on the poster artwork, which doesn't mirror; matches CardOverlays and CardWatchStatus
+                      className="absolute top-2.5 right-2.5 z-20 rounded-full bg-green-500/90 p-1 text-black shadow-sm"
+                    >
+                      <Check aria-hidden="true" className="size-3.5" strokeWidth={3} />
                     </div>
                   )}
 

@@ -72,6 +72,11 @@ var (
 	// ErrPlaybackControlSocketSessionEnded: the session's durable attempt was
 	// stopped, so no later request rebuilds it and the client should stop.
 	ErrPlaybackControlSocketSessionEnded = errors.New("playback session has ended")
+	// ErrPlaybackControlSocketPausedTimeout: the server ended the session
+	// because it stayed paused too long, and its client advertised
+	// paused_timeout_v1, so it is told why. A client that did not gets
+	// ErrPlaybackControlSocketSessionEnded.
+	ErrPlaybackControlSocketPausedTimeout = errors.New("playback session was paused for too long")
 	// ErrPlaybackControlSocketSessionResuming: the attempt is still live but
 	// this replica has no in-memory session for it yet. The player's next media
 	// request rebuilds it, so the client should retry.
@@ -279,6 +284,9 @@ func (h *PlaybackControlSocketV2) missingSessionError(ctx context.Context, ident
 		return playback.ErrSessionNotFound
 	}
 	if attempt.Stopped {
+		if ended, advertised := pausedTimeoutEnd(playbackSessionID, attempt.StopID, attempt.ClientFeatures); ended && advertised {
+			return ErrPlaybackControlSocketPausedTimeout
+		}
 		return ErrPlaybackControlSocketSessionEnded
 	}
 	return ErrPlaybackControlSocketSessionResuming

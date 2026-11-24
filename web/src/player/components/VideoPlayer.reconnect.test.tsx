@@ -1,5 +1,6 @@
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { createElement, useEffect, type ReactNode } from "react";
+import { toast } from "sonner";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PlayerConfigProvider, type PlayerConfig } from "../context/PlayerConfigContext";
@@ -18,6 +19,7 @@ import { VideoPlayer } from "./VideoPlayer";
 const controls = vi.hoisted(() => ({
   current: null as null | { activeSubtitleIndex: number | null },
 }));
+const exits = vi.hoisted(() => ({ onExit: vi.fn() }));
 const hlsJS = vi.hoisted(() => ({
   latest: null as null | { emit: (event: string, data: unknown) => void },
 }));
@@ -231,6 +233,7 @@ function Harness({
     connectionStatus: playback.connectionStatus,
     connectionErrorTitle: playback.connectionErrorTitle,
     connectionError: playback.connectionError,
+    connectionEndReason: playback.connectionEndReason,
     onReanchorSeek: playback.reanchorSeek,
     onPlaybackStateChange: (state) =>
       playback.updatePlaybackState(state.currentTime, state.playing),
@@ -240,7 +243,7 @@ function Harness({
     preferredSubtitleLanguage,
     intro: null,
     credits: null,
-    onExit: vi.fn(),
+    onExit: exits.onExit,
     seekIntervals: { back: 10, forward: 30 },
   });
 }
@@ -275,6 +278,8 @@ async function startWatching(): Promise<HTMLVideoElement> {
 }
 
 beforeEach(() => {
+  vi.mocked(toast.info).mockClear();
+  exits.onExit.mockClear();
   sessionRef.current = null;
   controls.current = null;
   hlsJS.latest = null;
@@ -321,6 +326,42 @@ describe("VideoPlayer with the playback session: reconnect", () => {
 
     await waitFor(() => expect(sessionRef.current?.connectionStatus).toBe("ended"));
     expect(requests.replans.map((replan) => replan.body.operation)).toEqual(["seek_reanchor"]);
+    expect(requests.starts).toHaveLength(1);
+  });
+
+  // The server ends a session paused past the administrator's timeout. The
+  // player leaves as it does after an administrator's end, with its own notice.
+  it("leaves with the paused-timeout notice when a resumed remux learns the pause ran too long", async () => {
+    const remuxPlan = directPlan({
+      delivery: "server_remux_progressive",
+      timeline: { ...directPlan().timeline, can_seek_anywhere: false },
+    });
+    const requests = stubServer({
+      start: () => jsonResponse(playable("session-1", remuxPlan), 201),
+      replan: () =>
+        jsonResponse(
+          {
+            type: "https://siloserver.org/docs/api/v2/problems/playback_session_paused_timeout",
+            title: "Playback session paused too long",
+            status: 410,
+            detail: "Playback stopped because it was paused for too long.",
+          },
+          410,
+        ),
+    });
+    renderHarness();
+    const video = await startWatching();
+    expect(requests.starts[0]?.client_features).toContain("paused_timeout_v1");
+    const now = Date.now();
+    fireEvent.pause(video);
+    vi.spyOn(Date, "now").mockReturnValue(now + 20 * 60_000);
+    fireEvent.play(video);
+
+    await waitFor(() => expect(exits.onExit).toHaveBeenCalledTimes(1));
+    // The only notice is the paused-timeout one, not the administrator's.
+    expect(vi.mocked(toast.info).mock.calls).toEqual([
+      ["Playback stopped because it was paused for too long.", expect.anything()],
+    ]);
     expect(requests.starts).toHaveLength(1);
   });
 

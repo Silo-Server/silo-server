@@ -521,6 +521,12 @@
       "value": "סשן ההפעלה הזה הסתיים. יש להתחיל את ההפעלה מחדש."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "ההפעלה הופסקה כי היא הושהתה זמן רב מדי. יש להתחיל את ההפעלה מחדש."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -73471,6 +73477,24 @@
       "value": "שמירה בספרייה"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "הפעלה מושהית"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "סיום הפעלה מושהית אחרי"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "בין 0 ל-1440. הפעלה של וידאו שהושהה למשך הזמן הזה באפליקציה של Silo מסתיימת, וההזרמה שלו וכל המרת קידוד משתחררות; הפעלה חוזרת ממשיכה מאותה נקודה. צפייה משותפת, העברה לטלוויזיה וספרי שמע לא מושפעים. הערך 0 מכבה את האפשרות הזו."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -73973,6 +73997,12 @@
     {
       "type": 0,
       "value": "ימים"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "דקות"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -79966,6 +79996,12 @@
       "value": "הפעלת מיפוי גוונים של HDR בתוכנה"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "סיום הפעלה מושהית אחרי (דקות)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -80024,6 +80060,12 @@
     {
       "type": 0,
       "value": "מקור הסמנים"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "הפעלה מושהית"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -82050,6 +82092,36 @@
     {
       "type": 0,
       "value": "יש להפעיל קודם ספק התחברות. כשההתחברות עם סיסמה כבויה ואין ספק מופעל, רק מנהלי חירום יוכלו להתחבר."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "בין 8 ל-72 תווים. הכללים חלים בעת בחירה או שינוי של סיסמה; סיסמאות שכבר הוגדרו ימשיכו לפעול."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "אורך מינימלי לסיסמה"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "כל סימן פיסוק או סמל, כמו ! או #. אותיות, ספרות ורווחים לא נחשבים."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "דרישה לתו מיוחד"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "דרישה לאות גדולה"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -94626,6 +94698,20 @@
       "value": "מתבצעת הגדרה…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "יש לשתף אותה בעצמך עם המשתמש "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -97410,10 +97496,80 @@
       "value": " לא מאפשר למכשיר הזה להתחבר לשרת הזה."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "לפחות "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " תו."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "לפחות "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " תווים."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "לפחות "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " תווים."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "הסיסמאות לא תואמות."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "יש לכלול לפחות תו מיוחד אחד, כמו ! או #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "יש לכלול לפחות אות גדולה אחת."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -97426,6 +97582,64 @@
     {
       "type": 0,
       "value": "יש להשתמש ב-8 תווים לפחות."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "יש להשתמש ב-"
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " תו לפחות."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "יש להשתמש ב-"
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " תווים לפחות."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "יש להשתמש ב-"
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " תווים לפחות."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -134043,6 +134257,12 @@
     {
       "type": 0,
       "value": "מנהל סיים את סשן ההפעלה הזה."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "ההפעלה הופסקה כי היא הושהתה זמן רב מדי."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

@@ -181,6 +181,12 @@ type ImageCacheProcessor struct {
 	// providers.
 	enabled atomic.Bool
 
+	// storageFullAt is when a write last found the artwork store full, so
+	// the background jobs after it wait without downloading anything
+	// (deferForFullStorage). A time.Time keeps the monotonic reading, so a
+	// wall-clock step does not stretch the pause.
+	storageFullAt atomic.Pointer[time.Time]
+
 	// idleWaitTimeout bounds how long CacheTargetArtwork waits on jobs held by
 	// a background worker. Zero means immediateImageCacheIdleTimeout.
 	idleWaitTimeout time.Duration
@@ -259,8 +265,9 @@ type ImageCacheRunStats struct {
 	Succeeded        int
 	Failed           int
 	Skipped          int
-	// Deferred counts jobs, also counted in Skipped, that were released for a
-	// server that can see the job's library root.
+	// Deferred counts jobs, also counted in Skipped, that were released
+	// without an attempt: for a server that can see the job's library root,
+	// or until the artwork store has room.
 	Deferred         int
 	DeletedSucceeded int
 	UploadedVariants int
@@ -524,7 +531,14 @@ loop:
 			defer func() { <-sem }()
 			defer release()
 			jobCtx, cancelJob := context.WithTimeout(ctx, ImageCacheJobTimeout)
-			result := p.processOne(jobCtx, job)
+			var result imageCacheProcessResult
+			// Background jobs right after a full-store failure wait without
+			// downloading; a manual refresh always tries.
+			if !interactive && p.storageRecentlyFull() && p.deferForFullStorage(jobCtx, job) {
+				result.outcome = imageCacheOutcomeDeferred
+			} else {
+				result = p.processOne(jobCtx, job)
+			}
 			cancelJob()
 			mu.Lock()
 			switch result.outcome {
@@ -905,6 +919,9 @@ func (p *ImageCacheProcessor) processOne(ctx context.Context, job *models.Metada
 		Language:      job.TargetLanguage,
 	})
 	if err != nil {
+		if p.storageFull(ctx, job, err) {
+			return imageCacheProcessResult{outcome: imageCacheOutcomeDeferred}
+		}
 		p.markFailed(ctx, job, err.Error())
 		return imageCacheProcessResult{outcome: "failed"}
 	}
@@ -1062,6 +1079,9 @@ func (p *ImageCacheProcessor) processLocalOne(ctx context.Context, job *models.M
 		KeyDiscriminator: discriminator,
 	})
 	if err != nil {
+		if p.storageFull(ctx, job, err) {
+			return imageCacheProcessResult{outcome: imageCacheOutcomeDeferred}
+		}
 		p.markFailed(ctx, job, err.Error())
 		return imageCacheProcessResult{outcome: "failed"}
 	}
@@ -1605,4 +1625,57 @@ func imageCacheJobImageType(value string) (ImageType, error) {
 // locked_at.
 func latestImageCacheJobStart(claimStarted time.Time) time.Time {
 	return claimStarted.Add(ImageCacheLeaseDuration - ImageCacheJobTimeout)
+}
+
+const (
+	// imageCacheStorageFullError is the last_error of a job waiting for the
+	// artwork store to have room. It stays the same from one attempt to the
+	// next, so a repeat deferral takes the longer delay.
+	imageCacheStorageFullError = "artwork storage is full; waiting for free space"
+	// imageCacheStorageFullRetry and imageCacheStorageFullRepeatRetry space
+	// a job's attempts while the store is full. Waiting costs no attempt, so
+	// cached artwork resumes within the hour once space is freed.
+	imageCacheStorageFullRetry       = 10 * time.Minute
+	imageCacheStorageFullRepeatRetry = time.Hour
+	// imageCacheStorageFullPause is how long after a full-store write the
+	// processor defers jobs without downloading or decoding their images.
+	imageCacheStorageFullPause = time.Minute
+)
+
+// storageFull reports whether err is the artwork store refusing a write for
+// lack of space (a local store at its free-space reserve, or a disk that
+// filled anyway). It then defers the job and reports whether that worked; a
+// job it could not defer is marked failed as usual by the caller.
+func (p *ImageCacheProcessor) storageFull(ctx context.Context, job *models.MetadataImageCacheJob, err error) bool {
+	if !errors.Is(err, syscall.ENOSPC) {
+		return false
+	}
+	now := time.Now()
+	p.storageFullAt.Store(&now)
+	return p.deferForFullStorage(ctx, job)
+}
+
+// storageRecentlyFull reports whether a write found the store full within
+// imageCacheStorageFullPause.
+func (p *ImageCacheProcessor) storageRecentlyFull() bool {
+	at := p.storageFullAt.Load()
+	return at != nil && time.Since(*at) < imageCacheStorageFullPause
+}
+
+// deferForFullStorage puts a claimed job back in the queue without counting
+// an attempt. Failing it instead would spend every queued job's attempts
+// within hours and park the whole queue for imageCacheFailedCooldown, so
+// artwork would stay missing for a week after an admin freed space.
+func (p *ImageCacheProcessor) deferForFullStorage(ctx context.Context, job *models.MetadataImageCacheJob) bool {
+	deferrer, ok := p.jobs.(imageCacheJobDeferrer)
+	if !ok {
+		return false
+	}
+	writeCtx, cancel := terminalJobContext(ctx)
+	defer cancel()
+	if err := deferrer.DeferClaimed(writeCtx, job.ID, job.LockedBy, imageCacheStorageFullError, imageCacheStorageFullRetry, imageCacheStorageFullRepeatRetry); err != nil {
+		p.logger.WarnContext(ctx, "metadata image cache: failed to defer job while artwork storage is full", "job_id", job.ID, "error", err)
+		return false
+	}
+	return true
 }

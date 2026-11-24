@@ -521,6 +521,12 @@
       "value": "Тази сесия на възпроизвеждане приключи. Започнете възпроизвеждането отново."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Възпроизвеждането спря, защото беше на пауза твърде дълго. Започнете възпроизвеждането отново."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67425,6 +67431,24 @@
       "value": "Запазване в библиотеката"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Възпроизвеждане на пауза"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Прекратяване на възпроизвеждане на пауза след"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "От 0 до 1440. Прекратява видео, което е било на пауза толкова дълго в приложение на Silo, и освобождава потока му и евентуалното транскодиране; при повторно възпроизвеждане то продължава от същото място. Не се засягат съвместното гледане, предаването към други устройства и аудиокнигите. При 0 тази функция е изключена."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67895,6 +67919,12 @@
     {
       "type": 0,
       "value": "дни"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "минути"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73817,6 +73847,12 @@
       "value": "Включване на софтуерно тонално преобразуване на HDR"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Прекратяване на възпроизвеждане на пауза след (минути)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73875,6 +73911,12 @@
     {
       "type": 0,
       "value": "Източник на маркерите"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Възпроизвеждане на пауза"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -75861,6 +75903,36 @@
     {
       "type": 0,
       "value": "Първо включете доставчик за вход. Ако входът с парола е изключен и няма включен доставчик, само администраторите за спешен достъп биха могли да влизат."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "От 8 до 72 знака. Правилата се прилагат, когато някой избира или променя парола; вече зададените пароли продължават да работят."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Минимална дължина на паролата"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Всеки препинателен знак или символ, например ! или #. Буквите, цифрите и интервалите не се броят."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Изискване на специален знак"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Изискване на главна буква"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -87747,6 +87819,20 @@
       "value": "Задава се…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Споделете я сами с потребителя "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -90299,10 +90385,64 @@
       "value": " не позволява на това устройство да влиза в този сървър."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Поне "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " знак."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Поне "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " знака."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Паролите не съвпадат."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Включете поне един специален знак, например ! или #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Включете поне една главна буква."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -90315,6 +90455,48 @@
     {
       "type": 0,
       "value": "Използвайте поне 8 знака."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Използвайте поне "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " знак."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Използвайте поне "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " знака."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -124791,6 +124973,12 @@
     {
       "type": 0,
       "value": "Администратор прекрати тази сесия на възпроизвеждане."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Възпроизвеждането спря, защото беше на пауза твърде дълго."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

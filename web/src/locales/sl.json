@@ -521,6 +521,12 @@
       "value": "Ta seja predvajanja se je končala. Znova začnite predvajanje."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Predvajanje se je ustavilo, ker je bilo predolgo začasno ustavljeno. Znova začnite predvajanje."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -80948,6 +80954,24 @@
       "value": "Shrani v knjižnico"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Začasno ustavljeno predvajanje"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Končaj začasno ustavljeno predvajanje po"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "Od 0 do 1440. Konča video, ki je bil v aplikaciji Silo tako dolgo začasno ustavljen, ter sprosti njegov pretok in morebitno prekodiranje; ob ponovnem predvajanju se nadaljuje z istega mesta. To ne vpliva na Skupni ogled, oddajanje v druge naprave in zvočne knjige. Vrednost 0 to možnost izklopi."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -81482,6 +81506,12 @@
     {
       "type": 0,
       "value": "dni"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "min"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -87506,6 +87536,12 @@
       "value": "Omogoči programsko preslikavo tonov HDR"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Končaj začasno ustavljeno predvajanje po (min)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -87564,6 +87600,12 @@
     {
       "type": 0,
       "value": "Vir oznak"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Začasno ustavljeno predvajanje"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -89618,6 +89660,36 @@
     {
       "type": 0,
       "value": "Najprej vklopite ponudnika prijave. Če je prijava z geslom izklopljena in noben ponudnik ni vklopljen, bi se lahko prijavili samo skrbniki za nujni dostop."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Od 8 do 72 znakov. Pravila veljajo, ko nekdo izbere ali spremeni geslo; že nastavljena gesla še naprej delujejo."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Najmanjša dolžina gesla"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Katero koli ločilo ali simbol, na primer ! ali #. Črke, števke in presledki ne štejejo."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Zahtevaj poseben znak"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Zahtevaj veliko črko"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -103088,6 +103160,20 @@
       "value": "Nastavljanje …"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Geslo sami posredujte uporabniku "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -106122,10 +106208,96 @@
       "value": " tej napravi ne dovoli prijave na ta strežnik."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vsaj "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znak."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vsaj "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaka."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vsaj "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaki."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vsaj "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znakov."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Gesli se ne ujemata."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Vključite vsaj en poseben znak, na primer ! ali #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Vključite vsaj eno veliko črko."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -106138,6 +106310,80 @@
     {
       "type": 0,
       "value": "Uporabite vsaj 8 znakov."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uporabite vsaj "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znak."
+            }
+          ]
+        },
+        "two": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uporabite vsaj "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaka."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uporabite vsaj "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znake."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Uporabite vsaj "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znakov."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -146323,6 +146569,12 @@
     {
       "type": 0,
       "value": "Skrbnik je končal to sejo predvajanja."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Predvajanje se je ustavilo, ker je bilo predolgo začasno ustavljeno."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

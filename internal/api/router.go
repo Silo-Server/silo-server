@@ -174,6 +174,7 @@ type Dependencies struct {
 	EmailBrand        *mail.BrandLoader             // server branding for outgoing email (nil sends Silo's default)
 	FolderRepo        *catalog.FolderRepository     // media folder repository (may be nil)
 	FileRepo          *scanner.FileRepository       // media file repository (may be nil)
+	StreamEnds        *playback.StreamEndRecorder   // stores where a transcode found a file's media ends (may be nil)
 	Scanner           *scanner.Scanner              // scanner instance (may be nil)
 	LibraryIngester   *libraryingest.Executor       // shared library ingest executor (may be nil)
 	ProbeEnsurer      handlers.PlaybackProbeEnsurer // on-demand probe repair for playback/detail (may be nil)
@@ -1604,6 +1605,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 		}
 		playbackHandler.ProbeEnsurer = deps.ProbeEnsurer
+		playbackHandler.StreamEnds = deps.StreamEnds
 		playbackHandler.ChapterThumbnailQueuer = deps.ChapterThumbnailQueuer
 		if settingsRepo != nil {
 			playbackHandler.SettingsRepo = settingsRepo
@@ -1805,6 +1807,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	var adminJobsHandler *handlers.AdminJobsHandler
 	if userRepo != nil {
 		adminHandler = handlers.NewAdminHandler(userRepo, deps.DB, deps.UserStoreProvider)
+		adminHandler.BaseContext = deps.AppContext //nolint:fatcontext // set once on a new handler to the app context
 		adminHandler.SessionsLoader = playbackSessionsLoader
 		adminHandler.DetailSvc = detailSvc
 		adminHandler.EventBus = deps.EventBus
@@ -3491,6 +3494,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			Telemetry:  streamtelemetry.NodeSnapshotStore(deps.StreamTelemetry),
 			Events:     deps.EventBus,
 			Deny:       playback.NewStreamDeny(deps.RedisClient),
+			StreamEnds: deps.StreamEnds,
 			// Main cancels the app context before it shuts the listener
 			// down, which cuts source byte streams instead of waiting on them.
 			Lifetime: deps.AppContext,
@@ -3508,6 +3512,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// nothing and revokes nothing.
 		nodeRecipes := noderecipe.NewStore(deps.RedisClient, 0)
 		nodeControlOptions.Recipes, nodeControlOptions.Revocations = nodeRecipes, nodeRecipes
+		if deps.SessionMgr != nil {
+			nodeControlOptions.Transcodes = deps.SessionMgr
+		}
 		deps.wireNodeSources(&nodeControlOptions)
 		if nodeHandler != nil {
 			// A node's declaration goes through the admin node service, so
@@ -3608,6 +3615,8 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	}
 
 	r.Use(apimw.RequestLogger(deps.NodeID))
+	// This Recoverer answers a panic in the recording middleware below. A
+	// handler's panic is answered by the one after the activity log.
 	r.Use(middleware.Recoverer)
 	r.Use(apimw.Metrics)
 
@@ -3621,6 +3630,11 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	if deps.ActivityLogWriter != nil {
 		r.Use(activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub))
 	}
+
+	// A handler's panic becomes its 500 here, inside the request metrics and
+	// the activity log, so both record it like any other server error
+	// (#3735), an upgrade request included.
+	r.Use(apimw.Recoverer)
 }
 
 // nodeConfigSettings reads the server settings a transcode node's

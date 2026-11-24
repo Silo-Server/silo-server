@@ -1,5 +1,5 @@
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, renderHook } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   setAdminSettingValue: vi.fn(),
   deleteAdminSettingValue: vi.fn(),
   v2: vi.fn(),
+  sendAudioChoiceRequest: vi.fn(),
 }));
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: mocks.toastError } }));
@@ -25,12 +26,23 @@ vi.mock("@/api/v2/adminAccountSettings", async () => ({
 vi.mock("@/api/client", async () => ({
   ...(await vi.importActual<object>("@/api/client")),
   captureProfileRequestContext: () => ({ profileId: "p1" }),
+  isCapturedProfileAuthorityActive: () => true,
 }));
 vi.mock("@/api/v2/request", async () => ({
   ...(await vi.importActual<object>("@/api/v2/request")),
   v2: mocks.v2,
 }));
 
+vi.mock("@/lib/recipes", () => ({ fetchRecipeCatalog: async () => ({ categories: {} }) }));
+vi.mock("@/player/context/PlayerConfigContext", () => ({ usePlayerConfig: () => ({}) }));
+vi.mock("@/player/utils/audioChoicePersistence", async () => ({
+  ...(await vi.importActual<object>("@/player/utils/audioChoicePersistence")),
+  sendAudioChoiceRequest: mocks.sendAudioChoiceRequest,
+}));
+
+import { ProfileHomeSections } from "@/pages/admin-users/detail/preferences/ProfileHomeSections";
+import { PlayerFetchError } from "@/player/player-fetch";
+import { useTrackChoicePersistence } from "@/player/hooks/useTrackChoicePersistence";
 import {
   useDeleteAllAdminUserDeviceSettingsForDevice,
   useUpdateAdminUserSetting,
@@ -121,6 +133,65 @@ describe("write failures whose error text is developer English", () => {
     );
     expect(audioText).toBe("Failed to save audio preference");
     expect(subtitleText).toBe("Failed to save subtitle preference");
+  });
+
+  it("show a Home sections save's own message, and keep the server's reason", async () => {
+    const row = {
+      id: "continue_watching",
+      section_type: "continue_watching",
+      title: "Continue Watching",
+      featured: false,
+      item_limit: 20,
+      hidden: false,
+      is_custom: false,
+      customized: false,
+      position: 0,
+    };
+    const hideRowWhenSaveFails = async (error: unknown) => {
+      mocks.v2.mockImplementation(async (route: string) => {
+        if (route.startsWith("PUT ")) throw error;
+        return { items: route.endsWith("/settings") ? [row] : [] };
+      });
+      document.body.replaceChildren();
+      render(<ProfileHomeSections userId={1} profileId="p1" profileName="admin" />, { wrapper });
+      const hide = await screen.findByRole("button", { name: "Hide Continue Watching" });
+      await waitFor(() => expect(hide).toBeEnabled());
+      return toastFor(async () => {
+        fireEvent.click(hide);
+        await waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
+      });
+    };
+
+    expect(await hideRowWhenSaveFails(new TypeError("Failed to fetch"))).toBe(
+      "Couldn't save Home sections",
+    );
+    expect(
+      await hideRowWhenSaveFails(v2Problem(422, "validation_failed", "Server refused the layout.")),
+    ).toBe("Couldn't save Home sections: Server refused the layout.");
+  });
+
+  it("show the player's audio pick message, and keep the server's", async () => {
+    const { result } = renderHook(
+      () =>
+        useTrackChoicePersistence({
+          seriesId: "series-1",
+          audioTracks: [{ index: 0, language: "eng", codec: "aac", channels: 2 } as never],
+          subtitleTracks: [],
+        }),
+      { wrapper },
+    );
+    const pick = (error: unknown) => async () => {
+      mocks.sendAudioChoiceRequest.mockRejectedValueOnce(error);
+      result.current.saveAudioChoice(0);
+      await vi.waitFor(() => expect(mocks.toastError).toHaveBeenCalled());
+    };
+
+    expect(await toastFor(pick(new TypeError("Failed to fetch")))).toBe(
+      "Failed to save audio preference",
+    );
+    expect(await toastFor(pick(new PlayerFetchError(422, "That track isn't in this file.")))).toBe(
+      "That track isn't in this file.",
+    );
   });
 
   it("show one offline notice for a burst of saves made offline", async () => {

@@ -521,6 +521,12 @@
       "value": "Tato relace přehrávání skončila. Spusťte přehrávání znovu."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Přehrávání bylo zastaveno, protože bylo příliš dlouho pozastavené. Spusťte přehrávání znovu."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -81169,6 +81175,24 @@
       "value": "Ukládat do knihovny"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pozastavené přehrávání"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Ukončit pozastavené přehrávání po"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 až 1440. Ukončí video, které je v aplikaci Silo takto dlouho pozastavené, a uvolní jeho stream i případné překódování; po opětovném spuštění přehrávání pokračuje od stejného místa. Na Společné sledování, odesílání do jiných zařízení a audioknihy se to nevztahuje. Hodnota 0 tuto funkci vypne."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -81703,6 +81727,12 @@
     {
       "type": 0,
       "value": "dní"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "min"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -87711,6 +87741,12 @@
       "value": "Zapnout softwarové mapování tónů HDR"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Ukončit pozastavené přehrávání po (min)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -87769,6 +87805,12 @@
     {
       "type": 0,
       "value": "Zdroj značek"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pozastavené přehrávání"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -89823,6 +89865,36 @@
     {
       "type": 0,
       "value": "Nejprve zapněte poskytovatele přihlášení. Při vypnutém přihlášení heslem a bez zapnutého poskytovatele by se mohli přihlásit jen nouzoví správci."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "8 až 72 znaků. Pravidla platí, když někdo volí nebo mění heslo; již nastavená hesla fungují dál."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Minimální délka hesla"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Libovolné interpunkční znaménko nebo symbol, například ! nebo #. Písmena, číslice a mezery se nepočítají."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Vyžadovat speciální znak"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Vyžadovat velké písmeno"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -103293,6 +103365,20 @@
       "value": "Nastavování…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Heslo sdělte uživateli "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " osobně."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -106327,10 +106413,96 @@
       "value": " tomuto zařízení nepovoluje přihlášení k tomuto serveru."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Alespoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znak."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Alespoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaky."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Alespoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaku."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Alespoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaků."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Hesla se neshodují."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Použijte alespoň jeden speciální znak, například ! nebo #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Použijte alespoň jedno velké písmeno."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -106343,6 +106515,80 @@
     {
       "type": 0,
       "value": "Použijte alespoň 8 znaků."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Použijte alespoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znak."
+            }
+          ]
+        },
+        "few": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Použijte alespoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaky."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Použijte alespoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaku."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Použijte alespoň "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " znaků."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -146657,6 +146903,12 @@
     {
       "type": 0,
       "value": "Správce ukončil tuto relaci přehrávání."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Přehrávání bylo zastaveno, protože bylo příliš dlouho pozastavené."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

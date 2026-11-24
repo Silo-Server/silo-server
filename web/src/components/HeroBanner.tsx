@@ -198,11 +198,11 @@ export default function HeroBanner({
   const shown = pageVisible && onScreen;
   const audiobookPlayback = useAudiobookPlaybackController();
   // Bumped whenever auto-advance restarts a fresh 8s cycle — after the slide
-  // changes, or after the user unpauses. Used as part of the progress-rail key
-  // so the CSS animation restarts in lockstep with the setInterval timer
-  // (otherwise, resuming via animation-play-state desyncs: rail finishes
-  // before the next slide advance, or vice-versa, depending on when the user
-  // paused).
+  // changes, after the user unpauses, or when the hero is shown again. Used as
+  // part of the progress-rail key so the CSS animation restarts in lockstep
+  // with the setInterval timer (otherwise, resuming via animation-play-state
+  // desyncs: rail finishes before the next slide advance, or vice-versa,
+  // depending on when the user paused).
   const [playCycle, setPlayCycle] = useState(0);
 
   const next = useCallback(() => {
@@ -223,15 +223,17 @@ export default function HeroBanner({
   const held = holds.hover || holds.focus;
   const [choice, setChoice] = useState<"play" | "pause" | null>(null);
   const wantsPlay = choice === "play" || (choice === null && !reduceMotion);
-  // What actually happens: drives the timer and the progress rail.
+  // Whether the user and the holds let the slideshow run.
   const autoplaying = wantsPlay && !held;
-  // Each time the slideshow starts running (a hold ends, or Play is pressed),
-  // playCycle bumps so the rail animation restarts at scaleX(0) in sync with
-  // the fresh 8s interval the effect below starts.
-  const [railRunning, setRailRunning] = useState(autoplaying);
-  if (railRunning !== autoplaying) {
-    setRailRunning(autoplaying);
-    if (autoplaying) setPlayCycle((c) => c + 1);
+  // What actually happens: drives the timer and the progress rail.
+  const advancing = autoplaying && shown;
+  // Each time the slideshow starts running again, playCycle bumps so the rail
+  // animation restarts at scaleX(0) in sync with the fresh 8s interval the
+  // effect below starts.
+  const [railRunning, setRailRunning] = useState(advancing);
+  if (railRunning !== advancing) {
+    setRailRunning(advancing);
+    if (advancing) setPlayCycle((c) => c + 1);
   }
   // A mouse press while the pointer is over the hero turns a focus hold into
   // a hover hold, and the focus that press moves onto a button holds as hover
@@ -290,10 +292,10 @@ export default function HeroBanner({
   // t=5s the auto-advance would still fire at t=8 instead of t=13, desyncing
   // with the progress rail that restarts on slide change.
   useEffect(() => {
-    if (slides.length <= 1 || !autoplaying || !shown) return;
+    if (slides.length <= 1 || !advancing) return;
     const timer = setInterval(next, 8000);
     return () => clearInterval(timer);
-  }, [next, slides.length, autoplaying, shown, activeIndex]);
+  }, [next, slides.length, advancing, activeIndex]);
 
   useEffect(() => {
     const section = sectionRef.current;
@@ -531,13 +533,14 @@ export default function HeroBanner({
           </div>
           <div
             className="hero-progress-rail hidden w-20 sm:block md:w-36"
-            data-paused={autoplaying ? "false" : "true"}
+            data-paused={advancing ? "false" : "true"}
             aria-hidden="true"
           >
             {/* The key restarts the animation in lockstep with the
-                  setInterval timer: on slide change, and on unpause (which
-                  starts a fresh 8s cycle). Pausing mid-cycle freezes the bar
-                  via `animation-play-state: paused` without remounting. */}
+                  setInterval timer: on slide change, and whenever the timer
+                  starts a fresh 8s cycle (unpause, or the hero shown again).
+                  Stopping mid-cycle freezes the bar via
+                  `animation-play-state: paused` without remounting. */}
             <span key={`${activeIndex}-${playCycle}`} />
           </div>
           {/* On phones the counter rides in the pill, which backs it over

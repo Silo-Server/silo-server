@@ -287,7 +287,20 @@ func TestPlannedCopySessionMatchesFFmpeg(t *testing.T) {
 		"-c:a", "aac", closeKeys).CombinedOutput(); err != nil {
 		t.Fatalf("make the close-keyframe file: %v: %s", err, out)
 	}
-	for _, src := range []string{source, shifted, lateVideo, closeKeys} {
+	// Open-GOP keyframes, as on Blu-ray remuxes: B-frames after a keyframe
+	// in decode order show before it (#4664).
+	openGOP := filepath.Join(dir, "open-gop.mkv")
+	if out, err := exec.CommandContext(ctx, ffmpeg, "-v", "error",
+		"-f", "lavfi", "-i", "testsrc2=size=96x54:rate=25:duration=40",
+		"-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000:duration=40",
+		"-map", "0", "-map", "1",
+		"-c:v", "libx264", "-preset", "ultrafast", "-bf", "3", "-forced-idr", "0",
+		"-x264-params", "open-gop=1:keyint=1000:scenecut=0:b-pyramid=normal",
+		"-force_key_frames", "0,0.9,2.2,2.6,5.2,7.2,7.6,8.9,12.6,13,15,17.6,18.5,25,26.1,31,33.3,38",
+		"-c:a", "aac", openGOP).CombinedOutput(); err != nil {
+		t.Fatalf("make the open-GOP file: %v: %s", err, out)
+	}
+	for _, src := range []string{source, shifted, lateVideo, closeKeys, openGOP} {
 		t.Run(filepath.Base(src), func(t *testing.T) {
 			checkPlannedCopySession(t, ctx, ffmpeg, src)
 		})

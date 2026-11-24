@@ -1,6 +1,7 @@
-import { act, render } from "@testing-library/react";
+import { act, render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { v2Problem } from "@/api/v2/problems.test-support";
 import { appearanceCache, storage } from "@/utils/storage";
 import { SETTING_KEYS } from "@/lib/settingsContract";
 
@@ -15,7 +16,11 @@ vi.mock("@/hooks/useAuth", () => ({
   useOptionalAuth: () => mocks.useOptionalAuth(),
 }));
 
-vi.mock("@/hooks/queries/settingValues", () => ({
+vi.mock("@/hooks/queries/settingValues", async (importOriginal) => ({
+  // The real failure classification, which decides how a failed save settles.
+  isDefinitiveSettingMutationRejection: (
+    await importOriginal<typeof import("@/hooks/queries/settingValues")>()
+  ).isDefinitiveSettingMutationRejection,
   useEffectiveSettings: (options?: { keys?: readonly string[]; enabled?: boolean }) =>
     mocks.useEffectiveSettings(options),
   useSetSettingValue: () => ({ mutate: mocks.mutate, mutateAsync: mocks.mutate, isPending: false }),
@@ -92,12 +97,14 @@ function signedInAs(id: number, profileId = "p1"): void {
  */
 function effectiveAnswer(values: Record<string, { value: unknown; source?: string }>): {
   data: Record<string, { key: string; value: unknown; source: string }>;
+  fetchStatus: "idle";
 } {
   const data: Record<string, { key: string; value: unknown; source: string }> = {};
   for (const [key, entry] of Object.entries(values)) {
     data[key] = { key, value: entry.value, source: entry.source ?? "profile" };
   }
-  return { data };
+  // A settled read, as the query reports once it has an answer.
+  return { data, fetchStatus: "idle" };
 }
 
 function expectDefaults(captured: Captured): void {
@@ -339,5 +346,69 @@ describe("appearance cache ownership", () => {
     expect(view.captured.textScale).toBe("default");
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe("x-large");
     expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p2")).toBeNull();
+  });
+
+  // A 502 may or may not have stored the change, and the settings re-read that
+  // settles it can come back unchanged; the page then shows and caches that.
+  it.each([
+    ["a stored value", { value: "large" }, "large", "large"],
+    ["no stored value", { value: "default", source: "default" }, "default", null],
+  ])(
+    "shows what the server holds after a save that may have stored it fails, given %s",
+    async (_label, stored, shown, cached) => {
+      signedInAs(1);
+      mocks.useEffectiveSettings.mockReturnValue(
+        effectiveAnswer({ [SETTING_KEYS.UI_TEXT_SCALE]: stored }),
+      );
+      mocks.mutate.mockRejectedValue(v2Problem(502, "bad_gateway", "Bad gateway"));
+      const view = renderAppearance();
+
+      act(() => {
+        view.captured.setTextScale("x-large");
+      });
+      expect(document.documentElement.getAttribute("data-text-scale")).toBe("x-large");
+
+      await waitFor(() =>
+        expect(document.documentElement.getAttribute("data-text-scale")).toBe(shown),
+      );
+      expect(view.captured.textScale).toBe(shown);
+      expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe(cached);
+    },
+  );
+
+  // When the re-read fails too, or is paused offline, the cached answer is no
+  // newer than the change, which may have been stored: the page waits for a
+  // read that succeeds.
+  it.each([
+    ["fails", { isError: true, fetchStatus: "idle" }],
+    ["is paused", { isError: false, fetchStatus: "paused" }],
+  ])("waits for a successful read when the re-read %s", async (_label, reread) => {
+    signedInAs(1);
+    const answer = effectiveAnswer({ [SETTING_KEYS.UI_TEXT_SCALE]: { value: "large" } });
+    const read = (state: object) =>
+      mocks.useEffectiveSettings.mockReturnValue({ ...answer, ...state });
+    read({ isError: false, fetchStatus: "idle" });
+    let failSave: (error: unknown) => void = () => {};
+    mocks.mutate.mockReturnValue(new Promise((_resolve, reject) => (failSave = reject)));
+    const view = renderAppearance();
+
+    act(() => {
+      view.captured.setTextScale("x-large");
+    });
+    // The save settles once its re-read has failed or paused.
+    read(reread);
+    await act(async () => failSave(v2Problem(502, "bad_gateway", "Bad gateway")));
+    expect(document.documentElement.getAttribute("data-text-scale")).toBe("x-large");
+    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe("x-large");
+
+    // A later read succeeds with the same answer.
+    read({ isError: false, fetchStatus: "idle" });
+    act(() => {
+      view.rerender();
+    });
+    await waitFor(() =>
+      expect(document.documentElement.getAttribute("data-text-scale")).toBe("large"),
+    );
+    expect(appearanceCache.get(KEYS.UI_TEXT_SCALE, "1:p1")).toBe("large");
   });
 });
