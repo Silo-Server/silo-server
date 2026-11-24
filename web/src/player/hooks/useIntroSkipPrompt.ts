@@ -77,6 +77,12 @@ interface UseIntroSkipPromptOptions {
    */
   controlsVisible: boolean;
   /**
+   * Whether something covers the player, such as the Next Up screen. Pass
+   * `playing` false as well. A cover is not a rebuffer, so the timer freezes
+   * at once instead of after the pause grace window.
+   */
+  covered?: boolean;
+  /**
    * Moves playback and reports whether the seek was accepted.
    *
    * A seek can be refused without anything moving — a watch-together room that
@@ -106,6 +112,7 @@ export function useIntroSkipPrompt({
   playing,
   enabled,
   controlsVisible,
+  covered = false,
   onSeek,
   skipLabel,
 }: UseIntroSkipPromptOptions) {
@@ -251,9 +258,21 @@ export function useIntroSkipPrompt({
       return;
     }
 
-    if (pausedRemainingRef.current !== null || pauseGraceTimerRef.current !== null) {
+    if (pausedRemainingRef.current !== null) return;
+
+    if (covered) {
+      // Frozen now. A pause edge already in its grace window keeps the value
+      // it captured at that edge.
+      clearPauseGraceTimer();
+      clearCountdownTimers();
+      const remaining = remainingAtEdgeRef.current ?? Math.max(0, deadlineRef.current - Date.now());
+      remainingAtEdgeRef.current = null;
+      pausedRemainingRef.current = remaining;
+      replacePrompt({ ...current, deadlineMs: null, remainingMs: remaining });
       return;
     }
+
+    if (pauseGraceTimerRef.current !== null) return;
 
     // The false edge. What the clock has left is captured here rather than when
     // the grace timer fires, or every real pause would silently eat the grace
@@ -276,6 +295,7 @@ export function useIntroSkipPrompt({
     activePrompt?.key,
     clearCountdownTimers,
     clearPauseGraceTimer,
+    covered,
     playing,
     replacePrompt,
     scheduleCountdown,

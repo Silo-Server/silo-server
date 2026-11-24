@@ -2788,6 +2788,7 @@ export function VideoPlayer({
     introKey: segmentKey,
     currentTime,
     playing: playing && displayMode === "foreground",
+    covered: displayMode === "postroll",
     controlsVisible,
     enabled:
       (displayMode === "foreground" || displayMode === "postroll") &&

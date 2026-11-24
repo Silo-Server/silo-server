@@ -266,11 +266,12 @@ describe("useIntroSkipPrompt", () => {
       currentTime: number;
       playing?: boolean;
       controlsVisible?: boolean;
+      covered?: boolean;
     }
 
     function renderCredits() {
       const view = renderHook(
-        ({ currentTime, playing = true, controlsVisible = false }: SegmentProps) =>
+        ({ currentTime, playing = true, controlsVisible = false, covered }: SegmentProps) =>
           useIntroSkipPrompt({
             mode: "ask",
             intro: credits,
@@ -279,6 +280,7 @@ describe("useIntroSkipPrompt", () => {
             playing,
             enabled: true,
             controlsVisible,
+            covered,
             onSeek,
             skipLabel: "Skip Credits",
           }),
@@ -375,6 +377,22 @@ describe("useIntroSkipPrompt", () => {
 
       rerender({ currentTime: 104 });
       act(() => vi.advanceTimersByTime(6_999));
+      expect(result.current.prompt).not.toBeNull();
+      act(() => vi.advanceTimersByTime(1));
+      expect(result.current.prompt).toBeNull();
+    });
+
+    // The Next Up screen covering the player is not a rebuffer: a visit
+    // shorter than the pause grace window must not spend the timer.
+    it("freezes its timer at once while the player is covered", () => {
+      const { result, rerender } = renderCredits();
+      act(() => vi.advanceTimersByTime(9_000));
+      rerender({ currentTime: 109, playing: false, covered: true });
+      act(() => vi.advanceTimersByTime(1_200));
+      expect(result.current.prompt?.timer).toMatchObject({ deadlineMs: null, remainingMs: 1_000 });
+
+      rerender({ currentTime: 109 });
+      act(() => vi.advanceTimersByTime(999));
       expect(result.current.prompt).not.toBeNull();
       act(() => vi.advanceTimersByTime(1));
       expect(result.current.prompt).toBeNull();
