@@ -753,7 +753,7 @@ export default function PlaybackSettings() {
           enabled={read<boolean>(SETTING_KEYS.PLAYBACK_NEXT_UP_ENABLED)}
           seconds={read<number>(SETTING_KEYS.PLAYBACK_NEXT_UP_PROMPT_SECONDS)}
           offOffered={supportsNextUpOff}
-          disabled={pending || capabilities.isPending || effectivePending}
+          disabled={pending || capabilities.data === undefined || effectivePending}
           save={saveProfileDefault}
         />
 

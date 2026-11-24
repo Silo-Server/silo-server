@@ -42,8 +42,10 @@ export function NextUpPromptSetting({
   seconds: number;
   offOffered: boolean;
   /**
-   * Held while capabilities or values load: until then a choice would not know
-   * whether to write next_up_enabled, nor see a device override to clear.
+   * Held until the capabilities and values arrive. A failed capabilities read
+   * means unknown, not old: until they arrive a choice would not know whether
+   * to write next_up_enabled (so a seconds choice could leave Next Up off), nor
+   * see a device override to clear.
    */
   disabled: boolean;
   /** The profile writer, which also clears a device override on the key. */
