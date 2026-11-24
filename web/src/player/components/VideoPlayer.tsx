@@ -729,6 +729,8 @@ export function VideoPlayer({
   const backendDurationRef = useRef(propDuration ?? 0);
   const autoEnterPictureInPictureAttemptedRef = useRef(false);
   const autoSkippedRecapKeyRef = useRef<string | null>(null);
+  /** The recap whose automatic skip was refused or failed, which offers its pill instead. */
+  const [failedAutoRecapKey, setFailedAutoRecapKey] = useState<string | null>(null);
   const lastInputWasKeyboardRef = useRef(false);
   const endedFiredRef = useRef(false);
   const [hasEnded, setHasEnded] = useState(false);
@@ -2775,6 +2777,9 @@ export function VideoPlayer({
   // intro pill waits, and starts its full timer when that pill has gone. The
   // Next Up screen covers the player without ending the range, so there the
   // pill is held as if paused instead of dropped.
+  const autoRecapKey = activeRecap
+    ? `${sessionId}:${activeFileId ?? "unknown"}:${activeRecap.start}:${activeRecap.end}`
+    : null;
   const segmentKey = activeSkipMarker
     ? `${sessionId}:${activeFileId ?? selectedVersion?.file_id ?? "unknown"}:${activeSkipMarker.kind}:${activeSkipMarker.start}:${activeSkipMarker.end}`
     : null;
@@ -2796,8 +2801,8 @@ export function VideoPlayer({
       !awaitingFirstFrame &&
       introPromptCanSeek &&
       activeIntroPrompt === null &&
-      // An automatic recap skip has already answered the pill.
-      !(autoSkipRecap && activeSkipMarker?.kind === "recap"),
+      // An automatic recap skip answers the pill, unless the seek did not take.
+      !(autoSkipRecap && activeSkipMarker?.kind === "recap" && failedAutoRecapKey !== autoRecapKey),
     onSeek: handlePlayerSeek,
     skipLabel: activeSkipMarker ? skipMarkerLabel(t, activeSkipMarker.kind) : undefined,
   });
@@ -2817,14 +2822,22 @@ export function VideoPlayer({
       return;
     }
 
-    const recapKey = `${sessionId}:${activeFileId ?? "unknown"}:${activeRecap.start}:${activeRecap.end}`;
+    const recapKey = autoRecapKey;
     if (autoSkippedRecapKeyRef.current === recapKey) {
       return;
     }
     autoSkippedRecapKeyRef.current = recapKey;
-    handlePlayerSeek(activeRecap.end);
+    // A refused or failed seek leaves the viewer in the recap, so the pill is
+    // offered instead. The skip is not retried: that would repeat on every
+    // position update.
+    void Promise.resolve(handlePlayerSeek(activeRecap.end)).then(
+      (accepted) => {
+        if (!accepted) setFailedAutoRecapKey(recapKey);
+      },
+      () => setFailedAutoRecapKey(recapKey),
+    );
   }, [
-    activeFileId,
+    autoRecapKey,
     autoSkipRecap,
     awaitingFirstFrame,
     currentTime,

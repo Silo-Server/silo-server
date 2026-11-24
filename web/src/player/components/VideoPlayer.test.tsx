@@ -1528,3 +1528,38 @@ describe("VideoPlayer lost connection", () => {
     expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(10, true);
   });
 });
+
+describe("VideoPlayer automatic recap skip", () => {
+  beforeEach(() => {
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  // A refused skip leaves the viewer inside the recap, and the automatic skip
+  // does not try again, so the pill is the viewer's way past it.
+  it("offers Skip Recap when the automatic skip was refused", async () => {
+    const onReanchorSeek = vi.fn(() => false);
+    const { container, findByRole } = renderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      }),
+      recap: { start: 10, end: 40 },
+      autoSkipRecap: true,
+      onReanchorSeek,
+    });
+    const video = container.querySelector("video")!;
+    video.currentTime = 15;
+    fireFrameTimeUpdate(video);
+
+    await waitFor(() => expect(onReanchorSeek).toHaveBeenCalledWith(40));
+    expect(await findByRole("button", { name: "Skip Recap" })).toBeTruthy();
+  });
+});
