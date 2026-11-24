@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"time"
 
@@ -96,16 +97,11 @@ func (f *RemoteFetcher) recent(id string, now time.Time) (remoteResult, bool) {
 	return result, true
 }
 
-// admits reports whether id's outcome can be remembered: it already has an
-// entry, or the memory has room once expired or evictable entries are dropped.
-// Fetch asks while holding a download slot, so the memory exceeds
-// remoteResultsMax by less than remoteFetchSlots. Evictable loads (stored
-// objects) are always admitted and drop old evictable entries or bypass caching
-// if the memory is full of provider entries.
-func (f *RemoteFetcher) admits(id string, now time.Time, evictable bool) bool {
-	if evictable {
-		return true
-	}
+// admits reports whether a provider download's outcome can be remembered: it
+// already has an entry, or the memory has room once expired entries or an
+// evictable stored entry are dropped. Fetch asks while holding a download
+// slot, so the memory exceeds remoteResultsMax by less than remoteFetchSlots.
+func (f *RemoteFetcher) admits(id string, now time.Time) bool {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if _, ok := f.results[id]; ok || len(f.results) < remoteResultsMax {
@@ -117,22 +113,15 @@ func (f *RemoteFetcher) admits(id string, now time.Time, evictable bool) bool {
 	if len(f.results) < remoteResultsMax {
 		return true
 	}
-	return f.evictSoonestReusable(false)
+	return f.evictOneReusable()
 }
 
-// evictSoonestReusable deletes the soonest-expiring evictable entry (one read
-// from our own store rather than an external provider) so revisiting it reloads
-// cleanly instead of returning ErrRemoteBusy. The caller holds f.mu.
-func (f *RemoteFetcher) evictSoonestReusable(requireBytes bool) bool {
+// evictOneReusable deletes the soonest-expiring evictable entry so provider
+// admission is never starved by stored-object entries. The caller holds f.mu.
+func (f *RemoteFetcher) evictOneReusable() bool {
 	victim, soonest := "", time.Time{}
 	for key, result := range f.results {
-		if !result.evictable {
-			continue
-		}
-		if requireBytes && len(result.image.Data) == 0 {
-			continue
-		}
-		if victim == "" || result.until.Before(soonest) {
+		if result.evictable && (victim == "" || result.until.Before(soonest)) {
 			victim, soonest = key, result.until
 		}
 	}
@@ -141,10 +130,50 @@ func (f *RemoteFetcher) evictSoonestReusable(requireBytes bool) bool {
 	}
 	f.bytes -= len(f.results[victim].image.Data)
 	delete(f.results, victim)
-	if len(f.results) == 0 {
-		f.firstExpiry = time.Time{}
-	}
 	return true
+}
+
+type evictCandidate struct {
+	key   string
+	until time.Time
+	bytes int
+}
+
+// collectEvictable gathers evictable entries and their total bytes in one scan.
+// The caller holds f.mu.
+func (f *RemoteFetcher) collectEvictable() ([]evictCandidate, int) {
+	var candidates []evictCandidate
+	totalBytes := 0
+	for key, result := range f.results {
+		if !result.evictable {
+			continue
+		}
+		n := len(result.image.Data)
+		totalBytes += n
+		candidates = append(candidates, evictCandidate{key: key, until: result.until, bytes: n})
+	}
+	return candidates, totalBytes
+}
+
+// dropEvictable deletes the soonest-expiring entries from candidates until the
+// map fits one new entry of neededBytes or candidates runs out. The caller
+// holds f.mu.
+func (f *RemoteFetcher) dropEvictable(candidates []evictCandidate, neededBytes int) {
+	slices.SortFunc(candidates, func(a, b evictCandidate) int {
+		return a.until.Compare(b.until)
+	})
+	for _, c := range candidates {
+		needEntry := len(f.results) >= remoteResultsMax
+		needByte := f.bytes+neededBytes > remoteResultsBudget
+		if !needEntry && !needByte {
+			return
+		}
+		if !needEntry && c.bytes == 0 {
+			continue
+		}
+		f.bytes -= c.bytes
+		delete(f.results, c.key)
+	}
 }
 
 // dropExpired removes expired outcomes. The caller holds f.mu.
@@ -171,8 +200,9 @@ func (f *RemoteFetcher) remember(id string, image RemoteImage, err error, now ti
 // rememberEntry keeps an outcome for later requests. Expired entries are
 // dropped at most once per remoteResultsSweep. Evictable entries (stored
 // objects) are deleted when space is needed and never evict or starve provider
-// entries; provider entries drop evictable entries first and otherwise leave a
-// busy marker until expiry so rotating links cannot repeat provider downloads.
+// outcomes in memory; provider entries drop evictable entries first and
+// otherwise leave a busy marker until expiry so rotating links cannot repeat
+// provider downloads.
 func (f *RemoteFetcher) rememberEntry(id string, image RemoteImage, err error, now time.Time, evictable bool) {
 	ttl := remoteResultTTL
 	if err != nil && !errors.Is(err, ErrRemoteTooLarge) {
@@ -190,9 +220,6 @@ func (f *RemoteFetcher) rememberEntry(id string, image RemoteImage, err error, n
 	if old, ok := f.results[id]; ok {
 		f.bytes -= len(old.image.Data)
 		delete(f.results, id)
-		if len(f.results) == 0 {
-			f.firstExpiry = time.Time{}
-		}
 	}
 	if evictable {
 		if !f.makeRoomForEvictable(len(image.Data)) {
@@ -203,55 +230,61 @@ func (f *RemoteFetcher) rememberEntry(id string, image RemoteImage, err error, n
 	}
 	until := now.Add(ttl)
 	f.results[id] = remoteResult{image: image, err: err, until: until, evictable: evictable}
-	if len(f.results) == 1 || f.firstExpiry.IsZero() || until.Before(f.firstExpiry) {
+	if len(f.results) == 1 || until.Before(f.firstExpiry) {
 		f.firstExpiry = until
 	}
 	f.bytes += len(image.Data)
 }
 
 // makeRoomForEvictable frees entry and byte room by dropping only evictable
-// entries; it returns false when provider entries fill the budget so stored
-// reads never evict or starve provider outcomes. The caller holds f.mu.
+// entries in one scan; it returns false without evicting anything when
+// provider entries leave too little budget for neededBytes. The caller holds
+// f.mu.
 func (f *RemoteFetcher) makeRoomForEvictable(neededBytes int) bool {
-	for len(f.results) >= remoteResultsMax {
-		if !f.evictSoonestReusable(false) {
-			return false
-		}
+	if len(f.results) < remoteResultsMax && f.bytes+neededBytes <= remoteResultsBudget {
+		return true
 	}
-	for f.bytes+neededBytes > remoteResultsBudget {
-		if !f.evictSoonestReusable(true) {
-			return false
-		}
+	candidates, evictableBytes := f.collectEvictable()
+	if len(f.results) >= remoteResultsMax && len(candidates) == 0 {
+		return false
 	}
+	if f.bytes-evictableBytes+neededBytes > remoteResultsBudget {
+		return false
+	}
+	f.dropEvictable(candidates, neededBytes)
 	return true
 }
 
 // makeRoomForProvider frees entry and byte room for a provider outcome. It
 // drops evictable store entries first; when bytes still do not fit, the
-// provider images nearest their expiry give theirs up but stay as a busy
-// marker until expiry so rotating links cannot repeat provider downloads. The
-// caller holds f.mu.
+// provider images nearest their expiry give theirs up in one scan and stay as
+// busy markers until expiry so rotating links cannot repeat provider downloads.
+// The caller holds f.mu.
 func (f *RemoteFetcher) makeRoomForProvider(neededBytes int) {
-	for len(f.results) >= remoteResultsMax {
-		if !f.evictSoonestReusable(false) {
-			break
+	if len(f.results) < remoteResultsMax && f.bytes+neededBytes <= remoteResultsBudget {
+		return
+	}
+	if candidates, _ := f.collectEvictable(); len(candidates) > 0 {
+		f.dropEvictable(candidates, neededBytes)
+	}
+	if f.bytes+neededBytes <= remoteResultsBudget {
+		return
+	}
+	var providerBytes []evictCandidate
+	for key, result := range f.results {
+		if n := len(result.image.Data); n > 0 {
+			providerBytes = append(providerBytes, evictCandidate{key: key, until: result.until, bytes: n})
 		}
 	}
-	for f.bytes+neededBytes > remoteResultsBudget {
-		if f.evictSoonestReusable(true) {
-			continue
+	slices.SortFunc(providerBytes, func(a, b evictCandidate) int {
+		return a.until.Compare(b.until)
+	})
+	for _, c := range providerBytes {
+		if f.bytes+neededBytes <= remoteResultsBudget {
+			return
 		}
-		victim, soonest := "", time.Time{}
-		for key, result := range f.results {
-			if len(result.image.Data) > 0 && (victim == "" || result.until.Before(soonest)) {
-				victim, soonest = key, result.until
-			}
-		}
-		if victim == "" {
-			break
-		}
-		f.bytes -= len(f.results[victim].image.Data)
-		f.results[victim] = remoteResult{err: ErrRemoteBusy, until: soonest}
+		f.bytes -= c.bytes
+		f.results[c.key] = remoteResult{err: ErrRemoteBusy, until: c.until}
 	}
 }
 
@@ -278,7 +311,7 @@ func (f *RemoteFetcher) Fetch(ctx context.Context, key, rawURL string) (RemoteIm
 // singleflight, 4 MiB cap, timeout, and byte-sniffed ServedImageType bounds.
 // Remembered entries share the result memory budget but are evicted cleanly
 // (reloading on the next request instead of returning ErrRemoteBusy) and never
-// evict or starve provider downloads.
+// evict or starve provider outcomes in memory.
 func (f *RemoteFetcher) FetchBytes(ctx context.Context, key, source string, load func(context.Context, int64) ([]byte, error)) (RemoteImage, error) {
 	return f.fetchBytes(ctx, key, source, true, load)
 }
@@ -331,7 +364,7 @@ func (f *RemoteFetcher) fetch(ctx context.Context, id string, evictable bool, lo
 	}
 	defer func() { <-f.slots }()
 
-	if !f.admits(id, time.Now(), evictable) {
+	if !evictable && !f.admits(id, time.Now()) {
 		return RemoteImage{}, ErrRemoteBusy
 	}
 	image, err := f.loadImage(ctx, load)

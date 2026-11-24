@@ -207,4 +207,31 @@ func TestRemoteFetcherFetchBytesEvictionReloadsAndPreservesProviders(t *testing.
 	if _, err := f2.Fetch(ctx, "p-new", srv.URL+"/new.png"); err != nil {
 		t.Fatalf("Fetch with memory full of stored entries = %v, want nil", err)
 	}
+
+	// An uncacheable stored image (provider entries leave less than its size)
+	// must succeed without flushing existing cached stored posters.
+	f3 := newRemoteFetcher(srv.Client())
+	now := time.Now()
+	// Fill 63 MiB with provider entries, leaving 1 MiB for stored posters.
+	for i := range 15 {
+		f3.remember("p-"+strconv.Itoa(i), RemoteImage{Data: make([]byte, 4<<20), ContentType: "image/png"}, nil, now)
+	}
+	f3.remember("p-15", RemoteImage{Data: make([]byte, 3<<20), ContentType: "image/png"}, nil, now)
+	smallStored := make([]byte, 512<<10)
+	copy(smallStored, "\x89PNG\r\n\x1a\n")
+	if _, err := f3.FetchBytes(ctx, "s-keep", "store:keep", func(_ context.Context, _ int64) ([]byte, error) {
+		return smallStored, nil
+	}); err != nil {
+		t.Fatalf("seed small stored poster = %v, want nil", err)
+	}
+	tooBigToCache := make([]byte, 2<<20)
+	copy(tooBigToCache, "\x89PNG\r\n\x1a\n")
+	if img, err := f3.FetchBytes(ctx, "s-uncacheable", "store:uncacheable", func(_ context.Context, _ int64) ([]byte, error) {
+		return tooBigToCache, nil
+	}); err != nil || len(img.Data) != len(tooBigToCache) {
+		t.Fatalf("uncacheable stored poster = %d bytes, %v; want %d bytes", len(img.Data), err, len(tooBigToCache))
+	}
+	if kept, ok := f3.recent("s-keep\x00store:keep", time.Now()); !ok || len(kept.image.Data) != len(smallStored) {
+		t.Fatalf("existing stored poster was flushed by uncacheable image: ok=%v, bytes=%d", ok, len(kept.image.Data))
+	}
 }
