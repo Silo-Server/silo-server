@@ -419,10 +419,11 @@ many addresses the attempts come from: native `login`, Jellyfin
 `POST /Users/AuthenticateByName`, Audiobookshelf `/login` (beta), and
 `linkAccountIdentityWithCredentials`, which spends the budget of the directory username
 it checks. Names are trimmed and compared without regard to case, as sign-in looks up
-accounts, so ` Alice` and `alice` share one budget. Case folds as the database folds it
-(`auth.ConfigureSignInNameFold` asks it at startup): every letter with a Unicode collation,
-ASCII letters only with the C collation, where `Älice` and `älice` are two accounts and two
-budgets; a username and the same account's
+accounts, so ` Alice` and `alice` share one budget. The database folds the case with the
+`lower()` that `citext` compares by, so budgets follow its collation: with the C collation
+`Älice` and `älice` are two accounts and two budgets, and two accounts never share one. If
+that query fails, the attempt still counts, under a name folded by the server, but its
+success clears and extends nothing; a username and the same account's
 email address are two names. A Jellyfin name with a `#`, such as `alice#Kids`, spends the
 budget of the part before the `#`, even when it signs in to an account whose own name
 contains the `#`, so the budget does not depend on which accounts exist. Such an account's
