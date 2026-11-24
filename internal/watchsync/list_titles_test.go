@@ -329,6 +329,86 @@ func TestServiceWatchlistImportCountsATitleWhoseRowWriteFails(t *testing.T) {
 	}
 }
 
+// watchlistRemoverStub records the watchlist removals it is sent.
+type watchlistRemoverStub struct {
+	watchlistBatchProviderStub
+	removed []LocalFavorite
+}
+
+func (p *watchlistRemoverStub) RemoveWatchlist(_ context.Context, _ ServerConfig, _ Connection, items []LocalFavorite) (ExportResult, error) {
+	p.removed = append(p.removed, items...)
+	result := ExportResult{}
+	for _, item := range items {
+		result.Sent = append(result.Sent, item.MediaItemID)
+	}
+	return result, nil
+}
+
+// A profile removed a title's entry outside the library, then added the
+// library item for it to the watchlist before the removal reached the
+// provider. The provider lists the title under another key than the entry's
+// row (imdb against tmdb), so the export's key guard doesn't hold the
+// removal, and an incremental provider leaves the unchanged listing out of
+// its batch. The item is a re-add: the removal doesn't go out, and the item
+// takes the row's place, so the provider dropping the title still takes it
+// off (#4286). Without the item, the removal goes out.
+func TestServiceWatchlistReAddedLibraryItemSupersedesATitleRemoval(t *testing.T) {
+	const titleRow = "watchlist-title:movie:550"
+	for _, tt := range []struct {
+		name        string
+		reAdded     bool
+		wantRemoved bool
+	}{
+		{name: "library item re-added", reAdded: true},
+		{name: "no library item", wantRemoved: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := context.Background()
+			store, repo, conn := favoriteImportFixture(t)
+			conn.ImportWatchlistEnabled, conn.SyncWatchlistRemovalsEnabled = true, true
+			removedAt := time.Now().Add(-time.Hour).UTC()
+			repo.listItemStates = append(repo.listItemStates, ListItemState{
+				ConnectionID: conn.ID, ListKind: ListKindWatchlist, MediaItemID: titleRow, Kind: "movie",
+				ProviderItemKey: "tmdb:550", TitleIDs: []string{"tmdb:550", "imdb:tt0137523"},
+				RemotePresent: true, LastRemovedLocalAt: &removedAt,
+			})
+			if tt.reAdded {
+				if _, err := store.AddToWatchlistAt(ctx, conn.ProfileID, "item-550", time.Now().UTC()); err != nil {
+					t.Fatal(err)
+				}
+			}
+			service := NewService(repo, NewRegistry()).
+				WithMatcher(matchedMatcherStub{mediaItemID: "item-550"}).
+				WithUserStoreProvider(staticStoreProvider{store: store})
+			service.SetWatchlistTitles(&titlesStub{entries: map[int]time.Time{}, promoted: map[int]bool{550: tt.reAdded}})
+			provider := &watchlistRemoverStub{}
+			if _, err := service.removePendingListItems(ctx, conn, ServerConfig{}, provider, service.watchlistBinding()); err != nil {
+				t.Fatal(err)
+			}
+			if removed := len(provider.removed) > 0; removed != tt.wantRemoved {
+				t.Fatalf("removals sent = %v, want the title's removal sent %v", provider.removed, tt.wantRemoved)
+			}
+			if state := listItemStateOf(repo, titleRow); state.RemotePresent {
+				t.Fatalf("title row = %#v, want it settled on the provider side", state)
+			}
+			if !tt.reAdded {
+				return
+			}
+			// Export is off, so nothing else tracks the listing: the item
+			// holds it now.
+			dropped := &watchlistIncrementalProviderStub{watchlistBatchProviderStub{rows: []RemoteFavorite{{
+				ProviderItemKey: "tmdb:550", Kind: "movie", Removed: true,
+			}}}}
+			if _, err := service.importList(ctx, conn, ServerConfig{}, dropped, service.watchlistBinding()); err != nil {
+				t.Fatal(err)
+			}
+			if listed, err := store.InWatchlist(ctx, conn.ProfileID, "item-550"); err != nil || listed {
+				t.Fatalf("library item listed = %v (%v) after the provider dropped the title, want it removed", listed, err)
+			}
+		})
+	}
+}
+
 func listItemStateOf(repo *serviceFakeRepo, mediaItemID string) *ListItemState {
 	for i := range repo.listItemStates {
 		if repo.listItemStates[i].MediaItemID == mediaItemID {

@@ -440,9 +440,12 @@ that serves it (see
 [restart-resilient playback](architecture/restart-resilient-playback.md)). For
 the session's owner the answer separates three cases:
 
-- the attempt was stopped (by the player, an administrator, expiry or an
-  abort): `410 playback_session_ended`. The session is gone for good, so the
-  client stops minting and does not retry;
+- the attempt was stopped (by the player, an administrator, expiry, an abort
+  or the paused timeout): `410 playback_session_ended`, or
+  `410 playback_session_paused_timeout` when the paused timeout ended an
+  attempt that listed client feature `paused_timeout_v1`
+  ([protocol v3 §6.3](architecture/playback-protocol-v3.md)). The session is
+  gone for good, so the client stops minting and does not retry;
 - the attempt is still live and this replica has not rebuilt the session:
   `503 dependency_unavailable` with `Retry-After`. Retry the mint later. The
   control socket still needs the session affinity the other session routes
@@ -491,7 +494,7 @@ connection with `1009` (message too big).
 `protocol`, an empty string when this server does not serve the handshake. The web
 player mints under captured profile authority for every connection, offers the
 protocol pair, and discards frames once that authority changes. It stops minting
-after a `410 playback_session_ended`. Any other refused mint is retried under the
+after any `410`. Any other refused mint is retried under the
 same authority with a backoff that grows to one attempt every 30 seconds, and
 never sooner than the refusal's `Retry-After` (capped at 60 seconds).
 

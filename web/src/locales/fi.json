@@ -521,6 +521,12 @@
       "value": "Tämä toistoistunto päättyi. Aloita toisto uudelleen."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Toisto pysäytettiin, koska se oli tauolla liian kauan. Aloita toisto uudelleen."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67225,6 +67231,24 @@
       "value": "Tallennus kirjastoon"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Tauotettu toisto"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Tauotetun toiston lopetusaika"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0–1440. Lopettaa videon toiston, kun video on ollut Silo-sovelluksessa tauolla näin kauan, ja vapauttaa sen suoratoiston ja mahdollisen transkoodauksen. Kun video toistetaan uudelleen, toisto jatkuu samasta kohdasta. Asetus ei koske Katso yhdessä -toimintoa, toiseen laitteeseen lähettämistä eikä äänikirjoja. Arvo 0 poistaa asetuksen käytöstä."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67695,6 +67719,12 @@
     {
       "type": 0,
       "value": "päivää"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minuuttia"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73613,6 +73643,12 @@
       "value": "Ota käyttöön ohjelmallinen HDR-sävykartoitus"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Tauotetun toiston lopetusaika (minuuttia)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73671,6 +73707,12 @@
     {
       "type": 0,
       "value": "Merkkien lähde"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Tauotettu toisto"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -75657,6 +75699,36 @@
     {
       "type": 0,
       "value": "Ota ensin kirjautumispalvelu käyttöön. Jos salasanakirjautuminen on pois käytöstä eikä mikään palvelu ole käytössä, vain hätäylläpitäjät voisivat kirjautua sisään."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "8–72 merkkiä. Säännöt koskevat salasanan valitsemista tai vaihtamista; jo asetetut salasanat toimivat edelleen."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Salasanan vähimmäispituus"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Mikä tahansa välimerkki tai symboli, kuten ! tai #. Kirjaimia, numeroita ja välilyöntejä ei lasketa."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Pakollinen erikoismerkki"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Pakollinen iso kirjain"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -87455,6 +87527,20 @@
       "value": "Asetetaan…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Kerro se itse käyttäjälle "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -89971,10 +90057,64 @@
       "value": " ei salli tämän laitteen kirjautua sisään tälle palvelimelle."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vähintään "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " merkki."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Vähintään "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " merkkiä."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Salasanat eivät täsmää."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Sisällytä vähintään yksi erikoismerkki, kuten ! tai #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Sisällytä vähintään yksi iso kirjain."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -89987,6 +90127,48 @@
     {
       "type": 0,
       "value": "Käytä vähintään 8 merkkiä."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Salasanassa on oltava vähintään "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " merkki."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Salasanassa on oltava vähintään "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " merkkiä."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -124527,6 +124709,12 @@
     {
       "type": 0,
       "value": "Järjestelmänvalvoja lopetti tämän toistoistunnon."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Toisto pysäytettiin, koska se oli tauolla liian kauan."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

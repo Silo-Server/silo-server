@@ -521,6 +521,12 @@
       "value": "Αυτή η συνεδρία αναπαραγωγής έληξε. Ξεκινήστε ξανά την αναπαραγωγή."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Η αναπαραγωγή διακόπηκε επειδή ήταν σε παύση για πολύ ώρα. Ξεκινήστε ξανά την αναπαραγωγή."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67477,6 +67483,24 @@
       "value": "Αποθήκευση στη βιβλιοθήκη"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Αναπαραγωγή σε παύση"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Τερματισμός αναπαραγωγής σε παύση μετά από"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 έως 1440. Τερματίζει ένα βίντεο που έχει μείνει σε παύση τόσο χρόνο σε μια εφαρμογή Silo και απελευθερώνει τη ροή του και τυχόν διακωδικοποίηση. Αν το αναπαραγάγετε ξανά, συνεχίζει από το ίδιο σημείο. Η Κοινή παρακολούθηση, η μετάδοση και τα ηχητικά βιβλία δεν επηρεάζονται. Η τιμή 0 απενεργοποιεί αυτήν τη ρύθμιση."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67947,6 +67971,12 @@
     {
       "type": 0,
       "value": "ημέρες"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "λεπτά"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73869,6 +73899,12 @@
       "value": "Ενεργοποίηση αντιστοίχισης τόνων HDR μέσω λογισμικού"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Τερματισμός αναπαραγωγής σε παύση μετά από (λεπτά)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73927,6 +73963,12 @@
     {
       "type": 0,
       "value": "Πηγή δεικτών"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Αναπαραγωγή σε παύση"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -75913,6 +75955,36 @@
     {
       "type": 0,
       "value": "Ενεργοποιήστε πρώτα έναν πάροχο σύνδεσης. Με τη σύνδεση με κωδικό πρόσβασης ανενεργή και χωρίς ενεργό πάροχο, μόνο οι διαχειριστές έκτακτης ανάγκης θα μπορούσαν να συνδεθούν."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Από 8 έως 72 χαρακτήρες. Οι κανόνες ισχύουν όταν κάποιος επιλέγει ή αλλάζει κωδικό πρόσβασης. Οι κωδικοί πρόσβασης που έχουν ήδη οριστεί εξακολουθούν να λειτουργούν."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Ελάχιστο μήκος κωδικού πρόσβασης"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Οποιοδήποτε σημείο στίξης ή σύμβολο, όπως ! ή #. Τα γράμματα, τα ψηφία και τα κενά δεν μετράνε."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Απαίτηση ειδικού χαρακτήρα"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Απαίτηση κεφαλαίου γράμματος"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -87839,6 +87911,20 @@
       "value": "Ορισμός…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Κοινοποιήστε τον εσείς στον χρήστη "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -90395,10 +90481,64 @@
       "value": " δεν επιτρέπει σε αυτήν τη συσκευή να συνδεθεί σε αυτόν τον διακομιστή."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Τουλάχιστον "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " χαρακτήρας."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Τουλάχιστον "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " χαρακτήρες."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Οι κωδικοί πρόσβασης δεν ταιριάζουν."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Συμπεριλάβετε τουλάχιστον έναν ειδικό χαρακτήρα, όπως ! ή #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Συμπεριλάβετε τουλάχιστον ένα κεφαλαίο γράμμα."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -90411,6 +90551,48 @@
     {
       "type": 0,
       "value": "Χρησιμοποιήστε τουλάχιστον 8 χαρακτήρες."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Χρησιμοποιήστε τουλάχιστον "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " χαρακτήρα."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Χρησιμοποιήστε τουλάχιστον "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " χαρακτήρες."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -124929,6 +125111,12 @@
     {
       "type": 0,
       "value": "Η συνεδρία αναπαραγωγής τερματίστηκε από διαχειριστή."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Η αναπαραγωγή διακόπηκε επειδή ήταν σε παύση για πολύ ώρα."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

@@ -521,6 +521,12 @@
       "value": "เซสชันการเล่นนี้สิ้นสุดแล้ว โปรดเริ่มเล่นอีกครั้ง"
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "การเล่นหยุดลงเนื่องจากหยุดชั่วคราวนานเกินไป โปรดเริ่มเล่นอีกครั้ง"
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -61506,6 +61512,24 @@
       "value": "บันทึกลงในคลัง"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "การเล่นที่หยุดชั่วคราว"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "สิ้นสุดการเล่นที่หยุดชั่วคราวหลังจาก"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 ถึง 1440 สิ้นสุดการเล่นวิดีโอที่หยุดชั่วคราวในแอป Silo นานเท่านี้ เพื่อคืนสตรีมและการแปลงรหัสที่ใช้อยู่ เมื่อเล่นอีกครั้งจะเล่นต่อจากตำแหน่งเดิม ไม่มีผลกับฟีเจอร์ดูด้วยกัน การแคสต์ และหนังสือเสียง 0 คือปิดตัวเลือกนี้"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -61940,6 +61964,12 @@
     {
       "type": 0,
       "value": "วัน"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "นาที"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -67775,6 +67805,12 @@
       "value": "เปิดใช้การแมปโทน HDR ด้วยซอฟต์แวร์"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "สิ้นสุดการเล่นที่หยุดชั่วคราวหลังจาก (นาที)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -67833,6 +67869,12 @@
     {
       "type": 0,
       "value": "แหล่งที่มาของเครื่องหมาย"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "การเล่นที่หยุดชั่วคราว"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -69771,6 +69813,36 @@
     {
       "type": 0,
       "value": "เปิดผู้ให้บริการลงชื่อเข้าใช้ก่อน หากปิดการลงชื่อเข้าใช้ด้วยรหัสผ่านและไม่ได้เปิดผู้ให้บริการใด จะมีเพียงผู้ดูแลระบบฉุกเฉินเท่านั้นที่ลงชื่อเข้าใช้ได้"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "ตั้งแต่ 8 ถึง 72 อักขระ กฎจะมีผลเมื่อมีผู้ตั้งหรือเปลี่ยนรหัสผ่าน รหัสผ่านที่ตั้งไว้แล้วยังใช้งานได้ตามเดิม"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "ความยาวรหัสผ่านขั้นต่ำ"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "เครื่องหมายวรรคตอนหรือสัญลักษณ์ใดก็ได้ เช่น ! หรือ # ตัวอักษร ตัวเลข และการเว้นวรรคไม่นับรวม"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "ต้องมีอักขระพิเศษ"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "ต้องมีตัวพิมพ์ใหญ่"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -80973,6 +81045,20 @@
       "value": "กำลังตั้งรหัสผ่าน…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "แจ้งรหัสผ่านนี้ให้ผู้ใช้ "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": " ทราบด้วยตนเอง"
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -83326,10 +83412,48 @@
       "value": " ไม่อนุญาตให้อุปกรณ์นี้ลงชื่อเข้าใช้เซิร์ฟเวอร์นี้"
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "อย่างน้อย "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " อักขระ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "รหัสผ่านไม่ตรงกัน"
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "ใส่อักขระพิเศษอย่างน้อยหนึ่งตัว เช่น ! หรือ #"
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "ใส่ตัวพิมพ์ใหญ่อย่างน้อยหนึ่งตัว"
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -83342,6 +83466,32 @@
     {
       "type": 0,
       "value": "ใช้อย่างน้อย 8 อักขระ"
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "ใช้อย่างน้อย "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " อักขระ"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -114847,6 +114997,12 @@
     {
       "type": 0,
       "value": "ผู้ดูแลระบบสิ้นสุดเซสชันการเล่นนี้แล้ว"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "การเล่นหยุดลงเนื่องจากหยุดชั่วคราวนานเกินไป"
     }
   ],
   "web.player.shuffle.scopeWithParent": [

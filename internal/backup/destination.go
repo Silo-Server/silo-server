@@ -12,8 +12,6 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/sys/unix"
-
 	"github.com/Silo-Server/silo-server/internal/blobstore"
 )
 
@@ -235,16 +233,24 @@ func deleteBackupFolder(ctx context.Context, d Destination, prefix string) error
 
 func (d StoreDestination) Probe(ctx context.Context) error { return d.Store.Probe(ctx) }
 
+// FreeBytes is the space a local destination can take, as the preflights
+// that add freeSpaceMargin to their need see it: free space less the part of
+// the store's free-space reserve that margin does not already cover. A
+// backup that fits then also fits above the reserve, where its writes stop.
 func (d StoreDestination) FreeBytes(context.Context) (uint64, bool, error) {
 	root, ok := d.localRoot()
 	if !ok {
 		return 0, false, nil
 	}
-	var st unix.Statfs_t
-	if err := unix.Statfs(root, &st); err != nil {
+	available, reserve, sized, err := blobstore.FreeSpace(root)
+	if err != nil {
 		return 0, true, fmt.Errorf("reading free space at the backup destination: %w", err)
 	}
-	return blockBytes(st.Bavail, st.Bsize), true, nil
+	if !sized {
+		return 0, false, nil
+	}
+	uncovered := max(reserve-freeSpaceMargin, 0)
+	return uint64(max(available-uncovered, 0)), true, nil
 }
 
 // blockBytes is blocks times a Statfs block size, whose type differs by

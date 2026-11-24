@@ -160,6 +160,9 @@ type Dependencies struct {
 	// a native session, so one this server rebuilds after a restart keeps
 	// measuring the same play. Optional.
 	RestoreReconstructedWatch func(ctx context.Context, sessionID string) (playback.WatchTime, bool)
+	// StreamEnds stores where a transcode found a file's media ends; nil
+	// stores nothing.
+	StreamEnds *playback.StreamEndRecorder
 
 	MarkerPopulation  MarkerPopulationService
 	FileResolver      FilePathResolver

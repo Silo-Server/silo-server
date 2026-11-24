@@ -60,3 +60,32 @@ func TestCachedSettingKeepsTheNewerOfTwoOverlappingReads(t *testing.T) {
 		t.Fatalf("cache holds %q, want new", c.value)
 	}
 }
+
+// Until a read succeeds, Lookup says its answer is only the parse of "", so a
+// caller can tell a default from an administrator's choice; a stored value,
+// including an unset one, is the setting.
+func TestCachedSettingLookupReportsWhetherASettingWasRead(t *testing.T) {
+	parse := func(value string) string { return "parsed:" + value }
+	fail := true
+	c := NewCachedSetting[string](hookSettingReader{get: func() (string, error) {
+		if fail {
+			return "", errors.New("boom")
+		}
+		return "", nil
+	}}, "k", UnratedContentCacheTTL, parse)
+
+	if got, ok := c.Lookup(context.Background()); ok || got != "parsed:" {
+		t.Fatalf("Lookup after a failed read = (%q, %v), want (parsed:, false)", got, ok)
+	}
+	fail = false
+	if got, ok := c.Lookup(context.Background()); !ok || got != "parsed:" {
+		t.Fatalf("Lookup of an unset setting = (%q, %v), want (parsed:, true)", got, ok)
+	}
+	fail = true
+	c.mu.Lock()
+	c.expires = time.Time{}
+	c.mu.Unlock()
+	if _, ok := c.Lookup(context.Background()); !ok {
+		t.Fatal("Lookup after a later failed read lost the setting it had read")
+	}
+}

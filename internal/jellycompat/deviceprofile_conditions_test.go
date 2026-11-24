@@ -654,22 +654,106 @@ func TestDeviceProfileDeclaresVideoRangeType(t *testing.T) {
 // AVC Dolby Vision track must not be advertised as dvh1.
 func TestCompatDOVIVariantEligibleCodecProfiles(t *testing.T) {
 	for _, tc := range []struct {
-		codec   string
-		profile int
-		want    bool
+		codec    string
+		profile  int
+		compatID int
+		want     bool
 	}{
-		{"hevc", 5, true},
-		{"h265", 5, true},
-		{"av1", 10, true},
-		{"h264", 9, false},
-		{"hevc", 10, false},
-		{"av1", 5, false},
+		{"hevc", 5, 0, true},
+		{"h265", 5, 0, true},
+		{"av1", 10, 0, true},
+		// 10.1 keeps the dav1 variant: Silo has no av01 CODECS entry for
+		// HDR AV1 to carry Jellyfin's SUPPLEMENTAL-CODECS instead.
+		{"av1", 10, 1, true},
+		{"av1", 10, 4, true},
+		// Jellyfin gives an SDR base layer no Dolby Vision signaling.
+		{"av1", 10, 2, false},
+		{"h264", 9, 0, false},
+		{"hevc", 10, 0, false},
+		{"av1", 5, 0, false},
 	} {
 		version := catalog.FileVersion{HDR: true, VideoTracks: []models.VideoTrack{{
-			Codec: tc.codec, DVProfile: tc.profile, DVLevel: 6, VideoRangeType: compatRangeDOVI,
+			Codec: tc.codec, DVProfile: tc.profile, DVLevel: 6, DVBLCompatID: tc.compatID, VideoRangeType: compatRangeDOVI,
 		}}}
 		if got := compatDOVIVariantEligible(version); got != tc.want {
-			t.Errorf("%s profile %d eligible = %v, want %v", tc.codec, tc.profile, got, tc.want)
+			t.Errorf("%s profile %d.%d eligible = %v, want %v", tc.codec, tc.profile, tc.compatID, got, tc.want)
 		}
+	}
+}
+
+// Jellyfin labels Dolby Vision profile 10 by its base layer. A client
+// without Dolby Vision lists the base-layer range types it accepts, so a
+// 10.1 stream must report DOVIWithHDR10 to direct play there. Rows scanned
+// before profile 10 was mapped store DOVI and are corrected from their
+// compatibility id.
+func TestCompatVideoRangeTypeDolbyVisionBaseLayer(t *testing.T) {
+	const nonDVClient = "SDR|HDR10|HLG|DOVIWithHDR10|DOVIWithHLG|DOVIWithSDR"
+	tests := []struct {
+		name          string
+		track         models.VideoTrack
+		wantType      string
+		wantRange     string
+		nonDVAccepted bool
+	}{
+		{
+			name:     "stored DOVI 10.1",
+			track:    models.VideoTrack{Codec: "av1", DVProfile: 10, DVBLCompatID: 1, ColorTransfer: "smpte2084", VideoRange: "DolbyVision", VideoRangeType: "DOVI"},
+			wantType: "DOVIWithHDR10", wantRange: "HDR", nonDVAccepted: true,
+		},
+		{
+			name:     "stored DOVI 10.1 with HDR10+",
+			track:    models.VideoTrack{Codec: "av1", DVProfile: 10, DVBLCompatID: 1, HDR10Plus: true, ColorTransfer: "smpte2084", VideoRangeType: "DOVI"},
+			wantType: "DOVIWithHDR10Plus", wantRange: "HDR", nonDVAccepted: true,
+		},
+		{
+			name:     "stored DOVI 10.2",
+			track:    models.VideoTrack{Codec: "av1", DVProfile: 10, DVBLCompatID: 2, ColorTransfer: "bt709", VideoRangeType: "DOVI"},
+			wantType: "DOVIWithSDR", wantRange: "SDR", nonDVAccepted: true,
+		},
+		{
+			name:     "stored DOVI 10.4",
+			track:    models.VideoTrack{Codec: "av1", DVProfile: 10, DVBLCompatID: 4, ColorTransfer: "arib-std-b67", VideoRangeType: "DOVI"},
+			wantType: "DOVIWithHLG", wantRange: "HDR", nonDVAccepted: true,
+		},
+		{
+			name:     "stored DOVI 10.0 stays DOVI",
+			track:    models.VideoTrack{Codec: "av1", DVProfile: 10, ColorTransfer: "smpte2084", VideoRangeType: "DOVI"},
+			wantType: "DOVI", wantRange: "HDR",
+		},
+		{
+			name:     "profile from the title alone",
+			track:    models.VideoTrack{Codec: "av1", DolbyVision: "Profile 10", DVBLCompatID: 1, VideoRangeType: "DOVI"},
+			wantType: "DOVIWithHDR10", wantRange: "HDR", nonDVAccepted: true,
+		},
+		{
+			name:     "no stored range type",
+			track:    models.VideoTrack{Codec: "av1", DVProfile: 10, DVBLCompatID: 1, ColorTransfer: "smpte2084"},
+			wantType: "DOVIWithHDR10", wantRange: "HDR", nonDVAccepted: true,
+		},
+		{
+			name:     "no stored range type, 10.0 PQ",
+			track:    models.VideoTrack{Codec: "av1", DVProfile: 10, ColorTransfer: "smpte2084"},
+			wantType: "DOVI", wantRange: "HDR",
+		},
+		{
+			name:     "profile 8.2 reports SDR",
+			track:    models.VideoTrack{Codec: "hevc", DVProfile: 8, DVBLCompatID: 2, ColorTransfer: "bt709", VideoRangeType: "DOVIWithSDR"},
+			wantType: "DOVIWithSDR", wantRange: "SDR", nonDVAccepted: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := compatVideoRangeType(tt.track, true); got != tt.wantType {
+				t.Fatalf("compatVideoRangeType() = %q, want %q", got, tt.wantType)
+			}
+			if got := compatVideoRange(tt.track, true); got != tt.wantRange {
+				t.Fatalf("compatVideoRange() = %q, want %q", got, tt.wantRange)
+			}
+			version := catalog.FileVersion{HDR: true, VideoTracks: []models.VideoTrack{tt.track}}
+			condition := ProfileCondition{Condition: "EqualsAny", Property: "VideoRangeType", Value: nonDVClient, IsRequired: true}
+			if got := conditionMatches(condition, buildConditionValues(version, nil)); got != tt.nonDVAccepted {
+				t.Fatalf("non-DV client accepts = %v, want %v", got, tt.nonDVAccepted)
+			}
+		})
 	}
 }

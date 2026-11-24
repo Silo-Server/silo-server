@@ -482,7 +482,11 @@ func (s *Service) heldTitleIDs(ctx context.Context, conn Connection, b listBindi
 // promotion moved onto the library watchlist is still on the watchlist; its
 // row retires without a removal and hands its place on the provider's list
 // to the library item's row. While an entry stays, its row keeps every ID
-// its title holds, since promotion deletes them with the title.
+// its title holds, since promotion deletes them with the title. A removed
+// entry's row retires the same way once a library item with the title's IDs
+// joins the watchlist: the removal was recorded while no such item was on
+// it, so the item is a re-add, which the removal must not take off the
+// provider whichever key each row carries (#4286).
 func (s *Service) reconcileLocalListTitles(ctx context.Context, conn Connection, b listBinding) error {
 	titles := s.watchlistTitles(b)
 	if titles == nil {
@@ -495,11 +499,22 @@ func (s *Service) reconcileLocalListTitles(ctx context.Context, conn Connection,
 	rows := map[WatchlistTitle]ListItemState{}
 	tracked := make(map[string]ListItemState, len(states))
 	keys := make([]WatchlistTitle, 0, len(states))
+	var removed []ListItemState
 	for _, state := range states {
 		tracked[state.MediaItemID] = state
-		if title, ok := watchlistTitleFromListItemID(state.MediaItemID); ok && state.LocalPresent {
+		title, ok := watchlistTitleFromListItemID(state.MediaItemID)
+		switch {
+		case !ok:
+		case state.LocalPresent:
 			rows[title] = state
 			keys = append(keys, title)
+		case state.RemotePresent:
+			removed = append(removed, state)
+		}
+	}
+	for _, state := range removed {
+		if err := s.retireReAddedListTitle(ctx, conn, b, titles, state, tracked); err != nil {
+			return err
 		}
 	}
 	if len(keys) == 0 {
@@ -548,6 +563,26 @@ func (s *Service) reconcileLocalListTitles(ctx context.Context, conn Connection,
 		}
 	}
 	return nil
+}
+
+// retireReAddedListTitle retires the row of a removed entry whose removal
+// waits when a library item with the title's IDs is on the watchlist, and
+// hands its place on the provider's list to the item when there is one.
+func (s *Service) retireReAddedListTitle(ctx context.Context, conn Connection, b listBinding, titles WatchlistTitles, state ListItemState, tracked map[string]ListItemState) error {
+	title, _ := watchlistTitleFromListItemID(state.MediaItemID)
+	promoted, err := titles.PromotedWatchlistItems(ctx, conn.UserID, conn.ProfileID, title, state.keptTitleIDs())
+	if err != nil || len(promoted) == 0 {
+		return err
+	}
+	if len(promoted) == 1 {
+		existing, ok := tracked[promoted[0]]
+		item, err := s.handOverListTitle(ctx, b, state, promoted[0], existing, ok)
+		if err != nil {
+			return err
+		}
+		tracked[promoted[0]] = item
+	}
+	return s.repo.MarkListItemRemoteRemoved(ctx, conn.ID, b.kind, state.MediaItemID, s.now())
 }
 
 // boolRank orders false before true.

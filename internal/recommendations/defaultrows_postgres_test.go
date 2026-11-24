@@ -108,17 +108,13 @@ func TestHighlyRatedRowPostgres(t *testing.T) {
 	if want := []string{adultBest, best, low, tmdbOnly, series}; !slices.Equal(got, want) {
 		t.Fatalf("highly rated = %v, want %v", got, want)
 	}
-	types, err := repo.GetItemMediaTypes(t.Context(), got)
-	if err != nil {
-		t.Fatal(err)
-	}
 	offered := map[string]bool{}
-	for _, mediaType := range types {
-		offered[mediaType] = true
+	for _, d := range candidateDetailsOf(t, repo, got) {
+		offered[d.Meta.Type] = true
 	}
 	for _, mediaType := range recommendableMediaTypes {
 		if !offered[mediaType] {
-			t.Fatalf("highly rated offers no %s: %v", mediaType, types)
+			t.Fatalf("highly rated offers no %s: %v", mediaType, got)
 		}
 	}
 
@@ -463,13 +459,9 @@ func TestTasteSeedPickerInterleavesGenresPostgres(t *testing.T) {
 			t.Fatalf("candidate %d = %s, want %s", 600+i, id, movie(599+i))
 		}
 	}
-	types, err := repo.GetItemMediaTypes(ctx, all)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for id, mediaType := range types {
-		if !slices.Contains(recommendableMediaTypes, mediaType) {
-			t.Fatalf("picker offered %s, a %s", id, mediaType)
+	for id, d := range candidateDetailsOf(t, repo, all) {
+		if !slices.Contains(recommendableMediaTypes, d.Meta.Type) {
+			t.Fatalf("picker offered %s, a %s", id, d.Meta.Type)
 		}
 	}
 }
@@ -650,7 +642,8 @@ func TestHighlyRatedReusesTitleCountsPostgres(t *testing.T) {
 // first and do not trust an IMDb rating of 9.6 or more or a TMDB rating of
 // 9.5 or more: in a large catalog those are an obscure title's handful of
 // votes or a TMDB score copied into the IMDb field. Highly Rated, the genre
-// rows and the quality prior read the same ratings.
+// rows and the quality prior read the same ratings; the quality prior reads
+// none for a title that is not notable, which leaves it neutral.
 func TestCatalogRankLeadsWithNotableTrustedRatingsPostgres(t *testing.T) {
 	pool := newEngineTestPool(t)
 	const prefix = "tdefault-rank-"
@@ -681,11 +674,8 @@ func TestCatalogRankLeadsWithNotableTrustedRatingsPostgres(t *testing.T) {
 	if got := itemIDs(items); !slices.Equal(got, append(slices.Clone(want), copied)) {
 		t.Fatalf("genre row = %v, want %v then the untrusted title", got, want)
 	}
-	quality, err := repo.GetItemQualityRatings(t.Context(), []string{copied, inflated, obscure})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if wantQuality := map[string]float64{inflated: 8.0, obscure: 9.2}; !maps.Equal(quality, wantQuality) {
+	quality := candidateQualities(t, repo, []string{copied, inflated, obscure, classic, known, fewKeywords})
+	if wantQuality := map[string]float64{classic: 9.3, known: 8.0}; !maps.Equal(quality, wantQuality) {
 		t.Fatalf("quality ratings = %v, want %v", quality, wantQuality)
 	}
 }

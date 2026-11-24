@@ -521,6 +521,12 @@
       "value": "Sesi pemutaran ini telah berakhir. Mulai putar lagi."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Pemutaran dihentikan karena dijeda terlalu lama. Mulai putar lagi."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -60466,6 +60472,24 @@
       "value": "Simpan ke perpustakaan"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pemutaran yang dijeda"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Akhiri pemutaran yang dijeda setelah"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 hingga 1440. Mengakhiri video yang dijeda selama ini di aplikasi Silo, sehingga stream dan transkode terkait dibebaskan; memutarnya lagi akan melanjutkan dari posisi yang sama. Tonton bersama, casting, dan buku audio tidak terpengaruh. 0 menonaktifkan opsi ini."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -60904,6 +60928,12 @@
     {
       "type": 0,
       "value": "hari"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "menit"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -66743,6 +66773,12 @@
       "value": "Aktifkan tone mapping HDR software"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Akhiri pemutaran yang dijeda setelah (menit)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -66801,6 +66837,12 @@
     {
       "type": 0,
       "value": "Sumber penanda"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pemutaran yang dijeda"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -68747,6 +68789,36 @@
     {
       "type": 0,
       "value": "Aktifkan penyedia masuk terlebih dahulu. Jika masuk dengan kata sandi nonaktif dan tidak ada penyedia yang aktif, hanya admin darurat yang dapat masuk."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Dari 8 hingga 72 karakter. Aturan berlaku saat seseorang memilih atau mengubah kata sandi; kata sandi yang sudah ditetapkan tetap berfungsi."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Panjang minimum kata sandi"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Tanda baca atau simbol apa pun, seperti ! atau #. Huruf, angka, dan spasi tidak dihitung."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Wajibkan karakter khusus"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Wajibkan huruf kapital"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -79813,6 +79885,20 @@
       "value": "Mengatur…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Bagikan sendiri kepada "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -82122,10 +82208,48 @@
       "value": " tidak mengizinkan perangkat ini masuk ke server ini."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Minimal "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " karakter."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Kata sandi tidak cocok."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Sertakan minimal satu karakter khusus, seperti ! atau #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Sertakan minimal satu huruf kapital."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -82138,6 +82262,32 @@
     {
       "type": 0,
       "value": "Gunakan minimal 8 karakter."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Gunakan minimal "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " karakter."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -113503,6 +113653,12 @@
     {
       "type": 0,
       "value": "Administrator mengakhiri sesi pemutaran ini."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Pemutaran dihentikan karena dijeda terlalu lama."
     }
   ],
   "web.player.shuffle.scopeWithParent": [
