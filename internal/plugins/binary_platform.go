@@ -5,6 +5,8 @@ import (
 	"debug/macho"
 	"debug/pe"
 	"fmt"
+	"io"
+	"os"
 	"runtime"
 )
 
@@ -18,7 +20,17 @@ const (
 // from its executable header. ok is false for formats this host does not
 // recognize; callers treat that as "unknown" rather than as a mismatch.
 func binaryPlatform(path string) (goos, goarch string, ok bool) {
-	if f, err := elf.Open(path); err == nil {
+	file, err := os.Open(path) //nolint:gosec // the plugin cache's own binary path, which the caller derived.
+	if err != nil {
+		return "", "", false
+	}
+	defer func() { _ = file.Close() }()
+	return binaryPlatformOf(file)
+}
+
+// binaryPlatformOf is binaryPlatform for a binary read through r.
+func binaryPlatformOf(r io.ReaderAt) (goos, goarch string, ok bool) {
+	if f, err := elf.NewFile(r); err == nil {
 		defer func() { _ = f.Close() }()
 		switch f.Machine {
 		case elf.EM_X86_64:
@@ -38,7 +50,7 @@ func binaryPlatform(path string) (goos, goarch string, ok bool) {
 		// only ELF platform Silo ships plugins for.
 		return osLinux, goarch, true
 	}
-	if f, err := macho.Open(path); err == nil {
+	if f, err := macho.NewFile(r); err == nil {
 		defer func() { _ = f.Close() }()
 		switch f.Cpu {
 		case macho.CpuAmd64:
@@ -50,7 +62,7 @@ func binaryPlatform(path string) (goos, goarch string, ok bool) {
 		}
 		return "darwin", goarch, true
 	}
-	if f, err := pe.Open(path); err == nil {
+	if f, err := pe.NewFile(r); err == nil {
 		defer func() { _ = f.Close() }()
 		switch f.Machine {
 		case pe.IMAGE_FILE_MACHINE_AMD64:
@@ -67,18 +79,29 @@ func binaryPlatform(path string) (goos, goarch string, ok bool) {
 	return "", "", false
 }
 
-// checkBinaryPlatform fails when the binary at path was built for another
-// platform than this process runs on. The archive in plugin_archives was
-// resolved for the API server's platform at install time, so a proxy node
-// on a different platform cannot run it; a clear error here beats the
-// supervisor discovering an exec failure on every restart.
+// foreignBinaryError is a plugin binary built for another platform than
+// this process runs on.
+type foreignBinaryError struct{ goos, goarch string }
+
+func (e *foreignBinaryError) Error() string {
+	return fmt.Sprintf("plugin binary is built for %s/%s but this host is %s/%s", e.goos, e.goarch, runtime.GOOS, runtime.GOARCH)
+}
+
+// proxyPlatformNote explains a foreign binary on a proxy node, which has no
+// catalog to fetch its own platform's build from.
+const proxyPlatformNote = "the stored archive was resolved for the API server's platform, so every proxy node must run the same platform in this release"
+
+// checkBinaryPlatform returns a *foreignBinaryError when the binary at path
+// was built for another platform than this process runs on, so a clear error
+// or a fetch of this platform's build replaces an exec failure on every
+// start.
 func checkBinaryPlatform(path string) error {
 	goos, goarch, ok := binaryPlatform(path)
 	if !ok {
 		return nil
 	}
 	if goos != runtime.GOOS || goarch != runtime.GOARCH {
-		return fmt.Errorf("plugin binary is built for %s/%s but this host is %s/%s; the stored archive was resolved for the API server's platform, so every proxy node must run the same platform in this release", goos, goarch, runtime.GOOS, runtime.GOARCH)
+		return &foreignBinaryError{goos: goos, goarch: goarch}
 	}
 	return nil
 }

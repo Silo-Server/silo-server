@@ -12,9 +12,10 @@ import {
   describePlaybackTransportError,
 } from "../playback-errors";
 import {
-  isPlaybackSessionEndedError,
   isTransientPlayerRequestError,
+  playbackSessionEndReason,
   PlayerFetchError,
+  type PlaybackSessionEndReason,
 } from "../player-fetch";
 import { useCodecDetection } from "./useCodecDetection";
 import { useBrowserEngineCapabilities } from "./useBrowserEngine";
@@ -97,11 +98,14 @@ interface PlaybackSessionState {
   connectionStatus: PlaybackConnectionStatus;
   connectionErrorTitle: string | null;
   connectionError: string | null;
+  /** Why the server ended the session, while `connectionStatus` is `ended`. */
+  connectionEndReason?: PlaybackSessionEndReason | null;
 }
 
 /**
  * `ended` means the server ended the session for good (an administrator
- * stopped it); the player exits rather than reconnecting.
+ * stopped it, or it stayed paused too long); the player exits rather than
+ * reconnecting.
  */
 export type PlaybackConnectionStatus = "connected" | "reconnecting" | "lost" | "ended";
 
@@ -1817,8 +1821,9 @@ export function usePlaybackSession(
       } catch (err) {
         if (loadSequence !== loadSequenceRef.current) return false;
         if (reconnect) throw err;
-        if (isPlaybackSessionEndedError(err)) {
-          // An administrator ended the session: leave rather than show an
+        const endReason = playbackSessionEndReason(err);
+        if (endReason) {
+          // The server ended the session for good: leave rather than show an
           // error or recover into a fresh session.
           sessionEndedRef.current = true;
           setState((current) => ({
@@ -1827,6 +1832,7 @@ export function usePlaybackSession(
             connectionStatus: "ended",
             connectionErrorTitle: null,
             connectionError: null,
+            connectionEndReason: endReason,
           }));
           return false;
         }
@@ -2399,7 +2405,8 @@ export function usePlaybackSession(
         if (adopted || !isCurrent()) return;
       } catch (error) {
         if (!isCurrent()) return;
-        if (isPlaybackSessionEndedError(error)) {
+        const endReason = playbackSessionEndReason(error);
+        if (endReason) {
           sessionEndedRef.current = true;
           endReconnect(false);
           setState((current) => ({
@@ -2409,6 +2416,7 @@ export function usePlaybackSession(
             connectionStatus: "ended",
             connectionErrorTitle: null,
             connectionError: null,
+            connectionEndReason: endReason,
           }));
           return;
         }

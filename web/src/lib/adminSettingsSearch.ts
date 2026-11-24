@@ -506,6 +506,8 @@ export const ADMIN_SETTINGS_NAV: AdminSettingsSearchItem[] = [
       "web.admin.settings.search.playback.setting.watchBehavior",
       "web.admin.settings.search.playback.setting.markWatchedAt",
       "web.admin.settings.search.playback.setting.showInContinueWatchingAfter",
+      "web.admin.settings.search.playback.setting.pausedPlayback",
+      "web.admin.settings.search.playback.setting.endPausedPlaybackAfter",
       "web.admin.settings.search.playback.setting.transcoding",
       "web.admin.settings.search.playback.setting.videoTranscoding",
       "web.admin.settings.search.playback.setting.hardwareAcceleration",

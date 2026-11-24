@@ -97,6 +97,12 @@ func OpenSegmentWithRecovery(
 		decisionLogger.InfoContext(ctx, "transcode segment wait timeout")
 	}
 
+	// Past the media's end (FFmpeg finished there, perhaps during the wait)
+	// the segment never comes: end the stream, never restart.
+	if session.pastEndOfStream(segNum) {
+		return nil, pastEndOfStreamError(segNum)
+	}
+
 	// If the segment is still missing (timed out, or outside the active encode
 	// range), either restart at the exact manifest-derived timeline position or
 	// return ErrSegmentNotFound for copy-mode segments outside the current
@@ -107,7 +113,7 @@ func OpenSegmentWithRecovery(
 
 	target, ok, restartErr := opts.Restart(ctx, segNum, decision.Progress.GenerationStartedAt)
 	// A restart skipped because the request ended is not a failure.
-	if restartErr != nil && !errors.Is(restartErr, ErrManifestNotReady) && !errors.Is(restartErr, ctx.Err()) {
+	if restartErr != nil && !errors.Is(restartErr, ErrManifestNotReady) && !errors.Is(restartErr, ErrPastEndOfStream) && !errors.Is(restartErr, ctx.Err()) {
 		logSegmentRestartError(ctx, baseLogger, opts.Component, restartErr)
 	}
 	if restartErr != nil {
@@ -128,6 +134,12 @@ func OpenSegmentWithRecovery(
 
 	// Throttler + exit monitor re-arm via the session's restart hook.
 	lease, err = session.WaitForOpenSegmentContext(ctx, segmentName, postRestartSegmentWaitTimeout)
+	if errors.Is(err, ErrSegmentNotFound) && session.pastEndOfStream(segNum) {
+		// The restart started past the media's end, read nothing and
+		// finished: a seek into the playlist's tail before any FFmpeg of the
+		// session had reached the end.
+		return nil, pastEndOfStreamError(segNum)
+	}
 	if err == nil && opts.CopyLookaheadTimeout > 0 && session.IsCopyVideo() {
 		// Copy-mode seeks can resume as soon as the target segment exists, but
 		// that sometimes leaves the player one segment away from stalling while

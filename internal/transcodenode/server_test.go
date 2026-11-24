@@ -2169,6 +2169,55 @@ func TestSpawnReconstructDoesNotRegisterFailedSoftwareRetry(t *testing.T) {
 	}
 }
 
+// A rebuild's software retry that is still running when the manifest wait ends
+// is kept and registered, as a slow first attempt is, so the segment path can
+// serve it once output appears (#4263).
+func TestSpawnReconstructKeepsSlowSoftwareRetry(t *testing.T) {
+	server := newTestServer(t)
+	server.reconstructStartupWait = 3 * time.Second
+	logPath := filepath.Join(t.TempDir(), "invocations.log")
+	useFakeFFmpeg(t, server, "#!/bin/sh\n"+
+		"printf '%s\\n' \"$*\" >> "+logPath+"\n"+
+		"case \"$*\" in\n"+
+		"  *-hwaccels*) echo videotoolbox; exit 0 ;;\n"+
+		"  *-encoders*) echo ' V..... h264_videotoolbox x'; exit 0 ;;\n"+
+		"  *videotoolbox*'-f null'*) exit 0 ;;\n"+
+		"  *libx264*'-f hls'*) while :; do sleep 0.1; done ;;\n"+
+		"  *) exit 1 ;;\n"+
+		"esac\n")
+	server.watcher.Config().Playback.HWAccel = tonemap.BackendVideoToolbox
+
+	const sessionID = "slow-reconstruct-retry"
+	card := playback.NewRecipeCard(7, "profile-1", 42, "", playback.TranscodeOpts{
+		SessionID: sessionID, InputPath: "/media/movie.mkv",
+		TargetCodecVideo: "h264", TargetCodecAudio: "aac", TargetResolution: "720p", TargetBitrateKbps: 2000,
+		SegmentDuration: 2,
+	})
+	session, err := server.spawnReconstruct(httptest.NewRequest(http.MethodGet, "/", nil), sessionID, -1, resolutionOf(card))
+	if session != nil {
+		t.Cleanup(func() { _ = session.Close() })
+	}
+	if err != nil {
+		t.Fatalf("spawnReconstruct err = %v, want the running software retry", err)
+	}
+	if session == nil || !session.IsRunning() {
+		t.Fatal("spawnReconstruct did not return the running software retry")
+	}
+	server.mu.RLock()
+	registered := server.sessions[sessionID]
+	server.mu.RUnlock()
+	if registered != session {
+		t.Fatal("the running software retry was not registered")
+	}
+	logData, readErr := os.ReadFile(logPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if got := strings.Count(string(logData), "-f hls"); got != 2 {
+		t.Fatalf("real transcode attempts = %d, want hardware plus the software retry:\n%s", got, logData)
+	}
+}
+
 // A rebuild reuses the lost session's output directory, which still holds the
 // manifest and segments the previous process wrote. A hardware start that
 // dies at startup must not be taken as ready from those: it gets the software

@@ -119,10 +119,12 @@ func (s *MetadataService) LocalImagePreview(ctx context.Context, contentID strin
 	if err != nil {
 		return "", err
 	}
-	// A sidecar may be a HEIC or AVIF under a .jpg name; the image cache
-	// renders those the same way when the image is applied.
+	// A sidecar may be a HEIC or AVIF under a .jpg name, or an SVG; the image
+	// cache renders those the same way when the image is applied. The preview
+	// only needs a small copy: twice its width on the longest edge keeps the
+	// full preview width for images up to twice as tall as they are wide.
 	if imageutil.NeedsRasterizing(data) {
-		if data, err = imageutil.Rasterize(data); err != nil {
+		if data, err = imageutil.RasterizeWithin(data, 2*localArtworkPreviewWidth); err != nil {
 			return "", err
 		}
 	}

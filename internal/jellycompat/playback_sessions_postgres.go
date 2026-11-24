@@ -99,6 +99,9 @@ func acquireNegotiatedSessionAdvisoryLock(
 	// process then takes the versioned bigint key in the same order. Once this
 	// bridge has shipped for a full release, a later release can remove the
 	// legacy acquisition while still coordinating with bridged processes.
+	// A route that names a media source carries its id dashed from older
+	// processes and compact from newer ones; both lock on the dashed spelling.
+	routeItemID = canonicalCompatID(routeItemID)
 	legacyScope := negotiatedPlaybackScope(compatToken, clientDeviceID, routeItemID)
 	if _, err := executor.Exec(ctx, negotiatedSessionLegacyAdvisoryLockQuery, legacyScope); err != nil {
 		return fmt.Errorf("acquiring legacy negotiated playback session advisory lock: %w", err)
@@ -309,13 +312,13 @@ func (d *DurableCompatPlaybackStore) replaceUnstartedNegotiation(
 			WHERE id <> $1
 				AND compat_token = $2
 				AND data->>'ClientDeviceID' = $3
-				AND data->>'RouteItemID' = $4
+				AND data->>'RouteItemID' = ANY($4::text[])
 				AND COALESCE(data->>'NegotiationVariant', '') = $6
 				AND COALESCE(data->>'UpstreamSessionID', '') = ''
 				AND COALESCE((data->>'Terminal')::boolean, false) = false
 				AND expires_at > $5
 			RETURNING id
-		`, session.ID, session.CompatToken, session.ClientDeviceID, session.RouteItemID, d.now(), session.NegotiationVariant)
+		`, session.ID, session.CompatToken, session.ClientDeviceID, compatIDSpellings(session.RouteItemID), d.now(), session.NegotiationVariant)
 		if err != nil {
 			return nil, err
 		}

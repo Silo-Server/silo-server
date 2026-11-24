@@ -3,8 +3,9 @@ package recommendations
 import (
 	"context"
 	"fmt"
-
 	"log/slog"
+	"maps"
+	"math"
 
 	"github.com/Silo-Server/silo-server/internal/catalog"
 	"github.com/Silo-Server/silo-server/internal/models"
@@ -80,58 +81,97 @@ func (e *Engine) rankSimilar(ctx context.Context, userID int, profileID, itemID 
 	// the ranked list. A source of unknown type keeps every type. Co-watch
 	// only adds to the embedding candidates, so neighbors that cannot be
 	// checked are left out rather than failing the list.
-	cowatchPairs, _ := e.repo.GetCowatchNeighbors(ctx, itemID, limit*3)
+	cowatchPairs, err := e.repo.GetCowatchNeighbors(ctx, itemID, limit*3)
+	if err != nil {
+		slog.WarnContext(ctx, "reading co-watch neighbors failed; ranking by embedding similarity alone", "component", "recommendations", "item_id", itemID, "error", err)
+		cowatchPairs = nil
+	}
 	cowatchMap, err := e.cowatchScores(ctx, cowatchPairs, filter, cowatchMediaTypes(sourceType, nil))
 	if err != nil {
 		slog.WarnContext(ctx, "filtering co-watch neighbors failed; leaving them out", "component", "recommendations", "item_id", itemID, "error", err)
 		cowatchMap = map[string]float64{}
 	}
 
-	// 4. Blend scores (70% embedding, 30% co-watch), leaving out the marked
-	// titles co-watch brought in.
-	blended := blendScores(embCandidates, cowatchMap, 0.7, 0.3)
-	if len(marks) > 0 {
-		marked := make(map[string]struct{}, len(marks))
-		for _, m := range marks {
-			marked[m.MediaItemID] = struct{}{}
-		}
-		blended = excludeScoredItems(blended, marked)
+	// The marked titles co-watch brought in are left out; the embedding
+	// search already excluded them.
+	for _, m := range marks {
+		delete(cowatchMap, m.MediaItemID)
 	}
 
-	// 5. Validation pipeline, after reading the details of the co-watch
-	// neighbors the embedding search did not return.
-	var cowatchOnly []string
-	for _, item := range blended {
-		if _, ok := details[item.MediaItemID]; !ok {
-			cowatchOnly = append(cowatchOnly, item.MediaItemID)
-		}
+	// 4. Read the details of the co-watch neighbors the embedding search did
+	// not return, for their similarity, validation and MMR.
+	if err := e.addCowatchDetails(ctx, details, cowatchMap); err != nil {
+		slog.WarnContext(ctx, "reading co-watch candidate details failed; ranking them without", "component", "recommendations", "item_id", itemID, "error", err)
 	}
-	if len(cowatchOnly) > 0 {
-		cowatchDetails, err := e.repo.GetCandidateDetails(ctx, cowatchOnly)
-		if err != nil {
-			slog.WarnContext(ctx, "reading co-watch candidate details failed; ranking them without", "component", "recommendations", "item_id", itemID, "error", err)
-		}
-		for id, d := range cowatchDetails {
-			details[id] = d
-		}
-	}
-	if len(blended) > 0 {
-		blended = applyValidation(sourceMeta, blended, details)
-	}
+	embMap := candidateEmbeddings(details)
+
+	// 5. Blend scores (70% embedding, 30% co-watch), then the validation
+	// pipeline.
+	blended := blendScores(withCowatchSimilarity(embCandidates, cowatchMap, embedding, embMap), cowatchMap, 0.7, 0.3)
+	blended = applyValidation(sourceMeta, blended, details)
 
 	// 6. MMR re-ranking.
-	embMap := make(map[string][]float32, len(details))
-	for id, d := range details {
-		if d.Embedding != nil {
-			embMap[id] = d.Embedding
+	return applyMMR(blended, embMap, e.mmrLambda(), limit), sourceMeta, nil
+}
+
+// addCowatchDetails reads into details the details of each co-watch
+// neighbor in cowatch that details lacks.
+func (e *Engine) addCowatchDetails(ctx context.Context, details map[string]CandidateDetails, cowatch map[string]float64) error {
+	var missing []string
+	for id := range cowatch {
+		if _, ok := details[id]; !ok {
+			missing = append(missing, id)
 		}
 	}
-	return applyMMR(blended, embMap, e.mmrLambda(), limit), sourceMeta, nil
+	if len(missing) == 0 {
+		return nil
+	}
+	read, err := e.repo.GetCandidateDetails(ctx, missing)
+	if err != nil {
+		return err
+	}
+	maps.Copy(details, read)
+	return nil
+}
+
+// candidateEmbeddings maps each candidate in details that has an embedding
+// to it.
+func candidateEmbeddings(details map[string]CandidateDetails) map[string][]float32 {
+	embeddings := make(map[string][]float32, len(details))
+	for id, d := range details {
+		if len(d.Embedding) > 0 {
+			embeddings[id] = d.Embedding
+		}
+	}
+	return embeddings
+}
+
+// candidateMediaTypes maps each candidate in details to its media type.
+func candidateMediaTypes(details map[string]CandidateDetails) map[string]string {
+	types := make(map[string]string, len(details))
+	for id, d := range details {
+		types[id] = d.Meta.Type
+	}
+	return types
+}
+
+// candidateGenres maps each candidate in details to its genres.
+func candidateGenres(details map[string]CandidateDetails) map[string][]string {
+	genres := make(map[string][]string, len(details))
+	for id, d := range details {
+		genres[id] = d.Meta.Genres
+	}
+	return genres
 }
 
 // applyValidation filters and penalizes candidates using the validation
 // pipeline, reading each candidate's title, year and genres from details.
+// Without source metadata there is nothing to validate against, and the
+// candidates are returned as they are.
 func applyValidation(sourceMeta *ItemMetadata, candidates []ScoredItem, details map[string]CandidateDetails) []ScoredItem {
+	if sourceMeta == nil || len(candidates) == 0 {
+		return candidates
+	}
 	var validated []ScoredItem
 	for _, item := range candidates {
 		candMeta := details[item.MediaItemID].Meta
@@ -141,7 +181,9 @@ func applyValidation(sourceMeta *ItemMetadata, candidates []ScoredItem, details 
 			continue
 		}
 		if result.scoreMult < 1.0 {
-			item.Score *= result.scoreMult
+			// Lower the score by the penalty's share of its magnitude, so
+			// a negative score also goes down rather than toward zero.
+			item.Score -= math.Abs(item.Score) * (1 - result.scoreMult)
 		}
 		validated = append(validated, item)
 	}

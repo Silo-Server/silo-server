@@ -18,6 +18,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/nodesessions"
 	"github.com/Silo-Server/silo-server/internal/nodesource"
 	"github.com/Silo-Server/silo-server/internal/opslog"
+	"github.com/Silo-Server/silo-server/internal/playback"
 	"github.com/Silo-Server/silo-server/internal/streamtelemetry"
 )
 
@@ -194,6 +195,68 @@ func TestReportFenceRefusesStaleReports(t *testing.T) {
 		if code := post(testReport(bad, 200)); code != http.StatusBadRequest {
 			t.Fatalf("boot_id %q: %d, want 400", bad, code)
 		}
+	}
+}
+
+type notedStreamEnd struct {
+	fileID  int
+	seconds float64
+}
+
+type remoteTranscodes map[string]struct {
+	nodeURL string
+	fileID  int
+}
+
+// remoteTranscodeStart is when every remoteTranscodes session started.
+var remoteTranscodeStart = time.Date(2026, 11, 1, 12, 0, 0, 0, time.UTC)
+
+func (m remoteTranscodes) RemoteTranscode(transportID string) (string, int, time.Time, bool) {
+	t, ok := m[transportID]
+	return t.nodeURL, t.fileID, remoteTranscodeStart, ok
+}
+
+type streamEndNoterFunc func(ctx context.Context, fileID int, end playback.StreamEnd)
+
+func (f streamEndNoterFunc) Note(ctx context.Context, fileID int, end playback.StreamEnd) {
+	f(ctx, fileID, end)
+}
+
+// A node reports where its transcodes found their media ends, and the core
+// passes each to the stream-end store, so a file's stored duration follows
+// whichever server or proxy relayed the segments. It takes one only for a
+// transcode this server's playback session runs on that node for the file
+// named: a node cannot shorten another file.
+func TestReportPassesStreamEndsOn(t *testing.T) {
+	f := newControlFixture(t)
+	var noted []notedStreamEnd
+	f.server.opts.StreamEnds = streamEndNoterFunc(func(_ context.Context, fileID int, end playback.StreamEnd) {
+		if end.PlannedSeconds != 160 {
+			t.Errorf("planned %v s, want the reported 160", end.PlannedSeconds)
+		}
+		// The node's run started no earlier than the core's session, so
+		// a probe after that may describe a replaced file.
+		if !end.ReadSince.Equal(remoteTranscodeStart) {
+			t.Errorf("read since %v, want the playback session's start %v", end.ReadSince, remoteTranscodeStart)
+		}
+		noted = append(noted, notedStreamEnd{fileID, end.Seconds})
+	})
+	f.server.opts.Transcodes = remoteTranscodes{
+		"ended":      {"http://gpu-7:8080", 42},
+		"other-node": {"http://gpu-8:8080", 42},
+		"other-file": {"http://gpu-7:8080", 42},
+	}
+	key := f.addNode(7, "gpu-7")
+	report := testReport("1800000000000000000", 1, "ended", "other-node", "other-file", "unknown", "playing")
+	for i, fileID := range []int{42, 42, 99, 42, 43} {
+		report.Sessions[i].MediaFileID, report.Sessions[i].StreamEndSeconds, report.Sessions[i].StreamPlannedSeconds = fileID, 149.5, 160
+	}
+	report.Sessions[4].StreamEndSeconds = 0
+	if code := f.serve(7, key, http.MethodPost, PathReport, report, nil).Code; code != http.StatusNoContent {
+		t.Fatalf("report: %d", code)
+	}
+	if fmt.Sprint(noted) != fmt.Sprint([]notedStreamEnd{{42, 149.5}}) {
+		t.Fatalf("noted %v, want file 42 at 149.5 s from its own transcode only", noted)
 	}
 }
 

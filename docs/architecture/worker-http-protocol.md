@@ -359,9 +359,9 @@ for that textual payload rather than claiming application/json on the wire.
 `hw_accel=auto` (a video transcode without tone mapping that resolves to a
 hardware backend), the node tries CPU decode with GPU encode, then software;
 otherwise it keeps the limited software retry for an early VideoToolbox failure.
-Outside `auto`, when the GPU decoder rejects the source (FFmpeg's
-`Hardware is lacking required capabilities`) of a video transcode that decoded
-on the GPU without tone mapping, the node walks the same CPU decode with GPU
+Outside `auto`, when the GPU decoder rejects the source of a video transcode
+that decoded on the GPU without tone mapping (the rejection lines are listed in
+[restart-resilient-playback.md](restart-resilient-playback.md)), the node walks the same CPU decode with GPU
 encode, then software, instead of failing the start.
 `auto_fallback_ready` asks for that wait only when the node's own `hw_accel=auto`
 pipeline is enabled for the start, judged from its live hardware; otherwise the
