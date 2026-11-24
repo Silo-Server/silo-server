@@ -78,6 +78,7 @@ import {
 import { CreateUserDialogContent } from "@/components/admin/users/CreateUserForm";
 import { useAdminUserRows } from "@/components/admin/users/useAdminUserRows";
 import { useT } from "@/i18n";
+import { emailDir } from "@/lib/direction";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
@@ -478,7 +479,16 @@ function AdminUsersPage() {
                             {u.username}
                           </Link>
                         </TableCell>
-                        <TableCell className="wrap-anywhere whitespace-normal">{u.email}</TableCell>
+                        <TableCell className="whitespace-normal">
+                          {/* Left to right unless it starts in a right-to-left script,
+                              as in the compact rows; w-fit keeps it on the page's start side. */}
+                          <span
+                            dir={emailDir(u.email)}
+                            className="align-with-page block w-fit max-w-full wrap-anywhere"
+                          >
+                            {u.email}
+                          </span>
+                        </TableCell>
                         <TableCell>
                           <AdminUserRoleBadge user={u} />
                         </TableCell>
