@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -241,5 +243,40 @@ func assertPlayGroupingTitleDetailDB(t *testing.T, h *AdminHandler, s playGroupi
 	}
 	if _, err := h.ReadAdminInsightsTitle(ctx, AdminInsightsTitleQuery{AdminInsightsWindowQuery: playGroupingWeek, ContentID: "nope"}); !errors.Is(err, ErrInsightsTitleNotFound) {
 		t.Fatalf("unknown id: err = %v", err)
+	}
+}
+
+// TestPlaybackHistoryEntrySkipsTheReadGateDB pins that the session lookup the
+// playback stop path makes never queues behind Insights reads, while a history
+// page still waits for a slot.
+func TestPlaybackHistoryEntrySkipsTheReadGateDB(t *testing.T) {
+	dsn := os.Getenv("SILO_TEST_DATABASE_URL")
+	if dsn == "" {
+		t.Skip("SILO_TEST_DATABASE_URL is not set")
+	}
+	pool, err := pgxpool.New(t.Context(), dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	h := &AdminHandler{pool: pool}
+	for range adminHistoryMaxConcurrentReads {
+		adminHistoryReadSlots <- struct{}{}
+	}
+	defer func() {
+		for range adminHistoryMaxConcurrentReads {
+			<-adminHistoryReadSlots
+		}
+	}()
+
+	ctx, cancel := context.WithTimeout(t.Context(), 10*time.Second)
+	defer cancel()
+	if _, err := h.ReadAdminPlaybackHistoryEntry(ctx, "missing-"+uuid.NewString()); err != nil {
+		t.Fatalf("entry lookup with every read slot taken: %v", err)
+	}
+	waiting, cancelWaiting := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancelWaiting()
+	if _, err := h.ListAdminPlaybackHistoryPage(waiting, AdminPlaybackHistoryFilter{}, nil, 1); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("history page with every read slot taken = %v, want it to wait out its deadline", err)
 	}
 }

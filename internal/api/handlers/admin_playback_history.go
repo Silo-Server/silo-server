@@ -440,15 +440,47 @@ func scanAdminPlaybackHistoryRow(rows pgx.Rows) (AdminPlaybackHistoryRow, error)
 
 // ListAdminPlaybackHistoryPage reads one consistent page of the finalized
 // playback log, newest ended first. It is the seam v2 listAdminPlaybackHistory
-// uses; v1 keeps its offset projection over the same table.
+// uses; v1 keeps its offset projection over the same table. A search or a
+// rare filter can scan the whole history before it finds a page, so pages go
+// through the same gate and deadline as Insights reads.
 func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter AdminPlaybackHistoryFilter, after *AdminPlaybackHistoryPageKey, limit int) (AdminPlaybackHistoryPage, error) {
-	var out AdminPlaybackHistoryPage
 	if h.pool == nil {
-		return out, errors.New("playback history database unavailable")
+		return AdminPlaybackHistoryPage{}, errors.New("playback history database unavailable")
 	}
 	if limit < 1 || limit > 200 {
-		return out, errors.New("invalid playback history page limit")
+		return AdminPlaybackHistoryPage{}, errors.New("invalid playback history page limit")
 	}
+	ctx, tx, done, err := beginAdminHistoryRead(ctx, h.pool, "")
+	if err != nil {
+		return AdminPlaybackHistoryPage{}, err
+	}
+	defer done()
+	return readAdminPlaybackHistoryPage(ctx, tx, filter, after, limit)
+}
+
+// ReadAdminPlaybackHistoryEntry reads one session's admin history row as the
+// history list projects it; nil when the session has none. A session lookup
+// is an index read, and the playback stop path's lifecycle event makes it, so
+// it stays off the read gate where Insights reads could hold it up.
+func (h *AdminHandler) ReadAdminPlaybackHistoryEntry(ctx context.Context, sessionID string) (*AdminPlaybackHistoryRow, error) {
+	if h.pool == nil {
+		return nil, errors.New("playback history database unavailable")
+	}
+	tx, err := h.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
+	page, err := readAdminPlaybackHistoryPage(ctx, tx, AdminPlaybackHistoryFilter{SessionID: sessionID}, nil, 1)
+	if err != nil || len(page.Items) == 0 {
+		return nil, err
+	}
+	return &page.Items[0], nil
+}
+
+// readAdminPlaybackHistoryPage runs a history page query in tx and commits it.
+func readAdminPlaybackHistoryPage(ctx context.Context, tx pgx.Tx, filter AdminPlaybackHistoryFilter, after *AdminPlaybackHistoryPageKey, limit int) (AdminPlaybackHistoryPage, error) {
+	var out AdminPlaybackHistoryPage
 	conditions, args := buildAdminPlaybackHistoryWhere(filter, after)
 	args = append(args, limit+1)
 	query := adminPlaybackHistorySelectSQL
@@ -456,14 +488,6 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 	query += " ORDER BY h.ended_at DESC, h.session_id DESC LIMIT $" + strconv.Itoa(len(args))
-
-	// A search or a rare filter can scan the whole history before it finds a
-	// page, so pages go through the same gate and deadline as Insights reads.
-	ctx, tx, done, err := beginAdminHistoryRead(ctx, h.pool, "")
-	if err != nil {
-		return out, err
-	}
-	defer done()
 	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
 		return out, err
@@ -490,14 +514,4 @@ func (h *AdminHandler) ListAdminPlaybackHistoryPage(ctx context.Context, filter 
 		return AdminPlaybackHistoryPage{}, err
 	}
 	return out, nil
-}
-
-// ReadAdminPlaybackHistoryEntry reads one session's admin history row as the
-// history list projects it; nil when the session has none.
-func (h *AdminHandler) ReadAdminPlaybackHistoryEntry(ctx context.Context, sessionID string) (*AdminPlaybackHistoryRow, error) {
-	page, err := h.ListAdminPlaybackHistoryPage(ctx, AdminPlaybackHistoryFilter{SessionID: sessionID}, nil, 1)
-	if err != nil || len(page.Items) == 0 {
-		return nil, err
-	}
-	return &page.Items[0], nil
 }
