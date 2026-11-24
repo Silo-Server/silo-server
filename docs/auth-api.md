@@ -462,9 +462,9 @@ address is the forwarder's), one from loopback (a proxy, plugin or relay on the 
 host), and an overlay request without a peer. So someone who keeps a name
 locked from elsewhere does not lock its people out where they usually sign in, and
 guessing stays bounded: ten attempts per window from every unknown address together,
-plus ten from each known one. Impersonation and remote-playback handoff sessions do not make an address known. Neither does a username or email
-another account also answers to, which only accounts from before the single login identity
-space can have. Every other failure counts,
+plus ten from each known one. Impersonation and remote-playback handoff sessions do not make an address known. Nor does an account's email when it
+is another account's username, which only accounts from before the single login identity
+space can have: that name signs in to the account with the username, whose name it stays. Every other failure counts,
 including one caused by an unavailable directory or database, or by a server too busy to
 check the password ([`503`](#when-the-server-is-too-busy-to-check-a-password)). A count that never reaches
 ten expires 15 minutes after its first attempt. A Jellyfin or Audiobookshelf sign-in whose

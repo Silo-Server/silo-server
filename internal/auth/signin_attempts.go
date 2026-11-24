@@ -271,9 +271,11 @@ func (s *Service) trustSignInSource(ctx context.Context, user *models.User) {
 
 // ownSignInKeys are the budget keys of user's username and email, folded by
 // the database (signInNameKeys), without repeats, and whether it answered.
-// A name another account also answers to is left out: an account kept from
-// before the single login identity space can have another account's
-// username as its email, and that name is not its to clear or extend.
+// A name signs in to the account LookupLogin finds for it, by username
+// first, then by email, and a name that finds another account is left out:
+// an account kept from before the single login identity space can have
+// another account's username as its email, and that name is the other
+// account's to clear or extend.
 func (s *Service) ownSignInKeys(ctx context.Context, user *models.User) ([]string, bool) {
 	if user == nil || s.users == nil {
 		return nil, false
@@ -289,9 +291,9 @@ func (s *Service) ownSignInKeys(ctx context.Context, user *models.User) ([]strin
 	}
 	var folded []string
 	err := s.users.pool.QueryRow(ctx, `
-		SELECT coalesce(array_agg(lower(t.name) ORDER BY t.i) FILTER (WHERE NOT EXISTS (
-			SELECT 1 FROM users u
-			WHERE u.id <> $2 AND (u.username = t.name::citext OR u.email = t.name::citext))), '{}')
+		SELECT coalesce(array_agg(lower(t.name) ORDER BY t.i) FILTER (WHERE coalesce(
+			(SELECT u.id FROM users u WHERE u.username = t.name::citext),
+			(SELECT u.id FROM users u WHERE u.email = t.name::citext)) = $2), '{}')
 		FROM unnest($1::text[]) WITH ORDINALITY AS t(name, i)`,
 		names, user.ID).Scan(&folded)
 	if err != nil {

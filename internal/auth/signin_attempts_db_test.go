@@ -223,9 +223,9 @@ func TestSignInNameBudgetDB(t *testing.T) {
 	})
 
 	// An account kept from before the single login identity space can have
-	// another account's username as its email. That name answers to the
-	// other account, so signing in or refreshing must not make an address
-	// known for it.
+	// another account's username as its email. The name signs in to the
+	// account with that username, so only that account's sign-ins make an
+	// address known for it.
 	t.Run("a legacy duplicate identifier is not an account's own name", func(t *testing.T) {
 		defer limiter.expire()
 		ctx := t.Context()
@@ -255,7 +255,10 @@ func TestSignInNameBudgetDB(t *testing.T) {
 		}
 
 		from := func(ip string) context.Context { return clientip.SetContext(ctx, ip) }
-		signedIn, refreshed := "198.51.100.77", "203.0.113.77"
+		victimHome, signedIn, refreshed := "198.51.100.78", "198.51.100.77", "203.0.113.77"
+		if _, _, err := svc.LoginWithProvider(from(victimHome), "", victim.Username, right, "test", ""); err != nil {
+			t.Fatalf("victim sign-in: %v", err)
+		}
 		pair, _, err := svc.LoginWithProvider(from(signedIn), "", holder, right, "test", "")
 		if err != nil {
 			t.Fatalf("holder sign-in: %v", err)
@@ -270,6 +273,9 @@ func TestSignInNameBudgetDB(t *testing.T) {
 		for _, ip := range []string{signedIn, refreshed} {
 			_, _, err := svc.LoginWithProvider(from(ip), "", victim.Username, wrong, "test", "")
 			wantThrottled(t, err)
+		}
+		if _, _, err := svc.LoginWithProvider(from(victimHome), "", victim.Username, right, "test", ""); err != nil {
+			t.Fatalf("name locked: victim sign-in from home: %v, want it to succeed", err)
 		}
 	})
 
