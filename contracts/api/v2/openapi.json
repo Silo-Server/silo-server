@@ -12844,6 +12844,7 @@
             "type": "array"
           },
           "matrix": {
+            "description": "Client and platform pairs with at least min_sessions sessions, at most 200 (the ones with the most sessions)",
             "items": {
               "$ref": "#/components/schemas/AdminInsightsClientMatrixRow"
             },

@@ -18986,6 +18986,7 @@ export interface components {
        */
       from: string;
       hw_accel_breakdown: components["schemas"]["AdminInsightsLabeledCount"][];
+      /** @description Client and platform pairs with at least min_sessions sessions, at most 200 (the ones with the most sessions) */
       matrix: components["schemas"]["AdminInsightsClientMatrixRow"][];
       /** @description Sessions delivered at a lower resolution class than their source, by source and delivered class */
       resolution_changes: components["schemas"]["AdminInsightsResolutionChange"][];

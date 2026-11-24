@@ -120,26 +120,56 @@ func queryInsightsDevicesSummary(ctx context.Context, tx pgx.Tx, whereSQL string
 	return nil
 }
 
+// insightsMatrixMaxRows caps the client and platform pairs the matrix returns,
+// the ones with the most sessions. Client names and platforms are what clients
+// report, so their number is whatever the clients make it; the cap keeps one
+// read's memory and response bounded however many identities history holds.
+const insightsMatrixMaxRows = 200
+
 func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL string, whereArgs []any, minSessions int, out *AdminInsightsDevices) error {
-	rows, err := tx.Query(ctx, `
-		SELECT
-			COALESCE(MIN(NULLIF(BTRIM(h.client_name), '')), 'Unknown') AS client_name,
-			COALESCE(MIN(NULLIF(BTRIM(h.device_platform), '')), 'Unknown') AS device_platform,
-			LOWER(COALESCE(NULLIF(BTRIM(mf.codec_video), ''), 'unknown')) AS source_codec,
-			BOOL_OR(COALESCE(h.compat_origin, FALSE)) AS compat_origin,
-			COUNT(*)::bigint AS sessions,
-			COUNT(*) FILTER (WHERE `+insightsPlayDirectSQL+`)::bigint AS direct_sessions,
-			COUNT(*) FILTER (WHERE `+insightsPlayRemuxSQL+`)::bigint AS remux_sessions,
-			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+`)::bigint AS transcode_sessions
-		FROM admin_playback_history h
-		LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
-		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
-		WHERE `+whereSQL+`
-		GROUP BY
-			LOWER(COALESCE(NULLIF(BTRIM(h.client_name), ''), 'unknown')),
-			LOWER(COALESCE(NULLIF(BTRIM(h.device_platform), ''), 'unknown')),
-			LOWER(COALESCE(NULLIF(BTRIM(mf.codec_video), ''), 'unknown'))
-	`, whereArgs...)
+	args := append(append([]any{}, whereArgs...), minSessions, insightsMatrixMaxRows, insightsTopTranscodersLimit)
+	minParam, capParam, topParam := len(args)-2, len(args)-1, len(args)
+	// Only the matrix's rows (over the threshold, within the cap) and the top
+	// transcoders (whatever their size) leave the database.
+	rows, err := tx.Query(ctx, fmt.Sprintf(`
+		WITH cells AS (
+			SELECT
+				LOWER(COALESCE(NULLIF(BTRIM(h.client_name), ''), 'unknown')) AS client_key,
+				LOWER(COALESCE(NULLIF(BTRIM(h.device_platform), ''), 'unknown')) AS platform_key,
+				COALESCE(MIN(NULLIF(BTRIM(h.client_name), '')), 'Unknown') AS client_name,
+				COALESCE(MIN(NULLIF(BTRIM(h.device_platform), '')), 'Unknown') AS device_platform,
+				LOWER(COALESCE(NULLIF(BTRIM(mf.codec_video), ''), 'unknown')) AS source_codec,
+				BOOL_OR(COALESCE(h.compat_origin, FALSE)) AS compat_origin,
+				COUNT(*)::bigint AS sessions,
+				COUNT(*) FILTER (WHERE %[1]s)::bigint AS direct_sessions,
+				COUNT(*) FILTER (WHERE %[2]s)::bigint AS remux_sessions,
+				COUNT(*) FILTER (WHERE %[3]s)::bigint AS transcode_sessions
+			FROM admin_playback_history h
+			LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
+			LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
+			WHERE %[4]s
+			GROUP BY 1, 2, 5
+		),
+		pairs AS (
+			SELECT client_key, platform_key,
+				SUM(sessions) AS total, SUM(transcode_sessions) AS transcodes
+			FROM cells
+			GROUP BY 1, 2
+		),
+		ranked AS (
+			SELECT client_key, platform_key,
+				(total >= $%[5]d AND ROW_NUMBER() OVER (
+					ORDER BY (total >= $%[5]d) DESC, total DESC, client_key, platform_key) <= $%[6]d) AS in_matrix,
+				(transcodes > 0 AND ROW_NUMBER() OVER (
+					ORDER BY transcodes DESC, total DESC, client_key, platform_key) <= $%[7]d) AS top_transcoder
+			FROM pairs
+		)
+		SELECT c.client_name, c.device_platform, c.source_codec, c.compat_origin,
+			c.sessions, c.direct_sessions, c.remux_sessions, c.transcode_sessions, r.in_matrix
+		FROM cells c
+		JOIN ranked r USING (client_key, platform_key)
+		WHERE r.in_matrix OR r.top_transcoder
+	`, insightsPlayDirectSQL, insightsPlayRemuxSQL, insightsPlayTranscodeSQL, whereSQL, minParam, capParam, topParam), args...)
 	if err != nil {
 		return fmt.Errorf("querying insights client codec matrix: %w", err)
 	}
@@ -147,11 +177,12 @@ func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL str
 
 	type matrixKey struct{ client, platform string }
 	rowMap := make(map[matrixKey]*AdminInsightsClientMatrixRow)
+	inMatrix := make(map[matrixKey]bool)
 	for rows.Next() {
 		var clientName, platform, codec string
-		var compatOrigin bool
+		var compatOrigin, matrixRow bool
 		var sessions, direct, remux, transcode int64
-		if err := rows.Scan(&clientName, &platform, &codec, &compatOrigin, &sessions, &direct, &remux, &transcode); err != nil {
+		if err := rows.Scan(&clientName, &platform, &codec, &compatOrigin, &sessions, &direct, &remux, &transcode, &matrixRow); err != nil {
 			return fmt.Errorf("scanning insights client codec matrix: %w", err)
 		}
 		k := matrixKey{client: strings.ToLower(clientName), platform: strings.ToLower(platform)}
@@ -166,6 +197,7 @@ func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL str
 		} else {
 			mergeMatrixRowIdentity(row, clientName, platform, compatOrigin)
 		}
+		inMatrix[k] = matrixRow
 		row.TotalSessions += sessions
 		row.DirectSessions += direct
 		row.RemuxSessions += remux
@@ -181,8 +213,8 @@ func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL str
 
 	out.TopTranscoders = topInsightsTranscoders(slices.Collect(maps.Values(rowMap)))
 	codecTotals := make(map[string]int64)
-	for _, row := range rowMap {
-		if row.TotalSessions < int64(minSessions) {
+	for k, row := range rowMap {
+		if !inMatrix[k] {
 			continue
 		}
 		row.DirectRate = roundInsightsRate(row.DirectSessions, row.TotalSessions)

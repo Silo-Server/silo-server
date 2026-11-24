@@ -596,6 +596,26 @@ func assertDevicesCaseInsensitiveMergeDB(t *testing.T, pool *pgxpool.Pool, h *Ad
 	if merged == nil || merged.TotalSessions != 6 || len(merged.Cells) != 2 {
 		t.Fatalf("case-variant client should merge into 1 row of 6 sessions at min_sessions=5, got %+v", merged)
 	}
+
+	// Client names are client-reported, so the matrix caps how many it returns.
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO admin_playback_history
+			(session_id, user_id, profile_id, media_item_id, media_file_id, play_method, started_at, ended_at, client_name, device_platform)
+		SELECT 'sess-cap-' || g || '-' || $3, $1, 'p-alice', 'movie-1', $2, 'direct', $4, $5, 'cap-client-' || g, 'Web'
+		FROM generate_series(1, $6::int) g`,
+		userID, h264FileID, uuid.NewString(), base, base.Add(time.Minute), insightsMatrixMaxRows+5); err != nil {
+		t.Fatal(err)
+	}
+	capped, err := h.ReadAdminInsightsDevices(ctx, AdminInsightsDevicesQuery{
+		AdminInsightsWindowQuery: AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"}, MinSessions: 1,
+	}, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(capped.Matrix) != insightsMatrixMaxRows ||
+		!slices.ContainsFunc(capped.Matrix, func(r AdminInsightsClientMatrixRow) bool { return r.TotalSessions == 6 }) {
+		t.Fatalf("matrix at min_sessions=1 has %d rows, want the cap of %d with the 6-session client kept", len(capped.Matrix), insightsMatrixMaxRows)
+	}
 }
 
 func assertPeopleCountsFirstTimeLiveAccountDB(t *testing.T, pool *pgxpool.Pool, h *AdminHandler) {

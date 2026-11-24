@@ -2359,7 +2359,8 @@ window. The implementation and its edge cases are documented in
 - `GET /api/v2/admin/insights/devices` (`getAdminInsightsDevices`) accepts optional
   `library_id`, `user_id`, `profile_id`, and `min_sessions` (default 5), returning, per
   session, the normalized `(client_name, device_platform)` × source video codec direct-play
-  matrix, canonical `adaptation_reasons` counts, hardware acceleration and HDR tone-mapping
+  matrix (at most 200 client and platform pairs, the ones with the most sessions, since clients
+  report their own names), canonical `adaptation_reasons` counts, hardware acceleration and HDR tone-mapping
   breakdowns, burn-in subtitle codecs, source vs delivered resolution classes
   (`source_resolutions`, `delivered_resolutions`, `resolution_changes`), and
   `top_transcoders`, up to 10 clients ranked by transcoded sessions whatever `min_sessions` is

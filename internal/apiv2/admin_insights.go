@@ -306,7 +306,7 @@ type AdminInsightsDevices struct {
 	Coverage             AdminInsightsCoverage           `json:"coverage"`
 	Summary              AdminInsightsDevicesSummary     `json:"summary"`
 	Codecs               []string                        `json:"codecs"`
-	Matrix               []AdminInsightsClientMatrixRow  `json:"matrix"`
+	Matrix               []AdminInsightsClientMatrixRow  `json:"matrix" doc:"Client and platform pairs with at least min_sessions sessions, at most 200 (the ones with the most sessions)"`
 	AdaptationReasons    []AdminInsightsAdaptationReason `json:"adaptation_reasons"`
 	HWAccelBreakdown     []AdminInsightsLabeledCount     `json:"hw_accel_breakdown"`
 	ToneMapBreakdown     []AdminInsightsLabeledCount     `json:"tone_map_breakdown"`
