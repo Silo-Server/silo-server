@@ -621,18 +621,21 @@ func cachedInsightsRead[T comparable](ctx context.Context, p *AdminInsightsProvi
 			c.Set(key, v, p.ttl)
 		}
 		p.publishMu.Unlock()
-		return v, nil
+		return insightsFill[T]{v}, nil
 	})
 	var zero T
 	if err != nil {
 		return zero, err
 	}
-	v, ok := shared.(T)
+	fill, ok := shared.(insightsFill[T])
 	if !ok {
 		return zero, fmt.Errorf("insights cache fill for %s returned %T", key, shared)
 	}
-	return v, nil
+	return fill.v, nil
 }
+
+// insightsFill carries a fill's value through singleflight's untyped result.
+type insightsFill[T any] struct{ v T }
 
 // insightsScopeKey is the cache-key fragment for the shared row filters.
 func insightsScopeKey(q AdminInsightsWindowQuery) string {

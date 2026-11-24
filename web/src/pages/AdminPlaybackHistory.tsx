@@ -2,9 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router";
 import { Flame, History, RefreshCw, Search, X } from "lucide-react";
 
-import { JellyfinSessionPill } from "@/components/JellyfinSessionPill";
 import { PageHeader } from "@/components/page/PageHeader";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,14 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { Table, TableBody, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   useAdminPlaybackHistoryEntry,
   useAdminPlaybackHistoryPage,
@@ -31,36 +22,20 @@ import {
 } from "@/hooks/queries/admin/history";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
-import { useT, type Translate } from "@/i18n";
+import { useT } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
-import { formatRelativeTime } from "@/lib/date";
-import { formatDateTime as formatPreferredDateTime } from "@/lib/datetime";
 import { formatCodecLabel } from "@/lib/mediaFormat";
 import { cn } from "@/lib/utils";
-import type { MessageKey } from "@/locales/keys";
 
-import {
-  formatHistoryDuration,
-  historyRowLabel,
-  historyRowTitle,
-  normalizeMethodKey,
-  watchTimeSummary,
-} from "./admin-history/historyFormat";
+import { historyRowLabel } from "./admin-history/historyFormat";
+import { HistoryTableRow } from "./admin-history/HistoryTableRow";
 import { SessionDetailSheet } from "./admin-history/SessionDetailSheet";
 import { InsightKpiCard } from "./admin-insights/insightsShared";
-import { activityMethodMeta, formatDecisionLabel } from "./adminActivityPresentation";
 import { getAdaptationReasonByCode } from "./adminActivityReasons";
 
 const ALL_VALUE = "all";
-const EM_DASH = "—";
 const PAGE_SIZE_OPTIONS = ["25", "50", "100"] as const;
 const REFRESH_SPINNER_MIN_VISIBLE_MS = 1_000;
-
-const MEDIA_TYPE_LABELS: Record<string, MessageKey> = {
-  movie: "web.admin.history.mediaType.movie",
-  episode: "web.admin.history.mediaType.episode",
-  series: "web.admin.history.mediaType.series",
-};
 
 interface ActiveFilterChip {
   key: string;
@@ -638,162 +613,14 @@ export default function AdminPlaybackHistory() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {rows.map((row) => {
-                        const watch = watchTimeSummary(row);
-                        const { title, detail } = historyRowTitle(row, t);
-                        const isSelected = row.session_id === selectedSessionId;
-                        const methodMeta = activityMethodMeta(normalizeMethodKey(row.play_method));
-                        const titleBlock = (
-                          <>
-                            {title}
-                            {detail ? (
-                              <div className="text-muted-foreground font-normal">{detail}</div>
-                            ) : null}
-                          </>
-                        );
-                        const profileLabel = row.profile_name || row.profile_id;
-                        return (
-                          <TableRow
-                            key={row.session_id}
-                            onClick={(e) => {
-                              if ((e.target as HTMLElement).closest("a, button")) return;
-                              selectSession(row.session_id);
-                            }}
-                            className={cn(
-                              "cursor-pointer transition-colors",
-                              isSelected && "bg-primary/8 hover:bg-primary/10",
-                            )}
-                          >
-                            <TableCell>
-                              <div className="max-w-[18rem] min-w-[11rem] space-y-1 break-words whitespace-normal">
-                                {row.media_item_id ? (
-                                  <Link
-                                    to={`/item/${encodeURIComponent(row.media_item_id)}`}
-                                    className="hover:text-primary block font-medium transition-colors hover:underline"
-                                  >
-                                    {titleBlock}
-                                  </Link>
-                                ) : (
-                                  <div className="font-medium">{titleBlock}</div>
-                                )}
-                                <div className="text-muted-foreground text-xs">
-                                  {t("web.admin.history.row.meta", {
-                                    media_type: mediaTypeLabel(row.media_type, t),
-                                    session: row.session_id.slice(0, 8),
-                                  })}
-                                </div>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <Link
-                                to={`/admin/users/${row.user_id}`}
-                                className="hover:text-primary font-medium transition-colors hover:underline"
-                              >
-                                {row.username ||
-                                  t("web.admin.activity.userFallback", { id: row.user_id })}
-                              </Link>
-                            </TableCell>
-                            <TableCell>
-                              <div className="space-y-1">
-                                <Link
-                                  to={`/admin/history?user_id=${row.user_id}&profile_id=${encodeURIComponent(row.profile_id)}`}
-                                  className="hover:text-primary block transition-colors hover:underline"
-                                >
-                                  {profileLabel}
-                                </Link>
-                                <div className="text-muted-foreground text-xs">
-                                  {row.profile_id}
-                                </div>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <div className="space-y-0.5">
-                                <div className="flex items-center gap-1.5 text-xs font-medium">
-                                  <span>{row.client_name ?? EM_DASH}</span>
-                                  <JellyfinSessionPill session={row} />
-                                </div>
-                                {row.device_platform ? (
-                                  <div className="text-muted-foreground text-[0.6875rem]">
-                                    {row.device_platform}
-                                  </div>
-                                ) : null}
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <span
-                                className={cn(
-                                  "inline-flex items-center rounded-md border px-2 py-0.5 text-[0.6875rem] font-semibold",
-                                  methodMeta.badgeClass,
-                                )}
-                              >
-                                {formatDecisionLabel(row.play_method)}
-                              </span>
-                            </TableCell>
-                            <TableCell>
-                              <div className="space-y-1 tabular-nums">
-                                <div
-                                  title={
-                                    watch.estimated
-                                      ? t("web.admin.history.row.estimatedTitle")
-                                      : undefined
-                                  }
-                                >
-                                  {watch.estimated
-                                    ? t("web.admin.history.row.estimatedDuration", {
-                                        duration: formatHistoryDuration(watch.seconds, t),
-                                      })
-                                    : formatHistoryDuration(watch.seconds, t)}
-                                </div>
-                                <div className="text-muted-foreground text-xs">
-                                  {t("web.admin.history.row.ofDuration", {
-                                    duration: formatHistoryDuration(row.duration_seconds, t),
-                                  })}
-                                </div>
-                              </div>
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant={row.completed ? "default" : "outline"}>
-                                {row.completed
-                                  ? t("web.admin.history.row.completed")
-                                  : t("web.admin.history.row.partial")}
-                              </Badge>
-                            </TableCell>
-                            <TableCell>
-                              <div className="space-y-1 tabular-nums">
-                                <div>{formatDateTime(row.ended_at)}</div>
-                                <div className="text-muted-foreground text-xs">
-                                  {t("web.admin.history.row.started", {
-                                    time: formatRelative(row.started_at),
-                                  })}
-                                </div>
-                              </div>
-                            </TableCell>
-                            <TableCell className="text-end">
-                              <div className="flex items-center justify-end gap-3">
-                                <button
-                                  type="button"
-                                  onClick={(e) => selectSession(row.session_id, e.currentTarget)}
-                                  className="text-primary cursor-pointer text-sm font-medium hover:underline"
-                                >
-                                  {t("web.admin.activity.row.details")}
-                                </button>
-                                <Link
-                                  to={`/admin/logs?playback_session_id=${encodeURIComponent(row.session_id)}&focus=playback`}
-                                  className="text-primary text-sm font-medium"
-                                >
-                                  {t("web.admin.activity.row.viewLogs")}
-                                </Link>
-                                <Link
-                                  to={`/admin/logs?playback_session_id=${encodeURIComponent(row.session_id)}&focus=playback&component=ffmpeg`}
-                                  className="text-primary text-sm"
-                                >
-                                  {t("web.admin.activity.row.ffmpegLogs")}
-                                </Link>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
+                      {rows.map((row) => (
+                        <HistoryTableRow
+                          key={row.session_id}
+                          row={row}
+                          selected={row.session_id === selectedSessionId}
+                          onSelect={selectSession}
+                        />
+                      ))}
                     </TableBody>
                   </Table>
                 </div>
@@ -917,22 +744,6 @@ function formatChipDate(iso: string): string {
     day: "numeric",
     year: "numeric",
   });
-}
-
-function mediaTypeLabel(mediaType: string, t: Translate): string {
-  if (!mediaType) return t("web.admin.history.mediaType.unknown");
-  const key = MEDIA_TYPE_LABELS[mediaType];
-  return key ? t(key) : mediaType;
-}
-
-function formatDateTime(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return formatPreferredDateTime(date);
-}
-
-function formatRelative(value: string) {
-  return formatRelativeTime(value, { rounding: "floor" }) ?? value;
 }
 
 function delay(ms: number) {
