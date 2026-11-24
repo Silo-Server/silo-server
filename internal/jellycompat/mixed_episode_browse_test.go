@@ -124,25 +124,27 @@ func TestBrowseItemsWithEpisodeAndOtherTypesIncludesEpisodes(t *testing.T) {
 	}
 }
 
-// A non-recursive ParentId library browse lists the library's direct children,
-// which are never episodes, so a type list naming Episode, here the movie,
-// series and episode default of an ExcludeItemTypes-only filter, browses
-// media_items alone. The same filter at the user root is a recursive search
-// and pages the episodes too.
-func TestNonRecursiveLibraryBrowseWithEpisodeTypeOmitsEpisodes(t *testing.T) {
+// Without Recursive, Jellyfin lists a library ParentId's direct children,
+// which are never episodes, when Episode comes only from an ExcludeItemTypes
+// filter (here the movie, series and episode default). An IncludeItemTypes
+// that names Episode there, and any type filter at the user root, searches
+// recursively and pages the episodes too.
+func TestNonRecursiveMixedBrowseFollowsJellyfinScope(t *testing.T) {
 	for _, tc := range []struct {
 		name         string
+		params       string
 		library      bool
 		wantIDs      []string
 		wantEpisodes bool
 	}{
-		{"library", true, []string{"movie-1", "movie-2"}, false},
-		{"user root", false, []string{"movie-1", "movie-2", "ep-1", "ep-2", "ep-3"}, true},
+		{"library exclude only", "ExcludeItemTypes=Season", true, []string{"movie-1", "movie-2"}, false},
+		{"library include", "IncludeItemTypes=Movie,Episode", true, []string{"movie-1", "movie-2", "ep-1", "ep-2", "ep-3"}, true},
+		{"user root exclude only", "ExcludeItemTypes=Season", false, []string{"movie-1", "movie-2", "ep-1", "ep-2", "ep-3"}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			movies := &mixedBrowseMovies{}
 			h, episodes := newMixedBrowseHandler(movies)
-			path := "/Items?ExcludeItemTypes=Season"
+			path := "/Items?" + tc.params
 			if tc.library {
 				path += "&ParentId=" + h.codec.EncodeIntID(EncodedIDLibrary, 1)
 			}
