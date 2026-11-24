@@ -391,7 +391,7 @@ type PlaybackSession struct {
 	SeriesTitle              string  `json:"series_title" doc:"Series title for an episode; empty otherwise" example:""`
 	SeasonNumber             *int    `json:"season_number" nullable:"true" doc:"null unless an episode" example:"1"`
 	EpisodeNumber            *int    `json:"episode_number" nullable:"true" doc:"null unless an episode" example:"1"`
-	PosterURL                string  `json:"poster_url" format:"uri-reference" doc:"Where to fetch the poster; empty when there is none" example:"https://media.example/poster.jpg"`
+	PosterURL                string  `json:"poster_url" format:"uri-reference" doc:"Card-size poster of the title as a path on this server (a signed getArtwork path for cached art, or a signed getItemPoster link); empty when there is none" example:"/api/v2/item-posters/movie-tmdb-278?exp=1795503600&sig=example"`
 	PlayMethod               string  `json:"play_method" doc:"The negotiated method as the node reported it" example:"direct"`
 	ReportingNode            string  `json:"reporting_node" doc:"Identifier of the node serving the stream" example:"api"`
 	NodeDisplayName          string  `json:"node_display_name" doc:"Empty when the node has no display name" example:""`
