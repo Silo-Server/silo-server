@@ -391,8 +391,11 @@ export function useIntroSkipPrompt({
     if (!current || !intro) return false;
     settleSeek(onSeekRef.current(current.kind === "skip" ? intro.end : intro.start), (accepted) => {
       if (!accepted) return;
-      if (!promptStillActive(activePromptRef.current, current.key, current.kind)) return;
+      // The seek took, so the range is answered even when an async seek lands
+      // after the prompt has gone: a reanchor moves the position first. Only
+      // the clearing waits on the prompt, so a late answer leaves a newer one.
       resolvedKeysRef.current.add(current.key);
+      if (!promptStillActive(activePromptRef.current, current.key, current.kind)) return;
       clearPrompt();
     });
     return true;

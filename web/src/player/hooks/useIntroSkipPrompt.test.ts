@@ -312,6 +312,26 @@ describe("useIntroSkipPrompt", () => {
       expect(result.current.prompt).toBeNull();
     });
 
+    // A reanchor moves the position to the range end before its replan
+    // answers, so the pill has already gone when the skip is accepted.
+    it("stays resolved when the accepted skip lands after the pill has gone", async () => {
+      let landReanchor: ((accepted: boolean) => void) | null = null;
+      onSeek.mockImplementation(
+        () =>
+          new Promise<boolean>((resolve) => {
+            landReanchor = resolve;
+          }),
+      );
+      const { result, rerender } = renderCredits();
+      act(() => expect(result.current.select()).toBe(true));
+      rerender({ currentTime: 160 });
+      expect(result.current.prompt).toBeNull();
+      await act(async () => landReanchor?.(true));
+
+      rerender({ currentTime: 110 });
+      expect(result.current.prompt).toBeNull();
+    });
+
     it("hides unresolved when the timer runs out, giving Select back", () => {
       const { result } = renderCredits();
       act(() => vi.advanceTimersByTime(PROMPT_MS - 1));
