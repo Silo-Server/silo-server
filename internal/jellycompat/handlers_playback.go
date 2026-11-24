@@ -3902,8 +3902,8 @@ func videoTrackDisplayTitle(track models.VideoTrack, versionHDR bool) string {
 	hdr10Plus := strings.HasSuffix(rangeType, compatRangeHDR10Plus)
 	dolbyVision := ""
 	if strings.HasPrefix(rangeType, compatRangeDOVI) {
-		// The range type has no HDR10+ form for profiles other than 7 and 8,
-		// so read the track's own flag as well.
+		// The range type has no HDR10+ form for profiles other than 7, 8 and
+		// 10, so read the track's own flag as well.
 		dolbyVision = compatDolbyVisionTitle(track, hdr10Plus || track.HDR10Plus)
 	}
 	switch {
