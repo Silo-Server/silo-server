@@ -1,5 +1,5 @@
-import { useCallback, useLayoutEffect, useRef } from "react";
-import { onlineManager } from "@tanstack/react-query";
+import { useCallback, useEffect, useLayoutEffect, useReducer, useRef } from "react";
+import { onlineManager, type FetchStatus } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { readableErrorText, V2ProblemError } from "@/api/v2/request";
@@ -94,6 +94,16 @@ interface ShownChange<T> {
    * Defaults to reportUnsavedSettingChange.
    */
   unsaved?: (error: unknown) => boolean;
+  /**
+   * Shows and caches what the server holds now. Called when the newest change
+   * failed in a way that may have stored it, once no save made through this
+   * hook is still pending (so after the settings re-read the failure
+   * triggers, and without putting back another preference that is still
+   * saving) and the settings read has last succeeded. That re-read can return
+   * what the caller already had, so its own sync from the stored value won't
+   * run.
+   */
+  reconcile?: () => void;
 }
 
 interface UnsettledPreference {
@@ -117,16 +127,42 @@ interface UnsettledPreference {
  * the newest change known to have landed, or else the value from before the
  * first unsettled change. An earlier change that lands after that, with
  * nothing picked since, is then shown. Callers' sync effects re-run only when
- * the stored value changes, which a failed save never does.
+ * the stored value changes, which a failed save never does. When the newest
+ * change failed in a way that may have saved, `reconcile` shows what the
+ * server holds instead.
+ *
+ * `read` is the state of the settings read the caller shows. A reconcile
+ * waits for it to succeed: when the re-read after the failure failed too, or
+ * was paused offline (which settles the save without it), its cached answer is
+ * no newer than the change, which may have been stored, so it must not replace
+ * that change on screen or in the cache.
  */
-export function useShowThenSave(cacheOwner: string | null) {
+export function useShowThenSave(
+  cacheOwner: string | null,
+  read?: { isError: boolean; fetchStatus: FetchStatus },
+) {
+  const readUnsettled = read ? read.isError || read.fetchStatus !== "idle" : false;
   const unsettled = useRef(new Map<string, UnsettledPreference>());
+  // Per owner, the reconcile owed for a change that may have saved, run once
+  // nothing is saving: a caller reconciles every preference it shows at once.
+  const owedReconciles = useRef(new Map<string | null, () => void>());
   // A restore shows the value through the provider's current state, so it is
   // skipped once another account or profile owns the appearance.
   const currentOwner = useRef(cacheOwner);
   useLayoutEffect(() => {
     currentOwner.current = cacheOwner;
   }, [cacheOwner]);
+  // Checked after a render, so `readUnsettled` reflects the read that a
+  // failed save waited for.
+  const [settleChecks, checkOwedReconcile] = useReducer((count: number) => count + 1, 0);
+  useEffect(() => {
+    if (readUnsettled || unsettled.current.size > 0) return;
+    // Only the owner showing now, which may not own the save that settled
+    // last; another owner's namespace is refreshed on its next load.
+    const owed = owedReconciles.current.get(currentOwner.current);
+    owedReconciles.current.clear();
+    owed?.();
+  }, [settleChecks, readUnsettled]);
   return useCallback(
     <T>({
       key,
@@ -136,6 +172,7 @@ export function useShowThenSave(cacheOwner: string | null) {
       show,
       save,
       unsaved = reportUnsavedSettingChange,
+      reconcile,
     }: ShownChange<T>) => {
       const token = {};
       // Per owner: another profile's unsettled change says nothing about this one's.
@@ -178,18 +215,27 @@ export function useShowThenSave(cacheOwner: string | null) {
         () => {
           settle();
           // A change that saved after a newer one doesn't replace it.
-          if (change < pending.stored.change) return;
-          pending.stored = { value, change, cached: String(value) };
-          // It landed after the newest change failed and put back an older
-          // value, with nothing picked since: show what is stored now.
-          if (pending.restored) showStored();
+          if (change >= pending.stored.change) {
+            pending.stored = { value, change, cached: String(value) };
+            // It landed after the newest change failed and put back an older
+            // value, with nothing picked since: show what is stored now.
+            if (pending.restored) showStored();
+          }
+          checkOwedReconcile();
         },
         (error: unknown) => {
           settle();
           // A newer change to this preference settles it instead.
-          if (pending.latest !== token || !unsaved(error)) return;
-          pending.restored = true;
-          showStored();
+          if (pending.latest === token) {
+            if (!unsaved(error)) {
+              // It may have saved: the settings re-read has the answer.
+              if (reconcile) owedReconciles.current.set(cacheOwner, reconcile);
+            } else {
+              pending.restored = true;
+              showStored();
+            }
+          }
+          checkOwedReconcile();
         },
       );
     },
