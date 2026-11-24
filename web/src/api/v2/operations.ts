@@ -188,6 +188,8 @@ export const v2Operations = {
   "GET /api/v2/admin/insights/capabilities": "getAdminInsightsCapabilities",
   "GET /api/v2/admin/insights/devices": "getAdminInsightsDevices",
   "GET /api/v2/admin/insights/people": "getAdminInsightsPeople",
+  "GET /api/v2/admin/insights/titles": "getAdminInsightsTitles",
+  "GET /api/v2/admin/insights/titles/{content_id}": "getAdminInsightsTitle",
   "GET /api/v2/admin/invitations": "listAdminInvitations",
   "GET /api/v2/admin/invitations/capabilities": "getAdminInvitationCapabilities",
   "GET /api/v2/admin/invitations/{id}": "getAdminInvitation",

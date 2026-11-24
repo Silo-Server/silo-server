@@ -8,18 +8,18 @@
     "oldest_measured_at": "2025-12-04T03:04:05.678Z",
     "oldest_route_facts_at": "2025-12-04T03:04:05.678Z",
     "oldest_metric_at": "2025-12-04T03:04:05.678Z",
-    "total_plays": 42,
-    "measured_plays": 40,
-    "route_facts_plays": 38
+    "total_sessions": 48,
+    "measured_sessions": 46,
+    "route_facts_sessions": 44
   },
   "summary": {
     "plays": 42,
+    "sessions": 48,
     "movies": 12,
     "episodes": 30,
     "other_media": 0,
     "watch_seconds": 86400,
     "measured_watch_seconds": 84000,
-    "measured_plays": 40,
     "completed_plays": 35,
     "completion_rate": 0.8333,
     "direct_plays": 30,

@@ -1,0 +1,43 @@
+{
+  "from": "2025-12-04T03:04:05.678Z",
+  "to": "2026-01-02T03:04:05.678Z",
+  "tz": "UTC",
+  "sort": "plays",
+  "movies": [
+    {
+      "content_id": "movie-1",
+      "kind": "movie",
+      "title": "Dune",
+      "year": 2021,
+      "plays": 6,
+      "viewers": 4,
+      "completed_plays": 5,
+      "episodes": 0,
+      "watch_seconds": 46000,
+      "last_played_at": "2026-01-02T01:34:05.678Z"
+    }
+  ],
+  "shows": [
+    {
+      "content_id": "series-1",
+      "kind": "series",
+      "title": "Severance",
+      "year": null,
+      "plays": 18,
+      "viewers": 3,
+      "completed_plays": 16,
+      "episodes": 9,
+      "watch_seconds": 54000,
+      "last_played_at": "2026-01-02T01:34:05.678Z"
+    }
+  ],
+  "libraries": [
+    {
+      "library_id": "2",
+      "name": "TV Shows",
+      "plays": 18,
+      "viewers": 3,
+      "watch_seconds": 54000
+    }
+  ]
+}

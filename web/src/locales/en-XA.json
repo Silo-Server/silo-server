@@ -51335,7 +51335,7 @@
     },
     {
       "type": 0,
-      "value": " ɱéåšûŕéđ~~~~~~⟧"
+      "value": " šéššîöñš ɱéåšûŕéđ~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.activity.peak.chartLabel": [
@@ -51420,6 +51420,12 @@
     {
       "type": 0,
       "value": "⟦Þļåý ɱéţĥöđ~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.activity.volume.subtitle": [
+    {
+      "type": 0,
+      "value": "⟦Å þļåý çöûñţš ŕéšûɱéđ šîţţîñĝš öñçé åñđ šķîþš ûñƒîñîšĥéđ åţţéɱþţš ûñđéŕ 30 šéçöñđš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.activity.volume.title": [
@@ -51601,7 +51607,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "⟦Ŕéɱöţé þļåý šĥåŕé~~~~~~~⟧"
+      "value": "⟦Ŕéɱöţé šéššîöñ šĥåŕé~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -51691,7 +51697,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "⟦Ñö þļåýš îñ ţĥîš ŵîñđöŵ çåŕŕý đéţåîļéđ ŕöûţé ƒåçţš ýéţ. Ñéŵ šéššîöñš ŕéçöŕđ ƒûļļ çöđéç, éñçöđéŕ, åñđ ŕöûţîñĝ ţéļéɱéţŕý åûţöɱåţîçåļļý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ñö šéššîöñš îñ ţĥîš ŵîñđöŵ çåŕŕý đéţåîļéđ ŕöûţé ƒåçţš ýéţ. Ñéŵ šéššîöñš ŕéçöŕđ ƒûļļ çöđéç, éñçöđéŕ, åñđ ŕöûţîñĝ ţéļéɱéţŕý åûţöɱåţîçåļļý.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -51713,7 +51719,7 @@
     },
     {
       "type": 0,
-      "value": " þļåýš îñ ţĥîš ŵîñđöŵ (ŕéçöŕđéđ šîñçé "
+      "value": " šéššîöñš îñ ţĥîš ŵîñđöŵ (ŕéçöŕđéđ šîñçé "
     },
     {
       "type": 1,
@@ -51721,7 +51727,7 @@
     },
     {
       "type": 0,
-      "value": ").~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": ").~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.coverage.watchTimePartial": [
@@ -51743,7 +51749,53 @@
     },
     {
       "type": 0,
-      "value": " þļåýš îñ ţĥîš ŵîñđöŵ; öļđéŕ šéššîöñš ûšé éñđ-þöšîţîöñ éšţîɱåţéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": " šéššîöñš îñ ţĥîš ŵîñđöŵ; öļđéŕ šéššîöñš ûšé éñđ-þöšîţîöñ éšţîɱåţéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.detail.action.history": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîéŵ šéššîöñš~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.detail.noPlays": [
+    {
+      "type": 0,
+      "value": "⟦Ñö þļåýš îñ ţĥîš ŵîñđöŵ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.detail.playsOverTime": [
+    {
+      "type": 0,
+      "value": "⟦Þļåýš öṽéŕ ţîɱé~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.detail.viewers": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîéŵéŕš~~~⟧"
+    }
+  ],
+  "web.admin.insights.detail.window": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " – "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.empty": [
@@ -51937,7 +51989,7 @@
     },
     {
       "type": 1,
-      "value": "plays"
+      "value": "sessions"
     },
     {
       "type": 0,
@@ -51964,10 +52016,10 @@
       "value": "⟦Ñö çļîéñţ-çöđéç þåîŕš ɱééţ ţĥé šåɱþļé ţĥŕéšĥöļđ îñ ţĥîš ŵîñđöŵ~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
-  "web.admin.insights.devices.matrix.minPlays": [
+  "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "⟦Ṁîñ 5 þļåýš~~~~~⟧"
+      "value": "⟦Ṁîñ 5 šéššîöñš~~~~~~⟧"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
@@ -51997,13 +52049,101 @@
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "⟦Šéŕṽéŕ åđåþţåţîöñ ŕéåšöñš ŕéçöŕđéđ öñ ñöñ-đîŕéçţ þļåýš~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Šéŕṽéŕ åđåþţåţîöñ ŕéåšöñš ŕéçöŕđéđ öñ ñöñ-đîŕéçţ šéššîöñš~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
       "value": "⟦Ŵĥý šéššîöñš åđåþţéđ~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.devices.resolution.change": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": " → "
+    },
+    {
+      "type": 1,
+      "value": "to"
+    },
+    {
+      "type": 0,
+      "value": "~~⟧"
+    }
+  ],
+  "web.admin.insights.devices.resolution.delivered": [
+    {
+      "type": 0,
+      "value": "⟦Đéļîṽéŕéđ~~~~⟧"
+    }
+  ],
+  "web.admin.insights.devices.resolution.downscaled": [
+    {
+      "type": 0,
+      "value": "⟦Đöŵñšçåļéđ~~~~⟧"
+    }
+  ],
+  "web.admin.insights.devices.resolution.downscaledEmpty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šéššîöñš ŵéŕé đéļîṽéŕéđ ƀéļöŵ ţĥéîŕ šöûŕçé ŕéšöļûţîöñ~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.devices.resolution.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šéššîöñš îñ ţĥîš ŵîñđöŵ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.devices.resolution.fuhd": [
+    {
+      "type": 0,
+      "value": "⟦8Ķ~⟧"
+    }
+  ],
+  "web.admin.insights.devices.resolution.sd": [
+    {
+      "type": 0,
+      "value": "⟦ŠĐ~⟧"
+    }
+  ],
+  "web.admin.insights.devices.resolution.source": [
+    {
+      "type": 0,
+      "value": "⟦Šöûŕçé~~~⟧"
+    }
+  ],
+  "web.admin.insights.devices.resolution.subtitle": [
+    {
+      "type": 0,
+      "value": "⟦Šöûŕçé ƒîļéš åñđ ŵĥåţ çļîéñţš ŕéçéîṽéđ, ƀý šéššîöñ~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.devices.resolution.title": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéšöļûţîöñ~~~~⟧"
+    }
+  ],
+  "web.admin.insights.devices.resolution.uhd": [
+    {
+      "type": 0,
+      "value": "⟦4Ķ~⟧"
+    }
+  ],
+  "web.admin.insights.devices.resolution.unknown": [
+    {
+      "type": 0,
+      "value": "⟦Ûñķñöŵñ~~~⟧"
     }
   ],
   "web.admin.insights.devices.topTranscoders.empty": [
@@ -52037,13 +52177,55 @@
     },
     {
       "type": 0,
-      "value": " þļåýš~~~~⟧"
+      "value": " šéššîöñš~~~~~~⟧"
     }
   ],
   "web.admin.insights.devices.unknownClient": [
     {
       "type": 0,
       "value": "⟦Ûñķñöŵñ çļîéñţ~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.episodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđé~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđéš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.filter.allAccounts": [
@@ -52130,6 +52312,26 @@
     {
       "type": 0,
       "value": "⟦Ĥîšţöŕý ›~~~~⟧"
+    }
+  ],
+  "web.admin.insights.people.action.details": [
+    {
+      "type": 0,
+      "value": "⟦Đéţåîļš~~~⟧"
+    }
+  ],
+  "web.admin.insights.people.action.detailsFor": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ îñšîĝĥţš ƒöŕ "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.people.collapseProfiles": [
@@ -52312,6 +52514,42 @@
       "value": "%~⟧"
     }
   ],
+  "web.admin.insights.personDetail.action.openAccount": [
+    {
+      "type": 0,
+      "value": "⟦Öþéñ åççöûñţ~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.personDetail.allProfiles": [
+    {
+      "type": 0,
+      "value": "⟦Åļļ þŕöƒîļéš~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.personDetail.clients": [
+    {
+      "type": 0,
+      "value": "⟦Çļîéñţš~~~⟧"
+    }
+  ],
+  "web.admin.insights.personDetail.clientsEmpty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šéššîöñš îñ ţĥîš ŵîñđöŵ~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.personDetail.profileLabel": [
+    {
+      "type": 0,
+      "value": "⟦Þŕöƒîļé~~~⟧"
+    }
+  ],
+  "web.admin.insights.personDetail.topTitles": [
+    {
+      "type": 0,
+      "value": "⟦Ţöþ ţîţļéš~~~~⟧"
+    }
+  ],
   "web.admin.insights.playCount": [
     {
       "type": 6,
@@ -52396,10 +52634,52 @@
       "value": "⟦Ŕéţŕý~~⟧"
     }
   ],
+  "web.admin.insights.sessionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéššîöñ~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " šéššîöñš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "⟦Þļåýƀåçķ ţŕéñđš, ĥöûšéĥöļđ ûšåĝé, đéṽîçé çöɱþåţîƀîļîţý, åñđ éĝŕéšš öṽéŕ ţîɱé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Þļåýƀåçķ ţŕéñđš, þöþûļåŕ ţîţļéš, ĥöûšéĥöļđ ûšåĝé, đéṽîçé çöɱþåţîƀîļîţý, åñđ éĝŕéšš öṽéŕ ţîɱé.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -52426,10 +52706,258 @@
       "value": "⟦Þéöþļé~~~⟧"
     }
   ],
+  "web.admin.insights.tabs.titles": [
+    {
+      "type": 0,
+      "value": "⟦Ţîţļéš~~~⟧"
+    }
+  ],
   "web.admin.insights.title": [
     {
       "type": 0,
       "value": "⟦Îñšîĝĥţš~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titleDetail.episodes.title": [
+    {
+      "type": 0,
+      "value": "⟦Éþîšöđéš~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titleDetail.episodes.truncated": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵîñĝ ţĥé ƒîŕšţ 500 éþîšöđéš.~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titleDetail.kind.movie": [
+    {
+      "type": 0,
+      "value": "⟦Ṁöṽîé~~⟧"
+    }
+  ],
+  "web.admin.insights.titleDetail.kind.series": [
+    {
+      "type": 0,
+      "value": "⟦Šéŕîéš~~~⟧"
+    }
+  ],
+  "web.admin.insights.titleDetail.notFound": [
+    {
+      "type": 0,
+      "value": "⟦Ţĥîš ţîţļé îš ñö ļöñĝéŕ îñ ţĥé çåţåļöĝ.~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titleDetail.scopedToPerson": [
+    {
+      "type": 0,
+      "value": "⟦Þļåýš ƀý "
+    },
+    {
+      "type": 1,
+      "value": "name"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titleDetail.showEveryone": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵ éṽéŕýöñé~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.furthest": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéåçĥéđ "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": " öƒ "
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    },
+    {
+      "type": 0,
+      "value": "~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.furthestNoDuration": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéåçĥéđ "
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.lastEpisode": [
+    {
+      "type": 0,
+      "value": "⟦Ļåšţ: "
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    },
+    {
+      "type": 0,
+      "value": "~~~⟧"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.title": [
+    {
+      "type": 0,
+      "value": "⟦Ŵĥö ŵåţçĥéđ~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.truncated": [
+    {
+      "type": 0,
+      "value": "⟦Šĥöŵîñĝ ţĥé 100 ɱöšţ ŕéçéñţ ṽîéŵéŕš.~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titles.libraries.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ļîƀŕåŕý þļåýš îñ ţĥîš ŵîñđöŵ~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titles.libraries.title": [
+    {
+      "type": 0,
+      "value": "⟦Ţöþ ļîƀŕåŕîéš~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titles.movies.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö ɱöṽîéš þļåýéđ îñ ţĥîš ŵîñđöŵ~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titles.movies.title": [
+    {
+      "type": 0,
+      "value": "⟦Ţöþ ɱöṽîéš~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titles.shows.empty": [
+    {
+      "type": 0,
+      "value": "⟦Ñö šĥöŵš þļåýéđ îñ ţĥîš ŵîñđöŵ~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titles.shows.title": [
+    {
+      "type": 0,
+      "value": "⟦Ţöþ šĥöŵš~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titles.sort.plays": [
+    {
+      "type": 0,
+      "value": "⟦Þļåýš~~⟧"
+    }
+  ],
+  "web.admin.insights.titles.sort.viewers": [
+    {
+      "type": 0,
+      "value": "⟦Ṽîéŵéŕš~~~⟧"
+    }
+  ],
+  "web.admin.insights.titles.sort.watchTime": [
+    {
+      "type": 0,
+      "value": "⟦Ŵåţçĥ ţîɱé~~~~⟧"
+    }
+  ],
+  "web.admin.insights.titles.sortLabel": [
+    {
+      "type": 0,
+      "value": "⟦Ŕåñķ ƀý~~~⟧"
+    }
+  ],
+  "web.admin.insights.titles.titleWithYear": [
+    {
+      "type": 0,
+      "value": "⟦"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": " ("
+    },
+    {
+      "type": 1,
+      "value": "year"
+    },
+    {
+      "type": 0,
+      "value": ")~~⟧"
+    }
+  ],
+  "web.admin.insights.titles.unknownTitle": [
+    {
+      "type": 0,
+      "value": "⟦Ŕéɱöṽéđ ţîţļé~~~~~~⟧"
+    }
+  ],
+  "web.admin.insights.viewerCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ṽîéŵéŕ~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": " ṽîéŵéŕš~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.libraries.activeWork.cancelRefresh": [

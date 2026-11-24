@@ -1,7 +1,9 @@
+import type { Translate } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
 import { formatDateTime, preferredDateLocale } from "@/lib/datetime";
+import type { MessageKey } from "@/locales/keys";
 
-export const INSIGHTS_TABS = ["playback", "people", "devices", "bandwidth"] as const;
+export const INSIGHTS_TABS = ["playback", "titles", "people", "devices", "bandwidth"] as const;
 export type InsightsTab = (typeof INSIGHTS_TABS)[number];
 
 export const INSIGHTS_RANGES = ["7d", "30d", "90d", "1y", "all", "custom"] as const;
@@ -86,22 +88,54 @@ export function parseInsightsUrlState(
   };
 }
 
+/**
+ * Query parameters for the page's shared window. `person` scopes the read to
+ * one account (and optionally one of its profiles) in place of the page's
+ * account filter, for the person detail panel.
+ */
 export function buildInsightsWindowQueryParams(
   filters: InsightsFilterState,
-  options: { omitLibrary?: boolean; omitUser?: boolean } = {},
+  options: { omitLibrary?: boolean; omitUser?: boolean; person?: InsightsPersonScope } = {},
 ) {
+  const userId = options.person?.userId ?? (options.omitUser ? undefined : filters.userId);
   return {
     range: filters.range,
     tz: filters.tz,
     ...(filters.range === "custom" ? { from_date: filters.fromDate, to_date: filters.toDate } : {}),
     ...(!options.omitLibrary && filters.libraryId ? { library_id: String(filters.libraryId) } : {}),
-    ...(!options.omitUser && filters.userId ? { user_id: String(filters.userId) } : {}),
+    ...(userId ? { user_id: String(userId) } : {}),
+    ...(options.person?.profileId ? { profile_id: options.person.profileId } : {}),
+  };
+}
+
+export interface InsightsPersonScope {
+  userId: number;
+  profileId?: string;
+}
+
+/** The detail panel the URL opens: a title (`title`) or a person (`person`, optional `profile`). */
+export interface InsightsDetailState {
+  titleId: string | undefined;
+  person: InsightsPersonScope | undefined;
+}
+
+export const INSIGHTS_DETAIL_PARAMS = ["title", "person", "profile"] as const;
+
+export function parseInsightsDetailState(searchParams: URLSearchParams): InsightsDetailState {
+  const titleId = searchParams.get("title")?.trim() || undefined;
+  const personId = parsePositiveIntParam(searchParams.get("person"));
+  const profileId = searchParams.get("profile")?.trim() || undefined;
+  return {
+    titleId,
+    person: personId ? { userId: personId, profileId } : undefined,
   };
 }
 
 export interface HistoryDrilldownParams {
   userId?: number | string;
   profileId?: string;
+  mediaItemId?: string;
+  seriesId?: string;
   libraryId?: number | string;
   playMethod?: string;
   clientName?: string;
@@ -118,6 +152,8 @@ export function buildHistoryDrilldownHref(params: HistoryDrilldownParams): strin
   const query = new URLSearchParams();
   if (params.userId) query.set("user_id", String(params.userId));
   if (params.profileId) query.set("profile_id", params.profileId);
+  if (params.mediaItemId) query.set("media_item_id", params.mediaItemId);
+  if (params.seriesId) query.set("series_id", params.seriesId);
   if (params.libraryId) query.set("library_id", String(params.libraryId));
   if (params.playMethod) query.set("play_method", params.playMethod);
   if (params.clientName) query.set("client_name", params.clientName);
@@ -143,6 +179,11 @@ export function formatRatePercentNumber(rate: number | null | undefined): string
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   });
+}
+
+/** A plural count message such as "3 plays", with the number in the app locale's digits. */
+export function formatInsightsCount(t: Translate, key: MessageKey, count: number): string {
+  return t(key, { count, count_text: count.toLocaleString(formatLocale()) });
 }
 
 export function formatShortCalendarDate(isoOrDate: string | null | undefined): string {
@@ -241,6 +282,43 @@ export function buildActivityBucketGrid(
     }
   }
   return out;
+}
+
+/**
+ * "Oct 26, 2026 – Nov 24, 2026" for a response window `[fromIso, toIso)`, as
+ * calendar dates in the window's own time zone, not the browser's.
+ */
+export function formatInsightsWindowDates(
+  fromIso: string,
+  toIso: string,
+  tz: string,
+): { from: string; to: string } {
+  const endMs = Date.parse(toIso);
+  const lastIso = Number.isFinite(endMs) ? new Date(endMs - 1).toISOString() : toIso;
+  return {
+    from: formatShortCalendarDate(isoCalendarDateInTz(fromIso, tz) ?? fromIso),
+    to: formatShortCalendarDate(isoCalendarDateInTz(lastIso, tz) ?? lastIso),
+  };
+}
+
+/**
+ * The Insights page URL with some parameters set or (null) removed, keeping the
+ * rest: tab, window, filters, and any open detail panel.
+ */
+export function insightsHrefWith(
+  current: URLSearchParams,
+  patch: Record<string, string | null>,
+): string {
+  const next = new URLSearchParams(current);
+  for (const [key, value] of Object.entries(patch)) {
+    if (value === null || value === "") {
+      next.delete(key);
+    } else {
+      next.set(key, value);
+    }
+  }
+  const qs = next.toString();
+  return qs ? `/admin/insights?${qs}` : "/admin/insights";
 }
 
 /** Formats a UTC calendar timestamp (`YYYY-MM-DD` midnight UTC) cleanly without browser-TZ shift. */

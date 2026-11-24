@@ -17,11 +17,13 @@ import (
 	"github.com/Silo-Server/silo-server/internal/playback"
 )
 
-const (
-	insightsPlayDirectSQL    = `h.play_method IN ('direct', 'direct_play')`
-	insightsPlayRemuxSQL     = `h.play_method IN ('remux', 'direct_stream')`
-	insightsPlayTranscodeSQL = `h.play_method = 'transcode'`
+var (
+	insightsPlayDirectSQL    = insightsDirectSQL("h.play_method")
+	insightsPlayRemuxSQL     = insightsRemuxSQL("h.play_method")
+	insightsPlayTranscodeSQL = insightsTranscodeSQL("h.play_method")
+)
 
+const (
 	insightsSortWatchTime     = "watch_time"
 	insightsSortPlays         = "plays"
 	insightsSortDirectPct     = "direct_pct"
@@ -38,7 +40,10 @@ func roundInsightsRate(num, den int64) float64 {
 	return math.Round(float64(num)/float64(den)*10000) / 10000
 }
 
-func buildInsightsHistoryWhere(win resolvedInsightsWindow, libraryID, userID int) (whereSQL string, args []any) {
+// buildInsightsHistoryWhere filters sessions (not plays) that started in the
+// window, for the session-based reads: Devices, Bandwidth's location share and
+// the People top client. Play counts use insightsPlaysScope instead.
+func buildInsightsHistoryWhere(win resolvedInsightsWindow, libraryID, userID int, profileID string) (whereSQL string, args []any) {
 	var conds []string
 	if !win.AllTime {
 		args = append(args, win.From)
@@ -50,10 +55,14 @@ func buildInsightsHistoryWhere(win resolvedInsightsWindow, libraryID, userID int
 		args = append(args, userID)
 		conds = append(conds, fmt.Sprintf("h.user_id = $%d", len(args)))
 	}
+	if profileID = strings.TrimSpace(profileID); profileID != "" {
+		args = append(args, profileID)
+		conds = append(conds, fmt.Sprintf("h.profile_id = $%d", len(args)))
+	}
 	if libraryID > 0 {
 		args = append(args, libraryID)
-		p := len(args)
-		conds = append(conds, fmt.Sprintf(`(mf.media_folder_id = $%d OR (mf.id IS NULL AND EXISTS (SELECT 1 FROM media_item_libraries mil WHERE mil.content_id = COALESCE(ep.series_id, h.media_item_id) AND mil.media_folder_id = $%d)))`, p, p))
+		conds = append(conds, fmt.Sprintf("%s = $%d",
+			insightsLibraryAttributionSQL("mf.media_folder_id", "mf.id", "COALESCE(ep.series_id, h.media_item_id)"), len(args)))
 	}
 	return strings.Join(conds, " AND "), args
 }
@@ -211,7 +220,10 @@ func queryAdminInsightsActivity(ctx context.Context, pool *pgxpool.Pool, q Admin
 	if pool == nil {
 		return nil, ErrAdminDashboardUnavailable
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err := validateInsightsScope(q); err != nil {
+		return nil, err
+	}
+	tx, err := beginInsightsPlaysRead(ctx, pool)
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights activity read: %w", err)
 	}
@@ -226,7 +238,6 @@ func queryAdminInsightsActivity(ctx context.Context, pool *pgxpool.Pool, q Admin
 		return nil, err
 	}
 	resolveAllTimeBounds(&win, earlierTimePtr(oldestHist, oldestMetric))
-	whereSQL, whereArgs := buildInsightsHistoryWhere(win, q.LibraryID, q.UserID)
 
 	out := &AdminInsightsActivity{
 		From: win.From, To: win.To, TZ: win.TZ, BucketUnit: win.BucketUnit,
@@ -237,13 +248,7 @@ func queryAdminInsightsActivity(ctx context.Context, pool *pgxpool.Pool, q Admin
 		Buckets: make([]AdminInsightsActivityBucket, 0), Heatmap: make([]AdminInsightsHeatmapCell, 0),
 		PeakStreams: make([]AdminInsightsPeakStreamsPoint, 0),
 	}
-	if err := queryInsightsActivitySummary(ctx, tx, whereSQL, whereArgs, out); err != nil {
-		return nil, err
-	}
-	if err := queryInsightsActivityBuckets(ctx, tx, win, whereSQL, whereArgs, out); err != nil {
-		return nil, err
-	}
-	if err := queryInsightsActivityHeatmap(ctx, tx, win, q.LibraryID, whereSQL, whereArgs, out); err != nil {
+	if err := queryInsightsActivityPlays(ctx, tx, win, newInsightsPlaysScope(win, q), out); err != nil {
 		return nil, err
 	}
 	if err := queryInsightsActivityPeakStreams(ctx, tx, win, dbNow, out); err != nil {
@@ -255,124 +260,91 @@ func queryAdminInsightsActivity(ctx context.Context, pool *pgxpool.Pool, q Admin
 	return out, nil
 }
 
-func queryInsightsActivitySummary(ctx context.Context, tx pgx.Tx, whereSQL string, whereArgs []any, out *AdminInsightsActivity) error {
-	watchSQL := adminPlaybackWatchTimeSQL("h")
-	var watchSecF, measuredWatchSecF float64
-	err := tx.QueryRow(ctx, `
-		SELECT
-			COUNT(*)::bigint,
-			COUNT(*) FILTER (WHERE ep.content_id IS NULL AND mi.type = 'movie')::bigint,
-			COUNT(*) FILTER (WHERE ep.content_id IS NOT NULL)::bigint,
-			COUNT(*) FILTER (WHERE ep.content_id IS NULL AND COALESCE(mi.type, '') <> 'movie')::bigint,
-			COALESCE(SUM(`+watchSQL+`), 0)::double precision,
-			COALESCE(SUM(CASE WHEN h.measured THEN h.played_seconds ELSE 0 END), 0)::double precision,
-			COUNT(*) FILTER (WHERE h.measured)::bigint,
-			COUNT(*) FILTER (WHERE h.route_facts_recorded)::bigint,
-			COUNT(*) FILTER (WHERE h.completed)::bigint,
-			COUNT(*) FILTER (WHERE `+insightsPlayDirectSQL+`)::bigint,
-			COUNT(*) FILTER (WHERE `+insightsPlayRemuxSQL+`)::bigint,
-			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+`)::bigint,
-			COUNT(DISTINCT h.user_id)::bigint,
-			COUNT(DISTINCT (h.user_id::text || ':' || h.profile_id))::bigint
-		FROM admin_playback_history h
-		LEFT JOIN media_items mi ON mi.content_id = h.media_item_id
-		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
-		LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
-		WHERE `+whereSQL, whereArgs...).Scan(
-		&out.Summary.Plays, &out.Summary.Movies, &out.Summary.Episodes, &out.Summary.OtherMedia,
-		&watchSecF, &measuredWatchSecF, &out.Summary.MeasuredPlays, &out.Coverage.RouteFactsPlays,
-		&out.Summary.CompletedPlays, &out.Summary.DirectPlays, &out.Summary.RemuxPlays, &out.Summary.TranscodePlays,
-		&out.Summary.UniqueAccounts, &out.Summary.UniqueProfiles,
-	)
-	if err != nil {
-		return fmt.Errorf("querying insights activity summary: %w", err)
-	}
-	out.Summary.WatchSeconds = int64(math.Round(watchSecF))
-	out.Summary.MeasuredWatchSeconds = int64(math.Round(measuredWatchSecF))
-	out.Summary.CompletionRate = roundInsightsRate(out.Summary.CompletedPlays, out.Summary.Plays)
-	out.Coverage.TotalPlays = out.Summary.Plays
-	out.Coverage.MeasuredPlays = out.Summary.MeasuredPlays
-	return nil
-}
-
-func queryInsightsActivityBuckets(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, whereSQL string, whereArgs []any, out *AdminInsightsActivity) error {
-	watchSQL := adminPlaybackWatchTimeSQL("h")
-	args := append(append([]any(nil), whereArgs...), win.BucketUnit, win.TZ)
+// insightsActivityPlaysSQL is the statement behind queryInsightsActivityPlays:
+// the summary, the time buckets and the heatmap over one materialized pass of
+// the viewing grouping. The buckets and heatmap hash-aggregate; only the
+// summary row needs the distinct account and profile counts, which sort.
+func insightsActivityPlaysSQL(win resolvedInsightsWindow, scope insightsPlaysScope) (string, []any) {
+	var args []any
+	with, counted := scope.viewingRowsSQL(&args)
+	args = append(args, win.BucketUnit, win.TZ)
 	unitParam, tzParam := len(args)-1, len(args)
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		WITH local_rows AS (
-			SELECT
-				date_trunc($%d, h.started_at AT TIME ZONE $%d) AS local_bucket,
-				h.play_method,
-				(%s) AS watch_sec,
-				(ep.content_id IS NOT NULL) AS is_episode,
-				(ep.content_id IS NULL AND COALESCE(mi.type, '') = 'movie') AS is_movie
-			FROM admin_playback_history h
-			LEFT JOIN media_items mi ON mi.content_id = h.media_item_id
-			LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
-			LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
-			WHERE %s
+	aggregates := fmt.Sprintf(`
+			COUNT(*) FILTER (WHERE is_play)::bigint,
+			COUNT(*)::bigint,
+			COUNT(*) FILTER (WHERE is_play AND NOT is_episode AND item_type = 'movie')::bigint,
+			COUNT(*) FILTER (WHERE is_play AND is_episode)::bigint,
+			COUNT(*) FILTER (WHERE is_play AND NOT is_episode AND COALESCE(item_type, '') <> 'movie')::bigint,
+			COALESCE(SUM(watch_sec), 0)::double precision,
+			COALESCE(SUM(CASE WHEN measured THEN played_seconds ELSE 0 END), 0)::double precision,
+			COUNT(*) FILTER (WHERE measured)::bigint,
+			COUNT(*) FILTER (WHERE route_facts_recorded)::bigint,
+			COUNT(*) FILTER (WHERE is_play AND viewing_completed)::bigint,
+			COUNT(*) FILTER (WHERE is_play AND %s)::bigint,
+			COUNT(*) FILTER (WHERE is_play AND %s)::bigint,
+			COUNT(*) FILTER (WHERE is_play AND %s)::bigint`,
+		insightsDirectSQL("viewing_play_method"), insightsRemuxSQL("viewing_play_method"), insightsTranscodeSQL("viewing_play_method"))
+	return with + fmt.Sprintf(`,
+		counted AS MATERIALIZED (
+			SELECT vr.user_id, vr.profile_id, vr.is_episode, vr.item_type, vr.watch_sec, vr.measured,
+				vr.played_seconds, vr.route_facts_recorded, vr.viewing_completed, vr.viewing_play_method,
+				%[1]s AS is_play,
+				date_trunc($%[2]d, vr.started_at AT TIME ZONE $%[3]d) AS local_bucket,
+				(EXTRACT(ISODOW FROM (vr.started_at AT TIME ZONE $%[3]d))::int - 1) AS dow,
+				EXTRACT(HOUR FROM (vr.started_at AT TIME ZONE $%[3]d))::int AS hour
+			FROM vr WHERE %[4]s
 		)
-		SELECT
-			(local_bucket AT TIME ZONE $%d) AS bucket_start,
-			to_char(local_bucket, 'YYYY-MM-DD') AS label_date,
-			COUNT(*)::bigint AS plays,
-			COALESCE(SUM(watch_sec), 0)::double precision AS watch_seconds,
-			COUNT(*) FILTER (WHERE play_method IN ('direct', 'direct_play'))::bigint AS direct,
-			COUNT(*) FILTER (WHERE play_method IN ('remux', 'direct_stream'))::bigint AS remux,
-			COUNT(*) FILTER (WHERE play_method = 'transcode')::bigint AS transcode,
-			COUNT(*) FILTER (WHERE is_movie)::bigint AS movies,
-			COUNT(*) FILTER (WHERE is_episode)::bigint AS episodes,
-			COUNT(*) FILTER (WHERE NOT is_movie AND NOT is_episode)::bigint AS other_media
-		FROM local_rows
-		GROUP BY local_bucket
-		ORDER BY local_bucket ASC
-	`, unitParam, tzParam, watchSQL, whereSQL, tzParam), args...)
-	if err != nil {
-		return fmt.Errorf("querying insights activity buckets: %w", err)
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var b AdminInsightsActivityBucket
-		var ws float64
-		if err := rows.Scan(&b.BucketStart, &b.LabelDate, &b.Plays, &ws, &b.Direct, &b.Remux, &b.Transcode, &b.Movies, &b.Episodes, &b.OtherMedia); err != nil {
-			return fmt.Errorf("scanning insights activity bucket: %w", err)
-		}
-		b.BucketStart = b.BucketStart.UTC()
-		b.WatchSeconds = int64(math.Round(ws))
-		out.Buckets = append(out.Buckets, b)
-	}
-	return rows.Err()
+		SELECT 1, 3, NULL::timestamptz, '', 0, 0, %[5]s,
+			COUNT(DISTINCT user_id)::bigint, COUNT(DISTINCT (user_id, profile_id))::bigint
+		FROM counted
+		UNION ALL
+		SELECT 0, 3, local_bucket AT TIME ZONE $%[3]d, to_char(local_bucket, 'YYYY-MM-DD'), 0, 0, %[5]s, 0::bigint, 0::bigint
+		FROM counted GROUP BY local_bucket
+		UNION ALL
+		SELECT 1, 0, NULL::timestamptz, '', dow, hour, %[5]s, 0::bigint, 0::bigint
+		FROM counted GROUP BY dow, hour
+		ORDER BY 1, 2, 3, 5, 6
+	`, insightsIsPlaySQL("vr"), unitParam, tzParam, counted, aggregates), args
 }
 
-func queryInsightsActivityHeatmap(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, libraryID int, whereSQL string, whereArgs []any, out *AdminInsightsActivity) error {
-	watchSQL := adminPlaybackWatchTimeSQL("h")
-	args := append(append([]any(nil), whereArgs...), win.TZ)
-	tzParam := len(args)
-	rows, err := tx.Query(ctx, fmt.Sprintf(`
-		SELECT
-			(EXTRACT(ISODOW FROM (h.started_at AT TIME ZONE $%d))::int - 1) AS dow,
-			EXTRACT(HOUR FROM (h.started_at AT TIME ZONE $%d))::int AS hour,
-			COUNT(*)::bigint AS plays,
-			COALESCE(SUM(%s), 0)::double precision AS watch_seconds
-		FROM admin_playback_history h
-		%s
-		WHERE %s
-		GROUP BY 1, 2
-		ORDER BY 1, 2
-	`, tzParam, tzParam, watchSQL, insightsLibraryJoinSQL(libraryID), whereSQL), args...)
+// queryInsightsActivityPlays reads the summary, the time buckets and the
+// heatmap in one statement, so the viewing grouping runs once per read.
+func queryInsightsActivityPlays(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, scope insightsPlaysScope, out *AdminInsightsActivity) error {
+	query, args := insightsActivityPlaysSQL(win, scope)
+	rows, err := tx.Query(ctx, query, args...)
 	if err != nil {
-		return fmt.Errorf("querying insights heatmap: %w", err)
+		return fmt.Errorf("querying insights activity: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var cell AdminInsightsHeatmapCell
-		var ws float64
-		if err := rows.Scan(&cell.DayOfWeek, &cell.Hour, &cell.Plays, &ws); err != nil {
-			return fmt.Errorf("scanning insights heatmap cell: %w", err)
+		var gBucket, gCell, dow, hour int
+		var bucketStart *time.Time
+		var label string
+		var plays, sessions, movies, episodes, other, measured, routeFacts, completed, direct, remux, transcode, accounts, profiles int64
+		var watchSec, measuredWatchSec float64
+		if err := rows.Scan(&gBucket, &gCell, &bucketStart, &label, &dow, &hour,
+			&plays, &sessions, &movies, &episodes, &other, &watchSec, &measuredWatchSec, &measured, &routeFacts,
+			&completed, &direct, &remux, &transcode, &accounts, &profiles); err != nil {
+			return fmt.Errorf("scanning insights activity: %w", err)
 		}
-		cell.WatchSeconds = int64(math.Round(ws))
-		out.Heatmap = append(out.Heatmap, cell)
+		watch := int64(math.Round(watchSec))
+		switch {
+		case gBucket == 0 && bucketStart != nil:
+			out.Buckets = append(out.Buckets, AdminInsightsActivityBucket{
+				BucketStart: bucketStart.UTC(), LabelDate: label, Plays: plays, WatchSeconds: watch,
+				Direct: direct, Remux: remux, Transcode: transcode, Movies: movies, Episodes: episodes, OtherMedia: other,
+			})
+		case gCell == 0:
+			out.Heatmap = append(out.Heatmap, AdminInsightsHeatmapCell{DayOfWeek: dow, Hour: hour, Plays: plays, WatchSeconds: watch})
+		default:
+			sum := &out.Summary
+			sum.Plays, sum.Sessions, sum.Movies, sum.Episodes, sum.OtherMedia = plays, sessions, movies, episodes, other
+			sum.WatchSeconds, sum.MeasuredWatchSeconds = watch, int64(math.Round(measuredWatchSec))
+			sum.CompletedPlays, sum.CompletionRate = completed, roundInsightsRate(completed, plays)
+			sum.DirectPlays, sum.RemuxPlays, sum.TranscodePlays = direct, remux, transcode
+			sum.UniqueAccounts, sum.UniqueProfiles = accounts, profiles
+			out.Coverage.TotalSessions, out.Coverage.MeasuredSessions, out.Coverage.RouteFactsSessions = sessions, measured, routeFacts
+		}
 	}
 	return rows.Err()
 }
@@ -417,7 +389,7 @@ func queryAdminInsightsPeopleSnapshot(ctx context.Context, pool *pgxpool.Pool, q
 	if pool == nil {
 		return nil, ErrAdminDashboardUnavailable
 	}
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	tx, err := beginInsightsPlaysRead(ctx, pool)
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights people read: %w", err)
 	}
@@ -432,7 +404,9 @@ func queryAdminInsightsPeopleSnapshot(ctx context.Context, pool *pgxpool.Pool, q
 		return nil, err
 	}
 	resolveAllTimeBounds(&win, oldestHist)
-	whereSQL, whereArgs := buildInsightsHistoryWhere(win, q.LibraryID, 0)
+	// People covers every account; it takes no account or profile filter.
+	scope := newInsightsPlaysScope(win, AdminInsightsWindowQuery{LibraryID: q.LibraryID})
+	whereSQL, whereArgs := buildInsightsHistoryWhere(win, q.LibraryID, 0, "")
 
 	out := &AdminInsightsPeople{
 		From: win.From, To: win.To, TZ: win.TZ,
@@ -448,7 +422,7 @@ func queryAdminInsightsPeopleSnapshot(ctx context.Context, pool *pgxpool.Pool, q
 		return nil, err
 	}
 	out.LiveAccounts = int64(len(liveUsers))
-	byUser, err := queryInsightsPeopleProfiles(ctx, tx, whereSQL, whereArgs, liveUsers, liveProfiles, out)
+	byUser, err := queryInsightsPeopleProfiles(ctx, tx, scope, liveUsers, liveProfiles, out)
 	if err != nil {
 		return nil, err
 	}
@@ -524,59 +498,66 @@ func queryInsightsLiveUsers(ctx context.Context, tx pgx.Tx, libraryID int) (map[
 	return liveUsers, liveProfiles, rows.Err()
 }
 
-func insightsPeopleProfilesSQL(whereSQL string) string {
-	watchSQL := adminPlaybackWatchTimeSQL("h")
-	return `
-		WITH grouped AS (
+// insightsPeopleProfilesSQL groups the window's sessions by profile. A
+// profile appears when it has any session in the window; its play counts may
+// be zero when it only continued a viewing begun before the window.
+func insightsPeopleProfilesSQL(with, counted string) string {
+	return with + `,
+		counted AS (
+			SELECT vr.*, ` + insightsIsPlaySQL("vr") + ` AS is_play FROM vr WHERE ` + counted + `
+		),
+		grouped AS (
 			SELECT
-				h.user_id, h.profile_id,
-				COUNT(*)::bigint AS plays,
-				COUNT(*) FILTER (WHERE ep.content_id IS NULL AND mi.type = 'movie')::bigint AS movies,
-				COUNT(*) FILTER (WHERE ep.content_id IS NOT NULL)::bigint AS episodes,
-				COALESCE(SUM(` + watchSQL + `), 0)::double precision AS watch_seconds,
-				COUNT(*) FILTER (WHERE h.measured)::bigint AS measured_plays,
-				COUNT(*) FILTER (WHERE h.route_facts_recorded)::bigint AS route_facts_plays,
-				COUNT(*) FILTER (WHERE ` + insightsPlayDirectSQL + `)::bigint AS direct_plays,
-				COUNT(*) FILTER (WHERE ` + insightsPlayRemuxSQL + `)::bigint AS remux_plays,
-				COUNT(*) FILTER (WHERE ` + insightsPlayTranscodeSQL + `)::bigint AS transcode_plays,
-				COUNT(*) FILTER (WHERE h.completed)::bigint AS completed_plays,
-				MAX(h.ended_at) AS last_seen_at
-			FROM admin_playback_history h
-			LEFT JOIN media_items mi ON mi.content_id = h.media_item_id
-			LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
-			LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
-			WHERE ` + whereSQL + `
-			GROUP BY h.user_id, h.profile_id
+				user_id, profile_id,
+				COUNT(*) FILTER (WHERE is_play)::bigint AS plays,
+				COUNT(*)::bigint AS sessions,
+				COUNT(*) FILTER (WHERE is_play AND NOT is_episode AND item_type = 'movie')::bigint AS movies,
+				COUNT(*) FILTER (WHERE is_play AND is_episode)::bigint AS episodes,
+				COALESCE(SUM(watch_sec), 0)::double precision AS watch_seconds,
+				COUNT(*) FILTER (WHERE measured)::bigint AS measured_sessions,
+				COUNT(*) FILTER (WHERE route_facts_recorded)::bigint AS route_facts_sessions,
+				COUNT(*) FILTER (WHERE is_play AND ` + insightsDirectSQL("viewing_play_method") + `)::bigint AS direct_plays,
+				COUNT(*) FILTER (WHERE is_play AND ` + insightsRemuxSQL("viewing_play_method") + `)::bigint AS remux_plays,
+				COUNT(*) FILTER (WHERE is_play AND ` + insightsTranscodeSQL("viewing_play_method") + `)::bigint AS transcode_plays,
+				COUNT(*) FILTER (WHERE is_play AND viewing_completed)::bigint AS completed_plays,
+				MAX(ended_at) AS last_seen_at
+			FROM counted
+			GROUP BY user_id, profile_id
 		)
 		SELECT
 			g.user_id, COALESCE(u.username, ''), COALESCE(u.role, ''),
 			g.profile_id, COALESCE(pn.profile_name, g.profile_id),
-			g.plays, g.movies, g.episodes, g.watch_seconds,
-			g.measured_plays, g.route_facts_plays,
+			g.plays, g.sessions, g.movies, g.episodes, g.watch_seconds,
+			g.measured_sessions, g.route_facts_sessions,
 			g.direct_plays, g.remux_plays, g.transcode_plays, g.completed_plays,
 			g.last_seen_at
 		FROM grouped g
 		LEFT JOIN users u ON u.id = g.user_id
-		LEFT JOIN LATERAL (
-			SELECT p.profile_name
-			FROM admin_playback_history p
-			WHERE p.user_id = g.user_id AND p.profile_id = g.profile_id AND p.profile_name <> ''
-			ORDER BY p.ended_at DESC
-			LIMIT 1
-		) pn ON TRUE
+		LEFT JOIN LATERAL (` + insightsProfileNameSQL("g") + `) pn ON TRUE
 	`
+}
+
+// insightsProfileNameSQL reads a profile's latest recorded display name from
+// history: profile names live in the per-user stores, not in Postgres.
+func insightsProfileNameSQL(alias string) string {
+	return `SELECT p.profile_name
+		FROM admin_playback_history p
+		WHERE p.user_id = ` + alias + `.user_id AND p.profile_id = ` + alias + `.profile_id AND p.profile_name <> ''
+		ORDER BY p.ended_at DESC
+		LIMIT 1`
 }
 
 func queryInsightsPeopleProfiles(
 	ctx context.Context,
 	tx pgx.Tx,
-	whereSQL string,
-	whereArgs []any,
+	scope insightsPlaysScope,
 	liveUsers map[int]bool,
 	liveProfiles map[string]bool,
 	out *AdminInsightsPeople,
 ) (map[int]*AdminInsightsPersonAccount, error) {
-	rows, err := tx.Query(ctx, insightsPeopleProfilesSQL(whereSQL), whereArgs...)
+	var args []any
+	with, counted := scope.viewingRowsSQL(&args)
+	rows, err := tx.Query(ctx, insightsPeopleProfilesSQL(with, counted), args...)
 	if err != nil {
 		return nil, fmt.Errorf("querying insights people: %w", err)
 	}
@@ -586,12 +567,12 @@ func queryInsightsPeopleProfiles(
 	for rows.Next() {
 		var uid int
 		var username, role, profileID, profileName string
-		var plays, movies, episodes, measuredPlays, routePlays, direct, remux, transcode, completed int64
+		var plays, sessions, movies, episodes, measured, routeFacts, direct, remux, transcode, completed int64
 		var watchSecF float64
 		var lastSeen *time.Time
 		if err := rows.Scan(
 			&uid, &username, &role, &profileID, &profileName,
-			&plays, &movies, &episodes, &watchSecF, &measuredPlays, &routePlays,
+			&plays, &sessions, &movies, &episodes, &watchSecF, &measured, &routeFacts,
 			&direct, &remux, &transcode, &completed, &lastSeen,
 		); err != nil {
 			return nil, fmt.Errorf("scanning insights person profile: %w", err)
@@ -599,9 +580,9 @@ func queryInsightsPeopleProfiles(
 		lastSeen = normalizeTimePtrUTC(lastSeen)
 		watchSec := int64(math.Round(watchSecF))
 
-		out.Coverage.TotalPlays += plays
-		out.Coverage.MeasuredPlays += measuredPlays
-		out.Coverage.RouteFactsPlays += routePlays
+		out.Coverage.TotalSessions += sessions
+		out.Coverage.MeasuredSessions += measured
+		out.Coverage.RouteFactsSessions += routeFacts
 		out.ActiveProfiles++
 		out.TotalWatchSeconds += watchSec
 
@@ -617,10 +598,11 @@ func queryInsightsPeopleProfiles(
 			byUser[uid] = acc
 		}
 		acc.Plays += plays
+		acc.Sessions += sessions
 		acc.Movies += movies
 		acc.Episodes += episodes
 		acc.WatchSeconds += watchSec
-		acc.MeasuredPlays += measuredPlays
+		acc.MeasuredSessions += measured
 		acc.DirectPlays += direct
 		acc.RemuxPlays += remux
 		acc.TranscodePlays += transcode
@@ -630,7 +612,7 @@ func queryInsightsPeopleProfiles(
 		}
 		acc.Profiles = append(acc.Profiles, AdminInsightsPersonProfile{
 			ProfileID: profileID, ProfileName: profileName, IsLive: liveProfiles[strconv.Itoa(uid)+":"+profileID],
-			Plays: plays, WatchSeconds: watchSec, MeasuredPlays: measuredPlays,
+			Plays: plays, Sessions: sessions, WatchSeconds: watchSec, MeasuredSessions: measured,
 			DirectPlays: direct, RemuxPlays: remux, TranscodePlays: transcode,
 			CompletedPlays: completed, CompletionRate: roundInsightsRate(completed, plays), LastSeenAt: lastSeen,
 		})
@@ -686,7 +668,7 @@ func finalizeInsightsPeopleAccounts(byUser map[int]*AdminInsightsPersonAccount, 
 	searchLower := strings.ToLower(strings.TrimSpace(search))
 	allAccounts := make([]AdminInsightsPersonAccount, 0, len(byUser))
 	for _, acc := range byUser {
-		acc.MeasuredShare = roundInsightsRate(acc.MeasuredPlays, acc.Plays)
+		acc.MeasuredShare = roundInsightsRate(acc.MeasuredSessions, acc.Sessions)
 		acc.DirectRate = roundInsightsRate(acc.DirectPlays, acc.Plays)
 		acc.CompletionRate = roundInsightsRate(acc.CompletedPlays, acc.Plays)
 		slices.SortFunc(acc.Profiles, func(a, b AdminInsightsPersonProfile) int {
@@ -771,6 +753,9 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 	if pool == nil {
 		return nil, ErrAdminDashboardUnavailable
 	}
+	if err := validateInsightsScope(q.AdminInsightsWindowQuery); err != nil {
+		return nil, err
+	}
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
 	if err != nil {
 		return nil, fmt.Errorf("beginning insights devices read: %w", err)
@@ -786,7 +771,7 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 		return nil, err
 	}
 	resolveAllTimeBounds(&win, oldestHist)
-	whereSQL, whereArgs := buildInsightsHistoryWhere(win, q.LibraryID, q.UserID)
+	whereSQL, whereArgs := buildInsightsHistoryWhere(win, q.LibraryID, q.UserID, q.ProfileID)
 
 	out := &AdminInsightsDevices{
 		From: win.From, To: win.To, TZ: win.TZ,
@@ -798,18 +783,23 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 		AdaptationReasons: make([]AdminInsightsAdaptationReason, 0),
 		HWAccelBreakdown:  make([]AdminInsightsLabeledCount, 0), ToneMapBreakdown: make([]AdminInsightsLabeledCount, 0),
 		SubtitleBurnInCodecs: make([]AdminInsightsLabeledCount, 0),
+		SourceResolutions:    make([]AdminInsightsLabeledCount, 0), DeliveredResolutions: make([]AdminInsightsLabeledCount, 0),
+		ResolutionChanges: make([]AdminInsightsResolutionChange, 0),
 	}
 
 	if err := queryInsightsDevicesSummary(ctx, tx, whereSQL, whereArgs, out); err != nil {
 		return nil, err
 	}
-	if err := queryInsightsClientCodecMatrix(ctx, tx, whereSQL, whereArgs, clampInsightsMinPlays(q.MinPlays), out); err != nil {
+	if err := queryInsightsClientCodecMatrix(ctx, tx, whereSQL, whereArgs, clampInsightsMinSessions(q.MinSessions), out); err != nil {
 		return nil, err
 	}
 	if err := queryInsightsAdaptationReasons(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
 		return nil, err
 	}
 	if err := queryInsightsDevicesBreakdowns(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
+		return nil, err
+	}
+	if err := queryInsightsResolutions(ctx, tx, whereSQL, whereArgs, out); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -837,32 +827,32 @@ func queryInsightsDevicesSummary(ctx context.Context, tx pgx.Tx, whereSQL string
 		LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
 		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
 		WHERE `+whereSQL, whereArgs...).Scan(
-		&out.Summary.TotalPlays, &out.Coverage.MeasuredPlays, &out.Summary.RouteFactsPlays,
-		&out.Summary.DirectPlays, &out.Summary.RemuxPlays, &out.Summary.TranscodePlays,
-		&out.Summary.HWTranscodePlays, &out.Summary.SWTranscodePlays,
-		&out.Summary.SubtitleBurnInPlays, &out.Summary.HDRToneMapPlays,
-		&out.Summary.HDRToneMapHWPlays, &out.Summary.HDRToneMapSWPlays,
+		&out.Summary.TotalSessions, &out.Coverage.MeasuredSessions, &out.Summary.RouteFactsSessions,
+		&out.Summary.DirectSessions, &out.Summary.RemuxSessions, &out.Summary.TranscodeSessions,
+		&out.Summary.HWTranscodeSessions, &out.Summary.SWTranscodeSessions,
+		&out.Summary.SubtitleBurnInSessions, &out.Summary.HDRToneMapSessions,
+		&out.Summary.HDRToneMapHWSessions, &out.Summary.HDRToneMapSWSessions,
 	)
 	if err != nil {
 		return fmt.Errorf("querying insights devices summary: %w", err)
 	}
-	out.Summary.DirectRate = roundInsightsRate(out.Summary.DirectPlays, out.Summary.TotalPlays)
-	out.Coverage.TotalPlays = out.Summary.TotalPlays
-	out.Coverage.RouteFactsPlays = out.Summary.RouteFactsPlays
+	out.Summary.DirectRate = roundInsightsRate(out.Summary.DirectSessions, out.Summary.TotalSessions)
+	out.Coverage.TotalSessions = out.Summary.TotalSessions
+	out.Coverage.RouteFactsSessions = out.Summary.RouteFactsSessions
 	return nil
 }
 
-func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL string, whereArgs []any, minPlays int, out *AdminInsightsDevices) error {
+func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL string, whereArgs []any, minSessions int, out *AdminInsightsDevices) error {
 	rows, err := tx.Query(ctx, `
 		SELECT
 			COALESCE(MIN(NULLIF(BTRIM(h.client_name), '')), 'Unknown') AS client_name,
 			COALESCE(MIN(NULLIF(BTRIM(h.device_platform), '')), 'Unknown') AS device_platform,
 			LOWER(COALESCE(NULLIF(BTRIM(mf.codec_video), ''), 'unknown')) AS source_codec,
 			BOOL_OR(COALESCE(h.compat_origin, FALSE)) AS compat_origin,
-			COUNT(*)::bigint AS plays,
-			COUNT(*) FILTER (WHERE `+insightsPlayDirectSQL+`)::bigint AS direct_plays,
-			COUNT(*) FILTER (WHERE `+insightsPlayRemuxSQL+`)::bigint AS remux_plays,
-			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+`)::bigint AS transcode_plays
+			COUNT(*)::bigint AS sessions,
+			COUNT(*) FILTER (WHERE `+insightsPlayDirectSQL+`)::bigint AS direct_sessions,
+			COUNT(*) FILTER (WHERE `+insightsPlayRemuxSQL+`)::bigint AS remux_sessions,
+			COUNT(*) FILTER (WHERE `+insightsPlayTranscodeSQL+`)::bigint AS transcode_sessions
 		FROM admin_playback_history h
 		LEFT JOIN media_files mf ON mf.id = COALESCE(h.effective_media_file_id, h.media_file_id)
 		LEFT JOIN episodes ep ON ep.content_id = h.media_item_id
@@ -882,8 +872,8 @@ func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL str
 	for rows.Next() {
 		var clientName, platform, codec string
 		var compatOrigin bool
-		var plays, direct, remux, transcode int64
-		if err := rows.Scan(&clientName, &platform, &codec, &compatOrigin, &plays, &direct, &remux, &transcode); err != nil {
+		var sessions, direct, remux, transcode int64
+		if err := rows.Scan(&clientName, &platform, &codec, &compatOrigin, &sessions, &direct, &remux, &transcode); err != nil {
 			return fmt.Errorf("scanning insights client codec matrix: %w", err)
 		}
 		k := matrixKey{client: strings.ToLower(clientName), platform: strings.ToLower(platform)}
@@ -898,13 +888,13 @@ func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL str
 		} else {
 			mergeMatrixRowIdentity(row, clientName, platform, compatOrigin)
 		}
-		row.TotalPlays += plays
-		row.DirectPlays += direct
-		row.RemuxPlays += remux
-		row.TranscodePlays += transcode
+		row.TotalSessions += sessions
+		row.DirectSessions += direct
+		row.RemuxSessions += remux
+		row.TranscodeSessions += transcode
 		row.Cells = append(row.Cells, AdminInsightsClientCodecCell{
-			SourceVideoCodec: codec, Plays: plays, DirectPlays: direct,
-			RemuxPlays: remux, TranscodePlays: transcode, DirectRate: roundInsightsRate(direct, plays),
+			SourceVideoCodec: codec, Sessions: sessions, DirectSessions: direct,
+			RemuxSessions: remux, TranscodeSessions: transcode, DirectRate: roundInsightsRate(direct, sessions),
 		})
 	}
 	if err := rows.Err(); err != nil {
@@ -913,12 +903,12 @@ func queryInsightsClientCodecMatrix(ctx context.Context, tx pgx.Tx, whereSQL str
 
 	codecTotals := make(map[string]int64)
 	for _, row := range rowMap {
-		if row.TotalPlays < int64(minPlays) {
+		if row.TotalSessions < int64(minSessions) {
 			continue
 		}
-		row.DirectRate = roundInsightsRate(row.DirectPlays, row.TotalPlays)
+		row.DirectRate = roundInsightsRate(row.DirectSessions, row.TotalSessions)
 		for _, cell := range row.Cells {
-			codecTotals[cell.SourceVideoCodec] += cell.Plays
+			codecTotals[cell.SourceVideoCodec] += cell.Sessions
 		}
 		out.Matrix = append(out.Matrix, *row)
 	}
@@ -940,7 +930,7 @@ func mergeMatrixRowIdentity(row *AdminInsightsClientMatrixRow, clientName, platf
 
 func orderClientCodecMatrix(out *AdminInsightsDevices, codecTotals map[string]int64) {
 	slices.SortFunc(out.Matrix, func(a, b AdminInsightsClientMatrixRow) int {
-		if c := cmp.Compare(b.TotalPlays, a.TotalPlays); c != 0 {
+		if c := cmp.Compare(b.TotalSessions, a.TotalSessions); c != 0 {
 			return c
 		}
 		if c := cmp.Compare(a.ClientName, b.ClientName); c != 0 {
@@ -1003,14 +993,14 @@ func queryInsightsAdaptationReasons(ctx context.Context, tx pgx.Tx, libraryID in
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	adaptedTotal := out.Summary.RemuxPlays + out.Summary.TranscodePlays
+	adaptedTotal := out.Summary.RemuxSessions + out.Summary.TranscodeSessions
 	for reason, count := range reasonCounts {
 		out.AdaptationReasons = append(out.AdaptationReasons, AdminInsightsAdaptationReason{
-			Reason: reason, Plays: count, ShareOfAdapted: roundInsightsRate(count, adaptedTotal),
+			Reason: reason, Sessions: count, ShareOfAdapted: roundInsightsRate(count, adaptedTotal),
 		})
 	}
 	slices.SortFunc(out.AdaptationReasons, func(a, b AdminInsightsAdaptationReason) int {
-		if c := cmp.Compare(b.Plays, a.Plays); c != 0 {
+		if c := cmp.Compare(b.Sessions, a.Sessions); c != 0 {
 			return c
 		}
 		return cmp.Compare(a.Reason, b.Reason)
@@ -1078,7 +1068,7 @@ func queryInsightsDevicesBreakdowns(ctx context.Context, tx pgx.Tx, libraryID in
 func sortedLabeledCounts(m map[string]int64) []AdminInsightsLabeledCount {
 	res := make([]AdminInsightsLabeledCount, 0, len(m))
 	for k, v := range m {
-		res = append(res, AdminInsightsLabeledCount{Key: k, Plays: v})
+		res = append(res, AdminInsightsLabeledCount{Key: k, Sessions: v})
 	}
 	slices.SortFunc(res, func(a, b AdminInsightsLabeledCount) int {
 		if a.Key == insightsUnknownKey && b.Key != insightsUnknownKey {
@@ -1087,7 +1077,7 @@ func sortedLabeledCounts(m map[string]int64) []AdminInsightsLabeledCount {
 		if b.Key == insightsUnknownKey && a.Key != insightsUnknownKey {
 			return -1
 		}
-		if c := cmp.Compare(b.Plays, a.Plays); c != 0 {
+		if c := cmp.Compare(b.Sessions, a.Sessions); c != 0 {
 			return c
 		}
 		return cmp.Compare(a.Key, b.Key)
@@ -1311,7 +1301,7 @@ func buildInsightsEgressSources(apiBytes, apiPeak, totalBytes int64, nodeSources
 }
 
 func queryInsightsStreamLocationShare(ctx context.Context, tx pgx.Tx, win resolvedInsightsWindow, out *AdminInsightsBandwidth) error {
-	whereSQL, whereArgs := buildInsightsHistoryWhere(win, 0, 0)
+	whereSQL, whereArgs := buildInsightsHistoryWhere(win, 0, 0, "")
 	err := tx.QueryRow(ctx, `
 		SELECT
 			COUNT(*) FILTER (WHERE h.stream_location = 'remote')::bigint,
@@ -1319,7 +1309,7 @@ func queryInsightsStreamLocationShare(ctx context.Context, tx pgx.Tx, win resolv
 			COUNT(*) FILTER (WHERE h.stream_location IS NULL OR h.stream_location NOT IN ('local', 'remote'))::bigint
 		FROM admin_playback_history h
 		WHERE `+whereSQL, whereArgs...).Scan(
-		&out.Summary.RemotePlays, &out.Summary.LocalPlays, &out.Summary.UnknownLocationPlays,
+		&out.Summary.RemoteSessions, &out.Summary.LocalSessions, &out.Summary.UnknownLocationSessions,
 	)
 	if err != nil {
 		return fmt.Errorf("querying insights bandwidth stream location share: %w", err)

@@ -25,6 +25,7 @@ import {
   buildHistoryDrilldownHref,
   buildInsightsWindowQueryParams,
   formatHwAccelLabel,
+  formatInsightsCount,
   formatRatePercentNumber,
   formatShortCalendarDate,
   type InsightsFilterState,
@@ -46,24 +47,20 @@ function matrixCellClass(directRate: number): string {
 
 export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
   const t = useT();
-  const [minPlays, setMinPlays] = useState<SampleThreshold>("5");
+  const [minSessions, setMinSessions] = useState<SampleThreshold>("5");
 
   const queryParams = useMemo(
     () => ({
       ...buildInsightsWindowQueryParams(filters),
-      min_plays: Number(minPlays),
+      min_sessions: Number(minSessions),
     }),
-    [filters, minPlays],
+    [filters, minSessions],
   );
   const query = useAdminInsightsDevices(queryParams);
   const data = query.data;
 
-  const formatPlayCount = useCallback(
-    (plays: number) =>
-      t("web.admin.insights.playCount", {
-        count: plays,
-        count_text: plays.toLocaleString(formatLocale()),
-      }),
+  const formatSessionCount = useCallback(
+    (sessions: number) => formatInsightsCount(t, "web.admin.insights.sessionCount", sessions),
     [t],
   );
 
@@ -74,7 +71,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
       return {
         id: item.reason,
         label: resolved?.label ?? item.reason,
-        value: item.plays,
+        value: item.sessions,
         secondary: t("web.admin.insights.percent", {
           value: formatRatePercentNumber(item.share_of_adapted),
         }),
@@ -93,11 +90,11 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
     if (!data) return [];
     const unknownClient = t("web.admin.insights.devices.unknownClient");
     return [...data.matrix]
-      .filter((row) => row.transcode_plays > 0)
+      .filter((row) => row.transcode_sessions > 0)
       .sort(
         (a, b) =>
-          b.transcode_plays - a.transcode_plays ||
-          b.total_plays - a.total_plays ||
+          b.transcode_sessions - a.transcode_sessions ||
+          b.total_sessions - a.total_sessions ||
           a.client_name.localeCompare(b.client_name),
       )
       .slice(0, 10)
@@ -107,10 +104,10 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
         return {
           id: `${row.client_name}:${row.device_platform}`,
           label,
-          value: row.transcode_plays,
+          value: row.transcode_sessions,
           secondary: t("web.admin.insights.devices.topTranscoders.transcodeShare", {
-            transcodes: row.transcode_plays.toLocaleString(formatLocale()),
-            total: row.total_plays.toLocaleString(formatLocale()),
+            transcodes: row.transcode_sessions.toLocaleString(formatLocale()),
+            total: row.total_sessions.toLocaleString(formatLocale()),
           }),
           to: buildHistoryDrilldownHref({
             clientName: row.client_name || "unknown",
@@ -132,7 +129,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
     return data.hw_accel_breakdown.map((entry) => ({
       id: entry.key,
       label: formatHwAccelLabel(entry.key, swLabel, unknownLabel),
-      value: entry.plays,
+      value: entry.sessions,
     }));
   }, [data, t]);
 
@@ -141,9 +138,51 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
     return data.subtitle_burn_in_codecs.map((entry) => ({
       id: entry.key,
       label: formatCodecLabel(entry.key) || entry.key.toUpperCase(),
-      value: entry.plays,
+      value: entry.sessions,
     }));
   }, [data]);
+
+  const resolutionLabel = useCallback(
+    (key: string) => {
+      switch (key) {
+        case "4320p":
+          return t("web.admin.insights.devices.resolution.fuhd");
+        case "2160p":
+          return t("web.admin.insights.devices.resolution.uhd");
+        case "480p":
+          return t("web.admin.insights.devices.resolution.sd");
+        case "1080p":
+        case "720p":
+          return key;
+        default:
+          return t("web.admin.insights.devices.resolution.unknown");
+      }
+    },
+    [t],
+  );
+
+  const resolutionItems = useCallback(
+    (entries: readonly { key: string; sessions: number }[]): BarListItem[] =>
+      entries.map((entry) => ({
+        id: entry.key,
+        label: resolutionLabel(entry.key),
+        value: entry.sessions,
+      })),
+    [resolutionLabel],
+  );
+
+  const downscaleItems = useMemo<BarListItem[]>(
+    () =>
+      (data?.resolution_changes ?? []).map((change) => ({
+        id: `${change.from}:${change.to}`,
+        label: t("web.admin.insights.devices.resolution.change", {
+          from: resolutionLabel(change.from),
+          to: resolutionLabel(change.to),
+        }),
+        value: change.sessions,
+      })),
+    [data?.resolution_changes, resolutionLabel, t],
+  );
 
   if (query.isLoading) {
     return (
@@ -174,9 +213,11 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
   }
 
   const { summary, coverage } = data;
-  const knownEncoderPlays = summary.hw_transcode_plays + summary.sw_transcode_plays;
+  const knownEncoderSessions = summary.hw_transcode_sessions + summary.sw_transcode_sessions;
   const burnInTranscodeRate =
-    summary.transcode_plays > 0 ? summary.subtitle_burn_in_plays / summary.transcode_plays : 0;
+    summary.transcode_sessions > 0
+      ? summary.subtitle_burn_in_sessions / summary.transcode_sessions
+      : 0;
   const burnInHistoryHref = buildHistoryDrilldownHref({
     subtitleBurnIn: true,
     libraryId: filters.libraryId,
@@ -187,13 +228,13 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
 
   return (
     <div className="space-y-5">
-      {coverage.total_plays > 0 && coverage.route_facts_plays === 0 ? (
+      {coverage.total_sessions > 0 && coverage.route_facts_sessions === 0 ? (
         <InsightNoticeBanner message={t("web.admin.insights.coverage.routeFactsNone")} />
-      ) : coverage.total_plays > 0 && coverage.route_facts_plays < coverage.total_plays ? (
+      ) : coverage.total_sessions > 0 && coverage.route_facts_sessions < coverage.total_sessions ? (
         <InsightNoticeBanner
           message={t("web.admin.insights.coverage.routeFactsPartial", {
-            recorded: coverage.route_facts_plays.toLocaleString(formatLocale()),
-            total: coverage.total_plays.toLocaleString(formatLocale()),
+            recorded: coverage.route_facts_sessions.toLocaleString(formatLocale()),
+            total: coverage.total_sessions.toLocaleString(formatLocale()),
             since: formatShortCalendarDate(coverage.oldest_route_facts_at),
           })}
         />
@@ -206,26 +247,28 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
             value: formatRatePercentNumber(summary.direct_rate),
           })}
           subtext={t("web.admin.insights.devices.kpi.directPlayDetail", {
-            direct: summary.direct_plays.toLocaleString(formatLocale()),
-            remux: summary.remux_plays.toLocaleString(formatLocale()),
-            transcode: summary.transcode_plays.toLocaleString(formatLocale()),
+            direct: summary.direct_sessions.toLocaleString(formatLocale()),
+            remux: summary.remux_sessions.toLocaleString(formatLocale()),
+            transcode: summary.transcode_sessions.toLocaleString(formatLocale()),
           })}
           accent="success"
         />
         <InsightKpiCard
           label={t("web.admin.insights.devices.kpi.hwSplit")}
           value={
-            knownEncoderPlays > 0
+            knownEncoderSessions > 0
               ? t("web.admin.insights.percent", {
-                  value: formatRatePercentNumber(summary.hw_transcode_plays / knownEncoderPlays),
+                  value: formatRatePercentNumber(
+                    summary.hw_transcode_sessions / knownEncoderSessions,
+                  ),
                 })
               : EM_DASH
           }
           subtext={
-            knownEncoderPlays > 0
+            knownEncoderSessions > 0
               ? t("web.admin.insights.devices.kpi.hwSplitDetail", {
-                  hw: summary.hw_transcode_plays.toLocaleString(formatLocale()),
-                  sw: summary.sw_transcode_plays.toLocaleString(formatLocale()),
+                  hw: summary.hw_transcode_sessions.toLocaleString(formatLocale()),
+                  sw: summary.sw_transcode_sessions.toLocaleString(formatLocale()),
                 })
               : t("web.admin.insights.devices.kpi.hwSplitNone")
           }
@@ -233,18 +276,18 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
         />
         <InsightKpiCard
           label={t("web.admin.insights.devices.kpi.subtitleBurnIn")}
-          value={summary.subtitle_burn_in_plays.toLocaleString(formatLocale())}
+          value={summary.subtitle_burn_in_sessions.toLocaleString(formatLocale())}
           subtext={t("web.admin.insights.devices.kpi.subtitleBurnInDetail", {
             percent: formatRatePercentNumber(burnInTranscodeRate),
           })}
-          accent={summary.subtitle_burn_in_plays > 0 ? "warning" : "default"}
+          accent={summary.subtitle_burn_in_sessions > 0 ? "warning" : "default"}
         />
         <InsightKpiCard
           label={t("web.admin.insights.devices.kpi.hdrToneMap")}
-          value={summary.hdr_tonemap_plays.toLocaleString(formatLocale())}
+          value={summary.hdr_tonemap_sessions.toLocaleString(formatLocale())}
           subtext={t("web.admin.insights.devices.kpi.hdrToneMapDetail", {
-            hw: summary.hdr_tonemap_hw_plays.toLocaleString(formatLocale()),
-            sw: summary.hdr_tonemap_sw_plays.toLocaleString(formatLocale()),
+            hw: summary.hdr_tonemap_hw_sessions.toLocaleString(formatLocale()),
+            sw: summary.hdr_tonemap_sw_sessions.toLocaleString(formatLocale()),
           })}
         />
       </div>
@@ -261,12 +304,12 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
             </p>
           </div>
           <WidgetViewToggle
-            value={minPlays}
+            value={minSessions}
             options={[
               {
                 value: "5",
-                label: t("web.admin.insights.devices.matrix.minPlays"),
-                ariaLabel: t("web.admin.insights.devices.matrix.minPlays"),
+                label: t("web.admin.insights.devices.matrix.minSessions"),
+                ariaLabel: t("web.admin.insights.devices.matrix.minSessions"),
               },
               {
                 value: "1",
@@ -274,7 +317,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
                 ariaLabel: t("web.admin.insights.devices.matrix.allSamples"),
               },
             ]}
-            onChange={setMinPlays}
+            onChange={setMinSessions}
           />
         </CardHeader>
         <CardContent>
@@ -334,8 +377,8 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
                             client: clientLabel,
                             codec: codecLabel,
                             direct_rate: rateStr,
-                            plays: formatPlayCount(cell.plays),
-                            transcodes: cell.transcode_plays.toLocaleString(formatLocale()),
+                            sessions: formatSessionCount(cell.sessions),
+                            transcodes: cell.transcode_sessions.toLocaleString(formatLocale()),
                           });
                           const drillHref = buildHistoryDrilldownHref({
                             clientName: row.client_name || "unknown",
@@ -361,7 +404,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
                                   {t("web.admin.insights.percent", { value: rateStr })}
                                 </span>
                                 <span className="text-[10px] tabular-nums opacity-80">
-                                  {cell.plays.toLocaleString(formatLocale())}
+                                  {cell.sessions.toLocaleString(formatLocale())}
                                 </span>
                               </Link>
                             </TableCell>
@@ -374,7 +417,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
                             })}
                           </div>
                           <div className="text-muted-foreground text-[11px]">
-                            {row.total_plays.toLocaleString(formatLocale())}
+                            {row.total_sessions.toLocaleString(formatLocale())}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -402,7 +445,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
             <BarList
               items={reasonItems}
               seriesIndex={2}
-              formatValue={formatPlayCount}
+              formatValue={formatSessionCount}
               emptyLabel={t("web.admin.insights.devices.reasons.empty")}
             />
           </CardContent>
@@ -418,7 +461,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
             <BarList
               items={topTranscoderItems}
               seriesIndex={0}
-              formatValue={formatPlayCount}
+              formatValue={formatSessionCount}
               emptyLabel={t("web.admin.insights.devices.topTranscoders.empty")}
             />
           </CardContent>
@@ -437,7 +480,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
             <BarList
               items={hwAccelItems}
               seriesIndex={1}
-              formatValue={formatPlayCount}
+              formatValue={formatSessionCount}
               emptyLabel={t("web.admin.insights.devices.hwAccel.empty")}
             />
           </CardContent>
@@ -461,12 +504,59 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
             <BarList
               items={burnInItems}
               seriesIndex={3}
-              formatValue={formatPlayCount}
+              formatValue={formatSessionCount}
               emptyLabel={t("web.admin.insights.devices.burnInCodecs.empty")}
             />
           </CardContent>
         </Card>
       </div>
+
+      {/* Source vs delivered resolution */}
+      <Card className="surface-panel rounded-2xl border-0">
+        <CardHeader className="space-y-0.5">
+          <CardTitle className="text-sm font-bold">
+            {t("web.admin.insights.devices.resolution.title")}
+          </CardTitle>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.insights.devices.resolution.subtitle")}
+          </p>
+        </CardHeader>
+        <CardContent className="grid grid-cols-1 gap-5 md:grid-cols-3">
+          <section className="space-y-1.5">
+            <h3 className="text-muted-foreground text-xs font-semibold">
+              {t("web.admin.insights.devices.resolution.source")}
+            </h3>
+            <BarList
+              items={resolutionItems(data.source_resolutions)}
+              seriesIndex={0}
+              formatValue={formatSessionCount}
+              emptyLabel={t("web.admin.insights.devices.resolution.empty")}
+            />
+          </section>
+          <section className="space-y-1.5">
+            <h3 className="text-muted-foreground text-xs font-semibold">
+              {t("web.admin.insights.devices.resolution.delivered")}
+            </h3>
+            <BarList
+              items={resolutionItems(data.delivered_resolutions)}
+              seriesIndex={1}
+              formatValue={formatSessionCount}
+              emptyLabel={t("web.admin.insights.devices.resolution.empty")}
+            />
+          </section>
+          <section className="space-y-1.5">
+            <h3 className="text-muted-foreground text-xs font-semibold">
+              {t("web.admin.insights.devices.resolution.downscaled")}
+            </h3>
+            <BarList
+              items={downscaleItems}
+              seriesIndex={2}
+              formatValue={formatSessionCount}
+              emptyLabel={t("web.admin.insights.devices.resolution.downscaledEmpty")}
+            />
+          </section>
+        </CardContent>
+      </Card>
     </div>
   );
 }

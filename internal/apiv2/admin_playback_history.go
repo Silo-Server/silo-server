@@ -26,6 +26,7 @@ type AdminPlaybackHistoryListInput struct {
 	UserID           ID     `query:"user_id" doc:"Only attempts by this login account"`
 	ProfileID        string `query:"profile_id" maxLength:"1024" doc:"Only attempts by this household profile"`
 	MediaItemID      string `query:"media_item_id" maxLength:"1024" doc:"Only attempts of this catalog item"`
+	SeriesID         string `query:"series_id" maxLength:"1024" doc:"Only attempts of episodes of this series"`
 	LibraryID        ID     `query:"library_id" doc:"Only attempts of media belonging to this library"`
 	Completed        string `query:"completed" enum:"all,true,false" default:"all" doc:"Completion filter; all returns every finalized attempt"`
 	EndedAfter       string `query:"ended_after" format:"date-time" doc:"Only attempts that ended at or after this instant (inclusive)"`
@@ -160,6 +161,7 @@ type AdminPlaybackHistoryCapabilities struct {
 	RouteFacts       bool     `json:"route_facts" doc:"Entries carry delivered route facts, adaptation reasons, and joined source file specs"`
 	RichFilters      bool     `json:"rich_filters" doc:"The list accepts search, play_method, device_platform, client_name, source_video_codec, subtitle_burn_in, stream_location, adaptation_reason, library_id, started_after and started_before"`
 	SessionDetail    bool     `json:"session_detail" doc:"GET /api/v2/admin/playback-history/{session_id} reads one finalized session entry"`
+	SeriesFilter     bool     `json:"series_filter" doc:"The list accepts series_id"`
 }
 
 const opListAdminPlaybackHistory = "listAdminPlaybackHistory"
@@ -190,6 +192,7 @@ func registerAdminPlaybackHistory(reg *Registry) {
 		out.Body.RouteFacts = available
 		out.Body.RichFilters = available
 		out.Body.SessionDetail = available
+		out.Body.SeriesFilter = available
 		out.Body.EndReasonValues = make([]string, len(handlers.PlaybackEndReasons))
 		for i, reason := range handlers.PlaybackEndReasons {
 			out.Body.EndReasonValues[i] = string(reason)
@@ -222,6 +225,7 @@ func registerAdminPlaybackHistory(reg *Registry) {
 		filter := handlers.AdminPlaybackHistoryFilter{
 			ProfileID:        strings.TrimSpace(in.ProfileID),
 			MediaItemID:      strings.TrimSpace(in.MediaItemID),
+			SeriesID:         strings.TrimSpace(in.SeriesID),
 			Search:           strings.TrimSpace(in.Search),
 			DevicePlatform:   strings.TrimSpace(in.DevicePlatform),
 			ClientName:       strings.TrimSpace(in.ClientName),

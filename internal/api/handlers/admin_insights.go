@@ -5,10 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"sync/atomic"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/Silo-Server/silo-server/internal/cache"
 )
@@ -28,15 +29,25 @@ const (
 	InsightsBucketWeek  = "week"
 	InsightsBucketMonth = "month"
 
-	insightsCustomMaxSpanDays = 3660
-	insightsDefaultPeopleLim  = 50
-	insightsMaxPeopleLim      = 100
-	insightsDefaultMinPlays   = 5
-	insightsMaxMinPlays       = 1000
+	insightsCustomMaxSpanDays  = 3660
+	insightsDefaultPeopleLim   = 50
+	insightsMaxPeopleLim       = 100
+	insightsDefaultMinSessions = 5
+	insightsMaxMinSessions     = 1000
+	insightsDefaultTitlesLimit = 10
+	insightsMaxTitlesLimit     = 50
+
+	InsightsTitlesSortPlays     = "plays"
+	InsightsTitlesSortWatchTime = "watch_time"
+	InsightsTitlesSortViewers   = "viewers"
 )
 
 // ErrInvalidInsightsQuery marks client-supplied filter or range validation errors.
 var ErrInvalidInsightsQuery = errors.New("invalid insights query")
+
+// ErrInsightsTitleNotFound marks a title detail read for a content id that is
+// not in the catalog.
+var ErrInsightsTitleNotFound = errors.New("insights title not found")
 
 // AdminInsightsWindowQuery holds the shared Insights filter bar parameters.
 type AdminInsightsWindowQuery struct {
@@ -46,6 +57,10 @@ type AdminInsightsWindowQuery struct {
 	TZ        string // IANA timezone name; empty defaults to UTC
 	LibraryID int
 	UserID    int
+	// ProfileID narrows to one household profile of UserID. Profile ids repeat
+	// across accounts (every account can have a "default" profile), so it is
+	// rejected without UserID.
+	ProfileID string
 }
 
 // AdminInsightsPeopleQuery extends the shared window query with People table controls.
@@ -61,7 +76,7 @@ type AdminInsightsPeopleQuery struct {
 // AdminInsightsDevicesQuery extends the shared window query with Devices controls.
 type AdminInsightsDevicesQuery struct {
 	AdminInsightsWindowQuery
-	MinPlays int
+	MinSessions int
 }
 
 // AdminInsightsBandwidthQuery holds the time-range parameters for Bandwidth.
@@ -72,27 +87,45 @@ type AdminInsightsBandwidthQuery struct {
 	TZ       string
 }
 
+// AdminInsightsTitlesQuery extends the shared window query with the Titles
+// ranking controls.
+type AdminInsightsTitlesQuery struct {
+	AdminInsightsWindowQuery
+	Sort  string // plays | watch_time | viewers
+	Limit int
+}
+
+// AdminInsightsTitleQuery reads one movie or series over the shared window.
+type AdminInsightsTitleQuery struct {
+	AdminInsightsWindowQuery
+	ContentID string
+}
+
 // AdminInsightsCoverage reports honest pre-upgrade data boundaries so the UI
-// never conflates missing legacy telemetry with zeroes.
+// never conflates missing legacy telemetry with zeroes. Its counts are
+// sessions (history rows), not plays: measurement and route facts are
+// recorded per session.
 type AdminInsightsCoverage struct {
 	OldestHistoryAt    *time.Time
 	OldestMeasuredAt   *time.Time
 	OldestRouteFactsAt *time.Time
 	OldestMetricAt     *time.Time
-	TotalPlays         int64
-	MeasuredPlays      int64
-	RouteFactsPlays    int64
+	TotalSessions      int64
+	MeasuredSessions   int64
+	RouteFactsSessions int64
 }
 
-// AdminInsightsActivitySummary aggregates KPIs for the Activity tab.
+// AdminInsightsActivitySummary aggregates KPIs for the Activity tab. Play
+// counts follow the viewing rule in admin_insights_plays.go; Sessions counts
+// the history rows behind them.
 type AdminInsightsActivitySummary struct {
 	Plays                 int64
+	Sessions              int64
 	Movies                int64
 	Episodes              int64
 	OtherMedia            int64
 	WatchSeconds          int64
 	MeasuredWatchSeconds  int64
-	MeasuredPlays         int64
 	CompletedPlays        int64
 	CompletionRate        float64
 	DirectPlays           int64
@@ -156,41 +189,43 @@ type AdminInsightsActivity struct {
 
 // AdminInsightsPersonProfile is one household profile nested under an account.
 type AdminInsightsPersonProfile struct {
-	ProfileID      string
-	ProfileName    string
-	IsLive         bool
-	Plays          int64
-	WatchSeconds   int64
-	MeasuredPlays  int64
-	DirectPlays    int64
-	RemuxPlays     int64
-	TranscodePlays int64
-	CompletedPlays int64
-	CompletionRate float64
-	LastSeenAt     *time.Time
+	ProfileID        string
+	ProfileName      string
+	IsLive           bool
+	Plays            int64
+	Sessions         int64
+	WatchSeconds     int64
+	MeasuredSessions int64
+	DirectPlays      int64
+	RemuxPlays       int64
+	TranscodePlays   int64
+	CompletedPlays   int64
+	CompletionRate   float64
+	LastSeenAt       *time.Time
 }
 
 // AdminInsightsPersonAccount is one account row on the People leaderboard.
 type AdminInsightsPersonAccount struct {
-	UserID         int
-	Username       string
-	Role           string
-	IsLive         bool
-	Plays          int64
-	Movies         int64
-	Episodes       int64
-	WatchSeconds   int64
-	MeasuredPlays  int64
-	MeasuredShare  float64
-	DirectPlays    int64
-	RemuxPlays     int64
-	TranscodePlays int64
-	DirectRate     float64
-	CompletedPlays int64
-	CompletionRate float64
-	TopClient      *string
-	LastSeenAt     *time.Time
-	Profiles       []AdminInsightsPersonProfile
+	UserID           int
+	Username         string
+	Role             string
+	IsLive           bool
+	Plays            int64
+	Sessions         int64
+	Movies           int64
+	Episodes         int64
+	WatchSeconds     int64
+	MeasuredSessions int64
+	MeasuredShare    float64
+	DirectPlays      int64
+	RemuxPlays       int64
+	TranscodePlays   int64
+	DirectRate       float64
+	CompletedPlays   int64
+	CompletionRate   float64
+	TopClient        *string
+	LastSeenAt       *time.Time
+	Profiles         []AdminInsightsPersonProfile
 }
 
 // AdminInsightsPeople is the payload for GET /api/v2/admin/insights/people.
@@ -207,57 +242,67 @@ type AdminInsightsPeople struct {
 	Accounts          []AdminInsightsPersonAccount
 }
 
-// AdminInsightsDevicesSummary aggregates KPIs for Devices & Quality.
+// AdminInsightsDevicesSummary aggregates KPIs for Devices & Quality. Devices
+// counts sessions: each session has its own route.
 type AdminInsightsDevicesSummary struct {
-	TotalPlays          int64
-	DirectPlays         int64
-	RemuxPlays          int64
-	TranscodePlays      int64
-	DirectRate          float64
-	RouteFactsPlays     int64
-	HWTranscodePlays    int64
-	SWTranscodePlays    int64
-	SubtitleBurnInPlays int64
-	HDRToneMapPlays     int64
-	HDRToneMapHWPlays   int64
-	HDRToneMapSWPlays   int64
+	TotalSessions          int64
+	DirectSessions         int64
+	RemuxSessions          int64
+	TranscodeSessions      int64
+	DirectRate             float64
+	RouteFactsSessions     int64
+	HWTranscodeSessions    int64
+	SWTranscodeSessions    int64
+	SubtitleBurnInSessions int64
+	HDRToneMapSessions     int64
+	HDRToneMapHWSessions   int64
+	HDRToneMapSWSessions   int64
 }
 
 // AdminInsightsClientCodecCell is one cell of the Client × Source Video Codec matrix.
 type AdminInsightsClientCodecCell struct {
-	SourceVideoCodec string
-	Plays            int64
-	DirectPlays      int64
-	RemuxPlays       int64
-	TranscodePlays   int64
-	DirectRate       float64
+	SourceVideoCodec  string
+	Sessions          int64
+	DirectSessions    int64
+	RemuxSessions     int64
+	TranscodeSessions int64
+	DirectRate        float64
 }
 
-// AdminInsightsClientMatrixRow groups plays by (client_name, device_platform).
+// AdminInsightsClientMatrixRow groups sessions by (client_name, device_platform).
 type AdminInsightsClientMatrixRow struct {
-	ClientName       string
-	DevicePlatform   string
-	IsJellyfinClient bool
-	TotalPlays       int64
-	DirectPlays      int64
-	RemuxPlays       int64
-	TranscodePlays   int64
-	DirectRate       float64
-	Cells            []AdminInsightsClientCodecCell
+	ClientName        string
+	DevicePlatform    string
+	IsJellyfinClient  bool
+	TotalSessions     int64
+	DirectSessions    int64
+	RemuxSessions     int64
+	TranscodeSessions int64
+	DirectRate        float64
+	Cells             []AdminInsightsClientCodecCell
 }
 
 // AdminInsightsAdaptationReason counts one canonical adaptation reason code.
 type AdminInsightsAdaptationReason struct {
 	Reason         string
-	Plays          int64
+	Sessions       int64
 	ShareOfAdapted float64
 }
 
-// AdminInsightsLabeledCount is a generic key + play count pair for compact
-// breakdowns (HW accel backends, HDR tone-map modes, burn-in subtitle codecs).
+// AdminInsightsLabeledCount is a generic key + session count pair for compact
+// breakdowns (HW accel backends, HDR tone-map modes, burn-in subtitle codecs,
+// resolution classes).
 type AdminInsightsLabeledCount struct {
-	Key   string
-	Plays int64
+	Key      string
+	Sessions int64
+}
+
+// AdminInsightsResolutionChange counts sessions delivered at a lower
+// resolution class than their source.
+type AdminInsightsResolutionChange struct {
+	From     string
+	To       string
+	Sessions int64
 }
 
 // AdminInsightsDevices is the payload for GET /api/v2/admin/insights/devices.
@@ -273,23 +318,26 @@ type AdminInsightsDevices struct {
 	HWAccelBreakdown     []AdminInsightsLabeledCount
 	ToneMapBreakdown     []AdminInsightsLabeledCount
 	SubtitleBurnInCodecs []AdminInsightsLabeledCount
+	SourceResolutions    []AdminInsightsLabeledCount
+	DeliveredResolutions []AdminInsightsLabeledCount
+	ResolutionChanges    []AdminInsightsResolutionChange
 }
 
 // AdminInsightsBandwidthSummary aggregates KPIs for the Bandwidth tab.
 type AdminInsightsBandwidthSummary struct {
-	TotalEgressBytes     int64
-	PlaybackEgressBytes  int64
-	DownloadEgressBytes  int64
-	APIEgressBytes       int64
-	NodeEgressBytes      int64
-	AvgDailyBytes        int64
-	PeakEgressKbps       int64
-	PeakEgressAt         *time.Time
-	PeakDownloadKbps     int64
-	ActiveDays           int64
-	RemotePlays          int64
-	LocalPlays           int64
-	UnknownLocationPlays int64
+	TotalEgressBytes        int64
+	PlaybackEgressBytes     int64
+	DownloadEgressBytes     int64
+	APIEgressBytes          int64
+	NodeEgressBytes         int64
+	AvgDailyBytes           int64
+	PeakEgressKbps          int64
+	PeakEgressAt            *time.Time
+	PeakDownloadKbps        int64
+	ActiveDays              int64
+	RemoteSessions          int64
+	LocalSessions           int64
+	UnknownLocationSessions int64
 }
 
 // AdminInsightsEgressSource summarizes one bandwidth source over the window.
@@ -330,28 +378,140 @@ type AdminInsightsBandwidth struct {
 	Points             []AdminInsightsBandwidthPoint
 }
 
+// AdminInsightsTitleRow is one movie or series on the Titles leaderboard.
+// Viewers counts distinct profiles with a play in the window; a series rolls
+// up the plays of all its episodes.
+type AdminInsightsTitleRow struct {
+	ContentID      string
+	Kind           string // movie | series
+	Title          string
+	Year           *int
+	Plays          int64
+	Viewers        int64
+	CompletedPlays int64
+	Episodes       int64 // series: distinct episodes with a play
+	WatchSeconds   int64
+	LastPlayedAt   *time.Time
+}
+
+// AdminInsightsLibraryRow is one library on the Titles leaderboard.
+type AdminInsightsLibraryRow struct {
+	LibraryID    int
+	Name         string
+	Plays        int64
+	Viewers      int64
+	WatchSeconds int64
+}
+
+// AdminInsightsTitles is the payload for GET /api/v2/admin/insights/titles.
+type AdminInsightsTitles struct {
+	From      time.Time
+	To        time.Time
+	TZ        string
+	Sort      string
+	Movies    []AdminInsightsTitleRow
+	Shows     []AdminInsightsTitleRow
+	Libraries []AdminInsightsLibraryRow
+}
+
+// AdminInsightsEpisodeRef identifies one episode of a series.
+type AdminInsightsEpisodeRef struct {
+	ContentID     string
+	SeasonNumber  int
+	EpisodeNumber int
+	Title         string
+}
+
+// AdminInsightsTitleSummary aggregates one title over the window.
+type AdminInsightsTitleSummary struct {
+	Plays          int64
+	Sessions       int64
+	Viewers        int64
+	CompletedPlays int64
+	WatchSeconds   int64
+	DirectPlays    int64
+	RemuxPlays     int64
+	TranscodePlays int64
+}
+
+// AdminInsightsPlaysBucket is one day/week/month of plays and watch time.
+type AdminInsightsPlaysBucket struct {
+	BucketStart  time.Time
+	LabelDate    string
+	Plays        int64
+	WatchSeconds int64
+}
+
+// AdminInsightsTitleViewer is one profile that played the title in the window.
+type AdminInsightsTitleViewer struct {
+	UserID                  int
+	Username                string
+	ProfileID               string
+	ProfileName             string
+	Plays                   int64
+	CompletedPlays          int64
+	WatchSeconds            int64
+	LastPlayedAt            *time.Time
+	FurthestPositionSeconds *float64                 // movies: furthest end position in the window
+	LastEpisode             *AdminInsightsEpisodeRef // series: the episode of the latest play
+}
+
+// AdminInsightsTitleEpisode is one episode with a play in the window.
+type AdminInsightsTitleEpisode struct {
+	AdminInsightsEpisodeRef
+	Plays        int64
+	Viewers      int64
+	WatchSeconds int64
+}
+
+// AdminInsightsTitle is the payload for GET /api/v2/admin/insights/titles/{content_id}.
+type AdminInsightsTitle struct {
+	From              time.Time
+	To                time.Time
+	TZ                string
+	BucketUnit        string
+	ContentID         string
+	Kind              string // movie | series
+	Title             string
+	Year              *int
+	DurationSeconds   *float64 // movies only
+	Summary           AdminInsightsTitleSummary
+	Buckets           []AdminInsightsPlaysBucket
+	Viewers           []AdminInsightsTitleViewer
+	ViewersTruncated  bool
+	Episodes          []AdminInsightsTitleEpisode
+	EpisodesTruncated bool
+}
+
 // AdminInsightsSource provides cached or freshly queried Insights payloads.
 type AdminInsightsSource interface {
 	Activity(ctx context.Context, q AdminInsightsWindowQuery) (*AdminInsightsActivity, error)
 	People(ctx context.Context, q AdminInsightsPeopleQuery) (*AdminInsightsPeople, error)
 	Devices(ctx context.Context, q AdminInsightsDevicesQuery) (*AdminInsightsDevices, error)
 	Bandwidth(ctx context.Context, q AdminInsightsBandwidthQuery) (*AdminInsightsBandwidth, error)
+	Titles(ctx context.Context, q AdminInsightsTitlesQuery) (*AdminInsightsTitles, error)
 	Invalidate()
 }
 
 // AdminInsightsProvider caches standard preset Insights reads in memory for
 // 60 seconds and clears local entries on admin/playback bus events (the same
-// channels the sibling admin_stats_* providers subscribe to). A monotonic
-// generation counter prevents an in-flight read whose DB snapshot predates an
-// invalidation from repopulating the cache with stale results.
+// channels the sibling admin_stats_* providers subscribe to). Title detail is
+// read on demand and not cached. Misses for one key fill once per generation:
+// concurrent requests share the read, and a later fill starts only after the
+// earlier one published, so fills publish in order. The generation counter,
+// compared and published under publishMu, keeps a fill whose DB snapshot
+// predates an invalidation from repopulating the cache with stale results.
 type AdminInsightsProvider struct {
 	pool      *pgxpool.Pool
 	activity  *cache.TTLCache[*AdminInsightsActivity]
 	people    *cache.TTLCache[*AdminInsightsPeople]
 	devices   *cache.TTLCache[*AdminInsightsDevices]
 	bandwidth *cache.TTLCache[*AdminInsightsBandwidth]
+	titles    *cache.TTLCache[*AdminInsightsTitles]
 	ttl       time.Duration
-	gen       atomic.Uint64
+	fills     singleflight.Group
+	publishMu sync.Mutex
+	gen       uint64 // guarded by publishMu
 }
 
 var _ AdminInsightsSource = (*AdminInsightsProvider)(nil)
@@ -364,6 +524,7 @@ func NewAdminInsightsProvider(ctx context.Context, pool *pgxpool.Pool, bus cache
 		people:    cache.NewTTLCache[*AdminInsightsPeople](),
 		devices:   cache.NewTTLCache[*AdminInsightsDevices](),
 		bandwidth: cache.NewTTLCache[*AdminInsightsBandwidth](),
+		titles:    cache.NewTTLCache[*AdminInsightsTitles](),
 		ttl:       adminInsightsCacheTTL,
 	}
 	if bus == nil || ctx == nil {
@@ -381,14 +542,16 @@ func NewAdminInsightsProvider(ctx context.Context, pool *pgxpool.Pool, bus cache
 	return p, nil
 }
 
-// Invalidate drops all cached Insights entries across all four tabs and
-// advances the generation counter so concurrent in-flight reads do not
-// repopulate the cache with pre-invalidation snapshots.
+// Invalidate drops all cached Insights entries across every tab and advances
+// the generation counter so concurrent in-flight reads do not repopulate the
+// cache with pre-invalidation snapshots.
 func (p *AdminInsightsProvider) Invalidate() {
 	if p == nil {
 		return
 	}
-	p.gen.Add(1)
+	p.publishMu.Lock()
+	defer p.publishMu.Unlock()
+	p.gen++
 	if p.activity != nil {
 		p.activity.InvalidatePrefix(adminInsightsCacheKeyPrefix)
 	}
@@ -401,6 +564,15 @@ func (p *AdminInsightsProvider) Invalidate() {
 	if p.bandwidth != nil {
 		p.bandwidth.InvalidatePrefix(adminInsightsCacheKeyPrefix)
 	}
+	if p.titles != nil {
+		p.titles.InvalidatePrefix(adminInsightsCacheKeyPrefix)
+	}
+}
+
+func (p *AdminInsightsProvider) generation() uint64 {
+	p.publishMu.Lock()
+	defer p.publishMu.Unlock()
+	return p.gen
 }
 
 // Close stops all background TTL sweepers.
@@ -420,26 +592,51 @@ func (p *AdminInsightsProvider) Close() {
 	if p.bandwidth != nil {
 		p.bandwidth.Close()
 	}
+	if p.titles != nil {
+		p.titles.Close()
+	}
 }
 
 func insightsWindowCacheable(rangeVal string) bool {
 	return normalizeInsightsRange(rangeVal) != InsightsRangeCustom
 }
 
-func cachedInsightsRead[T comparable](p *AdminInsightsProvider, c *cache.TTLCache[T], key string, load func() (T, error)) (T, error) {
+// cachedInsightsRead serves key from c or fills it. One fill runs per key and
+// generation, on a context detached from the caller so one request leaving
+// does not fail the others sharing it. The fill is published only when no
+// invalidation ran while it was in flight; the comparison and the Set share
+// publishMu with Invalidate, so an invalidation cannot slip in between.
+func cachedInsightsRead[T comparable](ctx context.Context, p *AdminInsightsProvider, c *cache.TTLCache[T], key string, load func(context.Context) (T, error)) (T, error) {
 	if v, ok := c.Get(key); ok {
 		return v, nil
 	}
-	gen := p.gen.Load()
-	v, err := load()
+	gen := p.generation()
+	shared, err, _ := p.fills.Do(fmt.Sprintf("%s#%d", key, gen), func() (any, error) {
+		v, err := load(context.WithoutCancel(ctx))
+		if err != nil {
+			return nil, err
+		}
+		p.publishMu.Lock()
+		if p.gen == gen {
+			c.Set(key, v, p.ttl)
+		}
+		p.publishMu.Unlock()
+		return v, nil
+	})
+	var zero T
 	if err != nil {
-		var zero T
 		return zero, err
 	}
-	if p.gen.Load() == gen {
-		c.Set(key, v, p.ttl)
+	v, ok := shared.(T)
+	if !ok {
+		return zero, fmt.Errorf("insights cache fill for %s returned %T", key, shared)
 	}
 	return v, nil
+}
+
+// insightsScopeKey is the cache-key fragment for the shared row filters.
+func insightsScopeKey(q AdminInsightsWindowQuery) string {
+	return fmt.Sprintf("r=%s:tz=%s:lib=%d:u=%d:p=%q", normalizeInsightsRange(q.Range), normalizeInsightsTZ(q.TZ), q.LibraryID, q.UserID, q.ProfileID)
 }
 
 func (p *AdminInsightsProvider) Activity(ctx context.Context, q AdminInsightsWindowQuery) (*AdminInsightsActivity, error) {
@@ -449,8 +646,8 @@ func (p *AdminInsightsProvider) Activity(ctx context.Context, q AdminInsightsWin
 	if !insightsWindowCacheable(q.Range) {
 		return queryAdminInsightsActivity(ctx, p.pool, q)
 	}
-	key := fmt.Sprintf("%sactivity:r=%s:tz=%s:lib=%d:u=%d", adminInsightsCacheKeyPrefix, normalizeInsightsRange(q.Range), normalizeInsightsTZ(q.TZ), q.LibraryID, q.UserID)
-	return cachedInsightsRead(p, p.activity, key, func() (*AdminInsightsActivity, error) {
+	key := adminInsightsCacheKeyPrefix + "activity:" + insightsScopeKey(q)
+	return cachedInsightsRead(ctx, p, p.activity, key, func(ctx context.Context) (*AdminInsightsActivity, error) {
 		return queryAdminInsightsActivity(ctx, p.pool, q)
 	})
 }
@@ -466,7 +663,7 @@ func (p *AdminInsightsProvider) People(ctx context.Context, q AdminInsightsPeopl
 	// past the first page reads from the same snapshot without skipping or
 	// duplicating accounts across concurrent plays.
 	key := fmt.Sprintf("%speople:r=%s:tz=%s:lib=%d:s=%s:d=%s", adminInsightsCacheKeyPrefix, normalizeInsightsRange(q.Range), normalizeInsightsTZ(q.TZ), q.LibraryID, strings.TrimSpace(q.Sort), strings.TrimSpace(q.Dir))
-	full, err := cachedInsightsRead(p, p.people, key, func() (*AdminInsightsPeople, error) {
+	full, err := cachedInsightsRead(ctx, p, p.people, key, func(ctx context.Context) (*AdminInsightsPeople, error) {
 		return queryAdminInsightsPeopleSnapshot(ctx, p.pool, q)
 	})
 	if err != nil {
@@ -482,8 +679,8 @@ func (p *AdminInsightsProvider) Devices(ctx context.Context, q AdminInsightsDevi
 	if !insightsWindowCacheable(q.Range) {
 		return queryAdminInsightsDevices(ctx, p.pool, q)
 	}
-	key := fmt.Sprintf("%sdevices:r=%s:tz=%s:lib=%d:u=%d:m=%d", adminInsightsCacheKeyPrefix, normalizeInsightsRange(q.Range), normalizeInsightsTZ(q.TZ), q.LibraryID, q.UserID, clampInsightsMinPlays(q.MinPlays))
-	return cachedInsightsRead(p, p.devices, key, func() (*AdminInsightsDevices, error) {
+	key := fmt.Sprintf("%sdevices:%s:m=%d", adminInsightsCacheKeyPrefix, insightsScopeKey(q.AdminInsightsWindowQuery), clampInsightsMinSessions(q.MinSessions))
+	return cachedInsightsRead(ctx, p, p.devices, key, func(ctx context.Context) (*AdminInsightsDevices, error) {
 		return queryAdminInsightsDevices(ctx, p.pool, q)
 	})
 }
@@ -496,8 +693,21 @@ func (p *AdminInsightsProvider) Bandwidth(ctx context.Context, q AdminInsightsBa
 		return queryAdminInsightsBandwidth(ctx, p.pool, q)
 	}
 	key := fmt.Sprintf("%sbandwidth:r=%s:tz=%s", adminInsightsCacheKeyPrefix, normalizeInsightsRange(q.Range), normalizeInsightsTZ(q.TZ))
-	return cachedInsightsRead(p, p.bandwidth, key, func() (*AdminInsightsBandwidth, error) {
+	return cachedInsightsRead(ctx, p, p.bandwidth, key, func(ctx context.Context) (*AdminInsightsBandwidth, error) {
 		return queryAdminInsightsBandwidth(ctx, p.pool, q)
+	})
+}
+
+func (p *AdminInsightsProvider) Titles(ctx context.Context, q AdminInsightsTitlesQuery) (*AdminInsightsTitles, error) {
+	if p == nil || p.pool == nil {
+		return nil, ErrAdminDashboardUnavailable
+	}
+	if !insightsWindowCacheable(q.Range) {
+		return queryAdminInsightsTitles(ctx, p.pool, q)
+	}
+	key := fmt.Sprintf("%stitles:%s:s=%s:n=%d", adminInsightsCacheKeyPrefix, insightsScopeKey(q.AdminInsightsWindowQuery), normalizeInsightsTitlesSort(q.Sort), clampInsightsTitlesLimit(q.Limit))
+	return cachedInsightsRead(ctx, p, p.titles, key, func(ctx context.Context) (*AdminInsightsTitles, error) {
+		return queryAdminInsightsTitles(ctx, p.pool, q)
 	})
 }
 
@@ -553,6 +763,28 @@ func (h *AdminHandler) ReadAdminInsightsBandwidth(ctx context.Context, q AdminIn
 		return nil, ErrAdminDashboardUnavailable
 	}
 	return queryAdminInsightsBandwidth(ctx, h.pool, q)
+}
+
+func (h *AdminHandler) ReadAdminInsightsTitles(ctx context.Context, q AdminInsightsTitlesQuery, refresh bool) (*AdminInsightsTitles, error) {
+	if h.InsightsSource != nil {
+		if refresh {
+			h.InsightsSource.Invalidate()
+		}
+		return h.InsightsSource.Titles(ctx, q)
+	}
+	if h.pool == nil {
+		return nil, ErrAdminDashboardUnavailable
+	}
+	return queryAdminInsightsTitles(ctx, h.pool, q)
+}
+
+// ReadAdminInsightsTitle reads one title's detail. It is small and keyed by an
+// arbitrary content id, so it skips the cache.
+func (h *AdminHandler) ReadAdminInsightsTitle(ctx context.Context, q AdminInsightsTitleQuery) (*AdminInsightsTitle, error) {
+	if h.pool == nil {
+		return nil, ErrAdminDashboardUnavailable
+	}
+	return queryAdminInsightsTitle(ctx, h.pool, q)
 }
 
 // Window validation & resolution helpers.
@@ -633,14 +865,42 @@ func clampInsightsPeopleLimit(limit int) int {
 	return limit
 }
 
-func clampInsightsMinPlays(minPlays int) int {
-	if minPlays <= 0 {
-		return insightsDefaultMinPlays
+func clampInsightsMinSessions(minSessions int) int {
+	if minSessions <= 0 {
+		return insightsDefaultMinSessions
 	}
-	if minPlays > insightsMaxMinPlays {
-		return insightsMaxMinPlays
+	if minSessions > insightsMaxMinSessions {
+		return insightsMaxMinSessions
 	}
-	return minPlays
+	return minSessions
+}
+
+func clampInsightsTitlesLimit(limit int) int {
+	if limit <= 0 {
+		return insightsDefaultTitlesLimit
+	}
+	if limit > insightsMaxTitlesLimit {
+		return insightsMaxTitlesLimit
+	}
+	return limit
+}
+
+func normalizeInsightsTitlesSort(raw string) string {
+	switch v := strings.ToLower(strings.TrimSpace(raw)); v {
+	case InsightsTitlesSortWatchTime, InsightsTitlesSortViewers:
+		return v
+	default:
+		return InsightsTitlesSortPlays
+	}
+}
+
+// validateInsightsScope rejects a profile filter without its account: profile
+// ids repeat across accounts.
+func validateInsightsScope(q AdminInsightsWindowQuery) error {
+	if strings.TrimSpace(q.ProfileID) != "" && q.UserID <= 0 {
+		return fmt.Errorf("%w: profile_id requires user_id", ErrInvalidInsightsQuery)
+	}
+	return nil
 }
 
 func pickInsightsBucketUnit(span time.Duration) string {

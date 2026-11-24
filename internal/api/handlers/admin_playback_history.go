@@ -45,6 +45,9 @@ type AdminPlaybackHistoryFilter struct {
 	StreamLocation   string `json:",omitempty"`
 	AdaptationReason string `json:",omitempty"`
 	LibraryID        int    `json:",omitempty"`
+	// SeriesID keeps attempts of any episode of one series: episode rows
+	// store the episode id in media_item_id.
+	SeriesID string `json:",omitempty"`
 	// SessionID limits the page to one session's row. Internal: a lifecycle
 	// event reads the row its end recorded.
 	SessionID string `json:",omitempty"`
@@ -160,6 +163,36 @@ func escapeHistoryLike(raw string) string {
 	return r.Replace(raw)
 }
 
+// canonicalPlayMethod folds a recorded play method, including the legacy
+// spellings older rows carry, to direct, remux or transcode; "" for others.
+func canonicalPlayMethod(method string) string {
+	switch strings.ToLower(strings.TrimSpace(method)) {
+	case string(playback.PlayDirect), legacyPlayMethodDirect:
+		return string(playback.PlayDirect)
+	case string(playback.PlayRemux), legacyPlayMethodRemux:
+		return string(playback.PlayRemux)
+	case string(playback.PlayTranscode):
+		return string(playback.PlayTranscode)
+	default:
+		return ""
+	}
+}
+
+// playMethodConditionSQL matches h.play_method for a canonical play method
+// and its legacy spelling.
+func playMethodConditionSQL(method string) (string, bool) {
+	switch canonicalPlayMethod(method) {
+	case string(playback.PlayDirect):
+		return insightsPlayDirectSQL, true
+	case string(playback.PlayRemux):
+		return insightsPlayRemuxSQL, true
+	case string(playback.PlayTranscode):
+		return insightsPlayTranscodeSQL, true
+	default:
+		return "", false
+	}
+}
+
 func buildAdminPlaybackHistoryWhere(filter AdminPlaybackHistoryFilter, after *AdminPlaybackHistoryPageKey) ([]string, []any) {
 	var conditions []string
 	var args []any
@@ -175,6 +208,10 @@ func buildAdminPlaybackHistoryWhere(filter AdminPlaybackHistoryFilter, after *Ad
 	}
 	if filter.MediaItemID != "" {
 		add("h.media_item_id = ", filter.MediaItemID)
+	}
+	if filter.SeriesID != "" {
+		args = append(args, filter.SeriesID)
+		conditions = append(conditions, fmt.Sprintf("h.media_item_id IN (SELECT content_id FROM episodes WHERE series_id = $%d)", len(args)))
 	}
 	if filter.Completed != nil {
 		add("h.completed = ", *filter.Completed)
@@ -192,14 +229,9 @@ func buildAdminPlaybackHistoryWhere(filter AdminPlaybackHistoryFilter, after *Ad
 		add("h.started_at < ", *filter.StartedBefore)
 	}
 	if filter.PlayMethod != "" {
-		switch strings.ToLower(strings.TrimSpace(filter.PlayMethod)) {
-		case string(playback.PlayDirect), legacyPlayMethodDirect:
-			conditions = append(conditions, "h.play_method IN ('direct', 'direct_play')")
-		case string(playback.PlayRemux), legacyPlayMethodRemux:
-			conditions = append(conditions, "h.play_method IN ('remux', 'direct_stream')")
-		case string(playback.PlayTranscode):
-			conditions = append(conditions, "h.play_method = 'transcode'")
-		default:
+		if cond, ok := playMethodConditionSQL(filter.PlayMethod); ok {
+			conditions = append(conditions, cond)
+		} else {
 			add("h.play_method = ", filter.PlayMethod)
 		}
 	}

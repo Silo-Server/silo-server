@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { Link } from "react-router";
+import { Link, useSearchParams } from "react-router";
 import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Search } from "lucide-react";
 
 import { formatWatchTime } from "@/components/admin/dashboard/format";
@@ -27,6 +27,7 @@ import {
   buildInsightsWindowQueryParams,
   formatRatePercentNumber,
   formatShortTimestamp,
+  insightsHrefWith,
   type InsightsFilterState,
 } from "./insightsHelpers";
 import { InsightKpiCard, InsightNoticeBanner, InsightSectionError } from "./insightsShared";
@@ -37,6 +38,7 @@ const EM_DASH = "—";
 
 export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
   const t = useT();
+  const [searchParams] = useSearchParams();
   const [searchInput, setSearchInput] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [sort, setSort] = useState<PeopleSort>("watch_time");
@@ -104,7 +106,7 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
 
   const coverage = data?.coverage;
   const showMeasuredBanner = Boolean(
-    coverage && coverage.total_plays > 0 && coverage.measured_plays < coverage.total_plays,
+    coverage && coverage.total_sessions > 0 && coverage.measured_sessions < coverage.total_sessions,
   );
 
   return (
@@ -112,8 +114,8 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
       {showMeasuredBanner && coverage ? (
         <InsightNoticeBanner
           message={t("web.admin.insights.coverage.watchTimePartial", {
-            measured: coverage.measured_plays.toLocaleString(formatLocale()),
-            total: coverage.total_plays.toLocaleString(formatLocale()),
+            measured: coverage.measured_sessions.toLocaleString(formatLocale()),
+            total: coverage.total_sessions.toLocaleString(formatLocale()),
           })}
         />
       ) : null}
@@ -329,12 +331,27 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
                                 : EM_DASH}
                             </TableCell>
                             <TableCell className="text-end">
-                              <Link
-                                to={accountHistoryHref}
-                                className="text-primary text-xs font-medium hover:underline"
-                              >
-                                {t("web.admin.insights.openHistory")}
-                              </Link>
+                              <div className="flex items-center justify-end gap-3">
+                                <Link
+                                  to={insightsHrefWith(searchParams, {
+                                    person: String(account.user_id),
+                                    profile: null,
+                                    title: null,
+                                  })}
+                                  aria-label={t("web.admin.insights.people.action.detailsFor", {
+                                    name: account.username,
+                                  })}
+                                  className="text-primary text-xs font-medium hover:underline"
+                                >
+                                  {t("web.admin.insights.people.action.details")}
+                                </Link>
+                                <Link
+                                  to={accountHistoryHref}
+                                  className="text-primary text-xs font-medium hover:underline"
+                                >
+                                  {t("web.admin.insights.openHistory")}
+                                </Link>
+                              </div>
                             </TableCell>
                           </TableRow>
 
@@ -399,12 +416,30 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
                                       : EM_DASH}
                                   </TableCell>
                                   <TableCell className="text-end">
-                                    <Link
-                                      to={profileHistoryHref}
-                                      className="text-primary text-xs hover:underline"
-                                    >
-                                      {t("web.admin.insights.openHistory")}
-                                    </Link>
+                                    <div className="flex items-center justify-end gap-3">
+                                      <Link
+                                        to={insightsHrefWith(searchParams, {
+                                          person: String(account.user_id),
+                                          profile: profile.profile_id,
+                                          title: null,
+                                        })}
+                                        aria-label={t(
+                                          "web.admin.insights.people.action.detailsFor",
+                                          {
+                                            name: profileLabel,
+                                          },
+                                        )}
+                                        className="text-primary text-xs hover:underline"
+                                      >
+                                        {t("web.admin.insights.people.action.details")}
+                                      </Link>
+                                      <Link
+                                        to={profileHistoryHref}
+                                        className="text-primary text-xs hover:underline"
+                                      >
+                                        {t("web.admin.insights.openHistory")}
+                                      </Link>
+                                    </div>
                                   </TableCell>
                                 </TableRow>
                               );

@@ -25,9 +25,9 @@ func (f *fakeAdminInsights) coverage() handlers.AdminInsightsCoverage {
 		OldestMeasuredAt:   &oldest,
 		OldestRouteFactsAt: &oldest,
 		OldestMetricAt:     &oldest,
-		TotalPlays:         42,
-		MeasuredPlays:      40,
-		RouteFactsPlays:    38,
+		TotalSessions:      48,
+		MeasuredSessions:   46,
+		RouteFactsSessions: 44,
 	}
 }
 
@@ -44,8 +44,8 @@ func (f *fakeAdminInsights) ReadAdminInsightsActivity(_ context.Context, q handl
 		From: fixedTime().AddDate(0, 0, -29), To: fixedTime(), TZ: q.TZ, BucketUnit: handlers.InsightsBucketDay,
 		Coverage: f.coverage(),
 		Summary: handlers.AdminInsightsActivitySummary{
-			Plays: 42, Movies: 12, Episodes: 30, WatchSeconds: 86400, MeasuredWatchSeconds: 84000,
-			MeasuredPlays: 40, CompletedPlays: 35, CompletionRate: 0.8333,
+			Plays: 42, Sessions: 48, Movies: 12, Episodes: 30, WatchSeconds: 86400, MeasuredWatchSeconds: 84000,
+			CompletedPlays: 35, CompletionRate: 0.8333,
 			DirectPlays: 30, RemuxPlays: 7, TranscodePlays: 5,
 			UniqueAccounts: 4, UniqueProfiles: 6, PeakConcurrentStreams: 4, PeakConcurrentAt: &peakAt,
 		},
@@ -74,13 +74,13 @@ func (f *fakeAdminInsights) ReadAdminInsightsPeople(_ context.Context, q handler
 		Coverage: f.coverage(),
 		Accounts: []handlers.AdminInsightsPersonAccount{{
 			UserID: 7, Username: "alex", Role: "admin", IsLive: true,
-			Plays: 24, Movies: 8, Episodes: 16, WatchSeconds: 50400,
-			MeasuredPlays: 24, MeasuredShare: 1.0, DirectPlays: 20, RemuxPlays: 2, TranscodePlays: 2,
+			Plays: 24, Sessions: 27, Movies: 8, Episodes: 16, WatchSeconds: 50400,
+			MeasuredSessions: 27, MeasuredShare: 1.0, DirectPlays: 20, RemuxPlays: 2, TranscodePlays: 2,
 			DirectRate: 0.8333, CompletedPlays: 21, CompletionRate: 0.875,
 			TopClient: &topClient, LastSeenAt: &lastSeen,
 			Profiles: []handlers.AdminInsightsPersonProfile{{
-				ProfileID: "p-main", ProfileName: "Alex", IsLive: true, Plays: 18, WatchSeconds: 40000,
-				MeasuredPlays: 18, DirectPlays: 16, RemuxPlays: 1, TranscodePlays: 1, CompletedPlays: 16,
+				ProfileID: "p-main", ProfileName: "Alex", IsLive: true, Plays: 18, Sessions: 20, WatchSeconds: 40000,
+				MeasuredSessions: 20, DirectPlays: 16, RemuxPlays: 1, TranscodePlays: 1, CompletedPlays: 16,
 				CompletionRate: 0.8889, LastSeenAt: &lastSeen,
 			}},
 		}},
@@ -96,22 +96,25 @@ func (f *fakeAdminInsights) ReadAdminInsightsDevices(_ context.Context, q handle
 		From: fixedTime().AddDate(0, 0, -29), To: fixedTime(), TZ: q.TZ,
 		Coverage: f.coverage(),
 		Summary: handlers.AdminInsightsDevicesSummary{
-			TotalPlays: 42, DirectPlays: 30, RemuxPlays: 7, TranscodePlays: 5, DirectRate: 0.7143,
-			RouteFactsPlays: 38, HWTranscodePlays: 4, SWTranscodePlays: 1,
-			SubtitleBurnInPlays: 2, HDRToneMapPlays: 2, HDRToneMapHWPlays: 2, HDRToneMapSWPlays: 0,
+			TotalSessions: 48, DirectSessions: 34, RemuxSessions: 8, TranscodeSessions: 6, DirectRate: 0.7083,
+			RouteFactsSessions: 44, HWTranscodeSessions: 5, SWTranscodeSessions: 1,
+			SubtitleBurnInSessions: 2, HDRToneMapSessions: 2, HDRToneMapHWSessions: 2, HDRToneMapSWSessions: 0,
 		},
 		Codecs: []string{"hevc", "h264"},
 		Matrix: []handlers.AdminInsightsClientMatrixRow{{
 			ClientName: "Silo Apple", DevicePlatform: "tvOS", IsJellyfinClient: false,
-			TotalPlays: 20, DirectPlays: 18, RemuxPlays: 1, TranscodePlays: 1, DirectRate: 0.9,
+			TotalSessions: 20, DirectSessions: 18, RemuxSessions: 1, TranscodeSessions: 1, DirectRate: 0.9,
 			Cells: []handlers.AdminInsightsClientCodecCell{{
-				SourceVideoCodec: "hevc", Plays: 12, DirectPlays: 11, RemuxPlays: 1, TranscodePlays: 0, DirectRate: 0.9167,
+				SourceVideoCodec: "hevc", Sessions: 12, DirectSessions: 11, RemuxSessions: 1, TranscodeSessions: 0, DirectRate: 0.9167,
 			}},
 		}},
-		AdaptationReasons:    []handlers.AdminInsightsAdaptationReason{{Reason: "subtitle_burn_in", Plays: 2, ShareOfAdapted: 0.1667}},
-		HWAccelBreakdown:     []handlers.AdminInsightsLabeledCount{{Key: "vaapi", Plays: 4}, {Key: "software", Plays: 1}},
-		ToneMapBreakdown:     []handlers.AdminInsightsLabeledCount{{Key: "hardware", Plays: 2}},
-		SubtitleBurnInCodecs: []handlers.AdminInsightsLabeledCount{{Key: "hdmv_pgs_subtitle", Plays: 2}},
+		AdaptationReasons:    []handlers.AdminInsightsAdaptationReason{{Reason: "subtitle_burn_in", Sessions: 2, ShareOfAdapted: 0.1429}},
+		HWAccelBreakdown:     []handlers.AdminInsightsLabeledCount{{Key: "vaapi", Sessions: 5}, {Key: "software", Sessions: 1}},
+		ToneMapBreakdown:     []handlers.AdminInsightsLabeledCount{{Key: "hardware", Sessions: 2}},
+		SubtitleBurnInCodecs: []handlers.AdminInsightsLabeledCount{{Key: "hdmv_pgs_subtitle", Sessions: 2}},
+		SourceResolutions:    []handlers.AdminInsightsLabeledCount{{Key: "2160p", Sessions: 20}, {Key: "1080p", Sessions: 26}, {Key: "unknown", Sessions: 2}},
+		DeliveredResolutions: []handlers.AdminInsightsLabeledCount{{Key: "2160p", Sessions: 17}, {Key: "1080p", Sessions: 27}, {Key: "unknown", Sessions: 4}},
+		ResolutionChanges:    []handlers.AdminInsightsResolutionChange{{From: "2160p", To: "1080p", Sessions: 3}},
 	}, nil
 }
 
@@ -130,7 +133,7 @@ func (f *fakeAdminInsights) ReadAdminInsightsBandwidth(_ context.Context, q hand
 			TotalEgressBytes: 900_000_000_000, PlaybackEgressBytes: 810_000_000_000,
 			DownloadEgressBytes: 90_000_000_000, APIEgressBytes: 300_000_000_000, NodeEgressBytes: 600_000_000_000,
 			AvgDailyBytes: 30_000_000_000, PeakEgressKbps: 145_000, PeakEgressAt: &peakAt,
-			PeakDownloadKbps: 42_000, ActiveDays: 30, RemotePlays: 28, LocalPlays: 12, UnknownLocationPlays: 2,
+			PeakDownloadKbps: 42_000, ActiveDays: 30, RemoteSessions: 31, LocalSessions: 14, UnknownLocationSessions: 3,
 		},
 		Sources: []handlers.AdminInsightsEgressSource{
 			{Key: "api", Kind: "api", Name: "API server", EgressBytes: 300_000_000_000, PeakEgressKbps: 65_000, ShareOfTotal: 0.3333},
@@ -147,13 +150,63 @@ func (f *fakeAdminInsights) ReadAdminInsightsBandwidth(_ context.Context, q hand
 	}, nil
 }
 
+func (f *fakeAdminInsights) ReadAdminInsightsTitles(_ context.Context, q handlers.AdminInsightsTitlesQuery, refresh bool) (*handlers.AdminInsightsTitles, error) {
+	f.lastRefresh = refresh
+	if f.err != nil {
+		return nil, f.err
+	}
+	lastPlayed := fixedTime().Add(-90 * time.Minute)
+	year := 2021
+	return &handlers.AdminInsightsTitles{
+		From: fixedTime().AddDate(0, 0, -29), To: fixedTime(), TZ: q.TZ, Sort: handlers.InsightsTitlesSortPlays,
+		Movies: []handlers.AdminInsightsTitleRow{{
+			ContentID: "movie-1", Kind: "movie", Title: "Dune", Year: &year, Plays: 6, Viewers: 4, CompletedPlays: 5,
+			WatchSeconds: 46000, LastPlayedAt: &lastPlayed,
+		}},
+		Shows: []handlers.AdminInsightsTitleRow{{
+			ContentID: "series-1", Kind: "series", Title: "Severance", Plays: 18, Viewers: 3, CompletedPlays: 16,
+			Episodes: 9, WatchSeconds: 54000, LastPlayedAt: &lastPlayed,
+		}},
+		Libraries: []handlers.AdminInsightsLibraryRow{{LibraryID: 2, Name: "TV Shows", Plays: 18, Viewers: 3, WatchSeconds: 54000}},
+	}, nil
+}
+
+func (f *fakeAdminInsights) ReadAdminInsightsTitle(_ context.Context, q handlers.AdminInsightsTitleQuery) (*handlers.AdminInsightsTitle, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	switch q.ContentID {
+	case "missing":
+		return nil, handlers.ErrInsightsTitleNotFound
+	case "ep-1":
+		return nil, handlers.ErrInvalidInsightsQuery
+	}
+	lastPlayed := fixedTime().Add(-90 * time.Minute)
+	return &handlers.AdminInsightsTitle{
+		From: fixedTime().AddDate(0, 0, -29), To: fixedTime(), TZ: q.TZ, BucketUnit: handlers.InsightsBucketDay,
+		ContentID: q.ContentID, Kind: "series", Title: "Severance",
+		Summary: handlers.AdminInsightsTitleSummary{Plays: 18, Sessions: 21, Viewers: 3, CompletedPlays: 16, WatchSeconds: 54000, DirectPlays: 15, RemuxPlays: 2, TranscodePlays: 1},
+		Buckets: []handlers.AdminInsightsPlaysBucket{{BucketStart: fixedTime().AddDate(0, 0, -1), LabelDate: fixedTime().AddDate(0, 0, -1).Format("2006-01-02"), Plays: 4, WatchSeconds: 12000}},
+		Viewers: []handlers.AdminInsightsTitleViewer{{
+			UserID: 7, Username: "alex", ProfileID: "p-main", ProfileName: "Alex", Plays: 9, CompletedPlays: 8, WatchSeconds: 27000,
+			LastPlayedAt: &lastPlayed, LastEpisode: &handlers.AdminInsightsEpisodeRef{ContentID: "ep-9", SeasonNumber: 1, EpisodeNumber: 9, Title: "The We We Are"},
+		}},
+		Episodes: []handlers.AdminInsightsTitleEpisode{{
+			AdminInsightsEpisodeRef: handlers.AdminInsightsEpisodeRef{ContentID: "ep-1", SeasonNumber: 1, EpisodeNumber: 1, Title: "Good News About Hell"},
+			Plays:                   3, Viewers: 3, WatchSeconds: 9000,
+		}},
+	}, nil
+}
+
 func adminInsightsFixtureCases() []fixtureCase {
 	return []fixtureCase{
 		{name: "get_admin_insights_capabilities_ok", operationID: "getAdminInsightsCapabilities", method: http.MethodGet, path: Prefix + "/admin/insights/capabilities", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/AdminInsightsCapabilities", scenario: "Administrator insights capabilities advertise available Monitor -> Insights tabs and archival datasets."},
 		{name: "get_admin_insights_activity_ok", operationID: "getAdminInsightsActivity", method: http.MethodGet, path: Prefix + "/admin/insights/activity?range=30d&tz=UTC", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminInsightsActivity", scenario: "Administrator insights activity returns summary KPIs, local-timezone buckets, viewing heatmap, and peak concurrent streams."},
 		{name: "get_admin_insights_people_ok", operationID: "getAdminInsightsPeople", method: http.MethodGet, path: Prefix + "/admin/insights/people?range=30d&tz=UTC", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminInsightsPeople", scenario: "Administrator insights people returns account and nested household profile viewing leaderboards."},
-		{name: "get_admin_insights_devices_ok", operationID: "getAdminInsightsDevices", method: http.MethodGet, path: Prefix + "/admin/insights/devices?range=30d&tz=UTC&min_plays=5", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminInsightsDevices", scenario: "Administrator insights devices returns client x codec direct-play matrix, adaptation reasons, and transcode breakdowns."},
+		{name: "get_admin_insights_devices_ok", operationID: "getAdminInsightsDevices", method: http.MethodGet, path: Prefix + "/admin/insights/devices?range=30d&tz=UTC&min_sessions=5", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminInsightsDevices", scenario: "Administrator insights devices returns client x codec direct-play matrix, adaptation reasons, transcode breakdowns, and source vs delivered resolution classes."},
 		{name: "get_admin_insights_bandwidth_ok", operationID: "getAdminInsightsBandwidth", method: http.MethodGet, path: Prefix + "/admin/insights/bandwidth?range=30d&tz=UTC", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminInsightsBandwidth", scenario: "Administrator insights bandwidth returns daily archive + live egress totals and per-node breakdown."},
+		{name: "get_admin_insights_titles_ok", operationID: "getAdminInsightsTitles", method: http.MethodGet, path: Prefix + "/admin/insights/titles?range=30d&tz=UTC&sort=plays&limit=10", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminInsightsTitles", scenario: "Administrator insights titles ranks the most watched movies, series and libraries."},
+		{name: "get_admin_insights_title_ok", operationID: "getAdminInsightsTitle", method: http.MethodGet, path: Prefix + "/admin/insights/titles/series-1?range=30d&tz=UTC", headers: actingRequestAdmin, status: 200, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AdminInsightsTitle", scenario: "Administrator insights title detail returns a series' plays over time, viewers, and episodes."},
 	}
 }
 
@@ -180,6 +233,8 @@ func TestAdminInsightsValidationAndMonitorScope(t *testing.T) {
 		"/admin/insights/people?range=30d&refresh=true",
 		"/admin/insights/devices?range=30d&refresh=true",
 		"/admin/insights/bandwidth?range=30d&refresh=true",
+		"/admin/insights/titles?range=30d&refresh=true",
+		"/admin/insights/titles/series-1?range=30d",
 		"/admin/playback-history/sess-1",
 	} {
 		rec := do(t, h, http.MethodGet, Prefix+path, "", bearer("sa_monitor"))
@@ -200,6 +255,13 @@ func TestAdminInsightsValidationAndMonitorScope(t *testing.T) {
 	// Invalid timezone maps to 422 validation_failed; missing session detail maps to 404 not_found.
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/admin/insights/activity?tz=Invalid/Zone", "", bearer("sa_admin")), TypeValidationFailed)
 	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/admin/playback-history/missing", "", bearer("sa_admin")), TypeNotFound)
+
+	// A profile filter needs its account: profile ids such as "default" repeat across accounts.
+	for _, path := range []string{"/admin/insights/activity?profile_id=default", "/admin/insights/titles?profile_id=default", "/admin/insights/titles/series-1?profile_id=default"} {
+		requireProblem(t, do(t, h, http.MethodGet, Prefix+path, "", bearer("sa_admin")), TypeValidationFailed)
+	}
+	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/admin/insights/titles/missing", "", bearer("sa_admin")), TypeNotFound)
+	requireProblem(t, do(t, h, http.MethodGet, Prefix+"/admin/insights/titles/ep-1", "", bearer("sa_admin")), TypeValidationFailed)
 
 	// Capabilities expose availability and the daily node-egress archive flag.
 	rec := do(t, h, http.MethodGet, Prefix+"/admin/insights/capabilities", "", bearer("sa_admin"))

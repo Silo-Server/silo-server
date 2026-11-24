@@ -119,7 +119,12 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
   // the API's local calendar label_date anchored at UTC midnight so columns
   // stay evenly spaced by time and never shift days in another browser TZ.
   const volumeBuckets = useMemo<StackedColumnBucket[]>(() => {
-    if (!data || data.buckets.length === 0) return [];
+    // Buckets carry sessions too, so a window can have buckets but no plays.
+    const hasMetric =
+      volumeMetric === "watch_time"
+        ? data?.buckets.some((b) => b.watch_seconds > 0)
+        : data?.buckets.some((b) => b.plays > 0);
+    if (!data || !hasMetric) return [];
     const byDate = new Map(data.buckets.map((b) => [b.label_date, b]));
     const grid = buildActivityBucketGrid(data.from, data.to, data.tz, data.bucket_unit);
     const dates = grid.length > 0 ? grid : data.buckets.map((b) => b.label_date);
@@ -292,7 +297,7 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
 
   const { summary, coverage } = data;
   const showMeasuredBanner =
-    coverage.total_plays > 0 && coverage.measured_plays < coverage.total_plays;
+    coverage.total_sessions > 0 && coverage.measured_sessions < coverage.total_sessions;
   const hasScopeFilter = filters.libraryId !== undefined || filters.userId !== undefined;
 
   return (
@@ -300,8 +305,8 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
       {showMeasuredBanner ? (
         <InsightNoticeBanner
           message={t("web.admin.insights.coverage.watchTimePartial", {
-            measured: coverage.measured_plays.toLocaleString(formatLocale()),
-            total: coverage.total_plays.toLocaleString(formatLocale()),
+            measured: coverage.measured_sessions.toLocaleString(formatLocale()),
+            total: coverage.total_sessions.toLocaleString(formatLocale()),
           })}
         />
       ) : null}
@@ -319,8 +324,8 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
           label={t("web.admin.insights.activity.kpi.watchTime")}
           value={formatWatchTime(summary.watch_seconds)}
           subtext={t("web.admin.insights.activity.kpi.watchTimeMeasured", {
-            measured: summary.measured_plays.toLocaleString(formatLocale()),
-            total: summary.plays.toLocaleString(formatLocale()),
+            measured: coverage.measured_sessions.toLocaleString(formatLocale()),
+            total: coverage.total_sessions.toLocaleString(formatLocale()),
           })}
         />
         <InsightKpiCard
@@ -351,9 +356,14 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
       {/* Playback volume stacked column chart */}
       <Card className="surface-panel rounded-2xl border-0">
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 space-y-0">
-          <CardTitle className="text-sm font-bold">
-            {t("web.admin.insights.activity.volume.title")}
-          </CardTitle>
+          <div className="space-y-0.5">
+            <CardTitle className="text-sm font-bold">
+              {t("web.admin.insights.activity.volume.title")}
+            </CardTitle>
+            <p className="text-muted-foreground text-xs">
+              {t("web.admin.insights.activity.volume.subtitle")}
+            </p>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             <WidgetViewToggle
               value={volumeMetric}

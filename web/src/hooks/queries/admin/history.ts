@@ -22,6 +22,8 @@ export interface AdminPlaybackHistoryParams {
   userId?: number;
   profileId?: string;
   mediaItemId?: string;
+  /** Attempts of any episode of this series. */
+  seriesId?: string;
   completed?: "all" | "true" | "false";
   search?: string;
   playMethod?: string;
@@ -55,6 +57,7 @@ export function buildAdminPlaybackHistoryQuery(
   if (params.userId) query.user_id = String(params.userId);
   if (params.profileId) query.profile_id = params.profileId;
   if (params.mediaItemId) query.media_item_id = params.mediaItemId;
+  if (params.seriesId) query.series_id = params.seriesId;
   if (params.completed === "true" || params.completed === "false") {
     query.completed = params.completed;
   }

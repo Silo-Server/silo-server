@@ -49679,7 +49679,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E measured\u202C"
+      "value": "\u202E sessions measured\u202C"
     }
   ],
   "web.admin.insights.activity.peak.chartLabel": [
@@ -49764,6 +49764,12 @@
     {
       "type": 0,
       "value": "\u200F\u202EPlay method\u202C"
+    }
+  ],
+  "web.admin.insights.activity.volume.subtitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EA play counts resumed sittings once and skips unfinished attempts under 30 seconds.\u202C"
     }
   ],
   "web.admin.insights.activity.volume.title": [
@@ -49941,7 +49947,7 @@
   "web.admin.insights.bandwidth.kpi.remoteShare": [
     {
       "type": 0,
-      "value": "\u200F\u202ERemote play share\u202C"
+      "value": "\u200F\u202ERemote session share\u202C"
     }
   ],
   "web.admin.insights.bandwidth.kpi.remoteShareDetail": [
@@ -50031,7 +50037,7 @@
   "web.admin.insights.coverage.routeFactsNone": [
     {
       "type": 0,
-      "value": "\u200F\u202ENo plays in this window carry detailed route facts yet. New sessions record full codec, encoder, and routing telemetry automatically.\u202C"
+      "value": "\u200F\u202ENo sessions in this window carry detailed route facts yet. New sessions record full codec, encoder, and routing telemetry automatically.\u202C"
     }
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
@@ -50053,7 +50059,7 @@
     },
     {
       "type": 0,
-      "value": "\u202E plays in this window (recorded since \u202C"
+      "value": "\u202E sessions in this window (recorded since \u202C"
     },
     {
       "type": 1,
@@ -50083,7 +50089,49 @@
     },
     {
       "type": 0,
-      "value": "\u202E plays in this window; older sessions use end-position estimates.\u202C"
+      "value": "\u202E sessions in this window; older sessions use end-position estimates.\u202C"
+    }
+  ],
+  "web.admin.insights.detail.action.history": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EView sessions\u202C"
+    }
+  ],
+  "web.admin.insights.detail.noPlays": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo plays in this window\u202C"
+    }
+  ],
+  "web.admin.insights.detail.playsOverTime": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlays over time\u202C"
+    }
+  ],
+  "web.admin.insights.detail.viewers": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EViewers\u202C"
+    }
+  ],
+  "web.admin.insights.detail.window": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": "\u202E – \u202C"
+    },
+    {
+      "type": 1,
+      "value": "to"
     }
   ],
   "web.admin.insights.devices.burnInCodecs.empty": [
@@ -50277,7 +50325,7 @@
     },
     {
       "type": 1,
-      "value": "plays"
+      "value": "sessions"
     },
     {
       "type": 0,
@@ -50304,10 +50352,10 @@
       "value": "\u200F\u202ENo client-codec pairs meet the sample threshold in this window\u202C"
     }
   ],
-  "web.admin.insights.devices.matrix.minPlays": [
+  "web.admin.insights.devices.matrix.minSessions": [
     {
       "type": 0,
-      "value": "\u200F\u202EMin 5 plays\u202C"
+      "value": "\u200F\u202EMin 5 sessions\u202C"
     }
   ],
   "web.admin.insights.devices.matrix.subtitle": [
@@ -50337,13 +50385,97 @@
   "web.admin.insights.devices.reasons.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EServer adaptation reasons recorded on non-direct plays\u202C"
+      "value": "\u200F\u202EServer adaptation reasons recorded on non-direct sessions\u202C"
     }
   ],
   "web.admin.insights.devices.reasons.title": [
     {
       "type": 0,
       "value": "\u200F\u202EWhy sessions adapted\u202C"
+    }
+  ],
+  "web.admin.insights.devices.resolution.change": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "from"
+    },
+    {
+      "type": 0,
+      "value": "\u202E → \u202C"
+    },
+    {
+      "type": 1,
+      "value": "to"
+    }
+  ],
+  "web.admin.insights.devices.resolution.delivered": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDelivered\u202C"
+    }
+  ],
+  "web.admin.insights.devices.resolution.downscaled": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDownscaled\u202C"
+    }
+  ],
+  "web.admin.insights.devices.resolution.downscaledEmpty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo sessions were delivered below their source resolution\u202C"
+    }
+  ],
+  "web.admin.insights.devices.resolution.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo sessions in this window\u202C"
+    }
+  ],
+  "web.admin.insights.devices.resolution.fuhd": [
+    {
+      "type": 0,
+      "value": "\u200F\u202E8K\u202C"
+    }
+  ],
+  "web.admin.insights.devices.resolution.sd": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESD\u202C"
+    }
+  ],
+  "web.admin.insights.devices.resolution.source": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESource\u202C"
+    }
+  ],
+  "web.admin.insights.devices.resolution.subtitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESource files and what clients received, by session\u202C"
+    }
+  ],
+  "web.admin.insights.devices.resolution.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EResolution\u202C"
+    }
+  ],
+  "web.admin.insights.devices.resolution.uhd": [
+    {
+      "type": 0,
+      "value": "\u200F\u202E4K\u202C"
+    }
+  ],
+  "web.admin.insights.devices.resolution.unknown": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EUnknown\u202C"
     }
   ],
   "web.admin.insights.devices.topTranscoders.empty": [
@@ -50377,13 +50509,55 @@
     },
     {
       "type": 0,
-      "value": "\u202E plays\u202C"
+      "value": "\u202E sessions\u202C"
     }
   ],
   "web.admin.insights.devices.unknownClient": [
     {
       "type": 0,
       "value": "\u200F\u202EUnknown client\u202C"
+    }
+  ],
+  "web.admin.insights.episodeCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E episode\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E episodes\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.filter.allAccounts": [
@@ -50470,6 +50644,22 @@
     {
       "type": 0,
       "value": "\u200F\u202EHistory ›\u202C"
+    }
+  ],
+  "web.admin.insights.people.action.details": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EDetails\u202C"
+    }
+  ],
+  "web.admin.insights.people.action.detailsFor": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow insights for \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
     }
   ],
   "web.admin.insights.people.collapseProfiles": [
@@ -50640,6 +50830,42 @@
       "value": "\u202E%\u202C"
     }
   ],
+  "web.admin.insights.personDetail.action.openAccount": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EOpen account\u202C"
+    }
+  ],
+  "web.admin.insights.personDetail.allProfiles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EAll profiles\u202C"
+    }
+  ],
+  "web.admin.insights.personDetail.clients": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EClients\u202C"
+    }
+  ],
+  "web.admin.insights.personDetail.clientsEmpty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo sessions in this window\u202C"
+    }
+  ],
+  "web.admin.insights.personDetail.profileLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EProfile\u202C"
+    }
+  ],
+  "web.admin.insights.personDetail.topTitles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETop titles\u202C"
+    }
+  ],
   "web.admin.insights.playCount": [
     {
       "type": 6,
@@ -50724,10 +50950,52 @@
       "value": "\u200F\u202ERetry\u202C"
     }
   ],
+  "web.admin.insights.sessionCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E session\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E sessions\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "\u200F\u202EPlayback trends, household usage, device compatibility, and egress over time.\u202C"
+      "value": "\u200F\u202EPlayback trends, popular titles, household usage, device compatibility, and egress over time.\u202C"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -50754,10 +51022,242 @@
       "value": "\u200F\u202EPeople\u202C"
     }
   ],
+  "web.admin.insights.tabs.titles": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETitles\u202C"
+    }
+  ],
   "web.admin.insights.title": [
     {
       "type": 0,
       "value": "\u200F\u202EInsights\u202C"
+    }
+  ],
+  "web.admin.insights.titleDetail.episodes.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EEpisodes\u202C"
+    }
+  ],
+  "web.admin.insights.titleDetail.episodes.truncated": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShowing the first 500 episodes.\u202C"
+    }
+  ],
+  "web.admin.insights.titleDetail.kind.movie": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EMovie\u202C"
+    }
+  ],
+  "web.admin.insights.titleDetail.kind.series": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ESeries\u202C"
+    }
+  ],
+  "web.admin.insights.titleDetail.notFound": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EThis title is no longer in the catalog.\u202C"
+    }
+  ],
+  "web.admin.insights.titleDetail.scopedToPerson": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlays by \u202C"
+    },
+    {
+      "type": 1,
+      "value": "name"
+    }
+  ],
+  "web.admin.insights.titleDetail.showEveryone": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShow everyone\u202C"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.furthest": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReached \u202C"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    },
+    {
+      "type": 0,
+      "value": "\u202E of \u202C"
+    },
+    {
+      "type": 1,
+      "value": "duration"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.furthestNoDuration": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EReached \u202C"
+    },
+    {
+      "type": 1,
+      "value": "position"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.lastEpisode": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ELast: \u202C"
+    },
+    {
+      "type": 1,
+      "value": "episode"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWho watched\u202C"
+    }
+  ],
+  "web.admin.insights.titleDetail.viewers.truncated": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EShowing the 100 most recent viewers.\u202C"
+    }
+  ],
+  "web.admin.insights.titles.libraries.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo library plays in this window\u202C"
+    }
+  ],
+  "web.admin.insights.titles.libraries.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETop libraries\u202C"
+    }
+  ],
+  "web.admin.insights.titles.movies.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo movies played in this window\u202C"
+    }
+  ],
+  "web.admin.insights.titles.movies.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETop movies\u202C"
+    }
+  ],
+  "web.admin.insights.titles.shows.empty": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ENo shows played in this window\u202C"
+    }
+  ],
+  "web.admin.insights.titles.shows.title": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ETop shows\u202C"
+    }
+  ],
+  "web.admin.insights.titles.sort.plays": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EPlays\u202C"
+    }
+  ],
+  "web.admin.insights.titles.sort.viewers": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EViewers\u202C"
+    }
+  ],
+  "web.admin.insights.titles.sort.watchTime": [
+    {
+      "type": 0,
+      "value": "\u200F\u202EWatch time\u202C"
+    }
+  ],
+  "web.admin.insights.titles.sortLabel": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERank by\u202C"
+    }
+  ],
+  "web.admin.insights.titles.titleWithYear": [
+    {
+      "type": 0,
+      "value": "\u200F"
+    },
+    {
+      "type": 1,
+      "value": "title"
+    },
+    {
+      "type": 0,
+      "value": "\u202E (\u202C"
+    },
+    {
+      "type": 1,
+      "value": "year"
+    },
+    {
+      "type": 0,
+      "value": "\u202E)\u202C"
+    }
+  ],
+  "web.admin.insights.titles.unknownTitle": [
+    {
+      "type": 0,
+      "value": "\u200F\u202ERemoved title\u202C"
+    }
+  ],
+  "web.admin.insights.viewerCount": [
+    {
+      "type": 6,
+      "value": "count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E viewer\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "count_text"
+            },
+            {
+              "type": 0,
+              "value": "\u202E viewers\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.libraries.activeWork.cancelRefresh": [

@@ -26,10 +26,15 @@ import { ActivityTab } from "./ActivityTab";
 import { BandwidthTab } from "./BandwidthTab";
 import { DevicesTab } from "./DevicesTab";
 import { PeopleTab } from "./PeopleTab";
+import { PersonDetailSheet } from "./PersonDetailSheet";
+import { TitleDetailSheet } from "./TitleDetailSheet";
+import { TitlesTab } from "./TitlesTab";
 import {
+  INSIGHTS_DETAIL_PARAMS,
   INSIGHTS_RANGES,
   defaultCustomDates,
   detectBrowserTimezone,
+  parseInsightsDetailState,
   parseInsightsUrlState,
   type InsightsRange,
   type InsightsTab,
@@ -57,6 +62,7 @@ export default function AdminInsights() {
     () => parseInsightsUrlState(searchParams, browserTz),
     [searchParams, browserTz],
   );
+  const detail = useMemo(() => parseInsightsDetailState(searchParams), [searchParams]);
 
   const { data: libraries = [] } = useAdminLibraries();
   const { data: users = [] } = useAdminUsers();
@@ -107,6 +113,20 @@ export default function AdminInsights() {
     [updateParams],
   );
 
+  const closeDetail = useCallback(() => {
+    updateParams((next) => {
+      for (const key of INSIGHTS_DETAIL_PARAMS) next.delete(key);
+    });
+  }, [updateParams]);
+
+  // A title opened from a person's panel keeps the person in the URL; closing
+  // it returns to that person.
+  const closeTitle = useCallback(() => {
+    updateParams((next) => {
+      next.delete("title");
+    });
+  }, [updateParams]);
+
   const handleReset = useCallback(() => {
     const next = new URLSearchParams();
     if (filters.tab !== "playback") {
@@ -150,8 +170,19 @@ export default function AdminInsights() {
 
   const activeTab: InsightsTab = filters.tab;
   const showLibraryFilter = activeTab !== "bandwidth";
-  const showAccountFilter = activeTab === "playback" || activeTab === "devices";
+  const showAccountFilter =
+    activeTab === "playback" || activeTab === "titles" || activeTab === "devices";
   const showTimezoneFilter = activeTab !== "bandwidth";
+  // The detail panels honor only the filters this tab shows: an account or
+  // library chosen on another tab stays in the URL but is hidden here.
+  const detailFilters = useMemo(
+    () => ({
+      ...filters,
+      libraryId: showLibraryFilter ? filters.libraryId : undefined,
+      userId: showAccountFilter ? filters.userId : undefined,
+    }),
+    [filters, showAccountFilter, showLibraryFilter],
+  );
 
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
@@ -201,6 +232,7 @@ export default function AdminInsights() {
         <div className="border-border/70 border-b">
           <TabsList variant="line" className="h-auto gap-2 pb-1">
             <TabsTrigger value="playback">{t("web.admin.insights.tabs.activity")}</TabsTrigger>
+            <TabsTrigger value="titles">{t("web.admin.insights.tabs.titles")}</TabsTrigger>
             <TabsTrigger value="people">{t("web.admin.insights.tabs.people")}</TabsTrigger>
             <TabsTrigger value="devices">{t("web.admin.insights.tabs.devices")}</TabsTrigger>
             <TabsTrigger value="bandwidth">{t("web.admin.insights.tabs.bandwidth")}</TabsTrigger>
@@ -371,6 +403,9 @@ export default function AdminInsights() {
         <TabsContent value="playback" className="mt-0 space-y-5">
           {activeTab === "playback" ? <ActivityTab filters={filters} /> : null}
         </TabsContent>
+        <TabsContent value="titles" className="mt-0 space-y-5">
+          {activeTab === "titles" ? <TitlesTab filters={filters} /> : null}
+        </TabsContent>
         <TabsContent value="people" className="mt-0 space-y-5">
           {activeTab === "people" ? <PeopleTab filters={filters} /> : null}
         </TabsContent>
@@ -381,6 +416,18 @@ export default function AdminInsights() {
           {activeTab === "bandwidth" ? <BandwidthTab filters={filters} /> : null}
         </TabsContent>
       </Tabs>
+
+      <TitleDetailSheet
+        titleId={detail.titleId}
+        person={detail.person}
+        filters={detailFilters}
+        onClose={detail.person ? closeTitle : closeDetail}
+      />
+      <PersonDetailSheet
+        person={detail.titleId ? undefined : detail.person}
+        filters={detailFilters}
+        onClose={closeDetail}
+      />
     </div>
   );
 }

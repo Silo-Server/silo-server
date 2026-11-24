@@ -519,6 +519,10 @@ export const adminKeys = {
     ["admin", "insights", "devices", params] as const,
   insightsBandwidth: (params: Record<string, unknown>) =>
     ["admin", "insights", "bandwidth", params] as const,
+  insightsTitles: (params: Record<string, unknown>) =>
+    ["admin", "insights", "titles", params] as const,
+  insightsTitle: (contentId: string, params: Record<string, unknown>) =>
+    ["admin", "insights", "title", contentId, params] as const,
   userIPs: (userId: number, days?: number) => ["admin", "users", userId, "ips", days] as const,
   ipUsers: (ip: string, days?: number) => ["admin", "ips", ip, days] as const,
   operationalLogsRoot: () => ["admin", "logs", "app"] as const,

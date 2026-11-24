@@ -6658,7 +6658,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"bbb10b6f542af6d68e49980464875cf8e16cb7ef02b2f4345bd516f39abc17e7\""
+        "ETag": "\"1d1377f9888815295cf9fd7c24376d588fe12eadf59e46ef9e4cf557c8c04d53\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminInsightsCapabilities",
@@ -6667,10 +6667,10 @@
     {
       "name": "get_admin_insights_devices_ok",
       "operation_id": "getAdminInsightsDevices",
-      "scenario": "Administrator insights devices returns client x codec direct-play matrix, adaptation reasons, and transcode breakdowns.",
+      "scenario": "Administrator insights devices returns client x codec direct-play matrix, adaptation reasons, transcode breakdowns, and source vs delivered resolution classes.",
       "request": {
         "method": "GET",
-        "path": "/api/v2/admin/insights/devices?range=30d&tz=UTC&min_plays=5",
+        "path": "/api/v2/admin/insights/devices?range=30d&tz=UTC&min_sessions=5",
         "headers": {
           "Authorization": "Bearer tok-admin",
           "X-Profile-Id": "p-primary"
@@ -6705,6 +6705,48 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminInsightsPeople",
       "body_file": "get_admin_insights_people_ok.json"
+    },
+    {
+      "name": "get_admin_insights_title_ok",
+      "operation_id": "getAdminInsightsTitle",
+      "scenario": "Administrator insights title detail returns a series' plays over time, viewers, and episodes.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/insights/titles/series-1?range=30d&tz=UTC",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminInsightsTitle",
+      "body_file": "get_admin_insights_title_ok.json"
+    },
+    {
+      "name": "get_admin_insights_titles_ok",
+      "operation_id": "getAdminInsightsTitles",
+      "scenario": "Administrator insights titles ranks the most watched movies, series and libraries.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/admin/insights/titles?range=30d&tz=UTC&sort=plays&limit=10",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-primary"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AdminInsightsTitles",
+      "body_file": "get_admin_insights_titles_ok.json"
     },
     {
       "name": "get_admin_item_trickplay_ok",
@@ -6742,7 +6784,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"74bde5f02e4a6421a55872b27d9ca56cae803e69d246067e1dca49367a37d0b2\""
+        "ETag": "\"d670d642614086a99de73e1d46549cd0d04475605d4cb63a12f081e6523efc35\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AdminPlaybackHistoryCapabilities",

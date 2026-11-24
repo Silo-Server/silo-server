@@ -87,6 +87,7 @@ export default function AdminPlaybackHistory() {
   const selectedLocation = searchParams.get("stream_location") ?? ALL_VALUE;
   const selectedBurnIn = searchParams.get("subtitle_burn_in") === "true";
   const selectedMediaItemId = searchParams.get("media_item_id")?.trim() ?? "";
+  const selectedSeriesId = searchParams.get("series_id")?.trim() ?? "";
   const selectedClientName = searchParams.get("client_name")?.trim() ?? "";
   const selectedPlatform = searchParams.get("device_platform")?.trim() ?? "";
   const selectedCodec = searchParams.get("source_video_codec")?.trim() ?? "";
@@ -108,6 +109,7 @@ export default function AdminPlaybackHistory() {
     selectedLocation,
     selectedBurnIn,
     selectedMediaItemId,
+    selectedSeriesId,
     selectedClientName,
     selectedPlatform,
     selectedCodec,
@@ -157,6 +159,7 @@ export default function AdminPlaybackHistory() {
     profileId: selectedProfile !== ALL_VALUE ? selectedProfile : undefined,
     libraryId: selectedLibraryId,
     mediaItemId: selectedMediaItemId || undefined,
+    seriesId: selectedSeriesId || undefined,
     playMethod: selectedMethod !== ALL_VALUE ? selectedMethod : undefined,
     completed:
       selectedCompleted === "true" || selectedCompleted === "false" ? selectedCompleted : "all",
@@ -349,7 +352,13 @@ export default function AdminPlaybackHistory() {
     t,
   ]);
 
-  const activeMediaItemLabel = rows[0] ? historyRowLabel(rows[0], t) : selectedMediaItemId;
+  // A title filter: one item (movie or episode) or every episode of a series.
+  const selectedTitleId = selectedMediaItemId || selectedSeriesId;
+  const activeMediaItemLabel = selectedMediaItemId
+    ? rows[0]
+      ? historyRowLabel(rows[0], t)
+      : selectedMediaItemId
+    : rows[0]?.series_title || selectedSeriesId;
 
   return (
     <div className="space-y-6 pb-4 sm:pb-6">
@@ -513,22 +522,22 @@ export default function AdminPlaybackHistory() {
           </Button>
         </div>
 
-        {(selectedMediaItemId || activeChips.length > 0) && (
+        {(selectedTitleId || activeChips.length > 0) && (
           <div className="flex flex-wrap items-center gap-2 pt-0.5">
-            {selectedMediaItemId ? (
+            {selectedTitleId ? (
               <div className="border-border bg-muted/40 inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs">
                 <span className="text-muted-foreground font-medium">
                   {t("web.admin.history.itemFilterActive")}
                 </span>
                 <Link
-                  to={`/item/${encodeURIComponent(selectedMediaItemId)}`}
+                  to={`/item/${encodeURIComponent(selectedTitleId)}`}
                   className="hover:text-primary font-semibold transition-colors hover:underline"
                 >
                   {activeMediaItemLabel}
                 </Link>
                 <button
                   type="button"
-                  onClick={() => removeFilterKeys(["media_item_id"])}
+                  onClick={() => removeFilterKeys(["media_item_id", "series_id"])}
                   aria-label={t("web.admin.history.filter.removeChip", {
                     label: activeMediaItemLabel,
                   })}

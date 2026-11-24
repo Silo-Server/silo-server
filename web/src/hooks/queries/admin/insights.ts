@@ -14,11 +14,15 @@ export type AdminInsightsActivity = V2Result<"GET /api/v2/admin/insights/activit
 export type AdminInsightsPeople = V2Result<"GET /api/v2/admin/insights/people">;
 export type AdminInsightsDevices = V2Result<"GET /api/v2/admin/insights/devices">;
 export type AdminInsightsBandwidth = V2Result<"GET /api/v2/admin/insights/bandwidth">;
+export type AdminInsightsTitles = V2Result<"GET /api/v2/admin/insights/titles">;
+export type AdminInsightsTitle = V2Result<"GET /api/v2/admin/insights/titles/{content_id}">;
 
 export type AdminInsightsActivityQuery = V2Query<"GET /api/v2/admin/insights/activity">;
 export type AdminInsightsPeopleQuery = V2Query<"GET /api/v2/admin/insights/people">;
 export type AdminInsightsDevicesQuery = V2Query<"GET /api/v2/admin/insights/devices">;
 export type AdminInsightsBandwidthQuery = V2Query<"GET /api/v2/admin/insights/bandwidth">;
+export type AdminInsightsTitlesQuery = V2Query<"GET /api/v2/admin/insights/titles">;
+export type AdminInsightsTitleQuery = V2Query<"GET /api/v2/admin/insights/titles/{content_id}">;
 
 const INSIGHTS_STALE_TIME = 45_000;
 
@@ -178,5 +182,37 @@ export function useAdminInsightsBandwidth(query: AdminInsightsBandwidthQuery, en
         signal,
       }),
     enabled,
+  );
+}
+
+export function useAdminInsightsTitles(query: AdminInsightsTitlesQuery, enabled = true) {
+  return useAdminInsightQuery(
+    adminKeys.insightsTitles(query as Record<string, unknown>),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/titles", {
+        query: withRefreshFlag(query),
+        profileContext,
+        signal,
+      }),
+    enabled,
+  );
+}
+
+/** Reads one movie or series. The server does not cache title detail, so it takes no refresh flag. */
+export function useAdminInsightsTitle(
+  contentId: string | undefined,
+  query: AdminInsightsTitleQuery,
+  enabled = true,
+) {
+  return useAdminInsightQuery(
+    adminKeys.insightsTitle(contentId ?? "", query as Record<string, unknown>),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/titles/{content_id}", {
+        path: { content_id: contentId ?? "" },
+        query,
+        profileContext,
+        signal,
+      }),
+    enabled && Boolean(contentId),
   );
 }

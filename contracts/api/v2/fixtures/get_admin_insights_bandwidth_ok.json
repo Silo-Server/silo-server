@@ -16,9 +16,9 @@
     "peak_egress_at": "2026-01-02T00:04:05.678Z",
     "peak_download_kbps": 42000,
     "active_days": 30,
-    "remote_plays": 28,
-    "local_plays": 12,
-    "unknown_location_plays": 2
+    "remote_sessions": 31,
+    "local_sessions": 14,
+    "unknown_location_sessions": 3
   },
   "sources": [
     {

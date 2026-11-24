@@ -2340,7 +2340,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read multi-range server and per-node daily egress volume, peak throughput, and remote vs local play share. */
+    /** Read multi-range server and per-node daily egress volume, peak throughput, and remote vs local session share. */
     get: operations["getAdminInsightsBandwidth"];
     put?: never;
     post?: never;
@@ -2393,6 +2393,40 @@ export interface paths {
     };
     /** Read account and household profile viewing leaderboards over the requested range. */
     get: operations["getAdminInsightsPeople"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/insights/titles": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Rank the most watched and most popular movies, series and libraries still in the catalog over the requested range. */
+    get: operations["getAdminInsightsTitles"];
+    put?: never;
+    post?: never;
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
+  "/api/v2/admin/insights/titles/{content_id}": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    /** Read one movie or series: plays over time, the profiles that played it, and a series' episodes. */
+    get: operations["getAdminInsightsTitle"];
     put?: never;
     post?: never;
     delete?: never;
@@ -18733,8 +18767,6 @@ export interface components {
       /** Format: int64 */
       episodes: number;
       /** Format: int64 */
-      measured_plays: number;
-      /** Format: int64 */
       measured_watch_seconds: number;
       /** Format: int64 */
       movies: number;
@@ -18747,10 +18779,18 @@ export interface components {
       peak_concurrent_at: string | null;
       /** Format: int64 */
       peak_concurrent_streams: number;
-      /** Format: int64 */
+      /**
+       * Format: int64
+       * @description Plays that started in the window
+       */
       plays: number;
       /** Format: int64 */
       remux_plays: number;
+      /**
+       * Format: int64
+       * @description Playback sessions that started in the window
+       */
+      sessions: number;
       /** Format: int64 */
       transcode_plays: number;
       /** Format: int64 */
@@ -18761,9 +18801,9 @@ export interface components {
       watch_seconds: number;
     };
     AdminInsightsAdaptationReason: {
-      /** Format: int64 */
-      plays: number;
       reason: string;
+      /** Format: int64 */
+      sessions: number;
       /** Format: double */
       share_of_adapted: number;
     };
@@ -18829,7 +18869,7 @@ export interface components {
       /** Format: int64 */
       download_egress_bytes: number;
       /** Format: int64 */
-      local_plays: number;
+      local_sessions: number;
       /** Format: int64 */
       node_egress_bytes: number;
       /** Format: int64 */
@@ -18844,11 +18884,11 @@ export interface components {
       /** Format: int64 */
       playback_egress_bytes: number;
       /** Format: int64 */
-      remote_plays: number;
+      remote_sessions: number;
       /** Format: int64 */
       total_egress_bytes: number;
       /** Format: int64 */
-      unknown_location_plays: number;
+      unknown_location_sessions: number;
     };
     AdminInsightsCapabilities: {
       /** @description Whether the current principal may use the capability */
@@ -18856,6 +18896,8 @@ export interface components {
       available: boolean;
       /** @description Long-term per-node daily egress archive survives past the 31-day minute-sample window */
       node_egress_daily: boolean;
+      /** @description Activity, Devices, Titles and title detail accept profile_id together with user_id */
+      profile_filter: boolean;
       /** @description Opaque revision of this document */
       revision: string;
       /**
@@ -18863,39 +18905,44 @@ export interface components {
        * @enum {string}
        */
       state: "available" | "disabled" | "not_configured" | "unsupported";
+      /** @description The Titles leaderboard (getAdminInsightsTitles) and title detail (getAdminInsightsTitle) are served */
+      titles: boolean;
     };
     AdminInsightsClientCodecCell: {
-      /** Format: int64 */
-      direct_plays: number;
       /** Format: double */
       direct_rate: number;
       /** Format: int64 */
-      plays: number;
+      direct_sessions: number;
       /** Format: int64 */
-      remux_plays: number;
+      remux_sessions: number;
+      /** Format: int64 */
+      sessions: number;
       source_video_codec: string;
       /** Format: int64 */
-      transcode_plays: number;
+      transcode_sessions: number;
     };
     AdminInsightsClientMatrixRow: {
       cells: components["schemas"]["AdminInsightsClientCodecCell"][];
       client_name: string;
       device_platform: string;
-      /** Format: int64 */
-      direct_plays: number;
       /** Format: double */
       direct_rate: number;
+      /** Format: int64 */
+      direct_sessions: number;
       is_jellyfin_client: boolean;
       /** Format: int64 */
-      remux_plays: number;
+      remux_sessions: number;
       /** Format: int64 */
-      total_plays: number;
+      total_sessions: number;
       /** Format: int64 */
-      transcode_plays: number;
+      transcode_sessions: number;
     };
     AdminInsightsCoverage: {
-      /** Format: int64 */
-      measured_plays: number;
+      /**
+       * Format: int64
+       * @description Sessions with measured watch time
+       */
+      measured_sessions: number;
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision, or null
@@ -18916,15 +18963,23 @@ export interface components {
        * @description RFC 3339 instant in UTC with millisecond precision, or null
        */
       oldest_route_facts_at: string | null;
-      /** Format: int64 */
-      route_facts_plays: number;
-      /** Format: int64 */
-      total_plays: number;
+      /**
+       * Format: int64
+       * @description Sessions with recorded route facts
+       */
+      route_facts_sessions: number;
+      /**
+       * Format: int64
+       * @description Sessions in scope
+       */
+      total_sessions: number;
     };
     AdminInsightsDevices: {
       adaptation_reasons: components["schemas"]["AdminInsightsAdaptationReason"][];
       codecs: string[];
       coverage: components["schemas"]["AdminInsightsCoverage"];
+      /** @description Sessions by delivered resolution class; transcodes recorded before route facts are unknown */
+      delivered_resolutions: components["schemas"]["AdminInsightsLabeledCount"][];
       /**
        * Format: date-time
        * @description RFC 3339 instant in UTC with millisecond precision
@@ -18932,6 +18987,10 @@ export interface components {
       from: string;
       hw_accel_breakdown: components["schemas"]["AdminInsightsLabeledCount"][];
       matrix: components["schemas"]["AdminInsightsClientMatrixRow"][];
+      /** @description Sessions delivered at a lower resolution class than their source, by source and delivered class */
+      resolution_changes: components["schemas"]["AdminInsightsResolutionChange"][];
+      /** @description Sessions by source resolution class (480p, 720p, 1080p, 2160p, 4320p, unknown), on the scale media_files.resolution uses */
+      source_resolutions: components["schemas"]["AdminInsightsLabeledCount"][];
       subtitle_burn_in_codecs: components["schemas"]["AdminInsightsLabeledCount"][];
       summary: components["schemas"]["AdminInsightsDevicesSummary"];
       /**
@@ -18943,30 +19002,30 @@ export interface components {
       tz: string;
     };
     AdminInsightsDevicesSummary: {
-      /** Format: int64 */
-      direct_plays: number;
       /** Format: double */
       direct_rate: number;
       /** Format: int64 */
-      hdr_tonemap_hw_plays: number;
+      direct_sessions: number;
       /** Format: int64 */
-      hdr_tonemap_plays: number;
+      hdr_tonemap_hw_sessions: number;
       /** Format: int64 */
-      hdr_tonemap_sw_plays: number;
+      hdr_tonemap_sessions: number;
       /** Format: int64 */
-      hw_transcode_plays: number;
+      hdr_tonemap_sw_sessions: number;
       /** Format: int64 */
-      remux_plays: number;
+      hw_transcode_sessions: number;
       /** Format: int64 */
-      route_facts_plays: number;
+      remux_sessions: number;
       /** Format: int64 */
-      subtitle_burn_in_plays: number;
+      route_facts_sessions: number;
       /** Format: int64 */
-      sw_transcode_plays: number;
+      subtitle_burn_in_sessions: number;
       /** Format: int64 */
-      total_plays: number;
+      sw_transcode_sessions: number;
       /** Format: int64 */
-      transcode_plays: number;
+      total_sessions: number;
+      /** Format: int64 */
+      transcode_sessions: number;
     };
     AdminInsightsEgressSource: {
       /** Format: int64 */
@@ -18985,6 +19044,14 @@ export interface components {
       peak_egress_kbps: number;
       /** Format: double */
       share_of_total: number;
+    };
+    AdminInsightsEpisodeRef: {
+      content_id: string;
+      /** Format: int64 */
+      episode_number: number;
+      /** Format: int64 */
+      season_number: number;
+      title: string;
     };
     AdminInsightsHeatmapCell: {
       /**
@@ -19005,7 +19072,21 @@ export interface components {
     AdminInsightsLabeledCount: {
       key: string;
       /** Format: int64 */
+      sessions: number;
+    };
+    AdminInsightsLibraryRow: {
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      library_id: string;
+      name: string;
+      /** Format: int64 */
       plays: number;
+      /** Format: int64 */
+      viewers: number;
+      /** Format: int64 */
+      watch_seconds: number;
     };
     AdminInsightsPeakStreamsPoint: {
       /**
@@ -19076,8 +19157,11 @@ export interface components {
        */
       last_seen_at: string | null;
       /** Format: int64 */
-      measured_plays: number;
-      /** Format: double */
+      measured_sessions: number;
+      /**
+       * Format: double
+       * @description Share of the account's sessions with measured watch time
+       */
       measured_share: number;
       /** Format: int64 */
       movies: number;
@@ -19087,6 +19171,9 @@ export interface components {
       /** Format: int64 */
       remux_plays: number;
       role: string;
+      /** Format: int64 */
+      sessions: number;
+      /** @description Client with the most sessions in the window */
       top_client: string | null;
       /** Format: int64 */
       transcode_plays: number;
@@ -19113,7 +19200,7 @@ export interface components {
        */
       last_seen_at: string | null;
       /** Format: int64 */
-      measured_plays: number;
+      measured_sessions: number;
       /** Format: int64 */
       plays: number;
       /**
@@ -19125,7 +19212,179 @@ export interface components {
       /** Format: int64 */
       remux_plays: number;
       /** Format: int64 */
+      sessions: number;
+      /** Format: int64 */
       transcode_plays: number;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsPlaysBucket: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      bucket_start: string;
+      /**
+       * Format: date
+       * @description Local bucket start date (YYYY-MM-DD in requested tz)
+       */
+      label_date: string;
+      /** Format: int64 */
+      plays: number;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsResolutionChange: {
+      /** @description Source resolution class */
+      from: string;
+      /** Format: int64 */
+      sessions: number;
+      /** @description Lower delivered resolution class */
+      to: string;
+    };
+    AdminInsightsTitle: {
+      /** @enum {string} */
+      bucket_unit: "day" | "week" | "month";
+      buckets: components["schemas"]["AdminInsightsPlaysBucket"][];
+      content_id: string;
+      /**
+       * Format: double
+       * @description Movie runtime in seconds; null for series or when unknown
+       */
+      duration_seconds: number | null;
+      /** @description Series: episodes with a play in the window, in season and episode order; empty for movies */
+      episodes: components["schemas"]["AdminInsightsTitleEpisode"][];
+      /** @description More than 500 episodes had a play; episodes holds the first 500 */
+      episodes_truncated: boolean;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      from: string;
+      /** @enum {string} */
+      kind: "movie" | "series";
+      summary: components["schemas"]["AdminInsightsTitleSummary"];
+      title: string;
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      to: string;
+      tz: string;
+      /** @description Profiles with a play in the window, most recent first */
+      viewers: components["schemas"]["AdminInsightsTitleViewer"][];
+      /** @description More than 100 profiles played the title; viewers holds the most recent 100 */
+      viewers_truncated: boolean;
+      /** Format: int64 */
+      year: number | null;
+    };
+    AdminInsightsTitleEpisode: {
+      content_id: string;
+      /** Format: int64 */
+      episode_number: number;
+      /** Format: int64 */
+      plays: number;
+      /** Format: int64 */
+      season_number: number;
+      title: string;
+      /** Format: int64 */
+      viewers: number;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsTitleRow: {
+      /** Format: int64 */
+      completed_plays: number;
+      content_id: string;
+      /**
+       * Format: int64
+       * @description Series: distinct episodes with a play; 0 for movies
+       */
+      episodes: number;
+      /** @enum {string} */
+      kind: "movie" | "series";
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      last_played_at: string | null;
+      /**
+       * Format: int64
+       * @description Plays that started in the window; a series counts its episodes' plays
+       */
+      plays: number;
+      title: string;
+      /**
+       * Format: int64
+       * @description Distinct household profiles with a play
+       */
+      viewers: number;
+      /** Format: int64 */
+      watch_seconds: number;
+      /** Format: int64 */
+      year: number | null;
+    };
+    AdminInsightsTitles: {
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      from: string;
+      libraries: components["schemas"]["AdminInsightsLibraryRow"][];
+      movies: components["schemas"]["AdminInsightsTitleRow"][];
+      shows: components["schemas"]["AdminInsightsTitleRow"][];
+      /** @enum {string} */
+      sort: "plays" | "watch_time" | "viewers";
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision
+       */
+      to: string;
+      tz: string;
+    };
+    AdminInsightsTitleSummary: {
+      /** Format: int64 */
+      completed_plays: number;
+      /** Format: int64 */
+      direct_plays: number;
+      /** Format: int64 */
+      plays: number;
+      /** Format: int64 */
+      remux_plays: number;
+      /** Format: int64 */
+      sessions: number;
+      /** Format: int64 */
+      transcode_plays: number;
+      /** Format: int64 */
+      viewers: number;
+      /** Format: int64 */
+      watch_seconds: number;
+    };
+    AdminInsightsTitleViewer: {
+      /** Format: int64 */
+      completed_plays: number;
+      /**
+       * Format: double
+       * @description Movies: furthest position a session in the window reached; null for series
+       */
+      furthest_position_seconds: number | null;
+      /** @description Series: the episode of the profile's latest play; absent for movies */
+      last_episode?: components["schemas"]["AdminInsightsEpisodeRef"];
+      /**
+       * Format: date-time
+       * @description RFC 3339 instant in UTC with millisecond precision, or null
+       */
+      last_played_at: string | null;
+      /** Format: int64 */
+      plays: number;
+      profile_id: string;
+      profile_name: string;
+      /**
+       * @description Opaque identifier
+       * @example 1
+       */
+      user_id: string;
+      username: string;
       /** Format: int64 */
       watch_seconds: number;
     };
@@ -20430,6 +20689,8 @@ export interface components {
       rich_filters: boolean;
       /** @description Entries carry delivered route facts, adaptation reasons, and joined source file specs */
       route_facts: boolean;
+      /** @description The list accepts series_id */
+      series_filter: boolean;
       /** @description GET /api/v2/admin/playback-history/{session_id} reads one finalized session entry */
       session_detail: boolean;
       /**
@@ -60675,6 +60936,8 @@ export interface operations {
         from_date?: string;
         /** @description Restrict playback analytics to media belonging to this library */
         library_id?: string;
+        /** @description Restrict playback analytics to this household profile of user_id; requires user_id because profile ids repeat across accounts */
+        profile_id?: string;
         /** @description Preset time window or custom */
         range?: "7d" | "30d" | "90d" | "1y" | "all" | "custom";
         /** @description Invalidate cached insights aggregates before reading; ignored for scoped API keys */
@@ -61045,8 +61308,10 @@ export interface operations {
         from_date?: string;
         /** @description Restrict device analytics to media belonging to this library */
         library_id?: string;
-        /** @description Minimum plays required for a client/platform row to appear in the direct-play matrix */
-        min_plays?: number;
+        /** @description Minimum sessions required for a client/platform row to appear in the direct-play matrix */
+        min_sessions?: number;
+        /** @description Restrict device analytics to this household profile of user_id; requires user_id */
+        profile_id?: string;
         /** @description Preset time window or custom */
         range?: "7d" | "30d" | "90d" | "1y" | "all" | "custom";
         /** @description Invalidate cached insights aggregates before reading; ignored for scoped API keys */
@@ -61205,6 +61470,257 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["AdminInsightsPeople"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminInsightsTitles: {
+    parameters: {
+      query?: {
+        /** @description Inclusive local start date (YYYY-MM-DD in tz), required when range=custom */
+        from_date?: string;
+        /** @description Restrict to plays of media belonging to this library */
+        library_id?: string;
+        /** @description Rows per list (movies, shows, libraries) */
+        limit?: number;
+        /** @description Restrict to plays by this household profile of user_id; requires user_id */
+        profile_id?: string;
+        /** @description Preset time window or custom */
+        range?: "7d" | "30d" | "90d" | "1y" | "all" | "custom";
+        /** @description Invalidate cached insights aggregates before reading; ignored for scoped API keys */
+        refresh?: boolean;
+        /** @description Ranking: plays (most watched), watch_time, or viewers (most popular: distinct profiles with a play) */
+        sort?: "plays" | "watch_time" | "viewers";
+        /** @description Inclusive local end date (YYYY-MM-DD in tz), required when range=custom */
+        to_date?: string;
+        /** @description IANA timezone identifier */
+        tz?: string;
+        /** @description Restrict to plays by this login account */
+        user_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminInsightsTitles"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  getAdminInsightsTitle: {
+    parameters: {
+      query?: {
+        /** @description Inclusive local start date (YYYY-MM-DD in tz), required when range=custom */
+        from_date?: string;
+        /** @description Restrict to plays of the title's files in this library */
+        library_id?: string;
+        /** @description Restrict to plays by this household profile of user_id; requires user_id */
+        profile_id?: string;
+        /** @description Preset time window or custom */
+        range?: "7d" | "30d" | "90d" | "1y" | "all" | "custom";
+        /** @description Inclusive local end date (YYYY-MM-DD in tz), required when range=custom */
+        to_date?: string;
+        /** @description IANA timezone identifier for bucketing */
+        tz?: string;
+        /** @description Restrict to plays by this login account */
+        user_id?: string;
+      };
+      header?: {
+        /** @description Optional. When present, it must name the authenticated account's primary profile; an absent header is accepted. */
+        "X-Profile-Id"?: string;
+        /** @description Verification proof for a PIN-locked profile, issued by POST /api/v2/profiles/{id}/verify-pin; required only when the declared profile is locked */
+        "X-Profile-Token"?: string;
+      };
+      path: {
+        /** @description Movie or series content id; an episode id answers 422 (read its series) */
+        content_id: string;
+      };
+      cookie?: never;
+    };
+    requestBody?: never;
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["AdminInsightsTitle"];
         };
       };
       /** @description Bad Request */
@@ -73315,6 +73831,8 @@ export interface operations {
         profile_id?: string;
         /** @description Case-insensitive search across media title, series title, account, profile, client, platform, client IP, or session ID */
         search?: string;
+        /** @description Only attempts of episodes of this series */
+        series_id?: string;
         /** @description Filter by source media file video codec (case-insensitive; 'unknown' matches rows without a probed video codec) */
         source_video_codec?: string;
         /** @description Only attempts that started at or after this instant (inclusive) */

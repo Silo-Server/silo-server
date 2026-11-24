@@ -1,7 +1,9 @@
 {
-  "revision": "a021c59af897bb94747c930461628656962b3aa59e054e7410044f02e94e6261",
+  "revision": "1c821d75982c0c4941654d7b92d858d4dcbc6693bba98fa6e75332b86d6c3739",
   "state": "available",
   "allowed": true,
   "available": true,
-  "node_egress_daily": true
+  "node_egress_daily": true,
+  "titles": true,
+  "profile_filter": true
 }

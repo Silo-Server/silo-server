@@ -12,9 +12,9 @@
     "oldest_measured_at": "2025-12-04T03:04:05.678Z",
     "oldest_route_facts_at": "2025-12-04T03:04:05.678Z",
     "oldest_metric_at": "2025-12-04T03:04:05.678Z",
-    "total_plays": 42,
-    "measured_plays": 40,
-    "route_facts_plays": 38
+    "total_sessions": 48,
+    "measured_sessions": 46,
+    "route_facts_sessions": 44
   },
   "accounts": [
     {
@@ -23,10 +23,11 @@
       "role": "admin",
       "is_live": true,
       "plays": 24,
+      "sessions": 27,
       "movies": 8,
       "episodes": 16,
       "watch_seconds": 50400,
-      "measured_plays": 24,
+      "measured_sessions": 27,
       "measured_share": 1,
       "direct_plays": 20,
       "remux_plays": 2,
@@ -42,8 +43,9 @@
           "profile_name": "Alex",
           "is_live": true,
           "plays": 18,
+          "sessions": 20,
           "watch_seconds": 40000,
-          "measured_plays": 18,
+          "measured_sessions": 20,
           "direct_plays": 16,
           "remux_plays": 1,
           "transcode_plays": 1,

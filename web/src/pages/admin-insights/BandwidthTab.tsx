@@ -193,7 +193,7 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
   const showMetricsStartBanner =
     Boolean(data.oldest_metric_at) &&
     Date.parse(data.from) < Date.parse(data.oldest_metric_at ?? "");
-  const knownLocationPlays = summary.remote_plays + summary.local_plays;
+  const knownLocationSessions = summary.remote_sessions + summary.local_sessions;
 
   return (
     <div className="space-y-5">
@@ -243,17 +243,17 @@ export function BandwidthTab({ filters }: { filters: InsightsFilterState }) {
         <InsightKpiCard
           label={t("web.admin.insights.bandwidth.kpi.remoteShare")}
           value={
-            knownLocationPlays > 0
+            knownLocationSessions > 0
               ? t("web.admin.insights.percent", {
-                  value: formatRatePercentNumber(summary.remote_plays / knownLocationPlays),
+                  value: formatRatePercentNumber(summary.remote_sessions / knownLocationSessions),
                 })
               : EM_DASH
           }
           subtext={
-            knownLocationPlays > 0
+            knownLocationSessions > 0
               ? t("web.admin.insights.bandwidth.kpi.remoteShareDetail", {
-                  remote: summary.remote_plays.toLocaleString(formatLocale()),
-                  local: summary.local_plays.toLocaleString(formatLocale()),
+                  remote: summary.remote_sessions.toLocaleString(formatLocale()),
+                  local: summary.local_sessions.toLocaleString(formatLocale()),
                 })
               : t("web.admin.insights.bandwidth.kpi.remoteShareUnknown")
           }

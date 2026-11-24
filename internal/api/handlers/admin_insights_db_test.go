@@ -204,8 +204,8 @@ func assertInsightsActivityDB(t *testing.T, h *AdminHandler, seed insightsTestSe
 	if err != nil {
 		t.Fatal(err)
 	}
-	if act.Summary.Plays != 3 || act.Summary.Movies != 2 || act.Summary.Episodes != 1 ||
-		act.Summary.MeasuredPlays != 2 || act.Coverage.RouteFactsPlays != 2 ||
+	if act.Summary.Plays != 3 || act.Summary.Sessions != 3 || act.Summary.Movies != 2 || act.Summary.Episodes != 1 ||
+		act.Coverage.MeasuredSessions != 2 || act.Coverage.RouteFactsSessions != 2 ||
 		act.Summary.PeakConcurrentStreams != 6 || len(act.PeakStreams) != 2 {
 		t.Fatalf("unexpected activity: summary=%+v coverage=%+v peaks=%+v", act.Summary, act.Coverage, act.PeakStreams)
 	}
@@ -234,15 +234,19 @@ func assertInsightsPeopleDB(t *testing.T, h *AdminHandler) {
 func assertInsightsDevicesDB(t *testing.T, h *AdminHandler) {
 	t.Helper()
 	devs, err := h.ReadAdminInsightsDevices(t.Context(), AdminInsightsDevicesQuery{
-		AdminInsightsWindowQuery: AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"}, MinPlays: 1,
+		AdminInsightsWindowQuery: AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"}, MinSessions: 1,
 	}, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if devs.Summary.TotalPlays != 3 || devs.Summary.HWTranscodePlays != 1 || devs.Summary.SubtitleBurnInPlays != 1 ||
-		devs.Summary.HDRToneMapHWPlays != 1 || len(devs.Matrix) != 2 || len(devs.AdaptationReasons) != 2 ||
+	if devs.Summary.TotalSessions != 3 || devs.Summary.HWTranscodeSessions != 1 || devs.Summary.SubtitleBurnInSessions != 1 ||
+		devs.Summary.HDRToneMapHWSessions != 1 || len(devs.Matrix) != 2 || len(devs.AdaptationReasons) != 2 ||
 		len(devs.HWAccelBreakdown) == 0 || len(devs.ToneMapBreakdown) != 1 || len(devs.SubtitleBurnInCodecs) != 1 {
 		t.Fatalf("unexpected devices: %+v", devs)
+	}
+	// Bob's transcode of the 4K file to 1080p is the one downscale.
+	if len(devs.ResolutionChanges) != 1 || devs.ResolutionChanges[0] != (AdminInsightsResolutionChange{From: "2160p", To: "1080p", Sessions: 1}) {
+		t.Fatalf("resolution changes = %+v (source %+v, delivered %+v)", devs.ResolutionChanges, devs.SourceResolutions, devs.DeliveredResolutions)
 	}
 }
 
@@ -255,7 +259,7 @@ func assertInsightsBandwidthDB(t *testing.T, h *AdminHandler) {
 	wantTotal, wantNode := int64(1_000_000_000+14000*7500), int64(600_000_000+10000*7500)
 	if bw.Summary.TotalEgressBytes != wantTotal || bw.Summary.NodeEgressBytes != wantNode ||
 		bw.Summary.PeakEgressKbps != 50000 || !bw.HasRemoteNodes || len(bw.Points) != 2 ||
-		bw.Summary.RemotePlays != 1 || bw.Summary.LocalPlays != 1 || bw.Summary.UnknownLocationPlays != 1 {
+		bw.Summary.RemoteSessions != 1 || bw.Summary.LocalSessions != 1 || bw.Summary.UnknownLocationSessions != 1 {
 		t.Fatalf("unexpected bandwidth: summary=%+v points=%+v", bw.Summary, bw.Points)
 	}
 }
@@ -331,7 +335,7 @@ func assertInsightsEdgeCasesDB(t *testing.T, pool *pgxpool.Pool, h *AdminHandler
 	// 4. Alternate edition & selected non-default audio track attribution.
 	assertEffectiveMediaAndAudioTrackDB(t, pool, h, userID)
 
-	// 5. Case-insensitive client+platform merge across codecs meets min_plays.
+	// 5. Case-insensitive client+platform merge across codecs meets min_sessions.
 	assertDevicesCaseInsensitiveMergeDB(t, pool, h, userID)
 
 	// 6. First-time live viewer without finalized history counts in LiveAccounts.
@@ -521,7 +525,7 @@ func assertEffectiveMediaAndAudioTrackDB(t *testing.T, pool *pgxpool.Pool, h *Ad
 	}
 
 	devs, err := h.ReadAdminInsightsDevices(ctx, AdminInsightsDevicesQuery{
-		AdminInsightsWindowQuery: AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"}, MinPlays: 1,
+		AdminInsightsWindowQuery: AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"}, MinSessions: 1,
 	}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -532,7 +536,7 @@ func assertEffectiveMediaAndAudioTrackDB(t *testing.T, pool *pgxpool.Pool, h *Ad
 			continue
 		}
 		found = true
-		if len(row.Cells) != 1 || row.Cells[0].SourceVideoCodec != "h264" || row.Cells[0].DirectPlays != 1 {
+		if len(row.Cells) != 1 || row.Cells[0].SourceVideoCodec != "h264" || row.Cells[0].DirectSessions != 1 {
 			t.Fatalf("Devices credited wrong edition codec: %+v", row.Cells)
 		}
 	}
@@ -564,7 +568,7 @@ func assertDevicesCaseInsensitiveMergeDB(t *testing.T, pool *pgxpool.Pool, h *Ad
 		}
 	}
 	devs, err := h.ReadAdminInsightsDevices(ctx, AdminInsightsDevicesQuery{
-		AdminInsightsWindowQuery: AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"}, MinPlays: 5,
+		AdminInsightsWindowQuery: AdminInsightsWindowQuery{Range: "7d", TZ: "UTC"}, MinSessions: 5,
 	}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -576,8 +580,8 @@ func assertDevicesCaseInsensitiveMergeDB(t *testing.T, pool *pgxpool.Pool, h *Ad
 			break
 		}
 	}
-	if merged == nil || merged.TotalPlays != 6 || len(merged.Cells) != 2 {
-		t.Fatalf("case-variant client should merge into 1 row of 6 plays at min_plays=5, got %+v", merged)
+	if merged == nil || merged.TotalSessions != 6 || len(merged.Cells) != 2 {
+		t.Fatalf("case-variant client should merge into 1 row of 6 sessions at min_sessions=5, got %+v", merged)
 	}
 }
 
