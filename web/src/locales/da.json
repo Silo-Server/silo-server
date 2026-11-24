@@ -521,6 +521,12 @@
       "value": "Denne afspilningssession er afsluttet. Start afspilningen igen."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Afspilningen stoppede, fordi den var sat på pause for længe. Start afspilningen igen."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67169,6 +67175,24 @@
       "value": "Gem i bibliotek"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Afspilning på pause"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Afslut afspilning på pause efter"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 til 1440. Afslutter en video, der har været sat på pause så længe i en Silo-app, og frigør dens stream og eventuel transkodning; afspilles den igen, fortsætter den fra samme sted. Se sammen, casting og lydbøger påvirkes ikke. 0 slår dette fra."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67639,6 +67663,12 @@
     {
       "type": 0,
       "value": "dage"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minutter"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73517,6 +73547,12 @@
       "value": "Aktivér HDR-tonemapping med software"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Afslut afspilning på pause efter (minutter)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73575,6 +73611,12 @@
     {
       "type": 0,
       "value": "Markørkilde"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Afspilning på pause"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -75557,6 +75599,36 @@
     {
       "type": 0,
       "value": "Slå en loginudbyder til først. Med login med adgangskode slået fra og ingen udbyder slået til ville kun nødadministratorer kunne logge ind."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Fra 8 til 72 tegn. Reglerne gælder, når nogen vælger eller ændrer en adgangskode; adgangskoder, der allerede er angivet, virker fortsat."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Minimumslængde for adgangskode"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Ethvert tegnsætningstegn eller symbol, f.eks. ! eller #. Bogstaver, cifre og mellemrum tæller ikke."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Kræv et specialtegn"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Kræv et stort bogstav"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -87403,6 +87475,20 @@
       "value": "Angiver…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Del den selv med "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -89947,10 +90033,64 @@
       "value": " tillader ikke denne enhed at logge ind på denne server."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mindst "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tegn."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Mindst "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tegn."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Adgangskoderne stemmer ikke overens."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Medtag mindst ét specialtegn, f.eks. ! eller #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Medtag mindst ét stort bogstav."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -89963,6 +90103,48 @@
     {
       "type": 0,
       "value": "Brug mindst 8 tegn."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Brug mindst "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tegn."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Brug mindst "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " tegn."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -124223,6 +124405,12 @@
     {
       "type": 0,
       "value": "En administrator har afsluttet denne afspilningssession."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Afspilningen stoppede, fordi den var sat på pause for længe."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

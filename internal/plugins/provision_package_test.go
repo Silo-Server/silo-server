@@ -207,6 +207,14 @@ func TestAutoUpdateClearsWithdrawnNoticeDB(t *testing.T) {
 		t.Fatalf("clearing the old notice after a concurrent check returned %v", err)
 	}
 	checkNotice(newNotice, 1)
+
+	// A notice no newer than the installed release, as a stale check could
+	// record before #4518, is cleared: applying it is refused (409), so
+	// keeping it would leave an Update button that can never succeed.
+	if _, err := pool.Exec(ctx, `UPDATE plugin_installations SET version = '2.0.0' WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	checkNotice("", 2)
 }
 
 func newProvisionCommitFixture(t *testing.T, pool *pgxpool.Pool) (*CatalogService, *Installer) {
@@ -385,5 +393,30 @@ func checkProvisionOfflineReuse(t *testing.T, repositories *RepositoryStore, ins
 		PluginID: provisionTestPluginID, Existing: &untrusted, Offline: true,
 	}); !errors.Is(err, ErrProvisionPackageUntrusted) {
 		t.Fatalf("unverified package = %v", err)
+	}
+}
+
+// A server on another platform fetches the build of the official release an
+// installation holds even after the official catalog's list moved on to a
+// newer one, from that release's descriptor, with its signature verified.
+func TestPlatformBuildOfAnEarlierOfficialReleaseDB(t *testing.T) {
+	pool := builtinGuardTestPool(t)
+	catalog, installer := newProvisionCommitFixture(t, pool)
+	official, err := catalog.OfficialRepository(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	repoURL, _ := officialPluginRepository(provisionTestPluginID)
+	installation := &Installation{
+		ID: 1, RepositoryID: &official.ID, PluginID: provisionTestPluginID, Version: provisionTestOld,
+		Signature: Signature{State: SignatureStateVerified, SourceRepo: &repoURL},
+	}
+	svc := &Service{catalog: catalog, installer: installer}
+	build, err := svc.fetchPlatformBuild(t.Context(), installation)
+	if err != nil {
+		t.Fatalf("fetchPlatformBuild(%s) = %v", provisionTestOld, err)
+	}
+	if build.manifest.GetVersion() != provisionTestOld || build.signature.State != SignatureStateVerified {
+		t.Fatalf("fetched %s signed %q; want %s, verified", build.manifest.GetVersion(), build.signature.State, provisionTestOld)
 	}
 }

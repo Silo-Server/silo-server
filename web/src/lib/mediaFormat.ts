@@ -120,6 +120,43 @@ export function audioTrackLabel(track: AudioTrackFormat): string {
   return track.codec ? mapAudioLabel(track.codec, audioTrackAtmosEvidence(track)) : "";
 }
 
+// Words that only restate an audio format: codec short names, the long names
+// FFprobe reports ("ATSC A/52B (AC-3, E-AC-3)", "AAC (Advanced Audio
+// Coding)"), and layouts. The scanner stores FFprobe's long name as a track's
+// title when the stream has no title tag (#4568).
+const FORMAT_WORDS = new Set([
+  ..."atsc a/52 a/52a a/52b dca dts dts-hd ma coherent acoustics truehd atmos".split(" "),
+  ..."ac3 ac-3 eac3 e-ac3 eac-3 e-ac-3 aac advanced audio coding codec interactive".split(" "),
+  ..."flac free lossless alac apple opus vorbis mp2 mp3 mpeg layer pcm signed unsigned".split(" "),
+  ..."floating point little-endian big-endian dolby digital plus surround stereo mono".split(" "),
+  ..."1.0 2.0 2.1 5.0 5.1 7.0 7.1".split(" "),
+]);
+// Numbers a format name can carry ("MPEG audio layer 3", "PCM signed 16-bit"),
+// which name a format only next to a format word.
+const FORMAT_NUMBER = /^\d{1,3}(?:-bit)?$/;
+const TITLE_SEPARATORS = /[\s()·,]+/;
+
+/**
+ * Whether a track title only names its audio format, as a title FFprobe's
+ * codec name filled in does. A display shows the language instead. A title of
+ * numbers alone ("1", "2") is a real title. Each word is looked up on its own,
+ * so the check is linear in the title's length.
+ */
+export function titleOnlyNamesAudioFormat(title?: string): boolean {
+  let namesFormat = false;
+  for (const word of (title ?? "").toLowerCase().split(TITLE_SEPARATORS)) {
+    if (word === "") {
+      continue;
+    }
+    if (FORMAT_WORDS.has(word)) {
+      namesFormat = true;
+    } else if (!FORMAT_NUMBER.test(word)) {
+      return false;
+    }
+  }
+  return namesFormat;
+}
+
 interface FormatFileSizeOptions {
   fallback?: string;
   /** Use IEC unit labels (GiB/MiB/KiB) instead of GB/MB/KB. Math is 1024-based either way. */

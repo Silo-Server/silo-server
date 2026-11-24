@@ -34,3 +34,50 @@ var hdr10PlusFrameSideData = []SideData{
 	{SideDataType: "Content light level metadata"},
 	{SideDataType: "HDR Dynamic Metadata SMPTE2094-40 (HDR10+)"},
 }
+
+// Dolby Vision profile 10 (AV1) takes its range type from the base-layer
+// compatibility id alone. A 10.0 stream is PQ-tagged too, so the transfer
+// must never turn an unmapped id into an HDR10-compatible range type.
+func TestNormalizeVideoTrackProfile10RangeType(t *testing.T) {
+	tests := []struct {
+		name      string
+		compatID  int
+		transfer  string
+		frameData []SideData
+		want      string
+	}{
+		{name: "10.0 PQ", compatID: 0, transfer: "smpte2084", want: "DOVI"},
+		{name: "10.1 HDR10 base", compatID: 1, transfer: "smpte2084", want: "DOVIWithHDR10"},
+		{name: "10.1 HDR10+ base", compatID: 1, transfer: "smpte2084", frameData: hdr10PlusFrameSideData, want: "DOVIWithHDR10Plus"},
+		{name: "10.2 SDR base", compatID: 2, transfer: "bt709", want: "DOVIWithSDR"},
+		{name: "10.4 HLG base", compatID: 4, transfer: "arib-std-b67", want: "DOVIWithHLG"},
+		{name: "unmapped id with PQ", compatID: 6, transfer: "smpte2084", want: "DOVI"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			track := NormalizeVideoTrack(Stream{
+				CodecName:     "av1",
+				CodecType:     "video",
+				ColorTransfer: tt.transfer,
+				SideDataList: []SideData{{
+					SideDataType: "DOVI configuration record", DVProfile: 10, DVLevel: 6,
+					DVBLCompatID: tt.compatID, DVBLCompatIDPresent: true,
+				}},
+				FrameSideDataList: tt.frameData,
+				FrameSideDataRead: true,
+			})
+			if track.VideoRangeType != tt.want {
+				t.Fatalf("VideoRangeType = %q, want %q", track.VideoRangeType, tt.want)
+			}
+			// The HDR10+ backfill rewrites a stored track's range type; it
+			// must keep the same mapping.
+			wantBackfill := tt.want
+			if wantBackfill == "DOVIWithHDR10" {
+				wantBackfill = "DOVIWithHDR10Plus"
+			}
+			if got := RangeTypeWithHDR10Plus(track); got != wantBackfill {
+				t.Fatalf("RangeTypeWithHDR10Plus = %q, want %q", got, wantBackfill)
+			}
+		})
+	}
+}

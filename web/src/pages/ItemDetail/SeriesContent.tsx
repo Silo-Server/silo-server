@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router";
 import type { ItemDetail } from "@/api/types";
+import { buildFieldFilterHref } from "@/pages/catalogSearchParams";
 import { useStartShuffle } from "@/hooks/queries/shuffles";
 import { useRefreshItemMetadata } from "@/hooks/queries/items";
 import { useSimilarItems } from "@/hooks/queries/recommendations";
@@ -173,6 +174,11 @@ export default function SeriesContent({
             topNav={<PageBack />}
             context={t("web.detail.hero.typeSeries")}
             studioLabel={firstNetwork}
+            studioHref={
+              firstNetwork
+                ? buildFieldFilterHref("network", firstNetwork, { libraryId, mediaType: "series" })
+                : undefined
+            }
             backdropUrl={item.backdrop_url}
             backdropThumbhash={item.backdrop_thumbhash}
             posterUrl={item.poster_url}

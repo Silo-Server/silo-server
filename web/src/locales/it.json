@@ -521,6 +521,12 @@
       "value": "Questa sessione di riproduzione è terminata. Avvia di nuovo la riproduzione."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "La riproduzione si è interrotta perché è rimasta in pausa troppo a lungo. Avvia di nuovo la riproduzione."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -73911,6 +73917,24 @@
       "value": "Salva nella libreria"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Riproduzione in pausa"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Termina la riproduzione in pausa dopo"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "Da 0 a 1440. Termina un video rimasto in pausa così a lungo in un’app Silo, liberando il suo stream e l’eventuale transcodifica; se lo riproduci di nuovo, riprende dallo stesso punto. Guarda insieme, la trasmissione e gli audiolibri non sono interessati. Con 0 l’opzione è disattivata."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -74413,6 +74437,12 @@
     {
       "type": 0,
       "value": "giorni"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minuti"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -80354,6 +80384,12 @@
       "value": "Attiva tone mapping HDR software"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Termina la riproduzione in pausa dopo (minuti)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -80412,6 +80448,12 @@
     {
       "type": 0,
       "value": "Sorgente dei marcatori"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Riproduzione in pausa"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -82430,6 +82472,36 @@
     {
       "type": 0,
       "value": "Attiva prima un provider di accesso. Con l’accesso con password disattivato e nessun provider attivo, potrebbero accedere solo gli admin di emergenza."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthDescription": [
+    {
+      "type": 0,
+      "value": "Da 8 a 72 caratteri. Le regole si applicano quando qualcuno sceglie o cambia una password; le password già impostate continuano a funzionare."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordMinLengthLabel": [
+    {
+      "type": 0,
+      "value": "Lunghezza minima della password"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialDescription": [
+    {
+      "type": 0,
+      "value": "Qualsiasi segno di punteggiatura o simbolo, come ! o #. Lettere, cifre e spazi non contano."
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireSpecialLabel": [
+    {
+      "type": 0,
+      "value": "Richiedi un carattere speciale"
+    }
+  ],
+  "web.admin.settings.signIn.page.passwordRequireUppercaseLabel": [
+    {
+      "type": 0,
+      "value": "Richiedi una lettera maiuscola"
     }
   ],
   "web.admin.settings.signIn.page.passwordResetDescription": [
@@ -95124,6 +95196,20 @@
       "value": "Impostazione…"
     }
   ],
+  "web.admin.users.setPasswordDialog.shareHint": [
+    {
+      "type": 0,
+      "value": "Comunicala tu stesso a "
+    },
+    {
+      "type": 1,
+      "value": "username"
+    },
+    {
+      "type": 0,
+      "value": "."
+    }
+  ],
   "web.admin.users.setPasswordDialog.submit": [
     {
       "type": 0,
@@ -97907,10 +97993,80 @@
       "value": " non consente a questo dispositivo di accedere a questo server."
     }
   ],
+  "web.auth.newPassword.minLengthHint": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Almeno "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " carattere."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Almeno "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " di caratteri."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Almeno "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caratteri."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
+    }
+  ],
   "web.auth.newPassword.mismatch": [
     {
       "type": 0,
       "value": "Le password non corrispondono."
+    }
+  ],
+  "web.auth.newPassword.needsSpecial": [
+    {
+      "type": 0,
+      "value": "Includi almeno un carattere speciale, come ! o #."
+    }
+  ],
+  "web.auth.newPassword.needsUppercase": [
+    {
+      "type": 0,
+      "value": "Includi almeno una lettera maiuscola."
     }
   ],
   "web.auth.newPassword.tooLong": [
@@ -97923,6 +98079,64 @@
     {
       "type": 0,
       "value": "Usa almeno 8 caratteri."
+    }
+  ],
+  "web.auth.newPassword.tooShortMinimum": [
+    {
+      "type": 6,
+      "value": "minimum",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Usa almeno "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " carattere."
+            }
+          ]
+        },
+        "many": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Usa almeno "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " di caratteri."
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "Usa almeno "
+            },
+            {
+              "type": 1,
+              "value": "minimum_text"
+            },
+            {
+              "type": 0,
+              "value": " caratteri."
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.auth.oauth.signingIn": [
@@ -135047,6 +135261,12 @@
     {
       "type": 0,
       "value": "Un amministratore ha terminato questa sessione di riproduzione."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "La riproduzione si è interrotta perché è rimasta in pausa troppo a lungo."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

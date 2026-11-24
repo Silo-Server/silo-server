@@ -48,6 +48,15 @@ type SessionInfo struct {
 	AuthUserID  int    `json:"auth_user_id,omitempty"`
 	ProfileID   string `json:"profile_id,omitempty"`
 	MediaFileID int    `json:"media_file_id,omitempty"`
+
+	// StreamEndSeconds is where an encoded transcode's media ends, once a
+	// run of it read the source to the end. A node fills it in each report,
+	// and the core lowers the file's stored duration to it
+	// (playback.StreamEndRecorder).
+	StreamEndSeconds float64 `json:"stream_end_seconds,omitempty"`
+	// StreamPlannedSeconds is the stored duration that transcode was planned
+	// with; the core lowers the duration only while it is still this.
+	StreamPlannedSeconds float64 `json:"stream_planned_seconds,omitempty"`
 }
 
 // Tracker manages session lifecycle in Redis for a single node.
