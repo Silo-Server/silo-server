@@ -12,8 +12,8 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
-	"github.com/Silo-Server/silo-server/internal/artworkurl"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/blobstore/blobstoretest"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/ratelimit"
@@ -430,9 +430,16 @@ func TestItemPosterAddressBudget(t *testing.T) {
 	if err := mw.Reload(t.Context()); err != nil {
 		t.Fatal(err)
 	}
-	posters := artworkurl.NewItemPosters("test-secret", time.Hour, &posterPresignFake{})
+	posters := newTestItemPosters(&posterPresignFake{})
 	source := &posterSourceFake{paths: map[string]string{"movie": "tmdb/movies/1/poster.jpg"}}
-	h := NewHandler(Dependencies{BucketRateLimit: mw.AuthEndpointHandler, ItemPosters: posters, ItemPosterSource: source})
+	store := blobstoretest.New()
+	if err := store.Put(t.Context(), "tmdb/movies/1/poster.jpg", []byte("\x89PNG\r\n\x1a\nrest")); err != nil {
+		t.Fatal(err)
+	}
+	h := NewHandler(Dependencies{
+		BucketRateLimit: mw.AuthEndpointHandler, ItemPosters: posters, ItemPosterSource: source,
+		ArtworkStore: store,
+	})
 	link := posters.Link("movie", time.Now())
 	get := func(ip string) *httptest.ResponseRecorder {
 		req := httptest.NewRequestWithContext(clientip.SetContext(t.Context(), ip), http.MethodGet, link, nil)
@@ -442,7 +449,7 @@ func TestItemPosterAddressBudget(t *testing.T) {
 	}
 	const ip = "203.0.113.9"
 	for range 2 {
-		if rec := get(ip); rec.Code != http.StatusFound {
+		if rec := get(ip); rec.Code != http.StatusOK {
 			t.Fatalf("poster burst: %d %s", rec.Code, rec.Body.String())
 		}
 	}
@@ -451,7 +458,7 @@ func TestItemPosterAddressBudget(t *testing.T) {
 	if limited.Header().Get("Retry-After") == "" || source.reads.Load() != 2 {
 		t.Fatalf("refusal: headers %v, catalog reads %d", limited.Header(), source.reads.Load())
 	}
-	if rec := get("203.0.113.10"); rec.Code != http.StatusFound {
+	if rec := get("203.0.113.10"); rec.Code != http.StatusOK {
 		t.Fatalf("second address: %d %s", rec.Code, rec.Body.String())
 	}
 }

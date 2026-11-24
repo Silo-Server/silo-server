@@ -69,9 +69,10 @@ episode has `series_id`, `series_title`, `season_number` and `episode_number`;
 its `year` is its air-date year.
 
 `poster_url` is the card-size poster of a movie or series, or of an episode's
-series, and is absent only when there is none. It is always a URL this server
-issued, never a metadata provider's, so a tool that cannot reach the
-providers' image hosts can load it; art not cached yet comes through a signed
+series, and is absent only when there is none. It is always a path on this
+server, never a metadata provider's or the artwork store's URL, so a tool that
+may contact only this server can load it: cached art comes through a signed
+`/api/v2/artwork/...` path and art not cached yet through a signed
 `getItemPoster` link (see "Admin poster URLs" in [images-api.md](images-api.md)).
 The URL expires: read it again from a later page rather than storing it.
 

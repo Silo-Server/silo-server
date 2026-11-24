@@ -9417,7 +9417,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** Read a catalog item's current poster from a signed link that admin reads return in poster_url. Cached art redirects to its stored object; art not cached yet is fetched from its provider through the server and queued for caching. */
+    /** Read a catalog item's current poster from a signed link that admin reads return in poster_url for art not cached yet. Once the art is cached, the link serves the stored object through this server; until then the art is fetched from its provider through the server and queued for caching. */
     get: operations["getItemPoster"];
     put?: never;
     post?: never;
@@ -16124,7 +16124,7 @@ export interface components {
       item_metadata: boolean;
       /** @description refreshAdminItemMetadata accepts mode reset, which resets an item, season or episode to its providers */
       item_metadata_reset: boolean;
-      /** @description listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always URLs this server issued */
+      /** @description listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always paths on this server */
       item_posters: boolean;
       /** @description Opaque revision of this document */
       revision: string;
@@ -16193,7 +16193,7 @@ export interface components {
       networks?: string[];
       /**
        * Format: uri-reference
-       * @description Card-size poster of a movie or series, or of an episode's series, as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent when there is no poster, and on a server that cannot issue poster links (the capabilities then report item_posters false). The URL expires; read it again from a later page or session row
+       * @description Card-size poster of a movie or series, or of an episode's series, as a path on this server: a signed getArtwork path when the art is cached, on any storage backend, or a signed getItemPoster link while it is not cached yet. Never a metadata provider's or off-server object store's URL. Absent when there is no poster, and on a server that cannot issue poster links (the capabilities then report item_posters false). The URL expires; read it again from a later page or session row
        */
       poster_url?: string;
       /**
@@ -21034,7 +21034,7 @@ export interface components {
       position_seconds: number;
       /**
        * Format: uri-reference
-       * @description Card-size poster of the title (an episode's series poster) as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent when there is no poster, and for art that is not cached yet on a server that cannot issue poster links (the catalog capabilities then report item_posters false)
+       * @description Card-size poster of the title (an episode's series poster) as a path on this server: a signed getArtwork path when the art is cached, on any storage backend, or a signed getItemPoster link while it is not cached yet. Never a metadata provider's or off-server object store's URL. Absent when there is no poster, and on a server that cannot issue poster links (the catalog capabilities then report item_posters false)
        */
       poster_url?: string;
       profile_id: string;
@@ -33379,8 +33379,8 @@ export interface components {
       position_seconds: number;
       /**
        * Format: uri-reference
-       * @description Where to fetch the poster; empty when there is none
-       * @example https://media.example/poster.jpg
+       * @description Card-size poster of the title as a path on this server (a signed getArtwork path for cached art, or a signed getItemPoster link); empty when there is none
+       * @example /api/v2/item-posters/movie-tmdb-278?exp=1795503600&sig=example
        */
       poster_url: string;
       /**
@@ -122617,7 +122617,10 @@ export interface operations {
         exp: number;
         sig: string;
       };
-      header?: never;
+      header?: {
+        "If-None-Match"?: string;
+        Range?: string;
+      };
       path: {
         /** @description Content ID of the movie or series whose poster the link names. */
         content_id: string;
@@ -122626,7 +122629,7 @@ export interface operations {
     };
     requestBody?: never;
     responses: {
-      /** @description Poster bytes of art not cached yet */
+      /** @description Poster bytes, read from the artwork store once cached or fetched from its provider until then */
       200: {
         headers: {
           [name: string]: unknown;
@@ -122635,7 +122638,16 @@ export interface operations {
           "image/*": string;
         };
       };
-      /** @description Redirect to the cached poster's signed URL */
+      /** @description Partial bytes of a cached poster */
+      206: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "image/*": string;
+        };
+      };
+      /** @description Redirect to a same-server path returned by a metadata plugin */
       302: {
         headers: {
           Location?: string;
@@ -122643,8 +122655,22 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Link invalid or expired, item gone, no poster, or the provider refused or failed */
+      /** @description Cached poster not modified */
+      304: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Link invalid or expired, item gone, no poster, or the provider or store has no servable image */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content?: never;
+      };
+      /** @description Requested range is outside the cached poster */
+      416: {
         headers: {
           [name: string]: unknown;
         };

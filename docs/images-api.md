@@ -234,19 +234,23 @@ cached.
 The admin reads a monitoring tool uses follow a stricter rule: `poster_url` on
 `GET /api/v2/admin/sessions` rows, on the rows embedded in
 `session.started`, `session.paused` and `session.resumed` events, and on
-`GET /api/v2/admin/catalog/items` items is always a URL this server issued, and
+`GET /api/v2/admin/catalog/items` items is always a path on this server, and
 absent only when the title has no poster. `GET /api/v2/profiles/household/sessions`
 reads the same session rows, so a household manager's session list follows the
 rule too. An episode carries its series'
 poster. `GET /api/v2/admin/catalog/capabilities` reports `item_posters: true`
 when the server applies this rule.
 
-- Cached art resolves to its card-size stored object, like any catalog read:
-  a signed `/api/v2/artwork/...` route or the artwork store's direct URL.
+- Cached art resolves to the signed `/api/v2/artwork/...` route of its
+  card-size stored object on every storage backend. With S3-compatible storage
+  that route reads the object through this server, even though catalog reads
+  hand out the store's direct URL.
 - Art that is not cached yet resolves to a signed link to
   `GET /api/v2/item-posters/{content_id}` (`getItemPoster`). The link signs the
   item's content ID and an expiry, never a URL. Each request looks up the
-  item's current poster: cached art answers `302` to its stored URL; art that is
+  item's current poster: cached art is read from the artwork store and served
+  as `/api/v2/artwork/...` serves it, answering `200` with its bytes, `304` to a
+  matching `If-None-Match`, and `206` or `416` to a `Range`; art that is
   still remote is downloaded through the server and answered `200` with its
   bytes, and the item's image-cache job is queued.
 
@@ -254,7 +258,7 @@ URLs may be root-relative; resolve them against the server's base URL. The link
 needs no credentials and expires with the artwork lifetime
 (`s3.metadata_presign_expiry`), changing at most every 15 minutes, so read a
 fresh one from a later page or session row. It keeps working after the art is
-cached, answering with the redirect from then on.
+cached, answering with the stored bytes from then on.
 
 `getItemPoster` has its own budget per client address. The default allows
 600 requests per minute with a burst of 400 so a dashboard can load a page of
@@ -268,15 +272,20 @@ download all return `404`. Every download and redirect hop must reach a public
 address, including URLs under the artwork store's direct URL prefix. The
 server serves an image of up to 4 MiB from a link and checks the bytes for
 JPEG, PNG, WebP or GIF; a larger original is refused, and that answer is kept
-for five minutes, until the image-cache job stores resized copies. See the [outbound address guard](architecture/outbound-address-guard.md#serving-catalog-artwork).
+for five minutes, until the image-cache job stores resized copies. Stored art
+is the server's own resized copy and skips those checks. See the [outbound address guard](architecture/outbound-address-guard.md#serving-catalog-artwork).
 
 Concurrent requests for one item share one download, and a
 server runs at most four at once. A server remembers a finished download for
 five minutes and a failed one for 30 seconds, so repeating a link does not
 repeat the request to the provider. An image over 4 MiB is not served from a
-link and answers `404` until the image cache has stored it. Proxied bytes carry
-`Cache-Control: private, max-age=300`; the redirect is `no-store`, since its
-target is a signed URL with its own lifetime.
+link and answers `404` until the image cache has stored it. From
+`getItemPoster`, proxied and stored bytes carry
+`Cache-Control: private, max-age=300`, since the link names whatever the
+item's poster is now, and stored bytes also carry the object's `ETag`. The
+signed `/api/v2/artwork/...` path keeps its own policy: a revisioned key is
+`immutable` until the link expires. A redirect to a plugin's same-server path
+is `no-store`.
 
 ### Admin request posters
 
@@ -292,8 +301,8 @@ This URL follows a different rule from the catalog and session posters above:
 
 - It needs the credentials that read the row: an admin session, an admin API
   key, or a key with the `admin:monitor:read` scope. Do not send those
-  credentials to the catalog and session poster URLs, which can be the artwork
-  store's own signed URLs.
+  credentials to the catalog and session poster URLs, which are signed links
+  that authorize themselves.
 - It never expires, so a tool can store it with the request.
 
 The route downloads the request's TMDB poster (`w500`) through the server and

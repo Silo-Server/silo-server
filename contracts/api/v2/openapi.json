@@ -5750,7 +5750,7 @@
             "type": "boolean"
           },
           "item_posters": {
-            "description": "listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always URLs this server issued",
+            "description": "listAdminCatalogItems returns poster_url, and admin poster URLs (here and on session rows) are always paths on this server",
             "type": "boolean"
           },
           "revision": {
@@ -5923,7 +5923,7 @@
             "type": "array"
           },
           "poster_url": {
-            "description": "Card-size poster of a movie or series, or of an episode's series, as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent when there is no poster, and on a server that cannot issue poster links (the capabilities then report item_posters false). The URL expires; read it again from a later page or session row",
+            "description": "Card-size poster of a movie or series, or of an episode's series, as a path on this server: a signed getArtwork path when the art is cached, on any storage backend, or a signed getItemPoster link while it is not cached yet. Never a metadata provider's or off-server object store's URL. Absent when there is no poster, and on a server that cannot issue poster links (the capabilities then report item_posters false). The URL expires; read it again from a later page or session row",
             "format": "uri-reference",
             "type": "string"
           },
@@ -18257,7 +18257,7 @@
             "type": "number"
           },
           "poster_url": {
-            "description": "Card-size poster of the title (an episode's series poster) as a URL this server issued: the cached artwork's signed URL, or a signed getItemPoster link while the art is not cached yet. Never a metadata provider's URL. Absent when there is no poster, and for art that is not cached yet on a server that cannot issue poster links (the catalog capabilities then report item_posters false)",
+            "description": "Card-size poster of the title (an episode's series poster) as a path on this server: a signed getArtwork path when the art is cached, on any storage backend, or a signed getItemPoster link while it is not cached yet. Never a metadata provider's or off-server object store's URL. Absent when there is no poster, and on a server that cannot issue poster links (the catalog capabilities then report item_posters false)",
             "format": "uri-reference",
             "type": "string"
           },
@@ -48970,9 +48970,9 @@
             "type": "number"
           },
           "poster_url": {
-            "description": "Where to fetch the poster; empty when there is none",
+            "description": "Card-size poster of the title as a path on this server (a signed getArtwork path for cached art, or a signed getItemPoster link); empty when there is none",
             "examples": [
-              "https://media.example/poster.jpg"
+              "/api/v2/item-posters/movie-tmdb-278?exp=1795503600\u0026sig=example"
             ],
             "format": "uri-reference",
             "type": "string"
@@ -189392,6 +189392,20 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Range",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -189405,10 +189419,22 @@
                 }
               }
             },
-            "description": "Poster bytes of art not cached yet"
+            "description": "Poster bytes, read from the artwork store once cached or fetched from its provider until then"
+          },
+          "206": {
+            "content": {
+              "image/*": {
+                "schema": {
+                  "contentMediaType": "application/octet-stream",
+                  "format": "binary",
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Partial bytes of a cached poster"
           },
           "302": {
-            "description": "Redirect to the cached poster's signed URL",
+            "description": "Redirect to a same-server path returned by a metadata plugin",
             "headers": {
               "Location": {
                 "schema": {
@@ -189418,8 +189444,14 @@
               }
             }
           },
+          "304": {
+            "description": "Cached poster not modified"
+          },
           "404": {
-            "description": "Link invalid or expired, item gone, no poster, or the provider refused or failed"
+            "description": "Link invalid or expired, item gone, no poster, or the provider or store has no servable image"
+          },
+          "416": {
+            "description": "Requested range is outside the cached poster"
           },
           "429": {
             "content": {
@@ -189443,7 +189475,7 @@
             "description": "Poster fetches are busy or not configured; retry after Retry-After"
           }
         },
-        "summary": "Read a catalog item's current poster from a signed link that admin reads return in poster_url. Cached art redirects to its stored object; art not cached yet is fetched from its provider through the server and queued for caching.",
+        "summary": "Read a catalog item's current poster from a signed link that admin reads return in poster_url for art not cached yet. Once the art is cached, the link serves the stored object through this server; until then the art is fetched from its provider through the server and queued for caching.",
         "tags": [
           "artwork"
         ],

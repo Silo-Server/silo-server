@@ -1255,7 +1255,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// this server issued, so a monitoring tool never needs a provider's host.
 	var itemPosters *artworkurl.ItemPosters
 	if cfg := deps.CurrentConfig(); detailSvc != nil && cfg != nil {
-		itemPosters = artworkurl.NewItemPosters(cfg.Auth.JWTSecret, cfg.S3.MetadataPresignExpiry, detailSvc)
+		itemPosters = artworkurl.NewItemPosters(cfg.Auth.JWTSecret, cfg.S3.MetadataPresignExpiry, detailSvc, deps.ArtworkSigner)
 	}
 	if deps.DB != nil {
 		playbackSessionsLoader = handlers.NewPlaybackSessionsLoader(deps.DB, deps.UserStoreProvider, detailSvc)
