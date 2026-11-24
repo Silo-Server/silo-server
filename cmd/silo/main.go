@@ -3339,7 +3339,7 @@ func main() {
 	// The per-name password sign-in budget follows the same rule. One
 	// limiter serves the native, Jellyfin and Audiobookshelf auth services,
 	// so no listener gets its own allowance.
-	deps.SignInAttempts = ratelimit.NewSignInNameAttemptLimiter(apiRedisClient)
+	deps.SignInAttempts = ratelimit.NewSignInLimiter(apiRedisClient)
 
 	// Activity log writer + consumer.
 	if err := activitylog.SeedDefaults(ctx, settingsRepo); err != nil {
