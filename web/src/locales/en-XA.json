@@ -51320,20 +51320,76 @@
       "value": "⟦"
     },
     {
-      "type": 1,
-      "value": "movies"
+      "type": 6,
+      "value": "movie_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "movies"
+            },
+            {
+              "type": 0,
+              "value": " ɱöṽîé"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "movies"
+            },
+            {
+              "type": 0,
+              "value": " ɱöṽîéš"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     },
     {
       "type": 0,
-      "value": " ɱöṽîéš · "
+      "value": " · "
     },
     {
-      "type": 1,
-      "value": "episodes"
+      "type": 6,
+      "value": "episode_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "episodes"
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđé"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "episodes"
+            },
+            {
+              "type": 0,
+              "value": " éþîšöđéš"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     },
     {
       "type": 0,
-      "value": " éþîšöđéš~~~~~~~~⟧"
+      "value": "~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.activity.kpi.watchTime": [
@@ -51344,24 +51400,60 @@
   ],
   "web.admin.insights.activity.kpi.watchTimeMeasured": [
     {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 1,
-      "value": "measured"
-    },
-    {
-      "type": 0,
-      "value": " öƒ "
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": " šéššîöñš ɱéåšûŕéđ~~~~~~~~~⟧"
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " šéššîöñ ɱéåšûŕéđ~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " šéššîöñš ɱéåšûŕéđ~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.activity.peak.chartLabel": [
@@ -51728,54 +51820,134 @@
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
     {
-      "type": 0,
-      "value": "⟦Đéţåîļéđ çöđéç, ţŕåñšçöđé, åñđ ŕöûţîñĝ ƒåçţš åŕé ŕéçöŕđéđ ƒöŕ "
-    },
-    {
-      "type": 1,
-      "value": "recorded"
-    },
-    {
-      "type": 0,
-      "value": " öƒ "
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": " šéššîöñš îñ ţĥîš ŵîñđöŵ (ŕéçöŕđéđ šîñçé "
-    },
-    {
-      "type": 1,
-      "value": "since"
-    },
-    {
-      "type": 0,
-      "value": ").~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Đéţåîļéđ çöđéç, ţŕåñšçöđé, åñđ ŕöûţîñĝ ƒåçţš åŕé ŕéçöŕđéđ ƒöŕ "
+            },
+            {
+              "type": 1,
+              "value": "recorded"
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " šéššîöñ îñ ţĥîš ŵîñđöŵ (ŕéçöŕđéđ šîñçé "
+            },
+            {
+              "type": 1,
+              "value": "since"
+            },
+            {
+              "type": 0,
+              "value": ").~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Đéţåîļéđ çöđéç, ţŕåñšçöđé, åñđ ŕöûţîñĝ ƒåçţš åŕé ŕéçöŕđéđ ƒöŕ "
+            },
+            {
+              "type": 1,
+              "value": "recorded"
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " šéššîöñš îñ ţĥîš ŵîñđöŵ (ŕéçöŕđéđ šîñçé "
+            },
+            {
+              "type": 1,
+              "value": "since"
+            },
+            {
+              "type": 0,
+              "value": ").~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.coverage.watchTimePartial": [
     {
-      "type": 0,
-      "value": "⟦Ṁéåšûŕéđ ŵåţçĥ ţîɱé çöṽéŕš "
-    },
-    {
-      "type": 1,
-      "value": "measured"
-    },
-    {
-      "type": 0,
-      "value": " öƒ "
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": " šéššîöñš îñ ţĥîš ŵîñđöŵ; öļđéŕ šéššîöñš ûšé éñđ-þöšîţîöñ éšţîɱåţéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ṁéåšûŕéđ ŵåţçĥ ţîɱé çöṽéŕš "
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " šéššîöñ îñ ţĥîš ŵîñđöŵ; öļđéŕ šéššîöñš ûšé éñđ-þöšîţîöñ éšţîɱåţéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦Ṁéåšûŕéđ ŵåţçĥ ţîɱé çöṽéŕš "
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " šéššîöñš îñ ţĥîš ŵîñđöŵ; öļđéŕ šéššîöñš ûšé éñđ-þöšîţîöñ éšţîɱåţéš.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.detail.action.history": [
@@ -51986,48 +52158,108 @@
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
     {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 1,
-      "value": "client"
-    },
-    {
-      "type": 0,
-      "value": " · "
-    },
-    {
-      "type": 1,
-      "value": "codec"
-    },
-    {
-      "type": 0,
-      "value": ": "
-    },
-    {
-      "type": 1,
-      "value": "direct_rate"
-    },
-    {
-      "type": 0,
-      "value": "% đîŕéçţ ("
-    },
-    {
-      "type": 1,
-      "value": "sessions"
-    },
-    {
-      "type": 0,
-      "value": "; "
-    },
-    {
-      "type": 1,
-      "value": "transcodes"
-    },
-    {
-      "type": 0,
-      "value": " ţŕåñšçöđéš)~~~~~~~~~~~~⟧"
+      "type": 6,
+      "value": "transcode_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "client"
+            },
+            {
+              "type": 0,
+              "value": " · "
+            },
+            {
+              "type": 1,
+              "value": "codec"
+            },
+            {
+              "type": 0,
+              "value": ": "
+            },
+            {
+              "type": 1,
+              "value": "direct_rate"
+            },
+            {
+              "type": 0,
+              "value": "% đîŕéçţ ("
+            },
+            {
+              "type": 1,
+              "value": "sessions"
+            },
+            {
+              "type": 0,
+              "value": "; "
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": " ţŕåñšçöđé)~~~~~~~~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "client"
+            },
+            {
+              "type": 0,
+              "value": " · "
+            },
+            {
+              "type": 1,
+              "value": "codec"
+            },
+            {
+              "type": 0,
+              "value": ": "
+            },
+            {
+              "type": 1,
+              "value": "direct_rate"
+            },
+            {
+              "type": 0,
+              "value": "% đîŕéçţ ("
+            },
+            {
+              "type": 1,
+              "value": "sessions"
+            },
+            {
+              "type": 0,
+              "value": "; "
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": " ţŕåñšçöđéš)~~~~~~~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.devices.matrix.clientColumn": [
@@ -52186,24 +52418,60 @@
   ],
   "web.admin.insights.devices.topTranscoders.transcodeShare": [
     {
-      "type": 0,
-      "value": "⟦"
-    },
-    {
-      "type": 1,
-      "value": "transcodes"
-    },
-    {
-      "type": 0,
-      "value": " öƒ "
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": " šéššîöñš~~~~~~⟧"
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " šéššîöñ~~~~~⟧"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "⟦"
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": " öƒ "
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": " šéššîöñš~~~~~~⟧"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.devices.unknownClient": [

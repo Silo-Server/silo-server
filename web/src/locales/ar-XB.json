@@ -49660,20 +49660,72 @@
       "value": "\u200F"
     },
     {
-      "type": 1,
-      "value": "movies"
+      "type": 6,
+      "value": "movie_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "movies"
+            },
+            {
+              "type": 0,
+              "value": "\u202E movie\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "movies"
+            },
+            {
+              "type": 0,
+              "value": "\u202E movies\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     },
     {
       "type": 0,
-      "value": "\u202E movies · \u202C"
+      "value": "\u202E · \u202C"
     },
     {
-      "type": 1,
-      "value": "episodes"
-    },
-    {
-      "type": 0,
-      "value": "\u202E episodes\u202C"
+      "type": 6,
+      "value": "episode_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 1,
+              "value": "episodes"
+            },
+            {
+              "type": 0,
+              "value": "\u202E episode\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 1,
+              "value": "episodes"
+            },
+            {
+              "type": 0,
+              "value": "\u202E episodes\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.activity.kpi.watchTime": [
@@ -49684,24 +49736,60 @@
   ],
   "web.admin.insights.activity.kpi.watchTimeMeasured": [
     {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "measured"
-    },
-    {
-      "type": 0,
-      "value": "\u202E of \u202C"
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": "\u202E sessions measured\u202C"
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": "\u202E of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "\u202E session measured\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": "\u202E of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "\u202E sessions measured\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.activity.peak.chartLabel": [
@@ -50064,54 +50152,134 @@
   ],
   "web.admin.insights.coverage.routeFactsPartial": [
     {
-      "type": 0,
-      "value": "\u200F\u202EDetailed codec, transcode, and routing facts are recorded for \u202C"
-    },
-    {
-      "type": 1,
-      "value": "recorded"
-    },
-    {
-      "type": 0,
-      "value": "\u202E of \u202C"
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": "\u202E sessions in this window (recorded since \u202C"
-    },
-    {
-      "type": 1,
-      "value": "since"
-    },
-    {
-      "type": 0,
-      "value": "\u202E).\u202C"
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EDetailed codec, transcode, and routing facts are recorded for \u202C"
+            },
+            {
+              "type": 1,
+              "value": "recorded"
+            },
+            {
+              "type": 0,
+              "value": "\u202E of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "\u202E session in this window (recorded since \u202C"
+            },
+            {
+              "type": 1,
+              "value": "since"
+            },
+            {
+              "type": 0,
+              "value": "\u202E).\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EDetailed codec, transcode, and routing facts are recorded for \u202C"
+            },
+            {
+              "type": 1,
+              "value": "recorded"
+            },
+            {
+              "type": 0,
+              "value": "\u202E of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "\u202E sessions in this window (recorded since \u202C"
+            },
+            {
+              "type": 1,
+              "value": "since"
+            },
+            {
+              "type": 0,
+              "value": "\u202E).\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.coverage.watchTimePartial": [
     {
-      "type": 0,
-      "value": "\u200F\u202EMeasured watch time covers \u202C"
-    },
-    {
-      "type": 1,
-      "value": "measured"
-    },
-    {
-      "type": 0,
-      "value": "\u202E of \u202C"
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": "\u202E sessions in this window; older sessions use end-position estimates.\u202C"
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EMeasured watch time covers \u202C"
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": "\u202E of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "\u202E session in this window; older sessions use end-position estimates.\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F\u202EMeasured watch time covers \u202C"
+            },
+            {
+              "type": 1,
+              "value": "measured"
+            },
+            {
+              "type": 0,
+              "value": "\u202E of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "\u202E sessions in this window; older sessions use end-position estimates.\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.detail.action.history": [
@@ -50318,48 +50486,108 @@
   ],
   "web.admin.insights.devices.matrix.cellTooltip": [
     {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "client"
-    },
-    {
-      "type": 0,
-      "value": "\u202E · \u202C"
-    },
-    {
-      "type": 1,
-      "value": "codec"
-    },
-    {
-      "type": 0,
-      "value": "\u202E: \u202C"
-    },
-    {
-      "type": 1,
-      "value": "direct_rate"
-    },
-    {
-      "type": 0,
-      "value": "\u202E% direct (\u202C"
-    },
-    {
-      "type": 1,
-      "value": "sessions"
-    },
-    {
-      "type": 0,
-      "value": "\u202E; \u202C"
-    },
-    {
-      "type": 1,
-      "value": "transcodes"
-    },
-    {
-      "type": 0,
-      "value": "\u202E transcodes)\u202C"
+      "type": 6,
+      "value": "transcode_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "client"
+            },
+            {
+              "type": 0,
+              "value": "\u202E · \u202C"
+            },
+            {
+              "type": 1,
+              "value": "codec"
+            },
+            {
+              "type": 0,
+              "value": "\u202E: \u202C"
+            },
+            {
+              "type": 1,
+              "value": "direct_rate"
+            },
+            {
+              "type": 0,
+              "value": "\u202E% direct (\u202C"
+            },
+            {
+              "type": 1,
+              "value": "sessions"
+            },
+            {
+              "type": 0,
+              "value": "\u202E; \u202C"
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": "\u202E transcode)\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "client"
+            },
+            {
+              "type": 0,
+              "value": "\u202E · \u202C"
+            },
+            {
+              "type": 1,
+              "value": "codec"
+            },
+            {
+              "type": 0,
+              "value": "\u202E: \u202C"
+            },
+            {
+              "type": 1,
+              "value": "direct_rate"
+            },
+            {
+              "type": 0,
+              "value": "\u202E% direct (\u202C"
+            },
+            {
+              "type": 1,
+              "value": "sessions"
+            },
+            {
+              "type": 0,
+              "value": "\u202E; \u202C"
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": "\u202E transcodes)\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.devices.matrix.clientColumn": [
@@ -50514,24 +50742,60 @@
   ],
   "web.admin.insights.devices.topTranscoders.transcodeShare": [
     {
-      "type": 0,
-      "value": "\u200F"
-    },
-    {
-      "type": 1,
-      "value": "transcodes"
-    },
-    {
-      "type": 0,
-      "value": "\u202E of \u202C"
-    },
-    {
-      "type": 1,
-      "value": "total"
-    },
-    {
-      "type": 0,
-      "value": "\u202E sessions\u202C"
+      "type": 6,
+      "value": "total_count",
+      "options": {
+        "one": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": "\u202E of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "\u202E session\u202C"
+            }
+          ]
+        },
+        "other": {
+          "value": [
+            {
+              "type": 0,
+              "value": "\u200F"
+            },
+            {
+              "type": 1,
+              "value": "transcodes"
+            },
+            {
+              "type": 0,
+              "value": "\u202E of \u202C"
+            },
+            {
+              "type": 1,
+              "value": "total"
+            },
+            {
+              "type": 0,
+              "value": "\u202E sessions\u202C"
+            }
+          ]
+        }
+      },
+      "offset": 0,
+      "pluralType": "cardinal"
     }
   ],
   "web.admin.insights.devices.unknownClient": [

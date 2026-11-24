@@ -307,6 +307,7 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
           message={t("web.admin.insights.coverage.watchTimePartial", {
             measured: coverage.measured_sessions.toLocaleString(formatLocale()),
             total: coverage.total_sessions.toLocaleString(formatLocale()),
+            total_count: coverage.total_sessions,
           })}
         />
       ) : null}
@@ -317,7 +318,9 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
           value={summary.plays.toLocaleString(formatLocale())}
           subtext={t("web.admin.insights.activity.kpi.playsBreakdown", {
             movies: summary.movies.toLocaleString(formatLocale()),
+            movie_count: summary.movies,
             episodes: summary.episodes.toLocaleString(formatLocale()),
+            episode_count: summary.episodes,
           })}
         />
         <InsightKpiCard
@@ -326,6 +329,7 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
           subtext={t("web.admin.insights.activity.kpi.watchTimeMeasured", {
             measured: coverage.measured_sessions.toLocaleString(formatLocale()),
             total: coverage.total_sessions.toLocaleString(formatLocale()),
+            total_count: coverage.total_sessions,
           })}
         />
         <InsightKpiCard

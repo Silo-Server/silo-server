@@ -116,6 +116,7 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
           message={t("web.admin.insights.coverage.watchTimePartial", {
             measured: coverage.measured_sessions.toLocaleString(formatLocale()),
             total: coverage.total_sessions.toLocaleString(formatLocale()),
+            total_count: coverage.total_sessions,
           })}
         />
       ) : null}

@@ -108,6 +108,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
           secondary: t("web.admin.insights.devices.topTranscoders.transcodeShare", {
             transcodes: row.transcode_sessions.toLocaleString(formatLocale()),
             total: row.total_sessions.toLocaleString(formatLocale()),
+            total_count: row.total_sessions,
           }),
           to: buildHistoryDrilldownHref({
             clientName: row.client_name || "unknown",
@@ -235,6 +236,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
           message={t("web.admin.insights.coverage.routeFactsPartial", {
             recorded: coverage.route_facts_sessions.toLocaleString(formatLocale()),
             total: coverage.total_sessions.toLocaleString(formatLocale()),
+            total_count: coverage.total_sessions,
             since: formatShortCalendarDate(coverage.oldest_route_facts_at),
           })}
         />
@@ -379,6 +381,7 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
                             direct_rate: rateStr,
                             sessions: formatSessionCount(cell.sessions),
                             transcodes: cell.transcode_sessions.toLocaleString(formatLocale()),
+                            transcode_count: cell.transcode_sessions,
                           });
                           const drillHref = buildHistoryDrilldownHref({
                             clientName: row.client_name || "unknown",

@@ -227,7 +227,9 @@ export function PersonDetailSheet({
                   value={formatWatchTime(activity.data.summary.watch_seconds)}
                   subtext={t("web.admin.insights.activity.kpi.playsBreakdown", {
                     movies: count(activity.data.summary.movies),
+                    movie_count: activity.data.summary.movies,
                     episodes: count(activity.data.summary.episodes),
+                    episode_count: activity.data.summary.episodes,
                   })}
                 />
                 <InsightKpiCard
