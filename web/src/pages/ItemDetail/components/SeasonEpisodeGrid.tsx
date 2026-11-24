@@ -18,6 +18,7 @@ import { overlayDataFromEpisodeListItem, type CardOverlayPrefs } from "@/lib/ove
 import { cn } from "@/lib/utils";
 import { EpisodeGridSkeleton } from "./SectionSkeletons";
 import { useT } from "@/i18n";
+import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import EpisodeCardCaption from "./EpisodeCardCaption";
 import { episodeLinkLibraryId, type EpisodeNavigationState } from "../itemDetailLayout";
 import WatchProgressBar from "@/components/WatchProgressBar";
@@ -128,7 +129,9 @@ function SeasonEpisodeCard({
     (episode.user_data?.position_seconds ?? 0) > 0 &&
     (episode.user_data?.duration_seconds ?? 0) > 0;
   const episodeTitle =
-    episode.title || t("web.detail.episodes.numbered", { episode: episode.episode_number });
+    episode.title ||
+    episodeAirDateLabel(episodeLabels, episode.air_date) ||
+    t("web.detail.episodes.numbered", { episode: episode.episode_number });
   const unwatched = isEpisodeUnwatched(episode.user_data);
   const hideImage =
     spoilerPrefs.hideImages && unwatched && isEpisodeStill(episode.still_is_episode_still);

@@ -16,6 +16,7 @@ import type { CardQuickActionMode } from "@/lib/cardQuickActions";
 import type { ScrollPreservingState } from "@/hooks/useScrollRestoration";
 import { buildItemHref } from "@/lib/mediaNavigation";
 import { useT } from "@/i18n";
+import { episodeAirDateLabel } from "@/lib/episodeCardLabels";
 import EpisodeCardCaption from "./EpisodeCardCaption";
 import WatchProgressBar from "@/components/WatchProgressBar";
 
@@ -131,7 +132,9 @@ function EpisodeCarouselCard({
   const cardRef = useRef<HTMLDivElement>(null);
   const thumbhashUrl = ep.still_thumbhash ? decodeThumbhash(ep.still_thumbhash) : "";
   const episodeTitle =
-    ep.title || t("web.detail.episodes.numbered", { episode: ep.episode_number });
+    ep.title ||
+    episodeAirDateLabel(episodeLabels, ep.air_date) ||
+    t("web.detail.episodes.numbered", { episode: ep.episode_number });
   const episodeHref = buildItemHref({
     contentId: ep.content_id,
     libraryId: episodeLinkLibraryId(ep, libraryId),

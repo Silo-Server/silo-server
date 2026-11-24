@@ -637,10 +637,11 @@ an episode date a provider has since corrected takes "Replace all metadata".
 `episode_labels` appears on:
 
 - item detail of the series, and of its seasons and episodes (the series' value)
-- series and episode cards of home and library sections, catalog browse and
-  search, library and personal collections, favorites, the watchlist, watch
-  history, Watch Together pickers and the shuffle `next` card; their episode
-  cards also carry `air_date`. Season cards don't carry it.
+- series and episode cards of home and library sections, Watch Tonight and
+  recommendation rows, catalog browse and search, library and personal
+  collections, favorites, the watchlist, watch history, Watch Together pickers
+  and the shuffle `next` card; their episode cards also carry `air_date`.
+  Season cards don't carry it.
 - watch detail (`getWatchDetail`) of an episode, with its `air_date`
 
 `/api/v1` and the Jellyfin-compatible API are unchanged.

@@ -24635,7 +24635,7 @@ export interface components {
        */
       duration_seconds?: number;
       /**
-       * @description How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
        * @example air_date
        * @enum {string}
        */
@@ -24906,7 +24906,7 @@ export interface components {
       /** Format: int64 */
       episode_count?: number;
       /**
-       * @description How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
        * @example air_date
        * @enum {string}
        */
@@ -28281,7 +28281,7 @@ export interface components {
        */
       duration_seconds?: number;
       /**
-       * @description How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
        * @example air_date
        * @enum {string}
        */
@@ -38023,7 +38023,7 @@ export interface components {
        */
       duration_seconds?: number;
       /**
-       * @description How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
        * @example air_date
        * @enum {string}
        */
@@ -38272,7 +38272,7 @@ export interface components {
        */
       duration_seconds?: number;
       /**
-       * @description How to label the episodes of this series, or of the series an episode or season belongs to. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
+       * @description How to label the episodes of this series, or of the series an episode belongs to; a season's detail carries its series' value, a season card does not. air_date: the numbers are synthetic (a sports league numbered S2026E296), so show the episode's air date where the season and episode numbers would go; the numbers still order episodes. Absent, or a value the client does not know: show the numbers
        * @example air_date
        * @enum {string}
        */

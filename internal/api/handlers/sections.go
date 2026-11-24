@@ -399,6 +399,9 @@ func (r *sectionItemResponse) applyEpisodeCardMeta(meta *sections.SectionItemMet
 	if r.ReleaseDate == nil {
 		r.ReleaseDate = meta.EpisodeAirDate
 	}
+	if r.EpisodeLabels != "" && r.AirDate == "" && meta.EpisodeAirDate != nil {
+		r.AirDate = *meta.EpisodeAirDate
+	}
 	r.EpisodeRatingTMDB = meta.RatingTMDB
 }
 
@@ -1132,7 +1135,6 @@ const (
 	sectionLookupImageURLs
 	sectionLookupEpisodeMeta
 	sectionLookupMangaChapterMeta
-	sectionLookupEpisodeLabels
 	sectionLookupAvailability
 	sectionLookupCount
 )
@@ -1145,7 +1147,6 @@ var sectionLookupTimingKeys = [sectionLookupCount]string{
 	sectionLookupImageURLs:        "image_urls_ms",
 	sectionLookupEpisodeMeta:      "episode_meta_ms",
 	sectionLookupMangaChapterMeta: "manga_chapter_meta_ms",
-	sectionLookupEpisodeLabels:    "episode_labels_ms",
 	sectionLookupAvailability:     "availability_ms",
 }
 
@@ -1181,7 +1182,6 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	var imageURLs map[sectionItemImageKey]sectionItemImageURLs
 	var episodeMeta map[string]sections.SectionItemMeta
 	var mangaChapterMeta map[string]sections.SectionItemMeta
-	var episodeLabels map[string]catalog.EpisodeLabel
 
 	var wg sync.WaitGroup
 
@@ -1215,7 +1215,6 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 	goSectionLookup(ctx, &wg, sectionLookupImageURLs, timings, func() { imageURLs = h.resolveSectionItemImageURLs(ctx, withItems, art) })
 	goSectionLookup(ctx, &wg, sectionLookupEpisodeMeta, timings, func() { episodeMeta = h.listSectionEpisodeItemMeta(ctx, withItems, viewerAccess) })
 	goSectionLookup(ctx, &wg, sectionLookupMangaChapterMeta, timings, func() { mangaChapterMeta = h.listSectionMangaChapterItemMeta(ctx, allItems) })
-	goSectionLookup(ctx, &wg, sectionLookupEpisodeLabels, timings, func() { episodeLabels = h.listSectionEpisodeLabels(ctx, allItems) })
 	availability := h.startSectionAvailability(ctx, &wg, timings, includeAvailability, viewerAccess, allItems)
 
 	wg.Wait()
@@ -1237,9 +1236,6 @@ func (h *SectionHandler) buildSectionsWithUserStates(ctx context.Context, withIt
 			imageKey := sectionItemImageKey{sectionID: s.ID, contentID: item.ContentID}
 			response := h.toSectionItemResponse(s.SectionType, card, meta, overlaySummaries[item.ContentID], userStates[item.ContentID], imageURLs[imageKey], playTargets[playableTargetKeyForItem(item)])
 			response.PendingTranslationLanguage = pendingTranslations[item.ContentID]
-			if label, ok := episodeLabels[item.ContentID]; ok {
-				response.EpisodeLabels, response.AirDate = label.Labels, label.AirDate
-			}
 			items = append(items, response)
 		}
 		resp.Sections = append(resp.Sections, resolvedSectionResponse{
@@ -1445,22 +1441,10 @@ func (h *SectionHandler) listSectionMangaChapterItemMeta(ctx context.Context, it
 	if h == nil || h.fetcher == nil {
 		return map[string]sections.SectionItemMeta{}
 	}
-	ids := sectionItemIDs(items, func(item *models.MediaItem) bool { return item.Type == itemTypeEbook })
-	meta, err := h.fetcher.FetchMangaChapterSeriesMeta(ctx, ids)
-	if err != nil {
-		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section manga chapter metadata", "component", "api", "error", err)
-		return map[string]sections.SectionItemMeta{}
-	}
-	return meta
-}
-
-// sectionItemIDs returns the distinct, non-blank content IDs of the items
-// keep accepts, in order.
-func sectionItemIDs(items []*models.MediaItem, keep func(*models.MediaItem) bool) []string {
 	ids := make([]string, 0)
 	seen := make(map[string]struct{})
 	for _, item := range items {
-		if item == nil || strings.TrimSpace(item.ContentID) == "" || !keep(item) {
+		if item == nil || item.Type != "ebook" || strings.TrimSpace(item.ContentID) == "" {
 			continue
 		}
 		if _, ok := seen[item.ContentID]; ok {
@@ -1469,22 +1453,12 @@ func sectionItemIDs(items []*models.MediaItem, keep func(*models.MediaItem) bool
 		seen[item.ContentID] = struct{}{}
 		ids = append(ids, item.ContentID)
 	}
-	return ids
-}
-
-// listSectionEpisodeLabels finds the series and episodes among the section
-// items whose episodes are labeled by air date instead of numbers.
-func (h *SectionHandler) listSectionEpisodeLabels(ctx context.Context, items []*models.MediaItem) map[string]catalog.EpisodeLabel {
-	if h == nil || h.fetcher == nil {
-		return map[string]catalog.EpisodeLabel{}
-	}
-	ids := sectionItemIDs(items, func(item *models.MediaItem) bool { return item.Type == itemTypeEpisode || item.Type == itemTypeSeries })
-	labels, err := h.fetcher.FetchEpisodeLabels(ctx, ids)
+	meta, err := h.fetcher.FetchMangaChapterSeriesMeta(ctx, ids)
 	if err != nil {
-		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section episode labels", "component", "api", "error", err)
-		return map[string]catalog.EpisodeLabel{}
+		slog.Log(ctx, ctxerr.LogLevel(ctx, err, slog.LevelWarn), "loading section manga chapter metadata", "component", "api", "error", err)
+		return map[string]sections.SectionItemMeta{}
 	}
-	return labels
+	return meta
 }
 
 func (h *SectionHandler) listSectionEpisodeItemMeta(ctx context.Context, withItems []sections.SectionWithItems, filter catalog.AccessFilter) map[string]sections.SectionItemMeta {
@@ -1670,6 +1644,12 @@ func sectionItemFromMediaItem(item *models.MediaItem) sectionItemResponse {
 	}
 	if resp.Keywords == nil {
 		resp.Keywords = []string{}
+	}
+	if item.Type == itemTypeEpisode && item.EpisodeLabels != "" && item.ReleaseDate != nil {
+		// An episode catalog row's release date is its air date. Rows from
+		// the episode-target query carry it in their meta instead
+		// (applyEpisodeCardMeta).
+		resp.AirDate = *item.ReleaseDate
 	}
 	return resp
 }

@@ -174,30 +174,24 @@ function ContinueWatchingCardView({ spoilerPrefs, ...props }: ContinueWatchingCa
       {card.title}
     </span>
   ) : null;
-  const episodeMeta = hasEpisodeMeta ? (
-    card.airDateLabel ? (
-      // A date-labeled series (sports): the game's date replaces its
-      // synthetic season and episode numbers.
-      card.title && card.seriesTitle ? (
-        <>
-          {card.airDateLabel}
-          {AIR_DATE_TITLE_SEPARATOR}
-          {episodeTitle}
-        </>
-      ) : (
-        card.airDateLabel
-      )
-    ) : card.seriesTitle && card.title ? (
-      t("web.home.continueWatching.episodeLabelWithTitle", {
-        ...episodeNumbers,
-        title: episodeTitle,
-      })
-    ) : (
-      t("web.home.continueWatching.episodeLabel", episodeNumbers)
-    )
-  ) : isMangaChapter ? (
-    episodeTitle
-  ) : null;
+  const episodeMeta = hasEpisodeMeta
+    ? card.airDateLabel
+      ? // A date-labeled series (sports): the game's date replaces its
+        // synthetic season and episode numbers. The parts are an array, not a
+        // fragment, because Children.map below doesn't look inside a fragment
+        // and the date would lose its own non-shrinking box.
+        card.title && card.seriesTitle
+        ? [`${card.airDateLabel}${AIR_DATE_TITLE_SEPARATOR}`, episodeTitle]
+        : card.airDateLabel
+      : card.seriesTitle && card.title
+        ? t("web.home.continueWatching.episodeLabelWithTitle", {
+            ...episodeNumbers,
+            title: episodeTitle,
+          })
+        : t("web.home.continueWatching.episodeLabel", episodeNumbers)
+    : isMangaChapter
+      ? episodeTitle
+      : null;
   const premiereBadge =
     "sectionItem" in props && props.sectionItem
       ? props.sectionItem.badges?.find((badge) => badge === "season_premiere")

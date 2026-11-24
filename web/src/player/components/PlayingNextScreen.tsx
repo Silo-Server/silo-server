@@ -545,20 +545,19 @@ function OnDeckCarousel({
             // The same line with the title in its own box; `episodeMeta` stays
             // the plain text for the tooltip.
             const episodeLine =
-              hasEpisodeNumber && titledEpisode && airDateLabel ? (
-                <>
-                  {airDateLabel}
-                  {AIR_DATE_TITLE_SEPARATOR}
-                  <LineTitle>{titledEpisode}</LineTitle>
-                </>
-              ) : hasEpisodeNumber && titledEpisode ? (
-                t("web.player.episode.codeWithTitle", {
-                  ...episodeCode,
-                  title: <LineTitle>{titledEpisode}</LineTitle>,
-                })
-              ) : (
-                episodeMeta
-              );
+              // An array, not a fragment: TitleLineParts doesn't look inside
+              // a fragment, so the date would lose its own non-shrinking box.
+              hasEpisodeNumber && titledEpisode && airDateLabel
+                ? [
+                    `${airDateLabel}${AIR_DATE_TITLE_SEPARATOR}`,
+                    <LineTitle key="title">{titledEpisode}</LineTitle>,
+                  ]
+                : hasEpisodeNumber && titledEpisode
+                  ? t("web.player.episode.codeWithTitle", {
+                      ...episodeCode,
+                      title: <LineTitle>{titledEpisode}</LineTitle>,
+                    })
+                  : episodeMeta;
             const thumbnailUrl = detail.backdrop_url ?? detail.poster_url;
             const progressPercent =
               item.progress.duration_seconds > 0
