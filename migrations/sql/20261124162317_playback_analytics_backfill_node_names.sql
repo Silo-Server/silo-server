@@ -19,11 +19,13 @@ WHERE h.routing_egress_node_id = sn.id
 
 UPDATE dashboard_node_egress_daily d
 SET
-    node_name = COALESCE(NULLIF(BTRIM(sn.name), ''), d.node_name),
-    node_type = COALESCE(sn.type, d.node_type)
+    -- Fill each field only where it is missing: a recorded name stays even
+    -- when only the type needs filling.
+    node_name = CASE WHEN BTRIM(d.node_name) = '' THEN COALESCE(NULLIF(BTRIM(sn.name), ''), '') ELSE d.node_name END,
+    node_type = COALESCE(d.node_type, sn.type)
 FROM stream_nodes sn
 WHERE d.node_id = sn.id
-  AND (d.node_name = '' OR d.node_type IS NULL);
+  AND (BTRIM(d.node_name) = '' OR d.node_type IS NULL);
 -- +goose StatementEnd
 
 -- +goose Down
