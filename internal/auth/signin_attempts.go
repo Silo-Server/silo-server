@@ -5,18 +5,46 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"net/netip"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Silo-Server/silo-server/internal/clientip"
+	"github.com/Silo-Server/silo-server/internal/models"
+	"github.com/Silo-Server/silo-server/internal/netaccess"
+)
+
+// SignInLane names the budget a password attempt spent.
+type SignInLane uint8
+
+const (
+	// SignInLaneName is the budget shared by every attempt at a name.
+	SignInLaneName SignInLane = iota
+	// SignInLaneSource is the budget of one client address the name is
+	// known to sign in from, spent only while the name's own budget is used.
+	SignInLaneSource
 )
 
 // SignInAttemptLimiter bounds password attempts per sign-in name
-// (*ratelimit.AttemptLimiter under ratelimit.SignInNamePolicy; this package
-// cannot import ratelimit). Reserve counts an attempt before the password is
-// checked and refuses one while the name is locked; Reset clears the count
-// after a correct password.
+// (*ratelimit.SignInLimiter; this package cannot import ratelimit).
+//
+// Every attempt spends the name's budget while it lasts. Once it is used,
+// the name is locked for attempts from unknown addresses, but an address the
+// account is known to sign in from (Trust) spends a budget of its own
+// instead. Guessing stays bounded per name and per known address, and
+// whoever spends the name's budget from elsewhere cannot lock the account's
+// people out where they usually sign in.
 type SignInAttemptLimiter interface {
-	Reserve(ctx context.Context, key string) (retryAfter time.Duration, ok bool)
-	Reset(ctx context.Context, key string)
+	// Reserve counts one attempt at the name keyed nameKey from the client
+	// address source ("" when unknown) before its password is checked. It
+	// reports the lane spent, or false with the time left on the lock.
+	Reserve(ctx context.Context, nameKey, source string) (lane SignInLane, retryAfter time.Duration, ok bool)
+	// Reset clears the lane's count after the password matched.
+	Reset(ctx context.Context, nameKey, source string, lane SignInLane)
+	// Trust records that the names keyed nameKeys sign in from source.
+	Trust(ctx context.Context, nameKeys []string, source string)
 }
 
 // SignInThrottledError refuses a password attempt for a name that has used
@@ -49,30 +77,108 @@ func signInAttemptKey(name string) string {
 	return "signin_name:" + hex.EncodeToString(sum[:])
 }
 
-// reserveSignIn counts one password attempt against name's budget. When the
-// name is locked it returns a *SignInThrottledError and the caller must not
-// check the password; a request whose context is done gets the context's
-// error instead.
-func (s *Service) reserveSignIn(ctx context.Context, name string) error {
+// signInSpend is what one sign-in spent of a name's budget: the name's key,
+// the client address it came from, and the lanes its attempts took.
+type signInSpend struct {
+	key    string
+	source string
+	lanes  [2]bool // indexed by SignInLane
+}
+
+func newSignInSpend(ctx context.Context, name string) *signInSpend {
+	return &signInSpend{key: signInAttemptKey(name), source: signInSource(ctx)}
+}
+
+// signInSource is the client address a sign-in counts from and makes known,
+// or "" when the request's address does not say where the person is, so
+// only the name's own budget applies. An overlay request counts from the
+// peer its network access provider vouched for, since the provider's own
+// connection carries every overlay user, kept apart from the same address
+// on another overlay or the default path (overlays such as Tailscale use the
+// carrier-grade NAT range). An address a forwarder sent for a client the
+// resolver could not identify is the forwarder's, and a loopback address is
+// a proxy, plugin or relay on this host: strangers share both.
+func signInSource(ctx context.Context) string {
+	if path := netaccess.PathFromContext(ctx); !path.IsDefault() {
+		if path.Peer.IsValid() {
+			return "overlay:" + strconv.Itoa(path.InstallationID) + ":" + path.Peer.String()
+		}
+		return ""
+	}
+	if clientip.ForwardedClientUnknown(ctx) {
+		return ""
+	}
+	ip := clientip.FromContext(ctx)
+	if addr, err := netip.ParseAddr(ip); err != nil || addr.IsLoopback() || addr.IsUnspecified() {
+		return ""
+	}
+	return ip
+}
+
+// reserveSignIn counts one password attempt against spend's name. When the
+// name is locked for the request's address it returns a
+// *SignInThrottledError and the caller must not check the password; a
+// request whose context is done gets the context's error instead.
+func (s *Service) reserveSignIn(ctx context.Context, spend *signInSpend) error {
 	if s.signInAttempts == nil {
 		return nil
 	}
-	if retryAfter, ok := s.signInAttempts.Reserve(ctx, signInAttemptKey(name)); !ok {
+	lane, retryAfter, ok := s.signInAttempts.Reserve(ctx, spend.key, spend.source)
+	if !ok {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
 		return &SignInThrottledError{RetryAfter: retryAfter}
 	}
+	spend.lanes[lane] = true
 	return nil
 }
 
-// finishSignIn clears name's budget once the password matched: the sign-in
-// succeeded, or a compatibility sign-in found a temporary password it cannot
-// change. Every other outcome, outages included, keeps the attempt counted.
-// The count is cleared even when the client has already hung up.
-func (s *Service) finishSignIn(ctx context.Context, name string, err error) {
+// finishSignIn clears the lanes spend took once the password matched (the
+// sign-in succeeded, or a compatibility sign-in found a temporary password
+// it cannot change), and records the address as one the name and user's own
+// names sign in from. Every other outcome, outages included, keeps the
+// attempts counted. The count is cleared even when the client has already
+// hung up.
+func (s *Service) finishSignIn(ctx context.Context, spend *signInSpend, user *models.User, err error) {
 	if s.signInAttempts == nil || (err != nil && !errors.Is(err, ErrPasswordChangeRequired)) {
 		return
 	}
-	s.signInAttempts.Reset(context.WithoutCancel(ctx), signInAttemptKey(name))
+	ctx = context.WithoutCancel(ctx)
+	for lane, spent := range spend.lanes {
+		if spent {
+			s.signInAttempts.Reset(ctx, spend.key, spend.source, SignInLane(lane))
+		}
+	}
+	s.signInAttempts.Trust(ctx, signInTrustKeys(spend.key, user), spend.source)
+}
+
+// trustSignInSource records the request's address as one user's names sign
+// in from, after a sign-in that spent no budget or a session refresh.
+func (s *Service) trustSignInSource(ctx context.Context, user *models.User) {
+	if s.signInAttempts == nil || user == nil {
+		return
+	}
+	s.signInAttempts.Trust(context.WithoutCancel(ctx), signInTrustKeys("", user), signInSource(ctx))
+}
+
+// signInTrustKeys are the budget keys of typed (when set) and of user's
+// username and email, without repeats.
+func signInTrustKeys(typed string, user *models.User) []string {
+	keys := make([]string, 0, 3)
+	if typed != "" {
+		keys = append(keys, typed)
+	}
+	if user == nil {
+		return keys
+	}
+	for _, name := range []string{user.Username, user.Email} {
+		if strings.TrimSpace(name) == "" {
+			continue
+		}
+		if key := signInAttemptKey(name); !slices.Contains(keys, key) {
+			keys = append(keys, key)
+		}
+	}
+	return keys
 }

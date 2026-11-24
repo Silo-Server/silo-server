@@ -7,27 +7,54 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/config"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
 
-// countingSignInAttempts allows max attempts per key, then refuses until the
-// key is reset or its window passes (expire), like the ratelimit
-// AttemptLimiter without a clock. This package cannot import ratelimit.
+// countingSignInAttempts allows max attempts per name, then refuses until
+// the name is reset or its window passes (expire), except from an address
+// trusted for the name, which gets max attempts of its own: the
+// ratelimit.SignInLimiter without a clock or address grouping. This package
+// cannot import ratelimit.
 type countingSignInAttempts struct {
 	max    int
 	counts map[string]int
+	known  map[string]bool
 }
 
-func (c *countingSignInAttempts) Reserve(_ context.Context, key string) (time.Duration, bool) {
-	if c.counts[key] >= c.max {
-		return 7 * time.Minute, false
+func newCountingSignInAttempts(maxAttempts int) *countingSignInAttempts {
+	return &countingSignInAttempts{max: maxAttempts, counts: map[string]int{}, known: map[string]bool{}}
+}
+
+func (c *countingSignInAttempts) Reserve(_ context.Context, key, source string) (SignInLane, time.Duration, bool) {
+	if c.counts[key] < c.max {
+		c.counts[key]++
+		return SignInLaneName, 0, true
 	}
-	c.counts[key]++
-	return 0, true
+	pair := key + "|" + source
+	if source == "" || !c.known[pair] {
+		return SignInLaneName, 7 * time.Minute, false
+	}
+	if c.counts[pair] >= c.max {
+		return SignInLaneSource, 7 * time.Minute, false
+	}
+	c.counts[pair]++
+	return SignInLaneSource, 0, true
 }
 
-func (c *countingSignInAttempts) Reset(_ context.Context, key string) { delete(c.counts, key) }
+func (c *countingSignInAttempts) Reset(_ context.Context, key, source string, lane SignInLane) {
+	if lane == SignInLaneSource {
+		key += "|" + source
+	}
+	delete(c.counts, key)
+}
+
+func (c *countingSignInAttempts) Trust(_ context.Context, keys []string, source string) {
+	for _, key := range keys {
+		c.known[key+"|"+source] = true
+	}
+}
 
 func (c *countingSignInAttempts) expire() { clear(c.counts) }
 
@@ -42,7 +69,7 @@ func TestSignInNameBudgetDB(t *testing.T) {
 	user := env.localAccount(t, "signin-budget", models.RoleUser)
 	users, sessions := NewUserRepository(env.pool), NewSessionRepository(env.pool)
 	svc := NewService(NewLocalProvider(users, sessions), NewJWTService("synthetic-signin-budget-secret-0123456789", time.Minute, 24*time.Hour), sessions, users, nil, nil, nil)
-	limiter := &countingSignInAttempts{max: 3, counts: map[string]int{}}
+	limiter := newCountingSignInAttempts(3)
 	svc.SetSignInAttempts(limiter)
 
 	const right, wrong = "correct horse battery", "wrong horse battery"
@@ -137,6 +164,57 @@ func TestSignInNameBudgetDB(t *testing.T) {
 		limiter.expire()
 		if err := native(user.Username, right); err != nil {
 			t.Fatalf("after the window: %v", err)
+		}
+	})
+
+	// A stranger who keeps a name locked does not lock its account out of the
+	// addresses it signs in from: a sign-in or a refresh makes the address
+	// known for the account's username and email, and a known address then
+	// spends a budget of its own. Every other address stays locked.
+	t.Run("a known address keeps signing in while the name is locked", func(t *testing.T) {
+		defer limiter.expire()
+		home, travel, stranger := "198.51.100.7", "203.0.113.20", "192.0.2.99"
+		from := func(ip string) context.Context { return clientip.SetContext(t.Context(), ip) }
+		signInFrom := func(ip, name, password string) (*TokenPair, error) {
+			pair, _, err := svc.LoginWithProvider(from(ip), "", name, password, "test", ip)
+			return pair, err
+		}
+
+		pair, err := signInFrom(home, user.Username, right)
+		if err != nil {
+			t.Fatalf("sign-in from home: %v", err)
+		}
+		for _, name := range []string{user.Username, user.Email} {
+			for range limiter.max {
+				if _, err := signInFrom(stranger, name, wrong); !errors.Is(err, ErrInvalidCredentials) {
+					t.Fatalf("stranger's guess at %s: err = %v, want ErrInvalidCredentials", name, err)
+				}
+			}
+			if _, err := signInFrom(stranger, name, right); err == nil {
+				t.Fatalf("%s locked: the stranger's address signed in", name)
+			}
+			if _, err := signInFrom(home, name, right); err != nil {
+				t.Fatalf("%s locked: sign-in from home: %v, want it to succeed", name, err)
+			}
+		}
+
+		// The known address's own budget bounds guessing from it too.
+		for range limiter.max {
+			if _, err := signInFrom(home, user.Username, wrong); !errors.Is(err, ErrInvalidCredentials) {
+				t.Fatalf("guess from home: err = %v, want ErrInvalidCredentials", err)
+			}
+		}
+		_, err = signInFrom(home, user.Username, right)
+		wantThrottled(t, err)
+
+		// A refresh makes its address known as well.
+		_, err = signInFrom(travel, user.Username, right)
+		wantThrottled(t, err)
+		if _, err := svc.Refresh(from(travel), pair.RefreshToken); err != nil {
+			t.Fatalf("refresh from travel: %v", err)
+		}
+		if _, err := signInFrom(travel, user.Username, right); err != nil {
+			t.Fatalf("sign-in from travel after a refresh there: %v", err)
 		}
 	})
 }

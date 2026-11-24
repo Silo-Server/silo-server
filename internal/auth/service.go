@@ -194,8 +194,17 @@ func NewService(
 
 // Login authenticates the user with the given credentials and creates a new
 // session. Returns a TokenPair containing the access and refresh tokens.
+//
+// It spends no sign-in attempt budget: its callers (signup, invitation
+// acceptance, a completed password reset) sign in with a password they have
+// just set. A success still makes the request's address one the account is
+// known to sign in from (SignInAttemptLimiter.Trust).
 func (s *Service) Login(ctx context.Context, username, password, deviceName, ip string) (*TokenPair, *models.User, error) {
-	return s.loginWithProvider(ctx, LocalProviderID, username, password, deviceName, ip, false)
+	pair, user, err := s.loginWithProvider(ctx, LocalProviderID, username, password, deviceName, ip, false)
+	if err == nil {
+		s.trustSignInSource(ctx, user)
+	}
+	return pair, user, err
 }
 
 // CompatLogin is Login for sign-in surfaces that cannot run the forced
@@ -230,16 +239,17 @@ func (s *Service) CompatLoginWithLocalFallback(ctx context.Context, username, pa
 	if budgetName == "" {
 		budgetName = username
 	}
-	if err = s.reserveSignIn(ctx, budgetName); err != nil {
+	spend := newSignInSpend(ctx, budgetName)
+	if err = s.reserveSignIn(ctx, spend); err != nil {
 		return nil, nil, false, err
 	}
-	defer func() { s.finishSignIn(ctx, budgetName, err) }()
+	defer func() { s.finishSignIn(ctx, spend, user, err) }()
 	if fallback != "" {
 		// A fallback is a second password that may be checked, so it spends a
 		// second attempt up front, for every name: charging it only where the
 		// fallback runs (local accounts) would tell names apart by how soon
 		// they lock.
-		if err = s.reserveSignIn(ctx, budgetName); err != nil {
+		if err = s.reserveSignIn(ctx, spend); err != nil {
 			return nil, nil, false, err
 		}
 	}
@@ -284,10 +294,11 @@ func (s *Service) LoginWithProvider(
 	deviceName string,
 	ip string,
 ) (pair *TokenPair, user *models.User, err error) {
-	if err = s.reserveSignIn(ctx, username); err != nil {
+	spend := newSignInSpend(ctx, username)
+	if err = s.reserveSignIn(ctx, spend); err != nil {
 		return nil, nil, err
 	}
-	defer func() { s.finishSignIn(ctx, username, err) }()
+	defer func() { s.finishSignIn(ctx, spend, user, err) }()
 	if providerID == "" {
 		routed, err := s.routePasswordLogin(ctx, username)
 		if err != nil {
@@ -1326,7 +1337,16 @@ func (s *Service) Refresh(ctx context.Context, refreshToken string) (*TokenPair,
 	if session.IsRemotePlayback() {
 		refreshed = remotePlaybackClaims(refreshed, session)
 	}
-	return s.generateTokenPair(refreshed)
+	pair, err := s.generateTokenPair(refreshed)
+	if err == nil && session.ImpersonatorUserID == nil && !session.IsRemotePlayback() {
+		// A device that keeps its session refreshed shows where the account
+		// signs in from, so a new device there is not locked out with
+		// strangers while someone else spends the name's attempt budget. An
+		// impersonating administrator and a device handed one playback
+		// session are elsewhere.
+		s.trustSignInSource(ctx, user)
+	}
+	return pair, err
 }
 
 // sessionStanding is what checkSessionStanding establishes about a login
