@@ -223,7 +223,13 @@ vi.mock("./PlayerControls", () => ({
       onVideoFitToggle?: () => void;
     }) => {
       controls.current = props;
-      return null;
+      // The seek slider a pill press moves focus to, inside the controls'
+      // hidden marker.
+      return createElement(
+        "div",
+        { "data-controls-hidden": props.visible ? undefined : "true" },
+        createElement("div", { role: "slider", "data-player-seek-slider": "", tabIndex: 0 }),
+      );
     },
   ),
 }));
@@ -1762,6 +1768,45 @@ describe("VideoPlayer credits pill keys", () => {
     expect(pill()).toBeNull();
     expect(onExit).not.toHaveBeenCalled();
     expect(onReanchorSeek).not.toHaveBeenCalled();
+  });
+
+  // A press on Skip Intro parks focus on the seek slider, which stays there
+  // after the controls fade. The credits pill must still answer Space.
+  it("skips with Space after a click on Skip Intro left focus in the hidden controls", async () => {
+    const onReanchorSeek = vi.fn(() => true);
+    const rendered = renderPlayer({
+      plan: fixturePlanV3({
+        ...directPlan,
+        delivery: "server_remux_progressive",
+        timeline: { ...directPlan.timeline, can_seek_anywhere: false },
+      }),
+      intro: { start: 10, end: 15 },
+      credits: { start: 20, end: 50 },
+      onReanchorSeek,
+    });
+    const video = rendered.container.querySelector("video")!;
+    Object.defineProperty(video, "paused", { configurable: true, value: false });
+    const at = (seconds: number) => {
+      video.currentTime = seconds;
+      fireFrameTimeUpdate(video);
+    };
+    at(5);
+    fireEvent.play(video);
+    await act(() => vi.advanceTimersByTimeAsync(3_000));
+    at(11);
+    const skipIntro = rendered.getByRole("button", { name: "Skip Intro" });
+    fireEvent.pointerDown(skipIntro);
+    fireEvent.click(skipIntro);
+    expect(onReanchorSeek).toHaveBeenCalledWith(15);
+    at(15);
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+    const slider = rendered.container.querySelector("[data-player-seek-slider]");
+    expect(document.activeElement).toBe(slider);
+
+    at(21);
+    expect(rendered.queryByRole("button", { name: "Skip Credits" })).not.toBeNull();
+    fireEvent.keyDown(slider!, { key: " " });
+    expect(onReanchorSeek).toHaveBeenCalledWith(50);
   });
 
   it("leaves Space and Escape to the player once the timer has run out", async () => {

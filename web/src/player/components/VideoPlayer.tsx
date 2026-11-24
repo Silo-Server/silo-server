@@ -155,6 +155,15 @@ import { mediaElementReleased, sourceLoadStarted } from "../bandwidth-probe";
 import { networkInformation, type NetworkInformationLike } from "../network-information";
 import { isRightToLeft } from "@/lib/direction";
 
+/**
+ * Whether focus sits in the player controls while they are hidden, as it does
+ * on the seek slider after a pill press once the controls fade. The viewer
+ * cannot see that focus, so a skip pill treats it as no focus at all.
+ */
+function focusInHiddenControls(element: HTMLElement | null): boolean {
+  return element?.closest('[data-controls-hidden="true"]') != null;
+}
+
 function pillKey(
   event: KeyboardEvent,
   promptSelector: string,
@@ -178,7 +187,8 @@ function pillKey(
   // at the document/player root. Back remains global for the pill.
   const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
   const promptHasFocus = targetInPrompt || active?.closest(promptSelector) != null;
-  const focusIsUnclaimed = active === null || active === document.body || active === root;
+  const focusIsUnclaimed =
+    active === null || active === document.body || active === root || focusInHiddenControls(active);
   if (isSelect && !promptHasFocus && !focusIsUnclaimed) return null;
   return isSelect ? "select" : "back";
 }
@@ -3973,11 +3983,12 @@ export function VideoPlayer({
   // open menu or a text field.
   const pillMayTakeFocus = () => {
     if (!lastInputWasKeyboardRef.current) return false;
-    const active = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const focused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const active = focusInHiddenControls(focused) ? null : focused;
     const interactionInProgress =
       active?.closest(
         'input, textarea, select, [contenteditable="true"], dialog, [role="dialog"], [role="menu"], [role="listbox"], [role="slider"]',
-      ) !== null ||
+      ) != null ||
       containerRef.current?.querySelector('[role="dialog"], [role="menu"], [role="listbox"]') !=
         null;
     return !interactionInProgress;
