@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/clientip"
@@ -107,6 +108,11 @@ func (s *Service) foldSignInNames(ctx context.Context, names []string) ([]string
 	if s.users == nil || len(names) == 0 {
 		return nil, false
 	}
+	if folded, ok := s.signInFolds.get(names); ok {
+		return folded, true
+	}
+	ctx, cancel := context.WithTimeout(ctx, signInLookupTimeout)
+	defer cancel()
 	var folded []string
 	err := s.users.pool.QueryRow(ctx,
 		`SELECT array_agg(lower(name) ORDER BY i) FROM unnest($1::text[]) WITH ORDINALITY AS t(name, i)`,
@@ -115,7 +121,48 @@ func (s *Service) foldSignInNames(ctx context.Context, names []string) ([]string
 		slog.WarnContext(ctx, "sign-in budget names could not be folded by the database", "component", "auth", "error", err)
 		return nil, false
 	}
+	s.signInFolds.put(names, folded)
 	return folded, true
+}
+
+// signInLookupTimeout bounds each database lookup a sign-in's budget makes,
+// which can run detached from the request after the password matched.
+const signInLookupTimeout = 2 * time.Second
+
+// signInFoldCacheMax bounds the folded names a Service remembers.
+const signInFoldCacheMax = 4096
+
+// signInFoldCache remembers how the database folded names, so attempts that
+// keep hitting one locked name do not each query it. A name's fold never
+// changes; the cache starts over when full.
+type signInFoldCache struct {
+	mu     sync.Mutex
+	folded map[string]string
+}
+
+func (c *signInFoldCache) get(names []string) ([]string, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	folded := make([]string, len(names))
+	for i, name := range names {
+		f, ok := c.folded[name]
+		if !ok {
+			return nil, false
+		}
+		folded[i] = f
+	}
+	return folded, true
+}
+
+func (c *signInFoldCache) put(names, folded []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.folded == nil || len(c.folded)+len(names) > signInFoldCacheMax {
+		c.folded = make(map[string]string, len(names))
+	}
+	for i, name := range names {
+		c.folded[name] = folded[i]
+	}
 }
 
 // signInSpend is what one sign-in spent of a name's budget: the name and its
@@ -253,6 +300,8 @@ func (s *Service) ownsSignInBudget(ctx context.Context, spend *signInSpend, own 
 	if spend.derived || s.users == nil {
 		return false
 	}
+	ctx, cancel := context.WithTimeout(ctx, signInLookupTimeout)
+	defer cancel()
 	_, err := LookupLogin(ctx, s.users, spend.name)
 	return IsNotFound(err)
 }
@@ -289,6 +338,8 @@ func (s *Service) ownSignInKeys(ctx context.Context, user *models.User) ([]strin
 	if len(names) == 0 {
 		return nil, true
 	}
+	ctx, cancel := context.WithTimeout(ctx, signInLookupTimeout)
+	defer cancel()
 	var folded []string
 	err := s.users.pool.QueryRow(ctx, `
 		SELECT coalesce(array_agg(lower(t.name) ORDER BY t.i) FILTER (WHERE coalesce(

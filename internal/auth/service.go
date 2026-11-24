@@ -123,6 +123,8 @@ type Service struct {
 	// signInAttempts bounds password attempts per sign-in name; nil allows
 	// every attempt (SetSignInAttempts).
 	signInAttempts SignInAttemptLimiter
+	// signInFolds remembers how the database folded sign-in names.
+	signInFolds signInFoldCache
 	// sessionsRevoked runs after a password change signed the account out
 	// of its other sessions; see OnSessionsRevoked.
 	sessionsRevoked      func(ctx context.Context, userID int)
