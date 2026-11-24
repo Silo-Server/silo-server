@@ -521,6 +521,12 @@
       "value": "Aquesta sessió de reproducció ha finalitzat. Torna a començar la reproducció."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "La reproducció s’ha aturat perquè ha estat en pausa massa estona. Torna a començar la reproducció."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -74139,6 +74145,24 @@
       "value": "Desa a la biblioteca"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Reproducció en pausa"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Finalitza la reproducció en pausa després de"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "De 0 a 1440. Finalitza un vídeo que ha estat en pausa aquest temps en una aplicació de Silo, cosa que allibera la transmissió i qualsevol transcodificació; si el tornes a reproduir, continua des del mateix punt. No afecta Veure junts, l’emissió a altres dispositius ni els audiollibres. Amb 0, aquesta opció es desactiva."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -74641,6 +74665,12 @@
     {
       "type": 0,
       "value": "dies"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minuts"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -80610,6 +80640,12 @@
       "value": "Activa el mapatge de tons HDR per programari"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Finalitza la reproducció en pausa després de (minuts)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -80668,6 +80704,12 @@
     {
       "type": 0,
       "value": "Font dels marcadors"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Reproducció en pausa"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -135695,6 +135737,12 @@
     {
       "type": 0,
       "value": "Un administrador ha finalitzat aquesta sessió de reproducció."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "La reproducció s’ha aturat perquè ha estat en pausa massa estona."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

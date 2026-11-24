@@ -7,6 +7,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -347,5 +349,25 @@ func TestInstallerReplacementRefusedAfterInstallationChangedDB(t *testing.T) {
 	}
 	if entries, _ := os.ReadDir(staleRoot); len(entries) != 0 {
 		t.Fatalf("refused 1.1.0 left %d install dirs behind", len(entries))
+	}
+}
+
+// A server fetching another platform's build refuses one signed with less
+// than the installed build before running it to read its manifest.
+func TestDownloadBinaryCheckedRefusesBeforeRunningTheBinary(t *testing.T) {
+	ran := filepath.Join(t.TempDir(), "ran")
+	binary := []byte("#!/bin/sh\ntouch '" + ran + "'\n")
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write(binary) }))
+	t.Cleanup(server.Close)
+	installer := NewInstaller(nil, InstallerOptions{BaseDir: t.TempDir(), HTTPClient: server.Client()})
+	refused := errors.New("refused")
+	_, err := installer.downloadBinaryChecked(context.Background(), InstallBinaryRequest{
+		BinaryURL: server.URL + "/plugin", Checksum: sha256Hex(binary), PluginID: "example.thirdparty", Version: "1.0.0",
+	}, func([]byte, Signature) error { return refused })
+	if !errors.Is(err, refused) {
+		t.Fatalf("downloadBinaryChecked() = %v, want the accept hook's refusal", err)
+	}
+	if _, err := os.Stat(ran); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("the refused binary ran: %v", err)
 	}
 }

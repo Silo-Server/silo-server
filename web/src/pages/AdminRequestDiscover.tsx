@@ -94,7 +94,7 @@ function RestoreDefaultsDialog({
           ))}
         </ul>
         <DialogFooter className="items-center sm:justify-between">
-          <p className="text-muted-foreground text-[13px]">
+          <p className="text-muted-foreground text-[0.8125rem]">
             {t("web.admin.requests.discoverPage.restore.cannotUndo")}
           </p>
           <div className="flex gap-2">

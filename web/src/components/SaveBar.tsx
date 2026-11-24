@@ -169,7 +169,7 @@ export function SaveBar({
         className="pointer-events-none fixed start-0 end-0 bottom-[calc(var(--playback-bar-clearance,0px)+1.5rem)] z-40 flex justify-center px-4 lg:start-[240px]"
       >
         <div className="glass pointer-events-auto flex max-w-full items-center gap-3 rounded-full py-2 ps-4 pe-2 shadow-2xl backdrop-blur-xl sm:gap-4 sm:ps-5">
-          <span className="min-w-0 truncate text-[13px] font-medium">{text}</span>
+          <span className="min-w-0 truncate text-[0.8125rem] font-medium">{text}</span>
           <span className="flex shrink-0 items-center gap-1.5">
             <Button variant="ghost" size="sm" className="rounded-full" onClick={onDiscard}>
               {discardText}

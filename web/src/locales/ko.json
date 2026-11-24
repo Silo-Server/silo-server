@@ -521,6 +521,12 @@
       "value": "재생 세션이 종료됐어요. 다시 재생하세요."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "너무 오래 일시정지되어 재생이 중지됐어요. 다시 재생하세요."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -60918,6 +60924,24 @@
       "value": "라이브러리에 저장"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "일시정지된 재생"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "일시정지된 재생 종료 시간"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0~1440. Silo 앱에서 이 시간 동안 일시정지된 동영상을 종료해 스트림과 트랜스코딩을 해제해요. 다시 재생하면 같은 위치부터 이어서 재생돼요. 함께 보기, 캐스팅, 오디오북에는 적용되지 않아요. 0이면 이 기능이 꺼져요."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -61356,6 +61380,12 @@
     {
       "type": 0,
       "value": "일"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "분"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -67251,6 +67281,12 @@
       "value": "소프트웨어 HDR 톤 매핑 사용"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "일시정지된 재생 종료 시간(분)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -67309,6 +67345,12 @@
     {
       "type": 0,
       "value": "마커 소스"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "일시정지된 재생"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -114163,6 +114205,12 @@
     {
       "type": 0,
       "value": "관리자가 이 재생 세션을 종료했어요."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "너무 오래 일시정지되어 재생이 중지됐어요."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

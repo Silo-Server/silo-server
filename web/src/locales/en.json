@@ -521,6 +521,12 @@
       "value": "This playback session ended. Start playing again."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Playback stopped because it was paused for too long. Start playing again."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67249,6 +67255,24 @@
       "value": "Save to library"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Paused playback"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "End paused playback after"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 to 1440. Ends a video paused this long in a Silo app, freeing its stream and any transcode; playing it again continues from the same spot. Watch Together, casting and audiobooks are not affected. 0 turns this off."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67711,6 +67735,12 @@
     {
       "type": 0,
       "value": "days"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minutes"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73601,6 +73631,12 @@
       "value": "Enable Software HDR Tone Mapping"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "End paused playback after (minutes)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73659,6 +73695,12 @@
     {
       "type": 0,
       "value": "Marker source"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Paused playback"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -124537,6 +124579,12 @@
     {
       "type": 0,
       "value": "An administrator ended this playback session."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Playback stopped because it was paused for too long."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

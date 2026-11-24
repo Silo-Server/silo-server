@@ -521,6 +521,12 @@
       "value": "Denne afspilningssession er afsluttet. Start afspilningen igen."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Afspilningen stoppede, fordi den var sat på pause for længe. Start afspilningen igen."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67169,6 +67175,24 @@
       "value": "Gem i bibliotek"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Afspilning på pause"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Afslut afspilning på pause efter"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 til 1440. Afslutter en video, der har været sat på pause så længe i en Silo-app, og frigør dens stream og eventuel transkodning; afspilles den igen, fortsætter den fra samme sted. Se sammen, casting og lydbøger påvirkes ikke. 0 slår dette fra."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67639,6 +67663,12 @@
     {
       "type": 0,
       "value": "dage"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minutter"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73517,6 +73547,12 @@
       "value": "Aktivér HDR-tonemapping med software"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Afslut afspilning på pause efter (minutter)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73575,6 +73611,12 @@
     {
       "type": 0,
       "value": "Markørkilde"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Afspilning på pause"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -124363,6 +124405,12 @@
     {
       "type": 0,
       "value": "En administrator har afsluttet denne afspilningssession."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Afspilningen stoppede, fordi den var sat på pause for længe."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

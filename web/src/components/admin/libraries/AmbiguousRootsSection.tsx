@@ -253,15 +253,19 @@ export function AmbiguousRootsSection({
                     <TableRow key={row.key}>
                       <TableCell className="max-w-[28rem]">
                         <div className="space-y-1">
-                          <div className="truncate text-sm font-medium">{row.label}</div>
+                          {/* A title can be in either script: it reads in its own direction, so
+                              "100% Wolf" keeps its digits first in a right-to-left page. */}
+                          <div dir="auto" className="bidi-text truncate text-sm font-medium">
+                            {row.label}
+                          </div>
                           <code
-                            className="text-muted-foreground block w-fit max-w-full truncate text-[11px]"
+                            className="text-muted-foreground block w-fit max-w-full truncate text-[0.6875rem]"
                             dir="ltr"
                           >
                             <PathText path={root.root_path} />
                           </code>
                           {row.evidence !== null ? (
-                            <div className="text-muted-foreground truncate text-[11px]">
+                            <div className="text-muted-foreground truncate text-[0.6875rem]">
                               {row.evidence}
                             </div>
                           ) : null}
@@ -301,7 +305,9 @@ export function AmbiguousRootsSection({
             return (
               <DiagnosticsCard key={row.key}>
                 <div className="space-y-1">
-                  <h3 className="font-medium break-words">{row.label}</h3>
+                  <h3 dir="auto" className="bidi-text font-medium break-words">
+                    {row.label}
+                  </h3>
                   <CardPath path={root.root_path} />
                 </div>
                 <CardFields>

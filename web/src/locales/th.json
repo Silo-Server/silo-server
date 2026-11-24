@@ -521,6 +521,12 @@
       "value": "เซสชันการเล่นนี้สิ้นสุดแล้ว โปรดเริ่มเล่นอีกครั้ง"
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "การเล่นหยุดลงเนื่องจากหยุดชั่วคราวนานเกินไป โปรดเริ่มเล่นอีกครั้ง"
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -61506,6 +61512,24 @@
       "value": "บันทึกลงในคลัง"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "การเล่นที่หยุดชั่วคราว"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "สิ้นสุดการเล่นที่หยุดชั่วคราวหลังจาก"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 ถึง 1440 สิ้นสุดการเล่นวิดีโอที่หยุดชั่วคราวในแอป Silo นานเท่านี้ เพื่อคืนสตรีมและการแปลงรหัสที่ใช้อยู่ เมื่อเล่นอีกครั้งจะเล่นต่อจากตำแหน่งเดิม ไม่มีผลกับฟีเจอร์ดูด้วยกัน การแคสต์ และหนังสือเสียง 0 คือปิดตัวเลือกนี้"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -61940,6 +61964,12 @@
     {
       "type": 0,
       "value": "วัน"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "นาที"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -67775,6 +67805,12 @@
       "value": "เปิดใช้การแมปโทน HDR ด้วยซอฟต์แวร์"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "สิ้นสุดการเล่นที่หยุดชั่วคราวหลังจาก (นาที)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -67833,6 +67869,12 @@
     {
       "type": 0,
       "value": "แหล่งที่มาของเครื่องหมาย"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "การเล่นที่หยุดชั่วคราว"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -114955,6 +114997,12 @@
     {
       "type": 0,
       "value": "ผู้ดูแลระบบสิ้นสุดเซสชันการเล่นนี้แล้ว"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "การเล่นหยุดลงเนื่องจากหยุดชั่วคราวนานเกินไป"
     }
   ],
   "web.player.shuffle.scopeWithParent": [

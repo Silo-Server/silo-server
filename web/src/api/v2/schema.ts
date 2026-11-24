@@ -9764,7 +9764,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The library's Collections tab: curated collections, their groups, and the viewer's opted-in personal collections. */
+    /** The library's Collections tab: curated collections, their groups, and opted-in personal collections (the viewer's own, plus shared ones from other profiles on the same login). */
     get: operations["getLibraryCollections"];
     put?: never;
     post?: never;
@@ -9849,7 +9849,7 @@ export interface paths {
       path?: never;
       cookie?: never;
     };
-    /** The viewer's own personal collections opted into this library's tab. */
+    /** Personal collections opted into this library's tab: the viewer's own, plus shared ones from other profiles on the same login. */
     get: operations["listLibraryUserCollections"];
     put?: never;
     post?: never;
@@ -19852,10 +19852,10 @@ export interface components {
       /** @description The command identity this receipt belongs to */
       command_id: string;
       /**
-       * @description dispatched: sent on the session's realtime lane. fallback_scheduled: no lane; the server ends the session after the deadline (stop only)
+       * @description dispatched: written to the session's realtime lane; the receipt does not say whether the player confirmed it, and a lane whose player went away without closing it still takes the write. fallback_scheduled: no lane; the server ends the session after the deadline (stop only). acknowledged: the player answered that it received the message within the server's short wait (message only); a player may answer before showing it
        * @enum {string}
        */
-      delivery: "dispatched" | "fallback_scheduled";
+      delivery: "dispatched" | "fallback_scheduled" | "acknowledged";
       /**
        * @description applied: this request dispatched the command once (202). replayed: the identity was already applied and this is its recorded receipt (200)
        * @enum {string}
@@ -19931,7 +19931,7 @@ export interface components {
        */
       end_position_seconds: number;
       /**
-       * @description Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from
+       * @description Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method or version). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from
        * @enum {string|null}
        */
       end_reason: "stopped" | "terminated" | "expired" | "aborted" | "replaced" | null;
@@ -21324,7 +21324,7 @@ export interface components {
       last_run?: components["schemas"]["AdminRecommendationJobRun"];
       /**
        * Format: int64
-       * @description Profiles whose recommendations wait for a rebuild. The sweep rebuilds up to 50 every 5 minutes; a profile whose rebuild fails stays pending.
+       * @description Profiles whose recommendations wait for a rebuild. Each server tries a sweep 2 minutes after its last try ended, one server at a time; a sweep starts rebuilds, oldest first, for up to a minute, and a rebuild it started finishes even past that minute. A profile whose rebuild fails stays pending.
        */
       pending: number;
     };

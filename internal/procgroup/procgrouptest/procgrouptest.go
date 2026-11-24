@@ -21,16 +21,37 @@ import (
 // records the child's pid, and waits for it.
 type Wrapper struct {
 	// Path is the script, to configure as the ffmpeg or ffprobe path.
-	Path    string
-	pidFile string
+	Path       string
+	pidFile    string
+	leaderFile string
 }
 
 // WriteWrapper writes a Wrapper named name in a new temporary directory.
 func WriteWrapper(t testing.TB, name string) Wrapper {
 	t.Helper()
+	return writeWrapper(t, name, true)
+}
+
+// WriteExitingWrapper writes a Wrapper named name that exits right after it
+// starts its child, leaving the child running and holding the wrapper's
+// stdout and stderr, the way npm can exit while webpack still runs.
+func WriteExitingWrapper(t testing.TB, name string) Wrapper {
+	t.Helper()
+	return writeWrapper(t, name, false)
+}
+
+func writeWrapper(t testing.TB, name string, wait bool) Wrapper {
+	t.Helper()
 	dir := t.TempDir()
-	w := Wrapper{Path: filepath.Join(dir, name), pidFile: filepath.Join(dir, name+".child.pid")}
-	script := "#!/bin/sh\nsleep 120 &\necho $! > '" + w.pidFile + "'\nwait\n"
+	w := Wrapper{
+		Path:       filepath.Join(dir, name),
+		pidFile:    filepath.Join(dir, name+".child.pid"),
+		leaderFile: filepath.Join(dir, name+".pid"),
+	}
+	script := "#!/bin/sh\necho $$ > '" + w.leaderFile + "'\nsleep 120 &\necho $! > '" + w.pidFile + "'\n"
+	if wait {
+		script += "wait\n"
+	}
 	// execve refuses a file another process still has open for writing. A
 	// fork landing between this open and its close would hold a copy of the
 	// fd until it execs, so hold the lock os/exec takes around fork.
@@ -48,18 +69,30 @@ func WriteWrapper(t testing.TB, name string) Wrapper {
 // leave it running.
 func (w Wrapper) ChildPID(t testing.TB) int {
 	t.Helper()
+	pid := readPID(t, w.pidFile, "child")
+	t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+	return pid
+}
+
+// LeaderPID waits for the wrapper to start and returns its own pid.
+func (w Wrapper) LeaderPID(t testing.TB) int {
+	t.Helper()
+	return readPID(t, w.leaderFile, "own")
+}
+
+func readPID(t testing.TB, path, which string) int {
+	t.Helper()
 	deadline := time.Now().Add(15 * time.Second)
 	for {
-		if data, err := os.ReadFile(w.pidFile); err == nil && strings.HasSuffix(string(data), "\n") {
+		if data, err := os.ReadFile(path); err == nil && strings.HasSuffix(string(data), "\n") { //nolint:gosec // G304: the path is in the test's temporary directory.
 			pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
 			if err != nil {
-				t.Fatalf("child pid %q: %v", data, err)
+				t.Fatalf("%s pid %q: %v", which, data, err)
 			}
-			t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
 			return pid
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("the wrapper never started its child")
+			t.Fatalf("the wrapper never wrote its %s pid", which)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}

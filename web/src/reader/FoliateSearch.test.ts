@@ -118,6 +118,7 @@ describe("foliate view search", () => {
     addAnnotation: (annotation: { value: string }) => void;
     search: (opts: {
       query: string;
+      index?: number;
       limit?: number;
       signal?: AbortSignal;
     }) => AsyncGenerator<SearchResult>;
@@ -199,33 +200,44 @@ describe("foliate view search", () => {
     expect(addAnnotation).not.toHaveBeenCalled();
   });
 
-  it("pauses a long section without matches so an abort stops it there", async () => {
-    // Each read of the clock moves it 30 ms, so every section runs past the
-    // search's time budget however fast the scan is.
-    let now = 0;
-    const clock = vi.spyOn(performance, "now").mockImplementation(() => (now += 30));
-    onTestFinished(() => clock.mockRestore());
-    const { view } = makeView(Array.from({ length: 3 }, () => "lorem ipsum ".repeat(1_000)));
-    const sections = (view.book as { sections: { createDocument: () => Promise<Document> }[] })
-      .sections;
-    let opened = 0;
-    for (const section of sections) {
-      const createDocument = section.createDocument;
-      section.createDocument = () => {
-        opened++;
-        return createDocument();
-      };
-    }
-    const controller = new AbortController();
-    // Queued before the scan starts, like a click on Back during the search.
-    setTimeout(() => controller.abort());
+  it.each([
+    // [case, sections, text, clock ms per read, section searched (whole book
+    // when undefined), most sections opened]
+    // A one-section search pauses only inside its scan.
+    ["a long section", 1, "lorem ipsum ".repeat(1_000), 30, 0, 1],
+    // Each section finishes well inside the budget; the book does not.
+    ["many short sections", 200, "lorem ipsum ".repeat(20), 5, undefined, 10],
+  ])(
+    "pauses %s without matches so an abort stops it there",
+    async (_, count, text, step, index, maxOpened) => {
+      // Every read of the clock moves it `step` ms, so the scan runs past the
+      // search's time budget however fast the runner is.
+      let now = 0;
+      const clock = vi.spyOn(performance, "now").mockImplementation(() => (now += step));
+      onTestFinished(() => clock.mockRestore());
+      const { view } = makeView(Array.from({ length: count }, () => text));
+      const sections = (view.book as { sections: { createDocument: () => Promise<Document> }[] })
+        .sections;
+      let opened = 0;
+      for (const section of sections) {
+        const createDocument = section.createDocument;
+        section.createDocument = () => {
+          opened++;
+          return createDocument();
+        };
+      }
+      const controller = new AbortController();
+      // Queued before the scan starts, like a click on Back during the search.
+      setTimeout(() => controller.abort());
 
-    const { subitems } = await collect(
-      view.search({ query: "quixotic", signal: controller.signal }),
-    );
+      const { subitems } = await collect(
+        view.search({ query: "quixotic", index, signal: controller.signal }),
+      );
 
-    expect(controller.signal.aborted).toBe(true);
-    expect(subitems).toEqual([]);
-    expect(opened).toBe(1);
-  });
+      expect(controller.signal.aborted).toBe(true);
+      expect(subitems).toEqual([]);
+      expect(opened).toBeGreaterThan(0);
+      expect(opened).toBeLessThanOrEqual(maxOpened);
+    },
+  );
 });

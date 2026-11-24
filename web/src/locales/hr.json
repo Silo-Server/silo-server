@@ -521,6 +521,12 @@
       "value": "Ova je sesija reprodukcije završila. Ponovno pokrenite reprodukciju."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Reprodukcija je zaustavljena jer je predugo bila pauzirana. Ponovno pokrenite reprodukciju."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -74159,6 +74165,24 @@
       "value": "Spremi u medijateku"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pauzirana reprodukcija"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Završi pauziranu reprodukciju nakon"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "Od 0 do 1440. Završava reprodukciju videozapisa koji je toliko dugo pauziran u aplikaciji Silo i oslobađa njegov stream i transkodiranje, ako postoji; ponovna reprodukcija nastavlja se s istog mjesta. Ne utječe na Zajedničko gledanje, emitiranje ni audioknjige. Vrijednost 0 isključuje ovu opciju."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -74661,6 +74685,12 @@
     {
       "type": 0,
       "value": "dana"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minuta"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -80622,6 +80652,12 @@
       "value": "Omogući softversko HDR mapiranje tonova"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Završi pauziranu reprodukciju nakon (minuta)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -80680,6 +80716,12 @@
     {
       "type": 0,
       "value": "Izvor oznaka"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pauzirana reprodukcija"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -135640,6 +135682,12 @@
     {
       "type": 0,
       "value": "Administrator je prekinuo ovu sesiju reprodukcije."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Reprodukcija je zaustavljena jer je predugo bila pauzirana."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

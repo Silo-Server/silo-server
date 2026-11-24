@@ -521,6 +521,12 @@
       "value": "Tämä toistoistunto päättyi. Aloita toisto uudelleen."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Toisto pysäytettiin, koska se oli tauolla liian kauan. Aloita toisto uudelleen."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67225,6 +67231,24 @@
       "value": "Tallennus kirjastoon"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Tauotettu toisto"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Tauotetun toiston lopetusaika"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0–1440. Lopettaa videon toiston, kun video on ollut Silo-sovelluksessa tauolla näin kauan, ja vapauttaa sen suoratoiston ja mahdollisen transkoodauksen. Kun video toistetaan uudelleen, toisto jatkuu samasta kohdasta. Asetus ei koske Katso yhdessä -toimintoa, toiseen laitteeseen lähettämistä eikä äänikirjoja. Arvo 0 poistaa asetuksen käytöstä."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67695,6 +67719,12 @@
     {
       "type": 0,
       "value": "päivää"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minuuttia"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73613,6 +73643,12 @@
       "value": "Ota käyttöön ohjelmallinen HDR-sävykartoitus"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Tauotetun toiston lopetusaika (minuuttia)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73671,6 +73707,12 @@
     {
       "type": 0,
       "value": "Merkkien lähde"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Tauotettu toisto"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -124667,6 +124709,12 @@
     {
       "type": 0,
       "value": "Järjestelmänvalvoja lopetti tämän toistoistunnon."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Toisto pysäytettiin, koska se oli tauolla liian kauan."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

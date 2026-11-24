@@ -521,6 +521,12 @@
       "value": "Тази сесия на възпроизвеждане приключи. Започнете възпроизвеждането отново."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Възпроизвеждането спря, защото беше на пауза твърде дълго. Започнете възпроизвеждането отново."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67425,6 +67431,24 @@
       "value": "Запазване в библиотеката"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Възпроизвеждане на пауза"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Прекратяване на възпроизвеждане на пауза след"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "От 0 до 1440. Прекратява видео, което е било на пауза толкова дълго в приложение на Silo, и освобождава потока му и евентуалното транскодиране; при повторно възпроизвеждане то продължава от същото място. Не се засягат съвместното гледане, предаването към други устройства и аудиокнигите. При 0 тази функция е изключена."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67895,6 +67919,12 @@
     {
       "type": 0,
       "value": "дни"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "минути"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73817,6 +73847,12 @@
       "value": "Включване на софтуерно тонално преобразуване на HDR"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Прекратяване на възпроизвеждане на пауза след (минути)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73875,6 +73911,12 @@
     {
       "type": 0,
       "value": "Източник на маркерите"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Възпроизвеждане на пауза"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -124931,6 +124973,12 @@
     {
       "type": 0,
       "value": "Администратор прекрати тази сесия на възпроизвеждане."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Възпроизвеждането спря, защото беше на пауза твърде дълго."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

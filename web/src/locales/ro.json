@@ -521,6 +521,12 @@
       "value": "Această sesiune de redare s-a încheiat. Porniți din nou redarea."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Redarea s-a oprit deoarece a rămas în pauză prea mult timp. Porniți din nou redarea."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -74155,6 +74161,24 @@
       "value": "Salvați în bibliotecă"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Redare în pauză"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Încheierea redării în pauză după"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "Între 0 și 1440. Încheie redarea unui videoclip aflat în pauză atât de mult timp într-o aplicație Silo, eliberând streamul și orice transcodare; la o nouă redare, aceasta continuă din același punct. Vizionarea împreună, proiectarea și cărțile audio nu sunt afectate. Valoarea 0 dezactivează această opțiune."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -74657,6 +74681,12 @@
     {
       "type": 0,
       "value": "zile"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minute"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -80618,6 +80648,12 @@
       "value": "Activați maparea tonurilor HDR software"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Încheierea redării în pauză după (minute)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -80676,6 +80712,12 @@
     {
       "type": 0,
       "value": "Sursa marcajelor"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Redare în pauză"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -135785,6 +135827,12 @@
     {
       "type": 0,
       "value": "Un administrator a încheiat această sesiune de redare."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Redarea s-a oprit deoarece a rămas în pauză prea mult timp."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

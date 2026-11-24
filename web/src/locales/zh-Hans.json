@@ -521,6 +521,12 @@
       "value": "此播放会话已结束。请重新开始播放。"
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "暂停时间过长，播放已停止。请重新开始播放。"
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -60982,6 +60988,24 @@
       "value": "保存到媒体库"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "暂停的播放"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "暂停多久后结束播放"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0到1440。在Silo应用中暂停达到此时长的视频将被结束，并释放其串流和所有转码；再次播放时会从同一位置继续。一起看、投屏和有声书不受影响。设为0则关闭此功能。"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -61420,6 +61444,12 @@
     {
       "type": 0,
       "value": "天"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "分钟"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -67323,6 +67353,12 @@
       "value": "开启软件HDR色调映射"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "暂停多久后结束播放（分钟）"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -67381,6 +67417,12 @@
     {
       "type": 0,
       "value": "标记来源"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "暂停的播放"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -114379,6 +114421,12 @@
     {
       "type": 0,
       "value": "管理员已结束此播放会话。"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "暂停时间过长，播放已停止。"
     }
   ],
   "web.player.shuffle.scopeWithParent": [

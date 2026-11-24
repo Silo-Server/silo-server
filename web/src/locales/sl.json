@@ -521,6 +521,12 @@
       "value": "Ta seja predvajanja se je končala. Znova začnite predvajanje."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Predvajanje se je ustavilo, ker je bilo predolgo začasno ustavljeno. Znova začnite predvajanje."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -80948,6 +80954,24 @@
       "value": "Shrani v knjižnico"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Začasno ustavljeno predvajanje"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Končaj začasno ustavljeno predvajanje po"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "Od 0 do 1440. Konča video, ki je bil v aplikaciji Silo tako dolgo začasno ustavljen, ter sprosti njegov pretok in morebitno prekodiranje; ob ponovnem predvajanju se nadaljuje z istega mesta. To ne vpliva na Skupni ogled, oddajanje v druge naprave in zvočne knjige. Vrednost 0 to možnost izklopi."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -81482,6 +81506,12 @@
     {
       "type": 0,
       "value": "dni"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "min"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -87506,6 +87536,12 @@
       "value": "Omogoči programsko preslikavo tonov HDR"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Končaj začasno ustavljeno predvajanje po (min)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -87564,6 +87600,12 @@
     {
       "type": 0,
       "value": "Vir oznak"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Začasno ustavljeno predvajanje"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -146527,6 +146569,12 @@
     {
       "type": 0,
       "value": "Skrbnik je končal to sejo predvajanja."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Predvajanje se je ustavilo, ker je bilo predolgo začasno ustavljeno."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

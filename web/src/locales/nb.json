@@ -521,6 +521,12 @@
       "value": "Denne avspillingsøkten er avsluttet. Start avspillingen på nytt."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Avspillingen stoppet fordi den var satt på pause for lenge. Start avspillingen på nytt."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67229,6 +67235,24 @@
       "value": "Lagre i biblioteket"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Avspilling på pause"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Avslutt avspilling på pause etter"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 til 1440. Avslutter en video som har stått på pause så lenge i en Silo-app, og frigjør strømmen og eventuell transkoding. Når den spilles av igjen, fortsetter den fra samme sted. Se sammen, casting og lydbøker påvirkes ikke. 0 slår dette av."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67699,6 +67723,12 @@
     {
       "type": 0,
       "value": "dager"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minutter"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73585,6 +73615,12 @@
       "value": "Aktiver HDR-tonetilordning med programvare"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Avslutt avspilling på pause etter (minutter)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73643,6 +73679,12 @@
     {
       "type": 0,
       "value": "Markørkilde"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Avspilling på pause"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -124517,6 +124559,12 @@
     {
       "type": 0,
       "value": "En administrator avsluttet denne avspillingsøkten."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Avspillingen stoppet fordi den var satt på pause for lenge."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

@@ -521,6 +521,12 @@
       "value": "Esta sessão de reprodução terminou. Inicie a reprodução novamente."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "A reprodução parou porque esteve em pausa durante demasiado tempo. Inicie a reprodução novamente."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -74351,6 +74357,24 @@
       "value": "Guardar na biblioteca"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Reprodução em pausa"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Terminar reprodução em pausa após"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 a 1440. Termina um vídeo que esteja em pausa durante este tempo numa app do Silo, libertando a transmissão e qualquer transcodificação; ao reproduzi-lo novamente, continua no mesmo ponto. O Ver juntos, a transmissão para outros dispositivos e os audiolivros não são afetados. O valor 0 desativa esta opção."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -74853,6 +74877,12 @@
     {
       "type": 0,
       "value": "dias"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minutos"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -80826,6 +80856,12 @@
       "value": "Ativar mapeamento de tons HDR por software"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Terminar reprodução em pausa após (minutos)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -80884,6 +80920,12 @@
     {
       "type": 0,
       "value": "Fonte dos marcadores"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Reprodução em pausa"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -135661,6 +135703,12 @@
     {
       "type": 0,
       "value": "Um administrador terminou esta sessão de reprodução."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "A reprodução parou porque esteve em pausa durante demasiado tempo."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

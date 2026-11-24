@@ -521,6 +521,12 @@
       "value": "此播放工作階段已結束。請重新開始播放。"
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "播放因暫停過久而停止。請重新開始播放。"
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -61120,6 +61126,24 @@
       "value": "儲存到媒體庫"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "暫停的播放"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "暫停超過此時間即結束播放"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 到 1440。在 Silo App 中暫停達此時間的影片會結束播放，以釋放其串流及任何轉碼；再次播放時會從同一位置繼續。一起看、投放和有聲書不受影響。設為 0 即可關閉此功能。"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -61558,6 +61582,12 @@
     {
       "type": 0,
       "value": "天"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "分鐘"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -67469,6 +67499,12 @@
       "value": "啟用軟體 HDR 色調對應"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "暫停超過此時間即結束播放（分鐘）"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -67527,6 +67563,12 @@
     {
       "type": 0,
       "value": "標記來源"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "暫停的播放"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -114877,6 +114919,12 @@
     {
       "type": 0,
       "value": "管理員已結束此播放工作階段。"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "播放因暫停過久而停止。"
     }
   ],
   "web.player.shuffle.scopeWithParent": [

@@ -76,7 +76,7 @@ export function PlayerSettingsMenu({ prefs, placement = "above" }: PlayerSetting
             onChange={prefs.setSkipForward}
             disabled={intervalsDisabled}
           />
-          <span className="text-[11px] leading-snug text-white/40">{intervalsNote}</span>
+          <span className="text-[0.6875rem] leading-snug text-white/40">{intervalsNote}</span>
 
           <button
             type="button"
@@ -89,7 +89,7 @@ export function PlayerSettingsMenu({ prefs, placement = "above" }: PlayerSetting
               <span className="text-sm text-white/85">
                 {t("web.audiobooks.player.smartRewind")}
               </span>
-              <span className="text-[11px] leading-snug text-white/40">
+              <span className="text-[0.6875rem] leading-snug text-white/40">
                 {t("web.audiobooks.player.smartRewindHint")}
               </span>
             </span>
@@ -133,7 +133,7 @@ function SkipIntervalRow({
       aria-disabled={disabled || undefined}
       className="flex flex-col gap-1.5"
     >
-      <span className="text-[11px] tracking-[0.14em] text-white/40 uppercase">{label}</span>
+      <span className="text-[0.6875rem] tracking-[0.14em] text-white/40 uppercase">{label}</span>
       <div className="flex flex-wrap gap-1">
         {choices.map((seconds) => (
           <button

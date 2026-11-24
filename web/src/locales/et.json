@@ -521,6 +521,12 @@
       "value": "See esitusseanss lõppes. Alustage esitamist uuesti."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Esitus lõpetati, sest see oli liiga kaua peatatud. Alustage esitamist uuesti."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67817,6 +67823,24 @@
       "value": "Salvesta meediakogusse"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Peatatud esitus"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Lõpeta peatatud esitus pärast"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0–1440. Lõpetab Silo rakenduses nii kaua peatatud video esituse ning vabastab selle voo ja võimaliku transkodeerimise; uuesti esitamisel jätkub video samast kohast. See ei mõjuta funktsiooni „Vaata koos“, ülekandmist ega audioraamatuid. Väärtus 0 lülitab selle välja."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -68279,6 +68303,12 @@
     {
       "type": 0,
       "value": "päeva"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minutit"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -74217,6 +74247,12 @@
       "value": "Luba tarkvaraline HDR-toonivastendus"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Lõpeta peatatud esitus pärast (minutit)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -74275,6 +74311,12 @@
     {
       "type": 0,
       "value": "Märkide allikas"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Peatatud esitus"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -125365,6 +125407,12 @@
     {
       "type": 0,
       "value": "Administraator lõpetas selle esitusseansi."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Esitus lõpetati, sest see oli liiga kaua peatatud."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

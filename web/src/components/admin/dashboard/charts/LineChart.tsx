@@ -302,7 +302,7 @@ export function LineChart({
           {geometry.ticks.map((tick) => (
             <span
               key={tick}
-              className="text-muted-foreground absolute right-0 -translate-y-1/2 text-[10px] leading-none tabular-nums"
+              className="text-muted-foreground absolute right-0 -translate-y-1/2 text-[0.625rem] leading-none tabular-nums"
               style={{ top: `${(1 - tick / geometry.top) * 100}%` }}
             >
               {(formatTick ?? formatValue)(tick)}
@@ -484,7 +484,7 @@ export function LineChart({
         </div>
       </div>
       {firstPoint && lastPoint ? (
-        <div className="text-muted-foreground mt-1.5 flex justify-between pl-12 text-[10px] tabular-nums">
+        <div className="text-muted-foreground mt-1.5 flex justify-between pl-12 text-[0.625rem] tabular-nums">
           <span>{edgeLabels ? edgeLabels.start : formatTimestamp(firstPoint.t)}</span>
           <span>{edgeLabels ? edgeLabels.end : formatTimestamp(lastPoint.t)}</span>
         </div>

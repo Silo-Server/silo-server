@@ -521,6 +521,12 @@
       "value": "⟦Ţĥîš þļåýƀåçķ šéššîöñ éñđéđ. Šţåŕţ þļåýîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "⟦Þļåýƀåçķ šţöþþéđ ƀéçåûšé îţ ŵåš þåûšéđ ƒöŕ ţöö ļöñĝ. Šţåŕţ þļåýîñĝ åĝåîñ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -73257,6 +73263,24 @@
       "value": "⟦Šåṽé ţö ļîƀŕåŕý~~~~~~⟧"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "⟦Þåûšéđ þļåýƀåçķ~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "⟦Éñđ þåûšéđ þļåýƀåçķ åƒţéŕ~~~~~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "⟦0 ţö 1440. Éñđš å ṽîđéö þåûšéđ ţĥîš ļöñĝ îñ å Šîļö åþþ, ƒŕééîñĝ îţš šţŕéåɱ åñđ åñý ţŕåñšçöđé; þļåýîñĝ îţ åĝåîñ çöñţîñûéš ƒŕöɱ ţĥé šåɱé šþöţ. Ŵåţçĥ Ţöĝéţĥéŕ, çåšţîñĝ åñđ åûđîöƀööķš åŕé ñöţ åƒƒéçţéđ. 0 ţûŕñš ţĥîš öƒƒ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -73727,6 +73751,12 @@
     {
       "type": 0,
       "value": "⟦đåýš~~⟧"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "⟦ɱîñûţéš~~~⟧"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -80277,6 +80307,12 @@
       "value": "⟦Éñåƀļé Šöƒţŵåŕé ĤĐŔ Ţöñé Ṁåþþîñĝ~~~~~~~~~~~~~⟧"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "⟦Éñđ þåûšéđ þļåýƀåçķ åƒţéŕ (ɱîñûţéš)~~~~~~~~~~~~~~⟧"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -80335,6 +80371,12 @@
     {
       "type": 0,
       "value": "⟦Ṁåŕķéŕ šöûŕçé~~~~~~⟧"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "⟦Þåûšéđ þļåýƀåçķ~~~~~~⟧"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -135501,6 +135543,12 @@
     {
       "type": 0,
       "value": "⟦Åñ åđɱîñîšţŕåţöŕ éñđéđ ţĥîš þļåýƀåçķ šéššîöñ.~~~~~~~~~~~~~~~~~~⟧"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "⟦Þļåýƀåçķ šţöþþéđ ƀéçåûšé îţ ŵåš þåûšéđ ƒöŕ ţöö ļöñĝ.~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.player.shuffle.scopeWithParent": [

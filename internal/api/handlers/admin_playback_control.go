@@ -32,6 +32,9 @@ type AdminPlaybackControlHandler struct {
 	// session's control lane (admin_playback_relay.go); nil serves every
 	// request here.
 	relay *playback.ControlRelay
+	// beforeReplayWait, when set by a test, runs as a replay of a message
+	// starts waiting for the player's answer (admin_playback_commands.go).
+	beforeReplayWait func()
 }
 
 func requiresLivePlaybackControl(name playback.CommandName) bool {

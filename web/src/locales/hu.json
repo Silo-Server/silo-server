@@ -521,6 +521,12 @@
       "value": "Ez a lejátszási munkamenet véget ért. Indítsa újra a lejátszást."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "A lejátszás leállt, mert túl sokáig volt szüneteltetve. Indítsa újra a lejátszást."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -67017,6 +67023,24 @@
       "value": "Mentés a könyvtárba"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Szüneteltetett lejátszás"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Szüneteltetett lejátszás leállítása ennyi idő után"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 és 1440 között. Leállítja az ennyi ideig szüneteltetett videót egy Silo-alkalmazásban, és felszabadítja a streamjét és az esetleges átkódolást; újbóli lejátszáskor ugyanonnan folytatódik. A Közös nézést, a kivetítést és a hangoskönyveket nem érinti. A 0 kikapcsolja ezt a funkciót."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67479,6 +67503,12 @@
     {
       "type": 0,
       "value": "nap"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "perc"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73393,6 +73423,12 @@
       "value": "Szoftveres HDR-tónusleképezés engedélyezése"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Szüneteltetett lejátszás leállítása ennyi idő után (perc)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73451,6 +73487,12 @@
     {
       "type": 0,
       "value": "Jelölők forrása"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Szüneteltetett lejátszás"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -124059,6 +124101,12 @@
     {
       "type": 0,
       "value": "Egy rendszergazda befejezte ezt a lejátszási munkamenetet."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "A lejátszás leállt, mert túl sokáig volt szüneteltetve."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

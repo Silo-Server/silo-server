@@ -228,7 +228,7 @@ export default function GeneralSettings() {
               <p className="text-sm font-medium">
                 {t("web.admin.settings.redis.unavailable.title")}
               </p>
-              <p className="text-muted-foreground mt-1 text-[13px]">
+              <p className="text-muted-foreground mt-1 text-[0.8125rem]">
                 {t("web.admin.settings.redis.unavailable.description")}
               </p>
             </div>

@@ -521,6 +521,12 @@
       "value": "यह प्लेबैक सेशन खत्म हो गया है। फिर से चलाना शुरू करें।"
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "प्लेबैक बहुत देर तक रुका रहा, इसलिए उसे बंद कर दिया गया। फिर से चलाना शुरू करें।"
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -66921,6 +66927,24 @@
       "value": "लाइब्रेरी में सेव करें"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "रुका हुआ प्लेबैक"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "रुके हुए प्लेबैक को बंद करने की अवधि"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 से 1440। किसी Silo ऐप में इतनी देर तक रुके हुए वीडियो का प्लेबैक बंद कर दिया जाता है, जिससे उसकी स्ट्रीम और कोई भी ट्रांसकोड खाली हो जाता है; उसे फिर से चलाने पर वह उसी जगह से जारी रहता है। साथ में देखें, कास्टिंग और ऑडियोबुक पर इसका असर नहीं पड़ता। 0 डालने पर यह सुविधा बंद हो जाती है।"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67383,6 +67407,12 @@
     {
       "type": 0,
       "value": "दिन"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "मिनट"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73317,6 +73347,12 @@
       "value": "सॉफ़्टवेयर HDR टोन मैपिंग चालू करें"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "रुके हुए प्लेबैक को बंद करने की अवधि (मिनट)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73375,6 +73411,12 @@
     {
       "type": 0,
       "value": "मार्कर सोर्स"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "रुका हुआ प्लेबैक"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -123809,6 +123851,12 @@
     {
       "type": 0,
       "value": "एडमिनिस्ट्रेटर ने यह प्लेबैक सेशन खत्म कर दिया।"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "प्लेबैक बहुत देर तक रुका रहा, इसलिए उसे बंद कर दिया गया।"
     }
   ],
   "web.player.shuffle.scopeWithParent": [

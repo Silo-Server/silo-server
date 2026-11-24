@@ -48,7 +48,7 @@ export function DetailCard({
             {title}
           </h3>
           {description ? (
-            <div className="text-muted-foreground text-[13px] leading-relaxed wrap-anywhere">
+            <div className="text-muted-foreground text-[0.8125rem] leading-relaxed wrap-anywhere">
               {description}
             </div>
           ) : null}
@@ -180,7 +180,7 @@ export function SourceTag({ source }: { source: "default" | "group" | "custom" }
     <span
       data-source={source}
       className={cn(
-        "shrink-0 text-[10px] font-semibold tracking-[0.06em] uppercase",
+        "shrink-0 text-[0.625rem] font-semibold tracking-[0.06em] uppercase",
         source === "custom"
           ? "rounded-md border border-amber-500/30 bg-amber-500/10 px-1.5 py-px text-amber-300"
           : "text-muted-foreground/80",
@@ -213,7 +213,7 @@ export function SubTabs<T extends string>({
           <TabsTrigger
             key={item.value}
             value={item.value}
-            className="flex-none rounded-lg px-3 py-1.5 text-[13px] max-lg:min-h-11"
+            className="flex-none rounded-lg px-3 py-1.5 text-[0.8125rem] max-lg:min-h-11"
           >
             {item.label}
           </TabsTrigger>

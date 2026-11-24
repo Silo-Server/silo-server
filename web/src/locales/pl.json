@@ -521,6 +521,12 @@
       "value": "Ta sesja odtwarzania się zakończyła. Rozpocznij odtwarzanie ponownie."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Odtwarzanie zatrzymano, ponieważ było wstrzymane zbyt długo. Rozpocznij odtwarzanie ponownie."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -81787,6 +81793,24 @@
       "value": "Zapisuj do biblioteki"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Wstrzymane odtwarzanie"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Zakończ wstrzymane odtwarzanie po"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "Od 0 do 1440. Kończy odtwarzanie wideo wstrzymanego tak długo w aplikacji Silo, zwalniając jego strumień i ewentualne transkodowanie; ponowne odtworzenie wznawia je od tego samego miejsca. Nie dotyczy to wspólnego oglądania, castingu ani audiobooków. 0 wyłącza tę funkcję."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -82321,6 +82345,12 @@
     {
       "type": 0,
       "value": "dni"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "min"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -88361,6 +88391,12 @@
       "value": "Włącz programowe mapowanie tonów HDR"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Zakończ wstrzymane odtwarzanie po (min)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -88419,6 +88455,12 @@
     {
       "type": 0,
       "value": "Źródło znaczników"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Wstrzymane odtwarzanie"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -147387,6 +147429,12 @@
     {
       "type": 0,
       "value": "Osoba administrująca zakończyła tę sesję odtwarzania."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Odtwarzanie zatrzymano, ponieważ było wstrzymane zbyt długo."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

@@ -521,6 +521,12 @@
       "value": "Цей сеанс відтворення завершено. Почніть відтворення знову."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Відтворення зупинено через задовгу паузу. Почніть відтворення знову."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -80932,6 +80938,24 @@
       "value": "Зберігати в бібліотеці"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Відтворення на паузі"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Завершувати відтворення на паузі через"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "Від 0 до 1440. Завершує відтворення відео, яке стільки часу перебуває на паузі в застосунку Silo, і звільняє його потік та транскодування; якщо відтворити його знову, перегляд продовжиться з того самого місця. Це не стосується функції «Дивитися разом», трансляції на інші пристрої та аудіокниг. 0 вимикає цю функцію."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -81466,6 +81490,12 @@
     {
       "type": 0,
       "value": "дн."
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "хв"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -87462,6 +87492,12 @@
       "value": "Увімкнути програмне тональне відображення HDR"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Завершувати відтворення на паузі через (хв)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -87520,6 +87556,12 @@
     {
       "type": 0,
       "value": "Джерело міток"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Відтворення на паузі"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -146551,6 +146593,12 @@
     {
       "type": 0,
       "value": "Цей сеанс відтворення завершено адміністратором."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Відтворення зупинено через задовгу паузу."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

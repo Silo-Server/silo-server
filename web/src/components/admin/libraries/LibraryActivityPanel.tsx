@@ -314,7 +314,7 @@ export function LibraryActivityPanel({
               </span>
               <span
                 className={cn(
-                  "rounded-full px-1.5 py-px text-[10px]",
+                  "rounded-full px-1.5 py-px text-[0.625rem]",
                   effectiveFilter === entry.libraryID
                     ? "bg-background/20 text-background"
                     : "bg-secondary text-secondary-foreground",
@@ -350,7 +350,7 @@ export function LibraryActivityPanel({
                       <span dir="auto" className="bidi-text text-sm font-semibold">
                         {name}
                       </span>
-                      <Badge variant="secondary" className="gap-1 text-[11px]">
+                      <Badge variant="secondary" className="gap-1 text-[0.6875rem]">
                         <DatabaseBackup className="h-3 w-3" aria-hidden="true" />
                         {t("web.admin.libraries.activeWork.metadata")}
                       </Badge>
@@ -358,7 +358,7 @@ export function LibraryActivityPanel({
                     <p className="text-muted-foreground truncate text-xs">
                       {entry.job.message || t("web.admin.libraries.activeWork.refreshQueued")}
                     </p>
-                    <p className="text-muted-foreground/80 truncate text-[11px] tabular-nums">
+                    <p className="text-muted-foreground/80 truncate text-[0.6875rem] tabular-nums">
                       {formatJobProgress(entry.job)}
                     </p>
                   </div>
@@ -443,7 +443,7 @@ function ActivityLibraryCard({
           <h3 dir="auto" className="bidi-text truncate text-sm font-semibold">
             {name}
           </h3>
-          <Badge variant="secondary" className="text-[11px] tabular-nums">
+          <Badge variant="secondary" className="text-[0.6875rem] tabular-nums">
             {countParts.join(SPACED_SEPARATOR)}
           </Badge>
         </div>
@@ -490,12 +490,12 @@ function ActivityLibraryCard({
                       </code>
                     </span>
                     {scan.trigger ? (
-                      <Badge variant="secondary" className="px-1.5 py-0 text-[10px]">
+                      <Badge variant="secondary" className="px-1.5 py-0 text-[0.625rem]">
                         {formatActiveScanTrigger(scan.trigger)}
                       </Badge>
                     ) : null}
                   </div>
-                  <span className="text-muted-foreground shrink-0 text-[11px] tabular-nums">
+                  <span className="text-muted-foreground shrink-0 text-[0.6875rem] tabular-nums">
                     {progressText || formatActiveScanStarted(scan.started_at)}
                   </span>
                 </div>
@@ -531,7 +531,7 @@ function ActivityLibraryCard({
                 })}
               </span>
               <span aria-hidden="true">{EM_DASH}</span>
-              <span dir="ltr" className="truncate font-mono text-[11px]">
+              <span dir="ltr" className="truncate font-mono text-[0.6875rem]">
                 {queuedPreview.map((target, index) => (
                   <span key={`${target}-${index}`}>
                     {index > 0 ? COMMA_SEPARATOR : null}
@@ -552,7 +552,7 @@ function ActivityLibraryCard({
               <Button
                 variant="ghost"
                 size="sm"
-                className="text-muted-foreground hover:text-foreground h-6 gap-1 px-2 text-[11px] max-lg:h-9"
+                className="text-muted-foreground hover:text-foreground h-6 gap-1 px-2 text-[0.6875rem] max-lg:h-9"
                 aria-expanded={queueExpanded}
                 onClick={() => setQueueExpanded((open) => !open)}
               >
@@ -579,7 +579,7 @@ function ActivityLibraryCard({
               {queuedScans.map((scan) => (
                 <li
                   key={scan.id}
-                  className="text-muted-foreground flex items-center gap-2 text-[11px]"
+                  className="text-muted-foreground flex items-center gap-2 text-[0.6875rem]"
                   title={scan.path}
                 >
                   <span className="bg-muted-foreground/40 h-1.5 w-1.5 shrink-0 rounded-full" />
@@ -587,7 +587,7 @@ function ActivityLibraryCard({
                   <code dir="ltr" className="text-foreground/80 min-w-0 flex-1 truncate font-mono">
                     <PathText path={formatActiveScanTarget(scan)} />
                   </code>
-                  <span className="shrink-0 text-[10px]">
+                  <span className="shrink-0 text-[0.625rem]">
                     {t("web.admin.libraries.scanQueue.waiting")}
                   </span>
                 </li>

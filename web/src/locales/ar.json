@@ -521,6 +521,12 @@
       "value": "انتهت جلسة التشغيل هذه. ابدأ التشغيل من جديد."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "توقف التشغيل لأنه بقي متوقفًا مؤقتًا مدة طويلة جدًا. ابدأ التشغيل من جديد."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -93107,6 +93113,24 @@
       "value": "الحفظ في المكتبة"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "التشغيل المتوقف مؤقتًا"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "إنهاء التشغيل المتوقف مؤقتًا بعد"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "من 0 إلى 1440. ينهي تشغيل الفيديو المتوقف مؤقتًا هذه المدة في أحد تطبيقات Silo، فيحرّر بثه وأي عملية لتحويل الترميز؛ وعند تشغيله مجددًا يتابع من الموضع نفسه. لا تتأثر المشاهدة الجماعية والإرسال والكتب الصوتية. القيمة 0 تعطّل هذا الخيار."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -93689,6 +93713,12 @@
     {
       "type": 0,
       "value": "أيام"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "دقيقة"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -99770,6 +99800,12 @@
       "value": "تفعيل تعيين درجات HDR بالبرمجيات"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "إنهاء التشغيل المتوقف مؤقتًا بعد (بالدقائق)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -99828,6 +99864,12 @@
     {
       "type": 0,
       "value": "مصدر العلامات"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "التشغيل المتوقف مؤقتًا"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -165589,6 +165631,12 @@
     {
       "type": 0,
       "value": "أنهى أحد المسؤولين جلسة التشغيل هذه."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "توقف التشغيل لأنه بقي متوقفًا مؤقتًا مدة طويلة جدًا."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

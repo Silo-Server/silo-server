@@ -10,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/Silo-Server/silo-server/internal/config"
@@ -70,6 +72,10 @@ const (
 	// releaseDelay is how long a file waits after this server gave it back
 	// through no fault of the file: its input unreadable here, or shutdown.
 	releaseDelay = time.Hour
+	// storageFullPause is how long the service claims no work after a sheet
+	// write found the store full, so a backlog is not decoded file by file
+	// only for every write to be refused.
+	storageFullPause = 10 * time.Minute
 )
 
 // reconcileLock serializes reconcile passes across servers ("SILOTRKP").
@@ -128,6 +134,9 @@ type Service struct {
 	settingsEvery  time.Duration
 	reconcileRetry time.Duration
 	reconcilePass  func(ctx context.Context) (ReconcileStats, bool, error)
+	// storageFullAt is when a sheet write last found the store full
+	// (storageFullPause). A time.Time keeps the monotonic reading.
+	storageFullAt atomic.Pointer[time.Time]
 }
 
 // NewService returns a service that claims work as nodeID. It returns nil
@@ -232,6 +241,13 @@ func (s *Service) dispatch(ctx context.Context) {
 		release, err := s.limiter.Acquire(ctx)
 		if err != nil {
 			return
+		}
+		// Checked once a slot is free, so a run that just found the
+		// store full pauses the next claim.
+		if s.storageRecentlyFull() {
+			release()
+			s.idle(ctx)
+			continue
 		}
 		job, err := s.queue.Claim(ctx, s.owner, leaseDuration)
 		if err != nil || job == nil {
@@ -339,6 +355,14 @@ func (s *Service) classify(ctx context.Context, err error) (Outcome, time.Durati
 		return Released, releaseDelay
 	case errors.Is(err, errNoNode), errors.Is(err, errSettingsUnreadable):
 		return Released, time.Minute
+	case errors.Is(err, syscall.ENOSPC):
+		// The artwork store is full (blobstore.ErrStorageFull). Counting it
+		// against the file would back the file off for up to a week, long
+		// after an admin frees space. The service claims nothing for a
+		// while, so the backlog is not decoded only to be refused.
+		now := time.Now()
+		s.storageFullAt.Store(&now)
+		return Released, releaseDelay
 	case mediasample.Classify(err).Permanent():
 		return Unusable, 0
 	}
@@ -635,4 +659,11 @@ func (s *Service) intSetting(ctx context.Context, key string, def, lo, hi int) i
 		value = def
 	}
 	return min(max(value, lo), hi)
+}
+
+// storageRecentlyFull reports whether a sheet write found the store full
+// within storageFullPause.
+func (s *Service) storageRecentlyFull() bool {
+	at := s.storageFullAt.Load()
+	return at != nil && time.Since(*at) < storageFullPause
 }

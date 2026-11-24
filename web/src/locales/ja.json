@@ -521,6 +521,12 @@
       "value": "この再生セッションは終了しました。もう一度再生してください。"
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "一時停止の時間が長すぎたため、再生を停止しました。もう一度再生してください。"
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -60614,6 +60620,24 @@
       "value": "ライブラリに保存"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "一時停止中の再生"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "一時停止した再生を終了するまで"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0〜1440。Siloアプリでこの時間一時停止した動画を終了し、そのストリームとトランスコードを解放します。もう一度再生すると同じ位置から続行します。「一緒に見る」、キャスト再生、オーディオブックは対象外です。0でオフになります。"
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -61048,6 +61072,12 @@
     {
       "type": 0,
       "value": "日"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "分"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -66911,6 +66941,12 @@
       "value": "ソフトウェアHDRトーンマッピングを有効化"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "一時停止した再生を終了するまで（分）"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -66969,6 +67005,12 @@
     {
       "type": 0,
       "value": "マーカーのソース"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "一時停止中の再生"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -113247,6 +113289,12 @@
     {
       "type": 0,
       "value": "管理者がこの再生セッションを終了しました。"
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "一時停止の時間が長すぎたため、再生を停止しました。"
     }
   ],
   "web.player.shuffle.scopeWithParent": [

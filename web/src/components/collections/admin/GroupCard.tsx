@@ -194,28 +194,28 @@ export function GroupCard({
             handleProps={{ ...attributes, ...listeners, ref: setActivatorNodeRef }}
           />
         ) : null}
-        <h3 className="m-0 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[15px] font-semibold tracking-[-0.01em]">
+        <h3 className="m-0 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[0.9375rem] font-semibold tracking-[-0.01em]">
           <span className="min-w-0 break-words">{shelf.name}</span>
           {mine ? (
-            <span className="bg-info/15 text-info ring-info/30 inline-flex h-[22px] items-center gap-1 rounded-full px-2 text-[11.5px] font-semibold ring-1 ring-inset">
+            <span className="bg-info/15 text-info ring-info/30 inline-flex min-h-[22px] items-center gap-1 rounded-full px-2 text-[0.71875rem] font-semibold ring-1 ring-inset">
               <Users aria-hidden className="size-3" />
               {myCollectionsTag()}
             </span>
           ) : (
-            <small className="text-muted-foreground text-[12.5px] font-normal">
+            <small className="text-muted-foreground text-[0.78125rem] font-normal">
               {loose ? noHeadingHelp() : shelfCountLine(shelf)}
             </small>
           )}
         </h3>
         {mine && noDrop ? (
-          <span className="text-destructive inline-flex items-center gap-1.5 text-[12.5px] font-medium">
+          <span className="text-destructive inline-flex items-center gap-1.5 text-[0.78125rem] font-medium">
             <MinusCircle aria-hidden className="size-3.5" />
             {myCollectionsNoDrop()}
           </span>
         ) : loose || mine ? (
           <span />
         ) : (
-          <label className="text-muted-foreground inline-flex items-center gap-2 text-[12.5px]">
+          <label className="text-muted-foreground inline-flex items-center gap-2 text-[0.78125rem]">
             {/* Phones keep the select and drop the word, which the select's label still says. */}
             <span className="max-lg:sr-only">{t("web.collections.admin.order")}</span>
             <select
@@ -223,7 +223,7 @@ export function GroupCard({
               disabled={orderDisabled}
               aria-label={t("web.collections.admin.orderOf", { name: shelf.name })}
               onChange={(event) => onSortChange(event.target.value as GroupSortMode)}
-              className="border-input bg-background text-foreground h-8 rounded-[9px] border px-2 text-[13px] max-lg:h-11 max-lg:max-w-[140px]"
+              className="border-input bg-background text-foreground h-8 rounded-[9px] border px-2 text-[0.8125rem] max-lg:h-11 max-lg:max-w-[140px]"
             >
               {SORT_MODES.map((mode) => (
                 <option key={mode} value={mode}>
@@ -239,7 +239,7 @@ export function GroupCard({
       {collapsed ? null : mine ? (
         <p
           ref={setBodyRef}
-          className="bg-muted/30 text-muted-foreground m-0 flex items-start gap-2.5 rounded-[14px] px-3.5 py-3 text-[13px] leading-normal"
+          className="bg-muted/30 text-muted-foreground m-0 flex items-start gap-2.5 rounded-[14px] px-3.5 py-3 text-[0.8125rem] leading-normal"
         >
           <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
           {myCollectionsNote()}
@@ -247,7 +247,7 @@ export function GroupCard({
       ) : (
         <div ref={setBodyRef} className={cn("rounded-[14px]", isOver && "bg-accent/40")}>
           {cards.length === 0 ? (
-            <p className="border-border text-muted-foreground m-0 rounded-[14px] border border-dashed px-4 py-4 text-center text-[13px]">
+            <p className="border-border text-muted-foreground m-0 rounded-[14px] border border-dashed px-4 py-4 text-center text-[0.8125rem]">
               {loose
                 ? t("web.collections.admin.noHeadingEmpty")
                 : t("web.collections.admin.shelfEmpty")}
@@ -268,7 +268,7 @@ export function GroupCard({
                 >
                   <span
                     id={bandLabelId}
-                    className="text-muted-foreground flex items-center gap-1.5 px-1 text-[12px]"
+                    className="text-muted-foreground flex items-center gap-1.5 px-1 text-[0.75rem]"
                   >
                     <Pin aria-hidden className="size-3" />
                     {pinnedBandLabel()}

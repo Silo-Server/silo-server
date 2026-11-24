@@ -521,6 +521,12 @@
       "value": "Táto relácia prehrávania sa skončila. Spustite prehrávanie znova."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Prehrávanie sa zastavilo, pretože bolo príliš dlho pozastavené. Spustite prehrávanie znova."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -81237,6 +81243,24 @@
       "value": "Uložiť do knižnice"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pozastavené prehrávanie"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Ukončiť pozastavené prehrávanie po"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 až 1440. Ukončí video, ktoré je v aplikácii Silo takto dlho pozastavené, a uvoľní jeho stream aj prípadné prekódovanie; po opätovnom spustení prehrávanie pokračuje od rovnakého miesta. Spoločné sledovanie, prenos do iných zariadení a audioknihy to neovplyvní. Hodnota 0 túto funkciu vypne."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -81771,6 +81795,12 @@
     {
       "type": 0,
       "value": "dní"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "min"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -87795,6 +87825,12 @@
       "value": "Zapnúť softvérové mapovanie tónov HDR"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Ukončiť pozastavené prehrávanie po (min)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -87853,6 +87889,12 @@
     {
       "type": 0,
       "value": "Zdroj značiek"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pozastavené prehrávanie"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -147179,6 +147221,12 @@
     {
       "type": 0,
       "value": "Správca ukončil túto reláciu prehrávania."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Prehrávanie sa zastavilo, pretože bolo príliš dlho pozastavené."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

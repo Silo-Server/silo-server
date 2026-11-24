@@ -175,7 +175,7 @@ export function StackedColumnChart({
           </ChartTooltip>
         ) : null}
       </div>
-      <div className="text-muted-foreground relative mt-1.5 h-3.5 shrink-0 text-[10px] tabular-nums">
+      <div className="text-muted-foreground relative mt-1.5 h-3.5 shrink-0 text-[0.625rem] tabular-nums">
         {columns.map((column, index) => {
           if (index % tickStride !== 0) {
             return null;

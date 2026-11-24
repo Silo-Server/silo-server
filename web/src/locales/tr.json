@@ -521,6 +521,12 @@
       "value": "Bu oynatma oturumu sona erdi. Oynatmayı yeniden başlatın."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Çok uzun süre duraklatıldığı için oynatma durduruldu. Oynatmayı yeniden başlatın."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -66637,6 +66643,24 @@
       "value": "Kitaplığa kaydet"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Duraklatılmış oynatma"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Duraklatılmış oynatmayı sonlandırma süresi"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 ile 1440 arası. Bir Silo uygulamasında bu kadar süre duraklatılmış bir videoyu sonlandırır, akışını ve varsa kod dönüştürme işlemini serbest bırakır; video yeniden oynatıldığında aynı yerden devam eder. Birlikte izle, yayınlama ve sesli kitaplar etkilenmez. 0 bu özelliği kapatır."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67099,6 +67123,12 @@
     {
       "type": 0,
       "value": "gün"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "dakika"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -72981,6 +73011,12 @@
       "value": "Yazılımsal HDR ton eşlemeyi etkinleştir"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Duraklatılmış oynatmayı sonlandırma süresi (dakika)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73039,6 +73075,12 @@
     {
       "type": 0,
       "value": "İşaretçi kaynağı"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Duraklatılmış oynatma"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -123167,6 +123209,12 @@
     {
       "type": 0,
       "value": "Bir yönetici bu oynatma oturumunu sonlandırdı."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Çok uzun süre duraklatıldığı için oynatma durduruldu."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

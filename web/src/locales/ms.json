@@ -521,6 +521,12 @@
       "value": "Sesi main balik ini telah tamat. Mulakan main semula."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Main balik dihentikan kerana dijeda terlalu lama. Mulakan main semula."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -60454,6 +60460,24 @@
       "value": "Simpan ke pustaka"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Main balik dijeda"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Tamatkan main balik dijeda selepas"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 hingga 1440. Menamatkan video yang dijeda selama ini dalam apl Silo, lalu membebaskan strim dan sebarang transkod video itu; memainkannya semula akan bersambung dari kedudukan yang sama. Tonton bersama, penghantaran ke peranti lain dan buku audio tidak terjejas. 0 mematikan pilihan ini."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -60892,6 +60916,12 @@
     {
       "type": 0,
       "value": "hari"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minit"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -66719,6 +66749,12 @@
       "value": "Dayakan Pemetaan Ton HDR Perisian"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Tamatkan main balik dijeda selepas (minit)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -66777,6 +66813,12 @@
     {
       "type": 0,
       "value": "Sumber penanda"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Main balik dijeda"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -113501,6 +113543,12 @@
     {
       "type": 0,
       "value": "Pentadbir telah menamatkan sesi main balik ini."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Main balik dihentikan kerana dijeda terlalu lama."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

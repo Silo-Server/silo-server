@@ -521,6 +521,12 @@
       "value": "Šī atskaņošanas sesija ir beigusies. Sāciet atskaņošanu no jauna."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Atskaņošana tika apturēta, jo tā bija pauzēta pārāk ilgi. Sāciet atskaņošanu no jauna."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -75198,6 +75204,24 @@
       "value": "Saglabāt bibliotēkā"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pauzēta atskaņošana"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Beigt pauzētu atskaņošanu pēc"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "No 0 līdz 1440. Beidz video, kas Silo lietotnē ir pauzēts tik ilgi, atbrīvojot tā straumi un jebkādu pārkodēšanu; atskaņojot to vēlreiz, skatīšanās turpinās no tās pašas vietas. Tas neietekmē funkciju „Skatīties kopā”, apraidi un audiogrāmatas. Vērtība 0 šo funkciju izslēdz."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -75688,6 +75712,12 @@
     {
       "type": 0,
       "value": "dienas"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minūtēm"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -81669,6 +81699,12 @@
       "value": "Iespējot programmatūras HDR toņu kartēšanu"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Beigt pauzētu atskaņošanu pēc (minūtēm)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -81727,6 +81763,12 @@
     {
       "type": 0,
       "value": "Marķieru avots"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pauzēta atskaņošana"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -137462,6 +137504,12 @@
     {
       "type": 0,
       "value": "Administrators beidza šo atskaņošanas sesiju."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Atskaņošana tika apturēta, jo tā bija pauzēta pārāk ilgi."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

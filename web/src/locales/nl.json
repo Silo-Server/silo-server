@@ -521,6 +521,12 @@
       "value": "Deze afspeelsessie is beëindigd. Start het afspelen opnieuw."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Het afspelen is gestopt omdat het te lang gepauzeerd was. Start het afspelen opnieuw."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -66897,6 +66903,24 @@
       "value": "Opslaan in bibliotheek"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Gepauzeerd afspelen"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Gepauzeerd afspelen beëindigen na"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "0 tot 1440. Beëindigt een video die zo lang gepauzeerd is in een Silo-app, waardoor de stream en een eventuele transcodering vrijkomen; opnieuw afspelen gaat verder vanaf hetzelfde punt. Samen kijken, casten en luisterboeken worden niet beïnvloed. Met 0 zet je dit uit."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -67367,6 +67391,12 @@
     {
       "type": 0,
       "value": "dagen"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "minuten"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -73245,6 +73275,12 @@
       "value": "Softwarematige HDR-tone mapping inschakelen"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Gepauzeerd afspelen beëindigen na (minuten)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -73303,6 +73339,12 @@
     {
       "type": 0,
       "value": "Bron van markeringen"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Gepauzeerd afspelen"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -123725,6 +123767,12 @@
     {
       "type": 0,
       "value": "Een beheerder heeft deze afspeelsessie beëindigd."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Het afspelen is gestopt omdat het te lang gepauzeerd was."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

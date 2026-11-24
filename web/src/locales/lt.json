@@ -521,6 +521,12 @@
       "value": "Šis atkūrimo seansas baigėsi. Pradėkite leisti iš naujo."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "Atkūrimas sustabdytas, nes per ilgai buvo pristabdytas. Pradėkite leisti iš naujo."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -81876,6 +81882,24 @@
       "value": "Išsaugoti bibliotekoje"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "Pristabdytas atkūrimas"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "Baigti pristabdytą atkūrimą po"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "Nuo 0 iki 1440. Baigia „Silo“ programoje tiek laiko pristabdyto vaizdo įrašo atkūrimą ir atlaisvina jo srautą bei perkodavimą, jei jis vyksta; vėl paleidus įrašą, atkūrimas tęsiamas nuo tos pačios vietos. Funkcijai „Žiūrėti kartu“, perdavimui į kitą įrenginį ir audioknygoms tai netaikoma. Nustačius 0, ši funkcija išjungiama."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -82394,6 +82418,12 @@
     {
       "type": 0,
       "value": "d."
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "min."
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -88454,6 +88484,12 @@
       "value": "Įjungti programinį HDR tonų atvaizdavimą"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "Baigti pristabdytą atkūrimą po (min.)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -88512,6 +88548,12 @@
     {
       "type": 0,
       "value": "Žymių šaltinis"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "Pristabdytas atkūrimas"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -148339,6 +148381,12 @@
     {
       "type": 0,
       "value": "Administratorius užbaigė šį atkūrimo seansą."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "Atkūrimas sustabdytas, nes per ilgai buvo pristabdytas."
     }
   ],
   "web.player.shuffle.scopeWithParent": [

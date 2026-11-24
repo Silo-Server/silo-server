@@ -129,7 +129,7 @@ function EpisodeChooser({
               </span>
               <span className="min-w-0 flex-1 truncate text-sm">{episode.title}</span>
               {episode.user_data?.played ? (
-                <span className="text-muted-foreground text-[11px]">
+                <span className="text-muted-foreground text-[0.6875rem]">
                   {t("web.watchTogether.startSheet.watched")}
                 </span>
               ) : null}
@@ -318,7 +318,7 @@ export function StartPartySheet({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-w-md flex-col gap-4">
         <DialogHeader>
-          <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+          <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
             {t("web.watchTogether.startSheet.eyebrow")}
           </p>
           <DialogTitle>{t("web.watchTogether.startSheet.title")}</DialogTitle>
@@ -379,7 +379,7 @@ export function StartPartySheet({
           ) : (
             <div className="surface-panel-subtle flex items-center gap-3 rounded-xl px-3 py-2.5">
               <div className="min-w-0 flex-1">
-                <div className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+                <div className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
                   {t("web.watchTogether.startSheet.episode")}
                 </div>
                 <div className="truncate text-sm font-medium">
@@ -407,7 +407,7 @@ export function StartPartySheet({
           aria-label={t("web.watchTogether.startSheet.howToPick")}
           className="flex flex-col gap-2"
         >
-          <div className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+          <div className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
             {t("web.watchTogether.startSheet.howToPick")}
           </div>
           {modeOptions.map((option) => {

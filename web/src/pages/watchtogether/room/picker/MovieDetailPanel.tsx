@@ -50,11 +50,11 @@ export function MemberWatchList({
   return (
     <section className="flex flex-col gap-2">
       <div className="flex items-baseline justify-between">
-        <h4 className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+        <h4 className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
           {t("watchParty.whoSeen.title")}
         </h4>
         {!loading && members.length > 0 ? (
-          <span className="text-muted-foreground text-[11px]">
+          <span className="text-muted-foreground text-[0.6875rem]">
             {started === 0
               ? t("web.watchTogether.movie.newForEveryone")
               : seen === members.length
@@ -183,7 +183,7 @@ export function MovieDetailPanel({
             ) : null}
           </div>
           <div className="min-w-0 flex-1 pb-0.5">
-            <p className="text-muted-foreground text-[11px] font-semibold tracking-[0.18em] uppercase">
+            <p className="text-muted-foreground text-[0.6875rem] font-semibold tracking-[0.18em] uppercase">
               {t("web.watchTogether.movie.eyebrow")}
             </p>
             <h3 className="line-clamp-2 text-base leading-tight font-semibold">{card.title}</h3>

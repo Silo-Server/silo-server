@@ -521,6 +521,12 @@
       "value": "סשן ההפעלה הזה הסתיים. יש להתחיל את ההפעלה מחדש."
     }
   ],
+  "error.playback_session_paused_timeout": [
+    {
+      "type": 0,
+      "value": "ההפעלה הופסקה כי היא הושהתה זמן רב מדי. יש להתחיל את ההפעלה מחדש."
+    }
+  ],
   "error.playback_transport_superseded": [
     {
       "type": 0,
@@ -73471,6 +73477,24 @@
       "value": "שמירה בספרייה"
     }
   ],
+  "web.admin.settings.playback.pausedPlayback.group": [
+    {
+      "type": 0,
+      "value": "הפעלה מושהית"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeout": [
+    {
+      "type": 0,
+      "value": "סיום הפעלה מושהית אחרי"
+    }
+  ],
+  "web.admin.settings.playback.pausedPlayback.timeoutDescription": [
+    {
+      "type": 0,
+      "value": "בין 0 ל-1440. הפעלה של וידאו שהושהה למשך הזמן הזה באפליקציה של Silo מסתיימת, וההזרמה שלו וכל המרת קידוד משתחררות; הפעלה חוזרת ממשיכה מאותה נקודה. צפייה משותפת, העברה לטלוויזיה וספרי שמע לא מושפעים. הערך 0 מכבה את האפשרות הזו."
+    }
+  ],
   "web.admin.settings.playback.previews.chapterExecution": [
     {
       "type": 0,
@@ -73973,6 +73997,12 @@
     {
       "type": 0,
       "value": "ימים"
+    }
+  ],
+  "web.admin.settings.playback.unitMinutes": [
+    {
+      "type": 0,
+      "value": "דקות"
     }
   ],
   "web.admin.settings.playback.unitSeconds": [
@@ -79966,6 +79996,12 @@
       "value": "הפעלת מיפוי גוונים של HDR בתוכנה"
     }
   ],
+  "web.admin.settings.search.playback.setting.endPausedPlaybackAfter": [
+    {
+      "type": 0,
+      "value": "סיום הפעלה מושהית אחרי (דקות)"
+    }
+  ],
   "web.admin.settings.search.playback.setting.ffmpegPath": [
     {
       "type": 0,
@@ -80024,6 +80060,12 @@
     {
       "type": 0,
       "value": "מקור הסמנים"
+    }
+  ],
+  "web.admin.settings.search.playback.setting.pausedPlayback": [
+    {
+      "type": 0,
+      "value": "הפעלה מושהית"
     }
   ],
   "web.admin.settings.search.playback.setting.previewImageWidth": [
@@ -134215,6 +134257,12 @@
     {
       "type": 0,
       "value": "מנהל סיים את סשן ההפעלה הזה."
+    }
+  ],
+  "web.player.session.endedPausedTimeout": [
+    {
+      "type": 0,
+      "value": "ההפעלה הופסקה כי היא הושהתה זמן רב מדי."
     }
   ],
   "web.player.shuffle.scopeWithParent": [
