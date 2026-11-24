@@ -385,6 +385,7 @@
 ./internal/taskmanager/tasks TestReconcileSkipsWhileAnotherReconcileRunsPostgres
 ./internal/taskmanager/tasks TestAdvisoryClusterLockLeavesASingleConnectionPoolFreePostgres
 ./internal/taskmanager/repository TestPgExecutionRepositoryPruneReportsBatchLimit
+./internal/taskmanager/repository TestPgExecutionRepositoryPruneRunsOnASingleConnectionPool
 
 # A task run whose server stops renewing its lease is recorded once, as an
 # interrupted failure ending at its last heartbeat; a renewed lease is kept.
