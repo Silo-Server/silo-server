@@ -2179,7 +2179,7 @@ func (h *ItemsHandler) episodeBrowseFilters(ctx context.Context, session *Sessio
 		sortKey = query.sort
 		order = query.order
 	}
-	return access, catalog.BrowseFilters{UserID: session.StreamAppUserID, MaturityLimits: access.MaturityLimits, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, ExcludeContentIDs: query.excludeIDs, Studios: query.studios, OfficialRatings: query.officialRatings, MinCommunityRating: query.minCommunityRating, MinCriticRating: query.minCriticRating, MinPremiereDate: query.minPremiereDate, MaxPremiereDate: query.maxPremiereDate, NameLessThan: query.nameLessThan, NameStartsWithOrGreater: query.nameStartsWithOrGreater, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
+	return access, catalog.BrowseFilters{UserID: session.StreamAppUserID, MaturityLimits: access.MaturityLimits, ProfileID: session.ProfileID, IsFavorite: query.isFavorite, IsPlayed: query.isPlayed, IsResumable: query.isResumable, Genres: query.genres, Genre: query.genreName, Years: query.years, SearchTerm: query.searchTerm, NamePrefix: query.namePrefix, PersonID: query.personID, RequireBackdrop: query.requireBackdrop, AudioLanguages: query.audioLanguages, SubtitleLanguages: query.subtitleLanguages, ExcludeContentIDs: query.excludeIDs, Studios: query.studios, OfficialRatings: query.officialRatings, MinCommunityRating: query.minCommunityRating, MinCriticRating: query.minCriticRating, MinPremiereDate: query.minPremiereDate, MaxPremiereDate: query.maxPremiereDate, NameLessThan: query.nameLessThan, NameStartsWithOrGreater: query.nameStartsWithOrGreater, ContentIDs: query.specificIDs, Limit: query.limit, Offset: query.startIndex, Sort: sortKey, Order: order}
 }
 
 // browseEpisodes pages repo.BrowseEpisodes. The catalog applies favorite and
@@ -2238,10 +2238,10 @@ func (h *ItemsHandler) browseEpisodes(ctx context.Context, session *Session, rep
 	return episodes, result.Total, nil
 }
 
-// episodeOnlyBrowser returns the episode browse when query lists Episode alone
-// and no Ids, which the media_items browse and favorites cannot serve.
+// episodeOnlyBrowser returns the episode browse when query lists Episode alone,
+// which the media_items browse and favorites cannot serve. Ids narrow it.
 func (h *ItemsHandler) episodeOnlyBrowser(query itemsQuery) (episodeBrowser, bool) {
-	if len(query.specificIDs) > 0 || !slices.Equal(query.itemTypes, []string{compatEpisodeType}) || (query.mediaTypesExplicit && !query.mediaTypesSet["video"]) {
+	if !slices.Equal(query.itemTypes, []string{compatEpisodeType}) || (query.mediaTypesExplicit && !query.mediaTypesSet["video"]) {
 		return nil, false
 	}
 	repo, ok := h.episodeRepo.(episodeBrowser)
@@ -2307,15 +2307,16 @@ func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session,
 }
 
 // mixedEpisodeBrowser returns the episode browse when a search lists Episode
-// beside other types, such as IncludeItemTypes=Episode,Movie, and no Ids. The
-// media_items browse serves the other types but holds no episodes (#4257). As
+// beside other types, such as IncludeItemTypes=Episode,Movie; Ids narrow both
+// parts. The media_items browse serves the other types but holds no episodes
+// (#4257, #4546). As
 // in Jellyfin, a type filter at the user root and an IncludeItemTypes that
 // names Episode under a library ParentId search recursively even without
 // Recursive. A non-recursive library browse whose Episode comes only from an
 // ExcludeItemTypes filter lists the library's direct children, which are never
 // episodes.
 func (h *ItemsHandler) mixedEpisodeBrowser(query itemsQuery) (episodeBrowser, bool) {
-	if (!query.recursive && query.parentLibraryID > 0 && !query.includesEpisode) || len(query.specificIDs) > 0 || len(query.itemTypes) < 2 || !slices.Contains(query.itemTypes, compatEpisodeType) || !query.allowsVideo() {
+	if (!query.recursive && query.parentLibraryID > 0 && !query.includesEpisode) || len(query.itemTypes) < 2 || !slices.Contains(query.itemTypes, compatEpisodeType) || !query.allowsVideo() {
 		return nil, false
 	}
 	repo, ok := h.episodeRepo.(episodeBrowser)
@@ -3037,6 +3038,12 @@ func (h *ItemsHandler) handleBrowseItems(w http.ResponseWriter, r *http.Request,
 func (h *ItemsHandler) handleFavoriteItems(w http.ResponseWriter, r *http.Request, session *Session, query itemsQuery) {
 	if repo, ok := h.episodeOnlyBrowser(query); ok {
 		h.handleEpisodeBrowse(w, r, session, query, repo)
+		return
+	}
+	// Favorites below come from media_items, which holds no episodes, so a list
+	// naming Episode beside other types takes the mixed browse (#4546).
+	if _, ok := h.mixedEpisodeBrowser(query); ok {
+		h.handleBrowseItems(w, r, session, query)
 		return
 	}
 	// Client requested specific types (e.g. Playlist, BoxSet, Video) that all

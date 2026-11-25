@@ -1425,7 +1425,7 @@ func (r *EpisodeRepository) ListUpcoming(ctx context.Context, since time.Time, s
 // paging, so a long series only hydrates the selected page. An empty seriesID
 // browses the episodes of every series, by default in series sort-title order,
 // and filters.LibraryID narrows it to one library. A zero filters.Limit only
-// counts.
+// counts. A non-nil filters.ContentIDs keeps only those episodes.
 func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, seasonID string, seasonNumber *int, startItemID string, filters BrowseFilters, access AccessFilter, includeTotal bool) ([]*models.Episode, int, error) {
 	conditions := []string{}
 	args := []any{}
@@ -1451,6 +1451,11 @@ func (r *EpisodeRepository) BrowseEpisodes(ctx context.Context, seriesID, season
 	}
 	appendLibraryAccessConditions("s.content_id", access, &conditions, &args, &index)
 	applyAccessFilter("s", access, &conditions, &args, &index)
+	if filters.ContentIDs != nil {
+		conditions = append(conditions, fmt.Sprintf("e.content_id = ANY($%d::text[])", index))
+		args = append(args, filters.ContentIDs)
+		index++
+	}
 	if seasonID != "" {
 		conditions = append(conditions, fmt.Sprintf("e.season_id = $%d", index))
 		args = append(args, seasonID)
