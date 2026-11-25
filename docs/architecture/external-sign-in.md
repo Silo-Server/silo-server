@@ -31,8 +31,10 @@ SDK's `docs/auth-provider.md`.
   works on one identity), and only then those rows: the uninstall waits at the
   identities, or the transaction waits for it. Revocation also withdraws device
   sign-in approvals before it revokes sessions. Today the uninstall's cascade
-  clears requests before sessions; that follows from the order the foreign
-  keys were created and nothing relies on it.
+  clears requests before sessions; that follows from the names Postgres gave
+  the two foreign keys' triggers, and nothing relies on it. These paths take
+  one account at a time: an uninstall deletes an installation's identities in
+  an order of its own, and an account holds at most one of them.
 - Every other writer of those rows writes one row, writes only sessions that
   carry no identity (impersonation sessions), deletes an account created in
   the same request, or never waits (the expired-session and expired-request

@@ -729,7 +729,7 @@ func (s *DeviceLoginService) approvingProviderChain(ctx context.Context, tx pgx.
 	}
 	// Identities before the approving session and the device row, in the
 	// order revocation and an uninstall take them (lockIdentitiesBeforeSessions).
-	if err := lockIdentitiesBeforeSessions(ctx, tx, []int{approverUserID}, false); err != nil {
+	if err := lockIdentitiesBeforeSessions(ctx, tx, approverUserID, false); err != nil {
 		return sessionProviderChain{}, err
 	}
 	claims := ClaimsFromContext(ctx)
@@ -1056,7 +1056,7 @@ func (s *DeviceLoginService) poll(ctx context.Context, deviceCode, bindingSecret
 	}
 	// Identities before the device row and the new session, in the order
 	// revocation and an uninstall take them (lockIdentitiesBeforeSessions).
-	if err := lockIdentitiesBeforeSessions(ctx, tx, []int{approverID}, false); err != nil {
+	if err := lockIdentitiesBeforeSessions(ctx, tx, approverID, false); err != nil {
 		return nil, err
 	}
 

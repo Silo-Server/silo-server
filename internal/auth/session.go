@@ -428,7 +428,7 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	// does (see lockIdentitiesBeforeSessions).
 	var withdrawn int64
 	if sessionID == nil {
-		if err := lockIdentitiesBeforeSessions(ctx, tx, []int{userID}, false); err != nil {
+		if err := lockIdentitiesBeforeSessions(ctx, tx, userID, false); err != nil {
 			return 0, err
 		}
 		if withdrawn, err = withdrawDeviceSignInApprovalsInTransaction(ctx, tx, []int{userID}); err != nil {

@@ -46,7 +46,9 @@ const (
 // auth_sessions or device_login_requests, or deletes identities, accounts,
 // installations or profiles (whose foreign-key actions write them), keyed by
 // file and enclosing function, with the rule that keeps it from deadlocking
-// with a plugin uninstall.
+// with a plugin uninstall. The test below checks that every writer is listed
+// here, not that it keeps the rule named beside it: the rule is for whoever
+// adds or changes a writer to read and check.
 var signInRowWriters = map[string]string{
 	// The uninstall itself: installation, then identities (cascade), then
 	// device sign-in requests and sessions (SET NULL).
@@ -59,7 +61,6 @@ var signInRowWriters = map[string]string{
 	"internal/auth/repository.go:ReplaceTemporaryPassword":                     identitiesFirst,
 	"internal/auth/provider_recheck.go:applyAnswer":                            identitiesFirst,
 	"internal/auth/identity_repository.go:deleteIdentity":                      identitiesFirst,
-	"internal/auth/account_resolution.go:linkIdentityTx":                       identitiesFirst,
 	"internal/auth/device_login.go:Approve":                                    identitiesFirst,
 	"internal/auth/device_login.go:approveForProfile":                          identitiesFirst,
 	"internal/auth/device_login.go:poll":                                       identitiesFirst,
@@ -76,6 +77,9 @@ var signInRowWriters = map[string]string{
 	"internal/auth/session.go:UpdateLastSeen":                    oneRow,
 	"internal/auth/session.go:ExtendExpiresAt":                   oneRow,
 
+	// Inserts a new identity, which no uninstall can see yet, and gives it
+	// to the account's sessions that had none.
+	"internal/auth/account_resolution.go:linkIdentityTx":     noIdentityRows,
 	"internal/auth/owner.go:moveOwnership":                   noIdentityRows,
 	"internal/auth/repository.go:endImpersonationsInvolving": noIdentityRows,
 
