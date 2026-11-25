@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { SubtitleUploadForm } from "./SubtitleUploadForm";
@@ -67,5 +67,37 @@ describe("SubtitleUploadForm", () => {
 
     expect(await screen.findByRole("alert")).toHaveTextContent(/Unsupported file type/);
     expect(languageSelect).toHaveValue("de");
+  });
+
+  it("ignores a detection result that arrives after the file is rejected", async () => {
+    let finishDetection: (result: { language: string; source: "content" }) => void = () => {};
+    const detectLanguage = vi.fn(
+      () =>
+        new Promise<{ language: string; source: "content" }>((resolve) => {
+          finishDetection = resolve;
+        }),
+    );
+    const { container } = render(
+      <SubtitleUploadForm
+        mediaFileId={1}
+        upload={vi.fn(async () => {})}
+        detectLanguage={detectLanguage}
+        onSuccess={vi.fn()}
+        variant="player"
+      />,
+    );
+    const languageSelect = screen.getByRole("combobox", { name: "Upload language" });
+
+    chooseFile(container, new File(["WEBVTT\n"], "c-valid.vtt", { type: "text/vtt" }));
+    expect(languageSelect).toBeDisabled();
+    chooseFile(container, new File(["notes"], "notes.txt", { type: "text/plain" }));
+    expect(languageSelect).not.toBeDisabled();
+
+    await act(async () => finishDetection({ language: "fr", source: "content" }));
+
+    expect(languageSelect).toHaveValue("en");
+    expect(screen.queryByText(/Detected/)).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(/Unsupported file type/);
+    expect(screen.getByRole("button", { name: "Upload" })).toBeDisabled();
   });
 });
