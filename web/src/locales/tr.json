@@ -100346,6 +100346,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "İzlenen içerikleri gizle"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Her profil bu koleksiyonu, sayfasında, satırlarında ve içerik sayısında kendi izlediği içerikler olmadan görür. Hiçbir şey kaldırılmaz. İçerik sınırı olan akıllı bir koleksiyon önce içeriklerini seçer, bu yüzden daha az içerik gösterebilir."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

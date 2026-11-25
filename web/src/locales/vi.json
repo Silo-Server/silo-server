@@ -101610,6 +101610,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ẩn các tựa đã xem"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Mỗi hồ sơ sẽ thấy bộ sưu tập này mà không có các tựa hồ sơ đó đã xem, trên trang, trong các hàng và trong số lượng của bộ sưu tập. Không có gì bị xóa. Bộ sưu tập thông minh có giới hạn số tựa sẽ chọn tựa trước, nên có thể hiển thị ít tựa hơn."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

@@ -109831,6 +109831,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "הסתרת כותרים שנצפו"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "כל פרופיל רואה את האוסף הזה בלי הכותרים שצפה בהם: בדף האוסף, בשורות שלו ובספירת הכותרים שלו. שום דבר לא מוסר. אוסף חכם עם מגבלת כותרים בוחר קודם את הכותרים שלו, ולכן ייתכן שיוצגו בו פחות כותרים."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

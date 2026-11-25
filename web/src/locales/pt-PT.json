@@ -111011,6 +111011,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ocultar títulos vistos"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Cada perfil vê esta coleção sem os títulos que já viu, na respetiva página, nas filas e na contagem. Nada é removido. Uma coleção inteligente com limite de títulos escolhe primeiro os títulos, pelo que pode mostrar menos."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

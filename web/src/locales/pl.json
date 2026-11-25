@@ -121286,6 +121286,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Ukryj obejrzane tytuły"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Każdy profil widzi tę kolekcję bez obejrzanych przez siebie tytułów: na stronie kolekcji, w swoich rzędach i w liczbie tytułów. Nic nie jest usuwane. Inteligentna kolekcja z limitem tytułów najpierw wybiera tytuły, więc może ich pokazywać mniej."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

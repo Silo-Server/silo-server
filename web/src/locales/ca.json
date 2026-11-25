@@ -110947,6 +110947,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Amaga els títols vistos"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Cada perfil veu aquesta col·lecció sense els títols que ha vist, a la seva pàgina, a les seves files i al seu recompte. No s’elimina res. Una col·lecció intel·ligent amb un límit de títols tria primer els seus títols, de manera que en pot mostrar menys."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

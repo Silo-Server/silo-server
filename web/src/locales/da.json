@@ -101280,6 +101280,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Skjul sete titler"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Hver profil ser denne samling uden de titler, den har set, på samlingens side, i sine rækker og i sit antal. Intet bliver fjernet. En smart samling med en titelgrænse vælger sine titler først, så den kan vise færre."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

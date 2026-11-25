@@ -120784,6 +120784,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Skryť pozreté tituly"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Každý profil vidí túto kolekciu bez titulov, ktoré pozrel – na stránke kolekcie, v jej radoch aj v jej počte. Nič sa neodstráni. Inteligentná kolekcia s limitom titulov najprv vyberie svoje tituly, takže ich môže zobraziť menej."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

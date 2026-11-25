@@ -110967,6 +110967,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "Sakrij pogledane naslove"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "Svaki profil vidi ovu kolekciju bez naslova koje je pogledao, na stranici kolekcije, u njezinim retcima i u broju naslova. Ništa se ne uklanja. Pametna kolekcija s ograničenjem broja naslova najprije odabire naslove, pa može prikazati manje."
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,

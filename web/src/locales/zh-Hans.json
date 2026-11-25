@@ -92591,6 +92591,18 @@
       ]
     }
   ],
+  "web.collections.details.hideWatched": [
+    {
+      "type": 0,
+      "value": "隐藏已观看的作品"
+    }
+  ],
+  "web.collections.details.hideWatchedHelp": [
+    {
+      "type": 0,
+      "value": "每个个人资料看到的此合集都不包含它已观看的作品，在合集页面、行和数量中都是如此。不会移除任何内容。设有作品数量上限的智能合集会先选出作品，因此显示的作品可能更少。"
+    }
+  ],
   "web.collections.details.label": [
     {
       "type": 0,
