@@ -206,7 +206,7 @@ func (s *Service) openKeySessionTx(ctx context.Context, tx pgx.Tx, user *models.
 	if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
 		return nil, fmt.Errorf("creating key session: %w", err)
 	}
-	if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET last_used_at = NOW() WHERE id = $1`, key.ID); err != nil {
+	if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET last_used_at = clock_timestamp() WHERE id = $1`, key.ID); err != nil {
 		return nil, fmt.Errorf("recording device key use: %w", err)
 	}
 	pair, err := s.generateTokenPair(Claims{

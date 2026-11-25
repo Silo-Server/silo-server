@@ -430,3 +430,18 @@ func bindAccountKeysToIdentity(ctx context.Context, tx sessionExecQuerier, userI
 	}
 	return nil
 }
+
+// deleteAccountKeysTx deletes every key of an account being deleted, in tx,
+// which holds the account row lock: the device keys first, which ends the
+// sessions they opened by cascade (key rows before sessions, as everywhere),
+// then the person keys. The cascade from the account's delete then finds no
+// key rows for the identity trigger to update.
+func deleteAccountKeysTx(ctx context.Context, tx sessionExecQuerier, userID int) error {
+	if _, err := tx.Exec(ctx, `DELETE FROM auth_device_keys WHERE user_id = $1`, userID); err != nil {
+		return fmt.Errorf("deleting device keys: %w", err)
+	}
+	if _, err := tx.Exec(ctx, `DELETE FROM auth_person_keys WHERE user_id = $1`, userID); err != nil {
+		return fmt.Errorf("deleting person keys: %w", err)
+	}
+	return nil
+}

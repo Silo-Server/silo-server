@@ -59,10 +59,18 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	if err != nil {
 		return current, err
 	}
-	// App keys go before sessions, the order every sweep takes
-	// (revokeAccountKeysTx): deleting the account removes them, and a
-	// promotion revokes them (revokeCredentialsIssuedToNonAdmin).
-	if input == nil || promotes(before, input) {
+	// App keys go before sessions, the order every sweep takes. Deleting
+	// the account deletes them outright: revoked rows would be updated again
+	// by the identity trigger when the delete cascades to the account's
+	// identities, and that second update re-checks a user_id whose row is
+	// already gone. A promotion revokes them
+	// (revokeCredentialsIssuedToNonAdmin).
+	switch {
+	case input == nil:
+		if err = deleteAccountKeysTx(ctx, tx, id); err != nil {
+			return current, err
+		}
+	case promotes(before, input):
 		if err = revokeAccountKeysTx(ctx, tx, id); err != nil {
 			return current, err
 		}

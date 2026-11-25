@@ -352,8 +352,11 @@ func appKeyProblem(err error) error {
 	}
 	var retry *auth.KeyRetryError
 	if errors.As(err, &retry) {
-		return NewProblem(TypeRateLimited, "This device is waiting for approval; ask again later.").
-			WithRetryAfter(int(retry.RetryAfter.Seconds()))
+		detail := "This device is waiting for approval; ask again later."
+		if retry.Changed {
+			detail = "This device's key changed while signing in; ask again."
+		}
+		return NewProblem(TypeRateLimited, detail).WithRetryAfter(int(retry.RetryAfter.Seconds()))
 	}
 	if code := appkeys.CodeOf(err); code != "" {
 		switch code.Stage() {

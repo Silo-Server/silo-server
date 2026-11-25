@@ -846,18 +846,22 @@ func TestRefusalSweepAndIdentityDeleteDontDeadlockDB(t *testing.T) {
 	if _, err := deleting.Exec(ctx, `SELECT 1 FROM auth_device_keys WHERE id = $1 FOR UPDATE`, bound.ID); err != nil {
 		t.Fatal(err)
 	}
+	var deletingPID int
+	if err := deleting.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&deletingPID); err != nil {
+		t.Fatal(err)
+	}
 	sweep := make(chan error, 1)
 	go func() {
 		_, err := env.svc.Refresh(ctx, pair.RefreshToken)
 		sweep <- err
 	}()
 	// Wait until the sweep is queued behind the key row this transaction
-	// holds: another backend waiting on a lock.
+	// holds: a backend blocked by this transaction and nothing else.
 	deadline := time.Now().Add(15 * time.Second)
 	for {
 		var waiting bool
-		if err := env.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
-			WHERE NOT l.granted AND a.datname = current_database() AND a.query ILIKE '%auth_device_keys%')`).Scan(&waiting); err != nil {
+		if err := env.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE $1 = ANY (pg_blocking_pids(pid)))`, deletingPID).Scan(&waiting); err != nil {
 			t.Fatal(err)
 		}
 		if waiting {
@@ -883,5 +887,109 @@ func TestRefusalSweepAndIdentityDeleteDontDeadlockDB(t *testing.T) {
 	}
 	if !env.keyRevoked(t, bound.ID) {
 		t.Fatal("the bound key survived both")
+	}
+}
+
+// keyedAccount gives the env's provider account keys bound to its identity,
+// a live session opened by the device key, and a device sign-in approved in
+// advance from that session. It returns the enrollment and the pre-approval.
+func (e *keyEnv) keyedAccount(t *testing.T) (*KeySignInResult, string) {
+	t.Helper()
+	_, enrolled := e.enrollFromProvider(t)
+	devices := NewDeviceLoginService(e.pool, NewUserRepository(e.pool), e.jwt, NewSessionRepository(e.pool), nil, nil)
+	_, binding := preapprovalSecret(t)
+	ctx := WithClaims(t.Context(), &Claims{UserID: e.user.ID, Role: e.user.Role, SessionID: enrolled.Pair.SessionID, TokenType: TokenTypeAccess})
+	preapproved, err := devices.Preapprove(ctx, DevicePreapprovalInput{DeviceName: "TV " + e.suffix, Binding: binding}, e.user.ID)
+	if err != nil {
+		t.Fatalf("preapprove from the key session: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.pool.Exec(context.WithoutCancel(t.Context()), `DELETE FROM device_login_requests WHERE id = $1`, preapproved.ID)
+	})
+	return enrolled, preapproved.ID
+}
+
+// Deleting an identity, here through the cascade of uninstalling its plugin
+// (which takes no account lock), never waits for the account's row. Every
+// path that holds the account row and then waits on a key, a session or a
+// pre-approval would otherwise deadlock with it. The trigger leaves nothing
+// for a later statement in the same transaction to update again; a second
+// update would re-check the row's foreign keys and share-lock the account.
+func TestIdentityDeleteNeverWaitsForAccountDB(t *testing.T) {
+	env := newKeyEnv(t, "keynowait")
+	ctx := t.Context()
+	enrolled, preapproval := env.keyedAccount(t)
+
+	holder, err := env.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = holder.Rollback(context.WithoutCancel(ctx)) }()
+	if _, err := holder.Exec(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, env.user.ID); err != nil {
+		t.Fatal(err)
+	}
+	err = pgx.BeginFunc(ctx, env.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, `SET LOCAL lock_timeout = '3s'`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(ctx, `DELETE FROM plugin_installations WHERE id = $1`, env.installationID)
+		return err
+	})
+	if err != nil {
+		t.Fatalf("uninstall while the account row is held: %v", err)
+	}
+	if err := holder.Rollback(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if !env.keyRevoked(t, enrolled.DeviceID) || env.sessionLive(t, enrolled.Pair.SessionID, env.user.ID) {
+		t.Fatal("the key or its session survived the uninstall")
+	}
+	if status := preapprovalStatus(t, env.pool, preapproval); status != DeviceLoginStatusDenied {
+		t.Fatalf("pre-approval status = %s, want denied", status)
+	}
+}
+
+// An account holding provider-bound keys, a key session, a pre-approval
+// made from it, and a second identity can be deleted, and nothing of it is
+// left in the key, session or device sign-in tables.
+func TestAccountWithKeysCanBeDeletedDB(t *testing.T) {
+	env := newKeyEnv(t, "keydelete")
+	ctx := t.Context()
+	env.keyedAccount(t)
+	var otherInstallation int
+	if err := env.pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+		VALUES ($1, '0', '/nonexistent/key-delete-test', true, 'manual', 'plugin') RETURNING id`, "key-delete-"+env.suffix).Scan(&otherInstallation); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = env.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM plugin_installations WHERE id = $1`, otherInstallation)
+	})
+	var otherIdentity int64
+	if err := env.pool.QueryRow(ctx, `INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id)
+		VALUES ($1, $2, $3) RETURNING id`, otherInstallation, "other|"+env.suffix, env.user.ID).Scan(&otherIdentity); err != nil {
+		t.Fatal(err)
+	}
+	other, err := env.signIn.keys.InsertDeviceKey(ctx, NewDeviceKey{UserID: env.user.ID, PublicKey: newTestKey(t).pub,
+		Kind: models.DeviceKeyKindDevice, Name: "Tablet", EnrolledVia: models.AppKeyEnrolledSession, IdentityID: &otherIdentity})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := env.svc.sessions.Create(ctx, models.AuthSession{UserID: env.user.ID, DeviceName: "Tablet",
+		ExpiresAt: time.Now().Add(time.Hour), DeviceKeyID: &other.ID, IdentityID: &otherIdentity, OpenedVia: models.SessionOpenedAppKey}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewUserRepository(env.pool).MutateAdminAccount(ctx, env.user.ID, -1, nil,
+		func(*models.User, pgx.Tx) (bool, error) { return true, nil }); err != nil {
+		t.Fatalf("delete an account with keys: %v", err)
+	}
+	for _, table := range []string{"auth_person_keys", "auth_device_keys", "auth_sessions", "plugin_auth_identities"} {
+		var left int
+		if err := env.pool.QueryRow(ctx, `SELECT COUNT(*) FROM `+table+` WHERE user_id = $1`, env.user.ID).Scan(&left); err != nil || left != 0 {
+			t.Fatalf("%s rows left = %d, %v", table, left, err)
+		}
+	}
+	var requests int
+	if err := env.pool.QueryRow(ctx, `SELECT COUNT(*) FROM device_login_requests WHERE approved_by_user_id = $1`, env.user.ID).Scan(&requests); err != nil || requests != 0 {
+		t.Fatalf("device sign-in requests still naming the account = %d, %v", requests, err)
 	}
 }

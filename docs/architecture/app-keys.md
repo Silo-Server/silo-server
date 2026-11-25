@@ -77,18 +77,32 @@ the key (below), so that sign-in answers `signature_invalid`. `enroll` and
 `PUT /auth/keys/person` lock the enrolling session's identity before the key
 rows and the session's own row last. Every sweep that revokes an account's
 keys and sessions together (a provider refusal, an email match, a promotion,
-an ownership move, deleting the account) revokes the keys first, then the
-sessions. Deleting an identity takes the identity, then the key rows bound to
-it and their sessions (the revoking trigger). Unlinking takes the account lock
-first (`UnlinkOwn` and `AdminUnlink`); uninstalling a plugin takes none, and
-the trigger then needs no account row either: it clears the keys' and
-sessions' `identity_id` itself, so the foreign key's `SET NULL` has nothing
-left to update and Postgres doesn't re-check the rows' `user_id`. So an
-uninstall that holds key rows and a sweep that holds the account row queue on
-the key rows instead of deadlocking
-(`TestRefusalSweepAndIdentityDeleteDontDeadlockDB`). Opening a session by key holds the account and key locks
-when it inserts the session, so a sign-in cannot create a live session after a
-concurrent revocation has ended the key's sessions.
+an ownership move) revokes the keys first, then the sessions. Deleting an
+account deletes its device keys (which ends their sessions by cascade) and
+then its person keys before it revokes the remaining sessions and deletes the
+account: revoked key rows would be updated again by the identity trigger when
+the delete cascades to the account's identities.
+
+Deleting an identity takes the identity, then the key rows bound to it, then
+the device sign-ins approved in advance from their sessions, then those
+sessions (the revoking trigger). Unlinking takes the account lock first
+(`UnlinkOwn` and `AdminUnlink`); uninstalling a plugin takes none, and the
+trigger never reads the account row. The rule that keeps it so: **the
+trigger leaves nothing for a later statement in the same transaction to
+update again.** When a transaction updates a row twice, Postgres re-checks
+the row's foreign keys on the second update, and for a row that names an
+account that share-locks the `users` row, which a sweep, a key sign-in or a
+password reset may hold while it waits on the same keys. So the trigger
+clears `identity_id` on the keys and sessions it revokes, and denies the
+pre-approvals of those sessions and clears their `approved_identity_id`, so
+that neither the foreign keys' `SET NULL` nor the sessions' pre-approval
+withdrawal trigger has anything left to change.
+`TestIdentityDeleteNeverWaitsForAccountDB` holds the account row and requires
+an uninstall to finish, and `TestRefusalSweepAndIdentityDeleteDontDeadlockDB`
+runs a refusal sweep against an identity delete. Opening a session by key
+holds the account and key locks when it inserts the session, so a sign-in
+cannot create a live session after a concurrent revocation has ended the
+key's sessions.
 
 ## Protocol
 

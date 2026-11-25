@@ -44,6 +44,9 @@ var (
 // than appkeys.PendingRetryInterval.
 type KeyRetryError struct {
 	RetryAfter time.Duration
+	// Changed marks a key whose provider binding changed while the request
+	// ran; the device asks again at once, not because it is waiting.
+	Changed bool
 }
 
 func (e *KeyRetryError) Error() string {
@@ -188,7 +191,7 @@ func (c lockedChain) session(ip string, expiry time.Time) KeySession {
 // between reading its binding and locking its row. The key is still good, so
 // the device is asked to try again on a fresh challenge, when it sees the
 // new binding; answering it as a bad key would make the device discard it.
-var errKeyBindingChanged = &KeyRetryError{RetryAfter: time.Second}
+var errKeyBindingChanged = &KeyRetryError{RetryAfter: time.Second, Changed: true}
 
 // keyChainError maps a failure of the provider locks in a key sign-in: an
 // identity deleted meanwhile has had its keys revoked by its trigger, so the
