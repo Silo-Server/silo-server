@@ -1292,6 +1292,11 @@ func newChiRouter(deps Dependencies) chi.Router {
 			profileHandler.Connections = &connectionstore.Store{Pool: deps.DB}
 			// And Jellyfin-compatible sessions.
 			profileHandler.JellyfinSessionPurger = jellycompat.NewSessionRepository(deps.DB, deps.SecretCipher)
+			// A profile set applies in one transaction only where the
+			// profiles live in that database too.
+			if shared, ok := deps.UserStoreProvider.(interface{ StoresAccountsIn(*pgxpool.Pool) bool }); ok {
+				profileHandler.ProfileSetAvailable = shared.StoresAccountsIn(deps.DB)
+			}
 		}
 		if watchlistRequestWithdrawer != nil {
 			profileHandler.WatchlistRequestWithdrawer = watchlistRequestWithdrawer

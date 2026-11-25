@@ -97,6 +97,9 @@ type ProfileHandler struct {
 	// RecWorker is told when an update changes a profile's access scope, so
 	// its recommendations are rebuilt under the new one. Optional.
 	RecWorker SignalsChangedNotifier
+	// ProfileSetAvailable turns the profile set on: the stores keep accounts
+	// in PostgreSQL, where a set applies in one transaction.
+	ProfileSetAvailable bool
 }
 
 // NewProfileHandler creates a new ProfileHandler.
