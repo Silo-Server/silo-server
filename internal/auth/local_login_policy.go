@@ -236,6 +236,23 @@ func primarySignInBindingSQL(alias string) string {
 	return alias + `.enabled AND NOT ` + plugins.AuthBindingIsNetworkSQL(alias+".plugin_installation_id", alias+".capability_id")
 }
 
+// primarySignInIdentitySQL is the SQL test that the plugin_auth_identities
+// row named by alias still signs its account in once passwords are off: its
+// installation is enabled with an enabled OIDC or LDAP binding
+// (primarySignInBindingSQL). A link only to a network provider is not one.
+func primarySignInIdentitySQL(alias string) string {
+	return `EXISTS (SELECT 1 FROM plugin_installations p
+		JOIN plugin_auth_bindings b ON b.plugin_installation_id = p.id AND ` + primarySignInBindingSQL("b") + `
+		WHERE p.id = ` + alias + `.plugin_installation_id AND p.enabled)`
+}
+
+// passwordSignsInSQL is the SQL test that the users row named by alias can
+// use a local password, as the sign-in path requires: password sign-in on
+// for the account and a password set.
+func passwordSignsInSQL(alias string) string {
+	return alias + `.local_password_login_enabled AND COALESCE(` + alias + `.password_hash, '') <> ''`
+}
+
 // Who loses password sign-in when the server turns it off, grouped by what
 // connects them to the provider at their first sign-in through it.
 const (
@@ -295,13 +312,46 @@ type LocalPasswordOffPage struct {
 	AdminLinkTotal  int
 }
 
+// localPasswordOffSQL answers LocalPasswordOffAccounts in one query: $1 is
+// whether email matching is on, $2 whether the email_match group is asked
+// for, $3 and $4 the last row of the previous page, $5 the row limit.
+func localPasswordOffSQL() string {
+	return `WITH affected AS (
+			SELECT u.id, COALESCE(u.username::text, '') AS username, COALESCE(u.email, '')::text AS email,
+				COALESCE(u.role, '') AS role, COALESCE(u.is_owner, false) AS is_owner,
+				CASE
+					WHEN ` + emailMatchCandidateSQL("u") + ` AND btrim(COALESCE(u.email, '')) <> '' THEN
+						CASE WHEN $1 THEN 'email_match' ELSE 'email_match_off' END
+					WHEN ` + emailMatchCandidateSQL("u") + ` THEN 'no_email'
+					ELSE 'administrator'
+				END AS reason
+			FROM users u
+			WHERE u.enabled AND ` + passwordSignsInSQL("u") + ` AND NOT u.break_glass
+				AND NOT EXISTS (SELECT 1 FROM plugin_auth_identities i WHERE i.user_id = u.id AND ` + primarySignInIdentitySQL("i") + `)),
+		totals AS (
+			SELECT COUNT(*) FILTER (WHERE reason = 'email_match') AS matched,
+				COUNT(*) FILTER (WHERE reason <> 'email_match') AS unmatched
+			FROM affected)
+		SELECT t.matched, t.unmatched, a.id, a.username, a.email, a.role, a.is_owner, a.reason
+		FROM totals t
+		LEFT JOIN LATERAL (
+			SELECT * FROM affected
+			WHERE (reason = 'email_match') = $2 AND (username, id) > ($3::text, $4::int)
+			ORDER BY username, id
+			LIMIT $5) a ON true
+		ORDER BY a.username, a.id`
+}
+
 // LocalPasswordOffAccounts answers who loses their way in when local
 // password sign-in is turned off: enabled accounts that can sign in with a
-// password today, are not break-glass (localPasswordPolicy exempts those),
-// and have no usable linked identity (usableIdentitySQL). Each is grouped by
-// whether email auto-match can link it at its first provider sign-in, with
-// the rule account resolution applies (emailMatchCandidateSQL). Both group
-// totals and the page come from one query, ordered by username.
+// password today (passwordSignsInSQL), are not break-glass
+// (localPasswordPolicy exempts those), and have no linked identity at an
+// enabled OIDC or LDAP provider (primarySignInIdentitySQL). Each is grouped
+// by whether email auto-match can link it at its first provider sign-in,
+// with the rule account resolution applies (emailMatchCandidateSQL); a link
+// to a network provider elsewhere does not stop that match. Both group
+// totals and the page come from one query, ordered by username (empty for
+// an account without one), then ID.
 func (s *IdentityService) LocalPasswordOffAccounts(ctx context.Context, q LocalPasswordOffQuery) (LocalPasswordOffPage, error) {
 	var page LocalPasswordOffPage
 	if q.Group != LocalPasswordOffEmailMatch && q.Group != LocalPasswordOffAdminLink {
@@ -321,29 +371,7 @@ func (s *IdentityService) LocalPasswordOffAccounts(ctx context.Context, q LocalP
 		matching = saved
 	}
 	page.EmailAutoMatch = matching
-	rows, err := s.pool.Query(ctx, `WITH affected AS (
-			SELECT u.id, u.username::text AS username, COALESCE(u.email, '')::text AS email, u.role, u.is_owner,
-				CASE
-					WHEN `+emailMatchCandidateSQL("u")+` AND btrim(COALESCE(u.email, '')) <> '' THEN
-						CASE WHEN $1 THEN 'email_match' ELSE 'email_match_off' END
-					WHEN `+emailMatchCandidateSQL("u")+` THEN 'no_email'
-					ELSE 'administrator'
-				END AS reason
-			FROM users u
-			WHERE u.enabled AND u.local_password_login_enabled AND NOT u.break_glass
-				AND NOT EXISTS (SELECT 1 FROM plugin_auth_identities i WHERE i.user_id = u.id AND `+usableIdentitySQL("i")+`)),
-		totals AS (
-			SELECT COUNT(*) FILTER (WHERE reason = 'email_match') AS matched,
-				COUNT(*) FILTER (WHERE reason <> 'email_match') AS unmatched
-			FROM affected)
-		SELECT t.matched, t.unmatched, a.id, a.username, a.email, a.role, a.is_owner, a.reason
-		FROM totals t
-		LEFT JOIN LATERAL (
-			SELECT * FROM affected
-			WHERE (reason = 'email_match') = $2 AND (username, id) > ($3::text, $4::int)
-			ORDER BY username, id
-			LIMIT $5) a ON true
-		ORDER BY a.username, a.id`,
+	rows, err := s.pool.Query(ctx, localPasswordOffSQL(),
 		matching, q.Group == LocalPasswordOffEmailMatch, q.AfterUsername, q.AfterID, q.Limit+1)
 	if err != nil {
 		return page, fmt.Errorf("listing accounts that lose password sign-in: %w", err)

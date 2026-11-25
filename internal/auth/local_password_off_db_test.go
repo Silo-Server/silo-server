@@ -38,8 +38,13 @@ func localPasswordOffOutcomes(t *testing.T, env *externalSignInEnv, matching *bo
 				t.Fatalf("%s page has %d rows, limit 1", group, len(page.Accounts))
 			}
 			for _, account := range page.Accounts {
-				if strings.HasSuffix(account.Username, env.suffix) {
-					label := strings.TrimSuffix(account.Username, "-"+env.suffix)
+				name := account.Username
+				if name == "" {
+					// An account without a username is known by its email.
+					name, _, _ = strings.Cut(account.Email, "@")
+				}
+				if strings.HasSuffix(name, env.suffix) {
+					label := strings.TrimSuffix(name, "-"+env.suffix)
 					if _, seen := out[label]; seen {
 						t.Fatalf("%s listed twice", label)
 					}
@@ -56,22 +61,40 @@ func localPasswordOffOutcomes(t *testing.T, env *externalSignInEnv, matching *bo
 	return out, totals
 }
 
-// TestLocalPasswordOffAccountsDB pins who the read lists before password
-// sign-in is turned off, and in which group, against the rules sign-in
-// applies: break-glass accounts keep their password, a usable linked
-// identity is a way in, and email auto-match links only ordinary accounts
-// with an email. A wrong predicate here tells an administrator an account
-// is safe when it is locked out, or the reverse.
-func TestLocalPasswordOffAccountsDB(t *testing.T) {
-	env := newExternalSignInEnv(t)
-	ctx := t.Context()
-	users := NewUserRepository(env.pool)
-	if _, err := env.pool.Exec(ctx, `UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID); err != nil {
+// exec runs one statement or fails the test.
+func (e *externalSignInEnv) exec(t *testing.T, sql string, args ...any) {
+	t.Helper()
+	if _, err := e.pool.Exec(t.Context(), sql, args...); err != nil {
 		t.Fatal(err)
 	}
-	matchOn, matchOff := true, false
-	_, before := localPasswordOffOutcomes(t, env, &matchOn)
+}
 
+// authInstallation seeds an auth plugin installation with one capability
+// whose auth_modes are modes (no capability row when empty) and its binding.
+func (e *externalSignInEnv) authInstallation(t *testing.T, label, capability, modes string, enabled bool) int {
+	t.Helper()
+	var id int
+	if err := e.pool.QueryRow(t.Context(), `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
+		VALUES ($1, '0', '/nonexistent/'||$1, true, 'manual', 'plugin') RETURNING id`, e.name(label)).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = e.pool.Exec(context.Background(), `DELETE FROM plugin_installations WHERE id = $1`, id)
+	})
+	if modes != "" {
+		e.exec(t, `INSERT INTO plugin_capabilities (plugin_installation_id, capability_type, capability_id, metadata)
+			VALUES ($1, 'auth_provider.v1', $2, jsonb_build_object('auth_modes', jsonb_build_array($3::text)))`, id, capability, modes)
+	}
+	e.exec(t, `INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, $2, $3)`, id, capability, enabled)
+	return id
+}
+
+// seedLocalPasswordOffAccounts seeds one account per rule the read applies,
+// each named for it, and answers the one linked only to a network provider.
+func seedLocalPasswordOffAccounts(t *testing.T, env *externalSignInEnv) *models.User {
+	t.Helper()
+	ctx := t.Context()
+	users := NewUserRepository(env.pool)
 	env.localAccount(t, "member", models.RoleUser)
 	env.localAccount(t, "admin", models.RoleAdmin)
 	glass := env.localAccount(t, "glass", models.RoleAdmin)
@@ -83,31 +106,45 @@ func TestLocalPasswordOffAccountsDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	noEmail := env.localAccount(t, "no-email", models.RoleUser)
-	if _, err := env.pool.Exec(ctx, `UPDATE users SET email = NULL WHERE id = $1`, noEmail.ID); err != nil {
-		t.Fatal(err)
+	env.exec(t, `UPDATE users SET email = NULL WHERE id = $1`, noEmail.ID)
+	// Links seeded straight in keep the password on, as a network link or a
+	// break-glass link does.
+	link := func(label string, installation int) *models.User {
+		user := env.localAccount(t, label, models.RoleUser)
+		if _, err := insertIdentity(ctx, env.pool, user.ID, installation, env.identity(label+"-idp"), false, false); err != nil {
+			t.Fatal(err)
+		}
+		return user
 	}
-	// Seeded straight in, so the links keep the password on as a network
-	// link or a break-glass link does.
-	linked := env.localAccount(t, "linked", models.RoleUser)
-	if _, err := insertIdentity(ctx, env.pool, linked.ID, env.installationID, env.identity("linked-idp"), false, false); err != nil {
-		t.Fatal(err)
-	}
-	var oldProvider int
-	if err := env.pool.QueryRow(ctx, `INSERT INTO plugin_installations (plugin_id, version, install_path, enabled, update_policy, kind)
-		VALUES ($1, '0', '/nonexistent/local-password-off-test', true, 'manual', 'plugin') RETURNING id`,
-		"local-password-off-"+env.suffix).Scan(&oldProvider); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_, _ = env.pool.Exec(context.WithoutCancel(ctx), `DELETE FROM plugin_installations WHERE id = $1`, oldProvider)
-	})
-	if _, err := env.pool.Exec(ctx, `INSERT INTO plugin_auth_bindings (plugin_installation_id, capability_id, enabled) VALUES ($1, 'oidc', false)`, oldProvider); err != nil {
-		t.Fatal(err)
-	}
-	stale := env.localAccount(t, "stale-link", models.RoleUser)
-	if _, err := insertIdentity(ctx, env.pool, stale.ID, oldProvider, env.identity("stale-idp"), false, false); err != nil {
-		t.Fatal(err)
-	}
+	link("linked", env.installationID)
+	link("stale-link", env.authInstallation(t, "old-provider", "oidc", "", false))
+	// A link only to a network provider signs in only from that network
+	// once passwords are off.
+	networkLinked := link("network-link", env.authInstallation(t, "tailnet", "tailnet", "network", true))
+	// The flag alone is not a password that signs in.
+	noHash := env.localAccount(t, "no-hash", models.RoleUser)
+	env.exec(t, `UPDATE users SET password_hash = '' WHERE id = $1`, noHash.ID)
+	// A username is optional; such an account sorts first and must still
+	// appear on exactly one page.
+	noUsername := env.localAccount(t, "no-username", models.RoleUser)
+	env.exec(t, `UPDATE users SET username = NULL WHERE id = $1`, noUsername.ID)
+	return networkLinked
+}
+
+// TestLocalPasswordOffAccountsDB pins who the read lists before password
+// sign-in is turned off, and in which group, against the rules sign-in
+// applies: break-glass accounts keep their password, a usable linked
+// identity is a way in, and email auto-match links only ordinary accounts
+// with an email. A wrong predicate here tells an administrator an account
+// is safe when it is locked out, or the reverse.
+func TestLocalPasswordOffAccountsDB(t *testing.T) {
+	env := newExternalSignInEnv(t)
+	ctx := t.Context()
+	env.exec(t, `UPDATE plugin_auth_bindings SET enabled = true WHERE plugin_installation_id = $1`, env.installationID)
+	matchOn, matchOff := true, false
+	_, before := localPasswordOffOutcomes(t, env, &matchOn)
+
+	networkLinked := seedLocalPasswordOffAccounts(t, env)
 
 	emailMatch := localPasswordOffOutcome{LocalPasswordOffEmailMatch, LocalPasswordOffReasonEmailMatch}
 	for _, tc := range []struct {
@@ -119,6 +156,8 @@ func TestLocalPasswordOffAccountsDB(t *testing.T) {
 			"setup-complete": emailMatch,
 			"member":         emailMatch,
 			"stale-link":     emailMatch,
+			"network-link":   emailMatch,
+			"no-username":    emailMatch,
 			"admin":          {LocalPasswordOffAdminLink, LocalPasswordOffReasonAdministrator},
 			"no-email":       {LocalPasswordOffAdminLink, LocalPasswordOffReasonNoEmail},
 		}},
@@ -126,6 +165,8 @@ func TestLocalPasswordOffAccountsDB(t *testing.T) {
 			"setup-complete": {LocalPasswordOffAdminLink, LocalPasswordOffReasonEmailMatchOff},
 			"member":         {LocalPasswordOffAdminLink, LocalPasswordOffReasonEmailMatchOff},
 			"stale-link":     {LocalPasswordOffAdminLink, LocalPasswordOffReasonEmailMatchOff},
+			"network-link":   {LocalPasswordOffAdminLink, LocalPasswordOffReasonEmailMatchOff},
+			"no-username":    {LocalPasswordOffAdminLink, LocalPasswordOffReasonEmailMatchOff},
 			"admin":          {LocalPasswordOffAdminLink, LocalPasswordOffReasonAdministrator},
 			"no-email":       {LocalPasswordOffAdminLink, LocalPasswordOffReasonNoEmail},
 		}},
@@ -141,11 +182,22 @@ func TestLocalPasswordOffAccountsDB(t *testing.T) {
 				}
 			}
 			if *tc.matching {
-				if totals[0]-before[0] != 2 || totals[1]-before[1] != 2 {
-					t.Errorf("totals %v moved from %v; want +2 email_match (member, stale-link), +2 admin_link", totals, before)
+				if totals[0]-before[0] != 4 || totals[1]-before[1] != 2 {
+					t.Errorf("totals %v moved from %v; want +4 email_match, +2 admin_link", totals, before)
 				}
 			}
 		})
+	}
+
+	// Email matching does connect the network-linked account: its
+	// "already linked" check looks only at the provider signing in.
+	verified := true
+	identity := env.identity("network-match")
+	identity.Email = networkLinked.Email
+	identity.EmailVerified = &verified
+	env.setSetting(t, config.AuthEmailAutoMatchSettingKey, "true")
+	if user, err := env.resolve(t, identity, false, 0); err != nil || user.ID != networkLinked.ID {
+		t.Fatalf("email match of the network-linked account = %+v, %v", user, err)
 	}
 
 	// Without an override the saved setting decides.
