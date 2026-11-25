@@ -165,7 +165,7 @@ type ProfileSetMember struct {
 type ProfileSetOverride struct {
 	SyncID string          `json:"sync_id" format:"uuid" example:"0f8fad5b-d9cb-469f-a165-70867728950e"`
 	Field  string          `json:"field" doc:"An item field name, or settings.<key>" example:"max_content_rating"`
-	Value  ProfileSetValue `json:"value"`
+	Value  ProfileSetValue `json:"value,omitempty" doc:"The value this server holds, as a set item encodes it. pin is \"set\" or \"clear\", never a PIN. Absent for a setting the owner reset, which has no profile value here"`
 }
 
 // ProfileSetSkippedSetting is a known setting whose value this server
@@ -183,8 +183,8 @@ type ProfileSetApplied struct {
 	AwaitingLibraries      []string                   `json:"awaiting_libraries" doc:"Child profiles with library limits and no libraries yet, waiting for the person to pick them"`
 	AwaitingPictures       []string                   `json:"awaiting_pictures" doc:"Items whose picture this server doesn't have: a sha256 picture not uploaded here, or a preset it doesn't know. The profile keeps its old picture"`
 	AwaitingPins           []string                   `json:"awaiting_pins" doc:"Profiles created from keep that still have no PIN"`
-	HiddenByOwner          []string                   `json:"hidden_by_owner" doc:"Profiles the owner removed on this server; always empty today"`
-	Overrides              []ProfileSetOverride       `json:"overrides" doc:"Values the owner set on this server; always empty today"`
+	HiddenByOwner          []string                   `json:"hidden_by_owner" doc:"Items the owner removed on this server; the set did not bring them back"`
+	Overrides              []ProfileSetOverride       `json:"overrides" doc:"Values the owner set on this server for the set's profiles; the set left them as they are"`
 	SkippedSettings        []ProfileSetSkippedSetting `json:"skipped_settings" doc:"Known settings whose value this server refused; it kept its own value"`
 	JellyfinBareNameSignIn *bool                      `json:"jellyfin_bare_name_sign_in,omitempty" doc:"Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile, as the account's profiles stand after the set: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off" example:"true"`
 }
@@ -223,7 +223,7 @@ type ProfileSetHeldItem struct {
 	RequireAdvisoryAge bool                    `json:"require_advisory_age" example:"false"`
 	RequestsBlocked    bool                    `json:"requests_blocked" example:"false"`
 	Settings           ProfileSetSettings      `json:"settings"`
-	ChangedHere        []ProfileSetFieldChange `json:"changed_here" doc:"Fields edited on this server outside a set since the last set it accepted; always empty today"`
+	ChangedHere        []ProfileSetFieldChange `json:"changed_here" doc:"Fields edited on this server outside a set and not yet settled: by account until the next set this server accepts, by owner until the owner's value is replaced"`
 }
 
 // ProfileSetLocal is a profile on the account that is not part of the set.
@@ -237,11 +237,12 @@ type ProfileSetLocal struct {
 type ProfileSetHeld struct {
 	Version                int64                `json:"version" doc:"The version of the last set this server accepted; 0 when it never took one" example:"7"`
 	Items                  []ProfileSetHeldItem `json:"items"`
-	DeletedHere            []ProfileSetDeletion `json:"deleted_here" doc:"Profiles of the set deleted on this server outside a set; always empty today"`
-	Overrides              []ProfileSetOverride `json:"overrides" doc:"Values the owner set on this server; always empty today"`
+	DeletedHere            []ProfileSetDeletion `json:"deleted_here" doc:"Profiles of the set deleted on this server outside a set"`
+	Overrides              []ProfileSetOverride `json:"overrides" doc:"Values the owner set on this server; a set leaves them as they are"`
+	HiddenByOwner          []string             `json:"hidden_by_owner" doc:"Profiles the owner removed on this server; a set does not bring them back"`
 	LocalOnly              []ProfileSetLocal    `json:"local_only" doc:"Profiles on this account that are not part of the set"`
 	JellyfinBareNameSignIn *bool                `json:"jellyfin_bare_name_sign_in,omitempty" doc:"Whether signing in on the Jellyfin-compatible surface with the bare account name (no #profile) picks a profile as the account's profiles now stand: true when exactly one profile is named like the account, or else exactly one profile has no PIN. Absent while that surface is off" example:"true"`
-	EditsToken             string               `json:"edits_token" doc:"Names the person's own edits on this server that no set has settled; empty when there are none. A set sends it back as edits_seen" example:""`
+	EditsToken             string               `json:"edits_token" doc:"Names the person's own edits on this server that no set has settled (the by account entries of changed_here and deleted_here); empty when there are none. A newer set must send it back as edits_seen while it is not empty" example:"e1.mFzDq0dX7eTsc3m6SfN0Lw1o2s0kHqgV"`
 }
 
 // ProfileSetGetInput is the getProfileSet request.
@@ -264,7 +265,8 @@ const putProfileSetDescription = "Makes the account's household profiles match a
 	"Sessions opened by device sign-in, by another app's key, or by an administrator acting as the account, remote-playback handoffs, and sessions older than the record of how sessions open are 403 permission_denied; an API key carries no login session and is 401 authentication_required. In demo mode a non-administrator is 403 permission_denied in both forms. " +
 	"The first item is the main profile; items match profiles by sync_id, then by pairs, and are otherwise created in set order up to the household's profile limit (the rest are left_off; nothing is deleted to fit). " +
 	"A profile holding a sync_id the set no longer has is deleted with everything that belongs to it; a profile with no sync_id that pairs does not name is left alone. " +
-	"Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones, and a set without the person's latest edits (edits_seen) are 409 profile_set_stale; the same version and content again answers 200 and writes nothing. " +
+	"Only a newer version changes anything: an older version, the same version with other content, the same version whose PINs differ from the stored ones (a PIN the owner set here is not compared), and a newer set whose edits_seen is not getProfileSet's current edits_token while that token is not empty are 409 profile_set_stale, with nothing written; the same version and content again answers 200 and writes nothing. " +
+	"A field the owner set on this server is left as it is and listed in overrides; an item the owner removed here is not created or paired and is listed in hidden_by_owner. An accepted newer set settles the account's edits its edits_seen named. " +
 	"A set that changes the main profile's PIN ends every X-Profile-Token minted for its old PIN, the caller's included. " +
 	"A malformed member is 422 validation_failed at its member (at body.payload in the signed form); a new item named like a profile outside the set is 422 with code name_conflict. " +
 	"Spends the per-address profile_set rate-limit budget; the signed form also spends its challenge. A body over 256 KiB is 413 payload_too_large. " +
@@ -283,7 +285,10 @@ func registerProfileSet(reg *Registry) {
 
 	get := humaOp(http.MethodGet, Prefix+"/profiles/set", "getProfileSet", "profiles",
 		"Read the account's profile set as this server holds it.")
-	get.Description = "The same sessions as putProfileSet's session form may read it, without the main profile's PIN. An account that never took a set answers version 0, no items, and every profile in local_only. changed_here, deleted_here and overrides are always empty today. Strong ETag; If-None-Match answers 304. 501 capability_unsupported where profiles are not kept in PostgreSQL."
+	get.Description = "The same sessions as putProfileSet's session form may read it, without the main profile's PIN. An account that never took a set answers version 0, no items, and every profile in local_only. " +
+		"changed_here and deleted_here list edits made on this server outside a set: by account for the account's own sessions, by owner for an administrator. The next accepted set settles the account ones; edits_token names them. " +
+		"overrides lists the owner's values, which a set leaves as they are until the account edits that field here; hidden_by_owner lists profiles the owner removed, which a set does not bring back. " +
+		"Strong ETag; If-None-Match answers 304. 501 capability_unsupported where profiles are not kept in PostgreSQL."
 	get.Errors = []int{http.StatusForbidden, http.StatusNotImplemented}
 	Register(reg, Operation{Operation: get, Class: ClassProfileScoped, ProfileOptional: true, ServiceBacked: true, Conditional: true}, reg.getProfileSet)
 }
@@ -413,7 +418,7 @@ func profileSetProblem(err error, signed bool) error {
 	case errors.Is(err, handlers.ErrProfileSetNoPrimary):
 		return NewProblem(TypeConflict, "This account's profiles are in a state the server can't apply a profile set to: it has profiles but no main profile.")
 	case errors.Is(err, handlers.ErrProfileSetStale):
-		return NewProblem(TypeProfileSetStale, "This server holds a newer profile set, or the same version with other content; read it and send a newer one.")
+		return NewProblem(TypeProfileSetStale, "This server holds a newer profile set, other content at the same version, or edits on this server the set has not seen; read it and send a newer one.")
 	case errors.Is(err, auth.ErrProfileSetAdminAccount):
 		return NewProblem(TypePermissionDenied, "An administrator's profiles change only from a session verified as the main profile.")
 	case errors.Is(err, access.ErrProfileUnverified):
@@ -431,7 +436,7 @@ func profileSetAppliedOf(r handlers.ProfileSetResult) ProfileSetApplied {
 	out := ProfileSetApplied{
 		Version: r.Version, LeftOff: NonNil(r.LeftOff), AwaitingLibraries: NonNil(r.AwaitingLibraries),
 		AwaitingPictures: NonNil(r.AwaitingPictures), AwaitingPins: NonNil(r.AwaitingPins),
-		HiddenByOwner: []string{}, Overrides: []ProfileSetOverride{},
+		HiddenByOwner: NonNil(r.HiddenByOwner), Overrides: profileSetOverridesOf(r.Overrides),
 		Profiles: make([]ProfileSetMember, 0, len(r.Profiles)), SkippedSettings: make([]ProfileSetSkippedSetting, 0, len(r.SkippedSettings)),
 		JellyfinBareNameSignIn: r.JellyfinBareNameSignIn,
 	}
@@ -485,8 +490,8 @@ func profileSetTag(body ProfileSetHeld) (EntityTag, error) {
 func profileSetHeldOf(h handlers.ProfileSetHeld) ProfileSetHeld {
 	out := ProfileSetHeld{
 		Version: h.Version, Items: make([]ProfileSetHeldItem, 0, len(h.Items)),
-		DeletedHere: []ProfileSetDeletion{}, Overrides: []ProfileSetOverride{},
-		LocalOnly: make([]ProfileSetLocal, 0, len(h.LocalOnly)), EditsToken: h.EditsToken,
+		DeletedHere: make([]ProfileSetDeletion, 0, len(h.DeletedHere)), Overrides: profileSetOverridesOf(h.Overrides),
+		HiddenByOwner: NonNil(h.HiddenByOwner), LocalOnly: make([]ProfileSetLocal, 0, len(h.LocalOnly)), EditsToken: h.EditsToken,
 		JellyfinBareNameSignIn: h.JellyfinBareNameSignIn,
 	}
 	for _, item := range h.Items {
@@ -508,11 +513,30 @@ func profileSetHeldOf(h handlers.ProfileSetHeld) ProfileSetHeld {
 			SyncID: item.SyncID, ID: ID(item.ID), Position: item.Position, Name: item.Name, Picture: item.Picture,
 			HasPIN: item.HasPIN, IsChild: item.IsChild, MaxContentRating: item.MaxContentRating, MaxAdvisoryAge: age,
 			RequireAdvisoryAge: item.RequireAdvisoryAge, RequestsBlocked: item.RequestsBlocked, Settings: settings,
-			ChangedHere: []ProfileSetFieldChange{},
+			ChangedHere: profileSetChangesOf(item.ChangedHere),
 		})
+	}
+	for _, d := range h.DeletedHere {
+		out.DeletedHere = append(out.DeletedHere, ProfileSetDeletion{SyncID: d.SyncID, At: NewInstant(d.At), By: d.By})
 	}
 	for _, local := range h.LocalOnly {
 		out.LocalOnly = append(out.LocalOnly, ProfileSetLocal{ID: ID(local.ID), Name: local.Name, HasPIN: local.HasPIN})
+	}
+	return out
+}
+
+func profileSetChangesOf(changes []handlers.ProfileSetFieldChange) []ProfileSetFieldChange {
+	out := make([]ProfileSetFieldChange, 0, len(changes))
+	for _, c := range changes {
+		out = append(out, ProfileSetFieldChange{Field: c.Field, At: NewInstant(c.At), By: c.By})
+	}
+	return out
+}
+
+func profileSetOverridesOf(overrides []handlers.ProfileSetOverride) []ProfileSetOverride {
+	out := make([]ProfileSetOverride, 0, len(overrides))
+	for _, o := range overrides {
+		out = append(out, ProfileSetOverride{SyncID: o.SyncID, Field: o.Field, Value: ProfileSetValue(bytes.Clone(o.Value))})
 	}
 	return out
 }

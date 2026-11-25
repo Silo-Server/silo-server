@@ -13,6 +13,7 @@ import (
 
 	"github.com/Silo-Server/silo-server/internal/access"
 	"github.com/Silo-Server/silo-server/internal/jellycompat"
+	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/settingscontract"
 	"github.com/Silo-Server/silo-server/internal/userstore"
 )
@@ -91,6 +92,12 @@ type ProfileSetResult struct {
 	AwaitingPictures  []string
 	AwaitingPins      []string
 	SkippedSettings   []ProfileSetSkippedSetting
+	// HiddenByOwner is the set's items the owner removed on this server,
+	// which the set did not bring back.
+	HiddenByOwner []string
+	// Overrides is the values the owner set on this server for the set's
+	// profiles, which the set left alone.
+	Overrides []ProfileSetOverride
 	// JellyfinBareNameSignIn is whether the bare account name signs in on
 	// the Jellyfin-compatible surface as the profiles now stand; nil while
 	// that surface is off.
@@ -111,6 +118,9 @@ type ProfileSetHeldItem struct {
 	RequireAdvisoryAge bool
 	RequestsBlocked    bool
 	Settings           map[string]json.RawMessage
+	// ChangedHere is the profile's fields edited on this server outside a
+	// set and not yet settled by one.
+	ChangedHere []ProfileSetFieldChange
 }
 
 // ProfileSetLocal is a profile on the account outside the set.
@@ -122,10 +132,13 @@ type ProfileSetLocal struct {
 
 // ProfileSetHeld is the set as this server holds it.
 type ProfileSetHeld struct {
-	Version    int64
-	Items      []ProfileSetHeldItem
-	LocalOnly  []ProfileSetLocal
-	EditsToken string
+	Version       int64
+	Items         []ProfileSetHeldItem
+	LocalOnly     []ProfileSetLocal
+	DeletedHere   []ProfileSetDeletion
+	Overrides     []ProfileSetOverride
+	HiddenByOwner []string
+	EditsToken    string
 	// JellyfinBareNameSignIn is as on ProfileSetResult.
 	JellyfinBareNameSignIn *bool
 }
@@ -166,7 +179,9 @@ func (h *ProfileHandler) HeldProfileSet(ctx context.Context, userID int) (Profil
 	if err != nil {
 		return ProfileSetHeld{}, err
 	}
-	held := ProfileSetHeld{Version: snap.State.Version, EditsToken: profileSetEditsToken(snap)}
+	edits := newProfileSetEdits(snap.Edits)
+	held := ProfileSetHeld{Version: snap.State.Version, EditsToken: profileSetEditsToken(snap),
+		DeletedHere: edits.deletedHere(), HiddenByOwner: edits.hiddenByOwner()}
 	rows := slices.Clone(snap.Rows)
 	slices.SortStableFunc(rows, func(a, b userstore.ProfileSetRow) int { return a.SyncPosition - b.SyncPosition })
 	for i := range rows {
@@ -174,17 +189,14 @@ func (h *ProfileHandler) HeldProfileSet(ctx context.Context, userID int) (Profil
 		if row.SyncID == "" {
 			continue
 		}
-		picture, err := h.profileSetPicture(ctx, store, &row.Profile)
+		item, err := h.heldItem(ctx, store, contract, row, snap.Settings[row.ID])
 		if err != nil {
 			return ProfileSetHeld{}, err
 		}
-		held.Items = append(held.Items, ProfileSetHeldItem{
-			SyncID: row.SyncID, ID: row.ID, Position: row.SyncPosition, Name: row.Name, Picture: picture,
-			HasPIN: row.PINHash != "", IsChild: row.IsChild, MaxContentRating: row.MaxContentRating,
-			MaxAdvisoryAge: row.MaxAdvisoryAge, RequireAdvisoryAge: row.RequireAdvisoryAge, RequestsBlocked: row.RequestsBlocked,
-			Settings: profileSetHeldSettings(contract, snap.Settings[row.ID]),
-		})
+		item.ChangedHere = edits.changedHere(row.SyncID)
+		held.Items = append(held.Items, item)
 	}
+	held.Overrides = edits.overridesOf(held.Items)
 	for _, row := range snap.Rows {
 		if row.SyncID == "" {
 			held.LocalOnly = append(held.LocalOnly, ProfileSetLocal{ID: row.ID, Name: row.Name, HasPIN: row.PINHash != ""})
@@ -214,11 +226,28 @@ func (h *ProfileHandler) jellyfinBareNameSignIn(ctx context.Context, userID int,
 	return &selects
 }
 
+// heldItem is a profile of the set as GET /profiles/set reports it.
+func (h *ProfileHandler) heldItem(ctx context.Context, store userstore.UserStore, contract *settingscontract.Manifest,
+	row *userstore.ProfileSetRow, settings map[string]json.RawMessage,
+) (ProfileSetHeldItem, error) {
+	picture, err := h.profileSetPicture(ctx, store, &row.Profile)
+	if err != nil {
+		return ProfileSetHeldItem{}, err
+	}
+	return ProfileSetHeldItem{
+		SyncID: row.SyncID, ID: row.ID, Position: row.SyncPosition, Name: row.Name, Picture: picture,
+		HasPIN: row.PINHash != "", IsChild: row.IsChild, MaxContentRating: row.MaxContentRating,
+		MaxAdvisoryAge: row.MaxAdvisoryAge, RequireAdvisoryAge: row.RequireAdvisoryAge, RequestsBlocked: row.RequestsBlocked,
+		Settings: profileSetHeldSettings(contract, settings),
+	}, nil
+}
+
 // profileSetEditsToken names the person's own edits on this server that no
-// accepted set has settled yet, "" when there are none. Nothing records
-// such edits yet, so it is always "": the change that records them derives
-// the token from them.
-func profileSetEditsToken(userstore.ProfileSetSnapshot) string { return "" }
+// accepted set has settled yet, "" when there are none
+// (profileedits.Token).
+func profileSetEditsToken(snap userstore.ProfileSetSnapshot) string {
+	return profileedits.Token(snap.Edits)
+}
 
 // profileSetPicture is a profile's picture as a set names it: preset:<id>,
 // sha256:<hex> of an upload, or "" for none. An upload stored before hashes
@@ -248,6 +277,8 @@ func (h *ProfileHandler) profileSetPicture(ctx context.Context, store userstore.
 // ApplyProfileSet makes the account's household match the set, in one
 // transaction (docs/architecture/app-keys.md, "The profile set").
 func (h *ProfileHandler) ApplyProfileSet(ctx context.Context, cmd ProfileSetCommand) (ProfileSetResult, error) {
+	// The set's own writes are not edits made on this server.
+	ctx = profileedits.WithoutRecording(ctx)
 	doc, err := parseProfileSet(cmd.Set, cmd.Pairs, cmd.EditsSeen)
 	if err != nil {
 		return ProfileSetResult{}, err
@@ -347,9 +378,12 @@ func profileSetAwaitingPin(applied json.RawMessage) bool {
 	return record.AwaitingPin
 }
 
-// buildProfileSetResult describes the account as the set left it.
+// buildProfileSetResult describes the account as the set left it. An item
+// the owner removed here is reported hidden, not left off; a picture the
+// owner set is not awaited.
 func buildProfileSetResult(doc *profileSetDoc, snap userstore.ProfileSetSnapshot, settings []profileSetSettings) ProfileSetResult {
 	out := ProfileSetResult{Version: snap.State.Version}
+	edits := newProfileSetEdits(snap.Edits)
 	bySyncID := map[string]*userstore.ProfileSetRow{}
 	for i := range snap.Rows {
 		if snap.Rows[i].SyncID != "" {
@@ -358,6 +392,10 @@ func buildProfileSetResult(doc *profileSetDoc, snap userstore.ProfileSetSnapshot
 	}
 	for i, item := range doc.Items {
 		row := bySyncID[item.SyncID]
+		if row == nil && edits.hidden[item.SyncID] {
+			out.HiddenByOwner = append(out.HiddenByOwner, item.SyncID)
+			continue
+		}
 		if row == nil {
 			out.LeftOff = append(out.LeftOff, item.SyncID)
 			continue
@@ -366,7 +404,7 @@ func buildProfileSetResult(doc *profileSetDoc, snap userstore.ProfileSetSnapshot
 		if row.IsChild && !row.IsPrimary && row.LibraryRestrictionsEnabled && len(row.AllowedLibraryIDs) == 0 {
 			out.AwaitingLibraries = append(out.AwaitingLibraries, item.SyncID)
 		}
-		if _, held, _ := heldPicture(&row.Profile, item.Picture); !held {
+		if _, held, _ := heldPicture(&row.Profile, item.Picture); !held && !edits.overridden(item.SyncID, profileedits.FieldPicture) {
 			out.AwaitingPictures = append(out.AwaitingPictures, item.SyncID)
 		}
 		if row.PINHash == "" && profileSetAwaitingPin(row.SyncApplied) {

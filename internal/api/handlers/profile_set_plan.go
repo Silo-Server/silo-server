@@ -16,9 +16,12 @@ type profileSetPlan struct {
 	// rowOf maps an item's index to the row it updates; an item not in it
 	// is created or left off.
 	rowOf map[int]*userstore.ProfileSetRow
-	// create and leftOff are item indexes, in set order.
+	// create, leftOff and hidden are item indexes, in set order. A hidden
+	// item names a profile the owner removed on this server: it is neither
+	// created nor paired, and does not count against the limit.
 	create  []int
 	leftOff []int
+	hidden  []int
 	// removed is the rows the set removes, in ID order.
 	removed []*userstore.ProfileSetRow
 	// localOnly is the rows outside the set, in creation order.
@@ -34,8 +37,10 @@ var ErrProfileSetNoPrimary = errors.New("the household has profiles but no prima
 // otherwise new. Rows holding a sync ID the set no longer has are removed,
 // the primary never. New items are created in set order while the household
 // is under limit (0 = none); the rest are left off, and nothing is deleted
-// to fit. Names are checked on the household as the set leaves it.
-func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit int) (*profileSetPlan, error) {
+// to fit. Names are checked on the household as the set leaves it. An item
+// after the first whose sync ID is in hidden, and that no profile here
+// holds, is hidden: its pair, if any, is ignored.
+func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit int, hidden map[string]bool) (*profileSetPlan, error) {
 	plan := &profileSetPlan{rowOf: map[int]*userstore.ProfileSetRow{}}
 	bySyncID := map[string]*userstore.ProfileSetRow{}
 	byID := map[string]*userstore.ProfileSetRow{}
@@ -62,7 +67,12 @@ func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit in
 		inSet[item.SyncID] = true
 	}
 	claimed := map[string]bool{}
+	isHidden := func(i int) bool { return i > 0 && hidden[doc.Items[i].SyncID] && bySyncID[doc.Items[i].SyncID] == nil }
 	for i, item := range doc.Items {
+		if isHidden(i) {
+			plan.hidden = append(plan.hidden, i)
+			continue
+		}
 		row, err := planProfileSetRow(doc, i, item, primary, bySyncID, byID, pairOf)
 		if err != nil {
 			return nil, err
@@ -85,7 +95,7 @@ func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit in
 	slices.SortFunc(plan.removed, func(a, b *userstore.ProfileSetRow) int { return strings.Compare(a.ID, b.ID) })
 	occupied := len(plan.localOnly) + len(plan.rowOf)
 	for i := range doc.Items {
-		if _, mapped := plan.rowOf[i]; mapped {
+		if _, mapped := plan.rowOf[i]; mapped || isHidden(i) {
 			continue
 		}
 		if limit < 1 || occupied < limit || (i == 0 && primary == nil) {
