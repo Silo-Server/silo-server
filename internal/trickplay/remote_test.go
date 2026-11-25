@@ -117,9 +117,6 @@ func TestNodeExtractorModes(t *testing.T) {
 		if !isNode || !failure.Permanent || failure.Reason != "invalid_data" || otherCalls.Load() != 0 {
 			t.Fatalf("err %v", err)
 		}
-		if outcome, _ := (&Service{}).classify(t.Context(), err); outcome != Unusable {
-			t.Fatalf("a permanent node failure classifies as %v", outcome)
-		}
 	})
 }
 

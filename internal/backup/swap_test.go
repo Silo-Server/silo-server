@@ -84,6 +84,10 @@ type fakeControl struct {
 	// restoreLocks is the restore lock table, shared by every control of
 	// one server; held names the databases locked.
 	restoreLocks *fakeRestoreLocks
+	// unreadable are the settings ClearUnreadableSettings clears, cleared
+	// the outbound bundles CarryOutboundSettings clears, and liveOwn the
+	// server-specific settings the live server holds.
+	unreadable, cleared, liveOwn []string
 }
 
 type fakeRestoreLocks struct {
@@ -247,7 +251,7 @@ type fakeLoader struct {
 func (l fakeLoader) Empty(context.Context, string) (bool, error) { return true, nil }
 func (l fakeLoader) UnbindStorage(context.Context, string) error { return nil }
 func (l fakeLoader) ClearUnreadableSettings(context.Context, string, *secret.Cipher) ([]string, error) {
-	return nil, nil
+	return l.ctl.unreadable, nil
 }
 func (l fakeLoader) DropSubtitles(context.Context, string, func(context.Context, string) (bool, error)) (int, error) {
 	return 0, nil
@@ -277,7 +281,10 @@ func (l fakeLoader) CarryServerSpecificSettings(context.Context, string, string)
 	return 0, nil
 }
 func (l fakeLoader) CarryOutboundSettings(context.Context, string, string, *secret.Cipher) ([]string, []string, error) {
-	return nil, nil, nil
+	return nil, l.ctl.cleared, nil
+}
+func (l fakeLoader) ServerSpecificSettingKeys(context.Context, string, *secret.Cipher) ([]string, error) {
+	return l.ctl.liveOwn, nil
 }
 func (l fakeLoader) InterruptWork(context.Context, string, string) ([]string, error) { return nil, nil }
 func (l fakeLoader) Superuser(context.Context, string) (bool, error)                 { return l.ctl.superuser, nil }
@@ -857,6 +864,33 @@ func TestSwapCarriesOnlyForTheSameDeployment(t *testing.T) {
 	}
 	if !slices.Equal(f.ctl.carriedFrom, []string{""}) || !strings.Contains(f.output.String(), "is not this deployment's") {
 		t.Fatalf("another deployment carried from %q, want nothing; output:\n%s", f.ctl.carriedFrom, f.output.String())
+	}
+}
+
+// TestSwapReportsOnlyWhatTheRestoredServerLacks: a replace gives the
+// restored database the live server's own settings after it clears what the
+// backup's key cannot read and the outbound credentials it cannot carry, so
+// it never tells the operator to enter again what the live server supplies,
+// such as its AI providers. What the live server does not have is still
+// listed, as is a unit it holds no credential of: a push relay waiting to
+// be registered again.
+func TestSwapReportsOnlyWhatTheRestoredServerLacks(t *testing.T) {
+	f := newSwapFixture(t)
+	f.ctl.liveServerID = "another-deployment"
+	f.validate = ValidateOptions{KeyCheck: "another-key", AcceptLostCredentials: true}
+	f.ctl.unreadable = []string{"ai.providers", "notifications.web_push.vapid_keypair", "tmdb.api_key"}
+	f.ctl.cleared = []string{"mail (SMTP)", "AI providers", "the push relay"}
+	f.ctl.liveOwn = []string{"ai.providers", "notifications.push_relay_reregistration_required",
+		"notifications.push_relay_url", "notifications.web_push.vapid_keypair"}
+	if err, _ := f.restore(); err != nil {
+		t.Fatalf("%v\n%s", err, f.output.String())
+	}
+	// Each report ends with its list.
+	out := f.output.String()
+	for _, want := range []string{"after Silo starts: tmdb.api_key\n", "in place of the backup's: AI providers.\n", "to use them: mail (SMTP), the push relay.\n"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("output lacks %q:\n%s", want, out)
+		}
 	}
 }
 

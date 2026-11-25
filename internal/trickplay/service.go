@@ -364,10 +364,10 @@ func (s *Service) classify(ctx context.Context, err error) (Outcome, time.Durati
 		s.storageFullAt.Store(&now)
 		return Released, releaseDelay
 	case mediasample.Classify(err).Permanent():
-		return Unusable, 0
+		return Damaged, 0
 	}
 	if failure, ok := errors.AsType[*ExtractError](err); ok && failure.Permanent {
-		return Unusable, 0
+		return Damaged, 0
 	}
 	return Failed, 0
 }

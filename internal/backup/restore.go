@@ -310,6 +310,11 @@ type postLoad struct {
 	older   bool
 	version int64
 	out     io.Writer
+	// liveOwn are the server-specific settings the live server holds, which
+	// a replace gives the restored database after these steps
+	// (CarryServerSpecificSettings); none for a separate restore. What they
+	// replace is not reported as lost.
+	liveOwn []string
 }
 
 func newPostLoad(m *Manifest, opts ValidateOptions, out io.Writer) postLoad {
@@ -372,7 +377,7 @@ func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, carry
 		}); err != nil {
 		return err
 	}
-	if err := p.step("carrying the outbound settings", carryOutboundSettings(ctx, loader, dbURL, carryFrom, cipher, p.out)); err != nil {
+	if err := p.step("carrying the outbound settings", carryOutboundSettings(ctx, loader, dbURL, carryFrom, cipher, p.liveOwn, p.out)); err != nil {
 		return err
 	}
 	releasesRestricted, err := carryPluginReleases(ctx, loader, dbURL, carryFrom, p.out)
@@ -614,6 +619,10 @@ type DatabaseLoader interface {
 	// CarryServerSpecificSettings gives dbURL liveURL's server-specific
 	// settings and returns how many it changed.
 	CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string) (int, error)
+	// ServerSpecificSettingKeys lists the server-specific settings liveURL
+	// holds a value for that CarryServerSpecificSettings gives a restored
+	// database. cipher (nil for none) opens the encrypted ones.
+	ServerSpecificSettingKeys(ctx context.Context, liveURL string, cipher *secret.Cipher) ([]string, error)
 	// CarryOutboundSettings gives dbURL liveURL's outbound settings, each
 	// bundle as a unit, clearing the secrets of one liveURL lacks ("" for
 	// none), and returns the bundles carried and cleared. cipher (nil for
@@ -635,8 +644,9 @@ type DatabaseLoader interface {
 // SECRET_KEY and restored with --accept-lost-credentials, the encrypted
 // settings this key cannot read: Silo refuses to start on a setting it
 // cannot decrypt, so they are deleted and listed for the admin to enter
-// again. A backup taken with this key changes nothing.
-func clearLostSettings(ctx context.Context, loader DatabaseLoader, dbURL string, m *Manifest, validate ValidateOptions, cipher *secret.Cipher, out io.Writer) error {
+// again, except those the live server supplies (liveOwn). A backup taken
+// with this key changes nothing.
+func clearLostSettings(ctx context.Context, loader DatabaseLoader, dbURL string, m *Manifest, validate ValidateOptions, cipher *secret.Cipher, liveOwn []string, out io.Writer) error {
 	if !validate.AcceptLostCredentials || m.KeyCheck == "" || m.KeyCheck == validate.KeyCheck {
 		return nil
 	}
@@ -644,6 +654,7 @@ func clearLostSettings(ctx context.Context, loader DatabaseLoader, dbURL string,
 	if err != nil {
 		return fmt.Errorf("clearing the settings this SECRET_KEY cannot read: %w", err)
 	}
+	keys = slices.DeleteFunc(keys, func(k string) bool { return slices.Contains(liveOwn, k) })
 	if len(keys) > 0 {
 		_, _ = fmt.Fprintf(out, "Cleared %d encrypted settings this SECRET_KEY cannot read; enter them again after Silo starts: %s\n", len(keys), strings.Join(keys, ", "))
 	}
@@ -794,7 +805,7 @@ func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, op
 	if err := post.step(stepSigningKeys, rotateSigningSecrets(ctx, loader, opts.Into, opts.Cipher, out)); err != nil {
 		return RestoreReport{}, err
 	}
-	if err := post.step(stepLostSettings, clearLostSettings(ctx, loader, opts.Into, src.Manifest, opts.Validate, opts.Cipher, out)); err != nil {
+	if err := post.step(stepLostSettings, clearLostSettings(ctx, loader, opts.Into, src.Manifest, opts.Validate, opts.Cipher, nil, out)); err != nil {
 		return RestoreReport{}, err
 	}
 	// A copy is not the live server: it gets none of the backup's

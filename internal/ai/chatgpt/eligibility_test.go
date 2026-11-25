@@ -2,6 +2,7 @@ package chatgpt
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"testing"
@@ -87,5 +88,33 @@ func TestPlanEligibilityRejectionPreservesOtherAccountsAndRotatedTokens(t *testi
 				t.Fatalf("active account disabled: %v", err)
 			}
 		})
+	}
+}
+
+// TestConnectedNeedsAnActiveSignedInAccount: only an active account that
+// can get tokens is a connection; a usage limit lifts on its own.
+func TestConnectedNeedsAnActiveSignedInAccount(t *testing.T) {
+	signedIn := account{ClientID: "a", RefreshToken: "a-refresh"}
+	for name, tc := range map[string]struct {
+		c    credentials
+		want bool
+	}{
+		"signed in":        {credentials{Active: "a", Accounts: []account{signedIn}}, true},
+		"usage limited":    {credentials{Active: "a", Accounts: []account{{ClientID: "a", RefreshToken: "r", UsageLimited: true}}}, true},
+		"disconnected":     {credentials{Accounts: []account{{ClientID: "a", RefreshToken: "r", NeedsLogin: true}}}, false},
+		"needs login":      {credentials{Active: "a", Accounts: []account{{ClientID: "a", RefreshToken: "r", NeedsLogin: true}}}, false},
+		"plan ineligible":  {credentials{Active: "a", Accounts: []account{{ClientID: "a", RefreshToken: "r", PlanIneligible: true}}}, false},
+		"no refresh token": {credentials{Active: "a", Accounts: []account{{ClientID: "a"}}}, false},
+	} {
+		raw, err := json.Marshal(tc.c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := Connected(string(raw)); got != tc.want {
+			t.Errorf("%s: Connected = %t, want %t", name, got, tc.want)
+		}
+	}
+	if Connected("") || Connected("not json") {
+		t.Error("Connected without readable credentials, want false")
 	}
 }

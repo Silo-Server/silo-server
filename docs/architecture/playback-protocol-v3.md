@@ -149,6 +149,7 @@ These are the protocol-v3 feature strings this server version advertises:
 | `hls_subtitle_renditions_all_v1` | Only with `hls_subtitle_renditions_v1` (and `hls_remux_subtitle_renditions_v1` for a remux). Every embedded text track the source's index can read, up to 64, becomes a WebVTT rendition of the HLS plan's stream, read on demand; those inventory rows carry `hls_rendition`, and switching among them keeps the stream (§8) |
 | `progressive_range_refusal_v1` | Sent by the client in `deliveries.progressive.features` rather than `client_features`. The client reopens a progressive remux at its current position when the stream refuses a mid-stream range. Its `server_remux_progressive` URLs then carry `remux_range=refuse`, except one served by a proxy that does not advertise `remux_range_refusal_v1` (§4.1), and a GET whose `Range` starts past byte 0, or is a suffix range, answers `409` before the remux starts instead of streaming from the origin, which a browser would read again from byte zero ([playback API](../playback-api.md#delivery)) |
 | `surround_bitstream_conversion_v1` | Advertised only. A client whose exact audio evidence shows it would decode a surround track to PCM, while its sink validates E-AC-3 or AC-3 5.1 but not the source codec, may receive a copy-video `server_remux_hls` that converts the track to that codec (`decision_reason: surround_bitstream_conversion`, §11) |
+| `hls_transport_marker_v1` | Sent by the client in `deliveries.hls.features` rather than `client_features`. The client accepts `silo_transport` on the HLS URLs a plan publishes and follows the playlist's URIs as given; a request from a playlist a replan replaced then answers `404 playback_transport_superseded` instead of driving the new transport. Without it the URLs stay unmarked (§6, superseded transports) |
 | `parallel_range_origin_v1` | The client sends it in `client_features`; the plan's `stream.parallel_range_url` may then name where to read the file's ranges over several connections (§4.2), unless the client also sends `header_authenticated_media_v1`. The client promises to use that URL exactly as given, adding no account token to it, and to read `stream.url` when the plan has none |
 | `paused_timeout_v1` | The client sends it in `client_features` and promises to leave the player, with its own notice, on `410 playback_session_paused_timeout`: the server ended the session because it stayed paused longer than the administrator allows (§6.3). A client without it gets `410 playback_session_ended` for the same end. Attempt-sticky |
 
@@ -1030,8 +1031,8 @@ parameter, and never carries a parameter across families.
 
 | Route family | Routes | Query parameters |
 | --- | --- | --- |
-| Media | `/stream/{session_id}`, `/playback/transcode/{session_id}/master.m3u8` and its segments | `seek` — the progressive-remux start offset in seconds, present only when it is non-zero — `origin` — the plan's `stream_origin_seconds`, alongside `seek` when the plan asked for the resume leading-picture drop (§ resume leading-picture drop) — and `remux_range=refuse` on a progressive remux whose start or replan request listed `progressive_range_refusal_v1` (`seek_reanchor` and `seek_failure_recovery` keep the opt-in of the attempt's stored request; a client that drops the feature on any other replan gets an unmarked URL), plus `silo_rendition=video` or `silo_rendition=subtitles` on the `master.m3u8` URIs that a subtitle rendition's multivariant playlist emits (§8) |
-| Media on a designated origin | `{proxy}/stream/v3/{session_id}`, `{proxy}/stream/v3/{session_id}/master.m3u8` and its `segment/{name}` children (§4.1) | `seek` and `remux_range`, with the same meaning, plus `silo_rendition` on the multivariant playlist's own `master.m3u8` URIs as above; these routes never accept a credential parameter of any kind |
+| Media | `/stream/{session_id}`, `/playback/transcode/{session_id}/master.m3u8` and its segments | `seek` — the progressive-remux start offset in seconds, present only when it is non-zero — `origin` — the plan's `stream_origin_seconds`, alongside `seek` when the plan asked for the resume leading-picture drop (§ resume leading-picture drop) — and `remux_range=refuse` on a progressive remux whose start or replan request listed `progressive_range_refusal_v1` (`seek_reanchor` and `seek_failure_recovery` keep the opt-in of the attempt's stored request; a client that drops the feature on any other replan gets an unmarked URL), plus `silo_rendition=video` or `silo_rendition=subtitles` on the `master.m3u8` URIs that a subtitle rendition's multivariant playlist emits (§8), and `silo_transport` on the HLS URLs (§6, superseded transports) |
+| Media on a designated origin | `{proxy}/stream/v3/{session_id}`, `{proxy}/stream/v3/{session_id}/master.m3u8` and its `segment/{name}` children (§4.1) | `seek` and `remux_range`, with the same meaning, plus `silo_rendition` on the multivariant playlist's own `master.m3u8` URIs and `silo_transport` on the HLS URLs as above; these routes never accept a credential parameter of any kind |
 | Subtitle artifact | `/stream/{session_id}/subtitles/{combined_index}{.ext}`, `/stream/{session_id}/subtitles/{combined_index}/fonts` | `file_id`, always; one identity pin: `embedded_stream_index`, `external_subtitle_key`, or `downloaded_subtitle_id` (§8); `original=1` on an original-SRT `.srt` URL (§8). VTT receivers may explicitly request `timestamp_offset` in seconds |
 
 A plan may also carry `stream.parallel_range_url` beside `stream.url`: a URL
@@ -1405,6 +1406,60 @@ playlist form it was built with (§4.2). The start state is whether the start
 request's hls delivery listed the feature, enabled or not. A replan that
 omits the hls delivery keeps the opt-in on a disabled hls entry, which plans
 like an absent one, so a later replan that offers HLS again still gets it.
+
+**Superseded transports.** A replan can answer with a new HLS transport under
+the same `session_id`, for example a burn-in transcode after the viewer picks an
+ASS subtitle, or a new quality rung. The new transport restarts FFmpeg with its
+own seek and start segment, while the player the client is replacing still
+holds the previous plan's playlist and keeps fetching numbered segments from
+the same `/playback/transcode/{session_id}/segment/{name}` path. Segment
+numbers alone cannot tell those requests apart, so the server binds every HLS
+URL to its transport:
+
+- When the attempt's hls delivery lists `hls_transport_marker_v1`, the
+  `master.m3u8` URL a plan publishes carries `silo_transport`, an opaque
+  token naming the transport generation (the plan's output directory, or its
+  transcode-node transport id). The playlist echoes its query into every
+  segment and rendition URI, so a client that follows playlist-relative URLs
+  carries the marker without knowing it exists. A client must not compose,
+  strip or move it (§4.2). Without the feature the URL carries no marker: a
+  client that checks a media URL's query against the parameters it knows
+  (header-authenticated clients do) would refuse it.
+- A replan that reuses the running transport (a sidecar-only track change, a
+  subtitle rendition switch) returns the same URL with the same marker. A
+  replan that starts a new transport returns a new marker, and a replan to a
+  delivery that is not HLS supersedes the last HLS transport as well. A seek restart
+  inside a transport and an executor move after a node failure keep it,
+  because the playlist the client holds stays valid across both.
+- A media request whose `silo_transport` names any other transport than the
+  session's current one answers `404` with the code
+  `playback_transport_superseded` (on `/api/v2`, the problem type of that
+  name; outside `/api/v2` the response also carries `X-Silo-Playback-Error`
+  with the code), before it can wait for, restart, relay to or reconstruct a
+  transport. The API origin and the proxy's `/stream/v3/{session_id}` family
+  enforce it. A proxy can only do so while it holds the session's grant: after
+  a replan moves egress to another origin, the old proxy answers the stale
+  request as it answers any grant it no longer holds, and still relays nothing.
+  A token route (`/stream/transcode/{token}/...`) is already bound to its
+  transport by the token. The answer is terminal for that URL, not for the
+  session: the client stops the superseded player and plays the current plan.
+  It must not treat the code as `playback_session_ended`. The server switches
+  to the new transport before the replan's response is sent, so while a
+  replan the client started is in flight, the player it is replacing can get
+  this answer first. Such a client waits for the replan's answer before it
+  acts: on success it plays the new plan; when the replan fails, the session
+  and any proxy grant go back to the previous transport, and the URL the
+  client holds is served again.
+- A request without the marker (a client without the feature, or a URL issued
+  before this rule) and a session
+  without a recorded transport keep the old behavior: the request is served
+  by, and can restart, the session's current transport. A session rebuilt
+  after an API restart has no recorded transport until its next replan; a
+  replan that reuses the running transport takes it from the URL it
+  republishes. One exception: a proxy grant that names no transport (written
+  when a proxied session replans away from HLS) refuses every marked HLS
+  request. Grants live outside the API process, so this holds after an API
+  restart too. Unmarked requests are unaffected.
 
 ### 6.1 `plan_invalidated_v1` — the server withdraws a plan
 

@@ -218,6 +218,22 @@ func ProgressiveRangeRefusalV3(request StartRequestV3) bool {
 // /api/v2 (see NativeServerFeaturesV3).
 const FeaturePausedTimeoutV3 = "paused_timeout_v1"
 
+// FeatureHLSTransportMarkerV3 is an hls delivery feature: the client accepts
+// the TransportQueryParam marker on the HLS URLs a plan publishes and follows
+// the playlist's URIs as given, so its requests keep naming the transport its
+// playlist came from. With the opt-in a request from a playlist a replan
+// replaced answers 404 playback_transport_superseded instead of driving the
+// new transport (playback protocol v3 §6). A client that validates media URL
+// queries (header_authenticated_media_v1 clients do) gets unmarked URLs
+// without it. /api/v2 advertises it in the capabilities features list.
+const FeatureHLSTransportMarkerV3 = "hls_transport_marker_v1"
+
+// HLSTransportMarkerV3 reports whether the request's hls delivery listed
+// hls_transport_marker_v1.
+func HLSTransportMarkerV3(request StartRequestV3) bool {
+	return deliverySupportsFeatureV3(request, DeliveryClassHLSV3, FeatureHLSTransportMarkerV3)
+}
+
 // FeatureCodecChannelCeilingsV3 tells a client that the server honors a
 // delivery's max_channels_by_codec. /api/v2 advertises it in the capabilities
 // features list.
@@ -352,7 +368,7 @@ func ServerFeaturesV3() []string {
 // advertises and honors only on /api/v2. They postdate the /api/v1 freeze, so
 // the frozen surface neither advertises nor negotiates them.
 func NativeServerFeaturesV3() []string {
-	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3, FeatureProgressiveRangeRefusalV3, FeatureSurroundBitstreamConversionV3, FeatureParallelRangeOriginV1, FeaturePausedTimeoutV3)
+	return append(ServerFeaturesV3(), FeatureBufferingQualityV1, FeaturePlaybackPlanSummaryV1, FeatureSubripSidecarV3, FeatureMarkerThumbnailsV3, FeatureHLSSubtitleRenditionsV3, FeaturePlanActiveQualityV3, FeatureHLSRemuxSubtitleRenditionsV3, FeatureHLSCopyMPEGTSV3, FeatureHLSVariableSubstitutionV3, FeatureCodecChannelCeilingsV3, FeatureNativeEmbeddedLimitationsV3, FeatureHLSSubtitleRenditionsAllV3, FeatureProgressiveRangeRefusalV3, FeatureSurroundBitstreamConversionV3, FeatureParallelRangeOriginV1, FeaturePausedTimeoutV3, FeatureHLSTransportMarkerV3)
 }
 
 // HLSVariableSubstitutionV3 reports whether the request's hls delivery
