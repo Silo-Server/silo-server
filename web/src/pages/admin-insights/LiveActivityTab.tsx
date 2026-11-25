@@ -93,10 +93,13 @@ import { formatDateTime, formatTime } from "@/lib/datetime";
 import { formatLocale, joinList } from "@/lib/appLocale";
 import { englishText, numberText, type TextValues, type Translate, useT } from "@/i18n";
 import type { MessageKey } from "@/locales/keys";
+import { InsightSectionError } from "./insightsShared";
 
 type SortField = "username" | "media" | "method" | "bitrate" | "node" | "started";
 type SortDir = "asc" | "desc";
 type ActivityView = "table" | "cards";
+
+const NO_SESSIONS: AdminSession[] = [];
 
 const MIDDLE_DOT = "·";
 const SORT_ASC_MARK = "▲";
@@ -203,8 +206,8 @@ const VIEW_STORAGE_KEY = "silo.admin.activity.view";
 /**
  * Until the admin picks a layout, a handful of streams opens as cards, which
  * read at a glance, and more opens as the table, which scans faster. The
- * choice is made once per visit so the layout doesn't flip as streams start
- * and stop.
+ * choice is made from the first loaded list each time the tab opens, so the
+ * layout doesn't flip as streams start and stop while it's open.
  */
 const AUTO_CARDS_MAX_STREAMS = 8;
 
@@ -336,13 +339,21 @@ function routeSortValue(session: AdminSession): string {
  */
 export function LiveActivityTab() {
   const t = useT();
-  const { data: sessions = [], isLoading, refetch: refresh } = useAdminSessions();
+  const {
+    data: loadedSessions,
+    isLoading,
+    error: sessionsError,
+    refetch: refresh,
+  } = useAdminSessions();
+  const sessions = loadedSessions ?? NO_SESSIONS;
   const { connectionState } = useRealtimeEvents();
   const pageActivity = usePageActivity();
   const wasRealtimePausedRef = useRef(!pageActivity.canApplyRealtimeUpdates);
   const [storedView, setStoredView] = useState<ActivityView | null>(readStoredView);
   const [autoView, setAutoView] = useState<ActivityView | null>(null);
-  if (autoView === null && !isLoading) {
+  // Only a loaded list counts: a failed or not-yet-started load has no streams
+  // to count, and deciding from it would fix the layout before any arrive.
+  if (autoView === null && loadedSessions !== undefined) {
     setAutoView(sessions.length > AUTO_CARDS_MAX_STREAMS ? "table" : "cards");
   }
   const view: ActivityView = storedView ?? autoView ?? "table";
@@ -496,13 +507,20 @@ export function LiveActivityTab() {
     setIPLookupOpen(true);
   }, []);
 
-  // Sessions that end while their details are open close the panel.
+  // Sessions that end while their details are open close the panel, and
+  // forget it, so the same session showing up again doesn't reopen it.
   const detailsSession = detailsSessionId
     ? sessions.find((session) => session.session_id === detailsSessionId)
     : undefined;
+  if (detailsSessionId !== null && loadedSessions !== undefined && !detailsSession) {
+    setDetailsSessionId(null);
+  }
 
   if (isLoading)
     return <div className="text-muted-foreground pb-8">{t("web.admin.activity.page.loading")}</div>;
+  // A failed load has no list to show; an empty one would read as "nothing is playing".
+  // The toolbar stays, since IP lookup doesn't need the list.
+  const loadFailed = loadedSessions === undefined && sessionsError !== null;
 
   const summary =
     sessions.length === 0
@@ -638,20 +656,29 @@ export function LiveActivityTab() {
         </div>
       </div>
 
-      <div className="text-muted-foreground space-y-1 text-[0.8125rem]">
-        <p>{summary}</p>
-        {(search || activeFilters > 0) && (
-          <p className="text-[0.75rem]">
-            {t("web.admin.activity.filter.showing", {
-              total: sessions.length,
-              shown: filtered.length,
-              total_text: sessions.length,
-            })}
-          </p>
-        )}
-      </div>
+      {loadFailed ? null : (
+        <div className="text-muted-foreground space-y-1 text-[0.8125rem]">
+          <p>{summary}</p>
+          {(search || activeFilters > 0) && (
+            <p className="text-[0.75rem]">
+              {t("web.admin.activity.filter.showing", {
+                total: sessions.length,
+                shown: filtered.length,
+                total_text: sessions.length,
+              })}
+            </p>
+          )}
+        </div>
+      )}
 
-      {filtered.length === 0 ? (
+      {loadFailed ? (
+        <InsightSectionError
+          error={sessionsError}
+          onRetry={() => {
+            void refresh();
+          }}
+        />
+      ) : filtered.length === 0 ? (
         <EmptyState hasData={sessions.length > 0} />
       ) : view === "cards" ? (
         <div className="space-y-3">
@@ -1244,6 +1271,11 @@ function StreamDetailsSheet({
   const t = useT();
   const panelId = useId();
   const sessionId = session?.session_id ?? null;
+  // The last session shown, which the panel keeps while it slides closed.
+  const [shown, setShown] = useState(session);
+  if (session !== undefined && session !== shown) {
+    setShown(session);
+  }
   const [ffmpegOpen, setFFmpegOpen] = useState(false);
   const [seenSessionId, setSeenSessionId] = useState(sessionId);
   if (seenSessionId !== sessionId) {
@@ -1275,31 +1307,30 @@ function StreamDetailsSheet({
           }
         }}
       >
-        {session ? (
+        {shown ? (
           <>
             <SheetHeader className="border-border/70 flex-row items-start gap-3 border-b px-5 py-4">
-              <Poster session={session} size="stacked" />
+              <Poster session={shown} size="stacked" />
               <div className="min-w-0 flex-1 space-y-1 pe-8">
                 <SheetTitle dir="auto" className="bidi-text truncate text-base font-bold">
-                  {getDisplayTitle(session, t)}
+                  {getDisplayTitle(shown, t)}
                 </SheetTitle>
                 <SheetDescription dir="auto" className="truncate text-xs">
                   {[
-                    getPlaybackSessionSubtitle(session),
-                    session.username ||
-                      t("web.admin.activity.userFallback", { id: session.user_id }),
+                    getPlaybackSessionSubtitle(shown),
+                    shown.username || t("web.admin.activity.userFallback", { id: shown.user_id }),
                   ]
                     .filter(Boolean)
                     .join(` ${MIDDLE_DOT} `)}
                 </SheetDescription>
-                <ProgressLine session={session} />
+                <ProgressLine session={shown} />
               </div>
             </SheetHeader>
             <div className="@container min-h-0 flex-1 overflow-y-auto">
               <PlaybackExpandedPanel
                 id={panelId}
-                session={session}
-                reasons={getAdaptationReasons(session)}
+                session={shown}
+                reasons={getAdaptationReasons(shown)}
                 layout={TABLE_LAYOUT}
                 showRoute={false}
                 onIPLookup={onIPLookup}
@@ -1308,11 +1339,11 @@ function StreamDetailsSheet({
                 rows={ffmpegLogs.data?.entries ?? []}
                 isLoading={ffmpegLogs.isLoading}
                 isFetching={ffmpegLogs.isFetching}
-                logsHref={sessionFFmpegLogsHref(session)}
+                logsHref={sessionFFmpegLogsHref(shown)}
               />
             </div>
             <div className="border-border/70 flex justify-end border-t px-4 py-2.5">
-              <SessionActions session={session} />
+              <SessionActions session={shown} />
             </div>
           </>
         ) : null}
