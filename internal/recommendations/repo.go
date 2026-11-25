@@ -234,9 +234,15 @@ func (r *Repo) withHNSWCandidateScan(ctx context.Context, fn func(pgx.Tx) error)
 	}
 	defer tx.Rollback(ctx)
 
+	// Each scan is planned for its own arguments. A connection's cached
+	// statement can otherwise switch to a generic plan, which cannot see how
+	// many titles a genre array matches: it underestimates a common genre and
+	// scans the genre index and sorts every match by distance instead of
+	// walking the HNSW index.
 	_, err = tx.Exec(ctx, `
 		SELECT set_config('hnsw.iterative_scan', 'relaxed_order', true),
-		       set_config('hnsw.ef_search', $1, true)
+		       set_config('hnsw.ef_search', $1, true),
+		       set_config('plan_cache_mode', 'force_custom_plan', true)
 	`, strconv.Itoa(hnswEfSearch))
 	if err != nil {
 		return fmt.Errorf("configure hnsw candidate scan: %w", err)
@@ -1205,7 +1211,10 @@ func (r *Repo) GetTasteProfile(ctx context.Context, userID int, profileID string
 }
 
 // FindSimilarUsers returns users with taste profiles similar to the given user's
-// profile, filtered by max_content_rating compatibility.
+// profile. maxContentRating is the ceiling the peers are matched under (see
+// peerCeiling): with one, only peers whose stored max_content_rating, the
+// highest rating among the titles they took to, is empty or within it are
+// returned; with none, any peer is.
 func (r *Repo) FindSimilarUsers(ctx context.Context, userID int, profileID string, maxContentRating string, limit int) ([]UserSimilarity, error) {
 	embedding, err := r.GetTasteProfile(ctx, userID, profileID)
 	if err != nil {

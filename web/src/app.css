@@ -2634,6 +2634,20 @@ html[data-navigation-direction]::view-transition-new(main-content) {
     }
   }
 
+  /* Admin pages scroll the document, so moving between a short page and a
+     long one (Insights tabs, for one) added or dropped the scrollbar and
+     shifted the whole layout sideways. Reserve its space while the admin
+     shell is mounted. Radix's scroll lock measures the scrollbar as the
+     window width minus the document width, which the reserved gutter now
+     always is, and would add that much body margin when a dialog or sheet
+     opens; the gutter already holds the page in place, so drop the margin. */
+  :root[data-admin-shell] {
+    scrollbar-gutter: stable;
+  }
+  :root[data-admin-shell] body[data-scroll-locked] {
+    margin-right: 0 !important;
+  }
+
   .impersonation-banner {
     --impersonation-accent: oklch(0.82 0.14 78);
     --impersonation-accent-glow: oklch(0.82 0.14 78 / 0.55);

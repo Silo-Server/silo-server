@@ -60,6 +60,7 @@ type Session struct {
 
 	TranscodeNodeURL     string // URL of assigned transcode node (empty = local/integrated)
 	TranscodeTransportID string // remote node process identity; empty means session ID
+	PlanID               string // committed v3 plan ID that produced this live route snapshot
 	AudioTrackIndex      int
 
 	// RoutingNetworkProvider is the validated access path selected when preparing
@@ -76,6 +77,9 @@ type Session struct {
 	RoutingEgress           string
 	RoutingEgressNodeID     int
 	RoutingEgressNodeURL    string
+	// ReportingNode is the API node identity recovered from playback_sessions_sync
+	// when another replica finalizes a session it does not hold in memory.
+	ReportingNode string
 
 	StreamBitrateKbps      int          // currently delivered bitrate, when known
 	TargetResolution       string       // requested output resolution for transcodes
@@ -176,6 +180,7 @@ type SessionStreamState struct {
 	Subtitle                      *SessionSubtitle
 	TranscodeNodeURL              string
 	TranscodeTransportID          string
+	PlanID                        string
 	TranscodeRouteSet             bool
 	RoutingNetworkProvider        *string
 	RoutingWorkload               string
@@ -1282,6 +1287,7 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 	if state.TranscodeRouteSet {
 		s.TranscodeNodeURL = state.TranscodeNodeURL
 		s.TranscodeTransportID = state.TranscodeTransportID
+		s.PlanID = state.PlanID
 		s.RoutingNetworkProvider = state.RoutingNetworkProvider
 		s.RoutingWorkload = state.RoutingWorkload
 		s.RoutingExecution = state.RoutingExecution
@@ -1334,6 +1340,7 @@ func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 		Subtitle:                      s.Subtitle,
 		TranscodeNodeURL:              s.TranscodeNodeURL,
 		TranscodeTransportID:          s.TranscodeTransportID,
+		PlanID:                        s.PlanID,
 		TranscodeRouteSet:             true,
 		RoutingNetworkProvider:        s.RoutingNetworkProvider,
 		RoutingWorkload:               s.RoutingWorkload,
@@ -1379,6 +1386,7 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.Subtitle = state.Subtitle
 	s.TranscodeNodeURL = state.TranscodeNodeURL
 	s.TranscodeTransportID = state.TranscodeTransportID
+	s.PlanID = state.PlanID
 	s.RoutingNetworkProvider = state.RoutingNetworkProvider
 	s.RoutingWorkload = state.RoutingWorkload
 	s.RoutingExecution = state.RoutingExecution
@@ -1985,7 +1993,7 @@ func (m *SessionManager) FinishDetached(ctx context.Context, s Session) {
 const PositionUnknown = -1
 
 // EndReasonReplaced is the end reason of a session another one replaced
-// mid-play: a Jellyfin client switched play method.
+// mid-play: a Jellyfin client switched play method or media source.
 const EndReasonReplaced = "replaced"
 
 type endReasonKey struct{}
@@ -2023,6 +2031,31 @@ func (m *SessionManager) GetSession(sessionID string) (*Session, error) {
 	// Return a copy to avoid races.
 	cp := *s
 	return &cp, nil
+}
+
+// RemoteTranscode returns the node URL, media file and start time of the
+// session whose remote transcode runs as transportID (its
+// TranscodeTransportID, or its ID when that is empty), when this server holds
+// it. A transport ID begins with
+// its session's 36-character UUID (see transportGenerationV3 in
+// internal/api/handlers).
+func (m *SessionManager) RemoteTranscode(transportID string) (nodeURL string, mediaFileID int, startedAt time.Time, ok bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	for _, id := range []string{transportID, transportID[:min(len(transportID), 36)]} {
+		s, found := m.sessions[id]
+		if !found || s.TranscodeNodeURL == "" {
+			continue
+		}
+		transport := s.TranscodeTransportID
+		if transport == "" {
+			transport = s.ID
+		}
+		if transport == transportID {
+			return s.TranscodeNodeURL, s.MediaFileID, s.StartedAt, true
+		}
+	}
+	return "", 0, time.Time{}, false
 }
 
 // GetUserSessions returns all active sessions for a user.

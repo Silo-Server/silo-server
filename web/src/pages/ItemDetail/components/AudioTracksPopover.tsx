@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { useT } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { getLanguageName } from "@/player/utils/languageNames";
-import { audioTrackLabel, formatChannels } from "@/lib/mediaFormat";
+import { audioTrackLabel, formatChannels, titleOnlyNamesAudioFormat } from "@/lib/mediaFormat";
 import { audioTitle, compactAudioMeta } from "./versionFormatUtils";
 import { formatAudioTrackSummary, resolveAudioTrackSelection } from "./prePlaySelection";
 import DetailPopover from "./DetailPopover";
@@ -128,7 +128,9 @@ function AudioTracksPopover({
           const title = language || fallbackTitle;
           const embeddedTitle = track.title?.trim() || track.embedded_title?.trim() || "";
           const meta = [
-            embeddedTitle && embeddedTitle !== title ? embeddedTitle : "",
+            embeddedTitle && embeddedTitle !== title && !titleOnlyNamesAudioFormat(embeddedTitle)
+              ? embeddedTitle
+              : "",
             compactAudioMeta(track),
           ]
             .filter(Boolean)

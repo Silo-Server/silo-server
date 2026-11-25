@@ -86,6 +86,7 @@ const DEFAULT_CONFIG: RateLimitConfig = {
     device_start: { requests_per_minute: 20, burst: 10 },
     device_lookup: { requests_per_minute: 60, burst: 20 },
     device_poll: { requests_per_minute: 120, burst: 30 },
+    oauth_start: { requests_per_minute: 40, burst: 20 },
     autoscan_webhook: { requests_per_minute: 60, burst: 30 },
   },
   session_quota: DEFAULT_SESSION_QUOTA,
@@ -104,6 +105,7 @@ const AUTH_ENDPOINT_LABELS: Record<string, MessageKey> = {
   device_start: "web.admin.settings.security.endpoint.deviceStart",
   device_lookup: "web.admin.settings.security.endpoint.deviceLookup",
   device_poll: "web.admin.settings.security.endpoint.devicePoll",
+  oauth_start: "web.admin.settings.security.endpoint.oauthStart",
   autoscan_webhook: "web.admin.settings.security.endpoint.autoscanWebhook",
 };
 

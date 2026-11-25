@@ -1528,3 +1528,42 @@ describe("VideoPlayer lost connection", () => {
     expect(onConnectionLost).toHaveBeenCalledExactlyOnceWith(10, true);
   });
 });
+
+describe("VideoPlayer session end", () => {
+  beforeEach(() => {
+    realtimeOptions.current = null;
+    controls.current = null;
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+    vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
+    vi.spyOn(HTMLMediaElement.prototype, "load").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  // The server ends the session while a minimize is still finishing: the
+  // minimized player must still leave once the minimize is done.
+  it("leaves when the session ends while the player is minimizing", async () => {
+    let finishMinimize: () => void = () => {};
+    const onMinimize = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finishMinimize = resolve;
+        }),
+    );
+    const onExit = vi.fn();
+    const { getByRole, rerenderPlayer } = renderPlayer({ onMinimize, onExit });
+
+    fireEvent.click(getByRole("button", { name: "Minimize player" }));
+    await waitFor(() => expect(onMinimize).toHaveBeenCalledOnce());
+
+    rerenderPlayer({ onMinimize, onExit, connectionStatus: "ended" });
+    await act(async () => {
+      finishMinimize();
+    });
+
+    await waitFor(() => expect(onExit).toHaveBeenCalledOnce());
+  });
+});

@@ -1,0 +1,72 @@
+{
+  "from": "2025-12-04T03:04:05.678Z",
+  "to": "2026-01-02T03:04:05.678Z",
+  "tz": "UTC",
+  "oldest_metric_at": "2025-12-04T03:04:05.678Z",
+  "oldest_route_facts_at": "2025-12-04T03:04:05.678Z",
+  "has_remote_nodes": true,
+  "summary": {
+    "total_egress_bytes": 900000000000,
+    "playback_egress_bytes": 810000000000,
+    "download_egress_bytes": 90000000000,
+    "api_egress_bytes": 300000000000,
+    "node_egress_bytes": 600000000000,
+    "avg_daily_bytes": 30000000000,
+    "peak_egress_kbps": 145000,
+    "peak_egress_at": "2026-01-02T00:04:05.678Z",
+    "peak_download_kbps": 42000,
+    "active_days": 30,
+    "remote_sessions": 31,
+    "local_sessions": 14,
+    "unknown_location_sessions": 3
+  },
+  "sources": [
+    {
+      "key": "api",
+      "kind": "api",
+      "name": "API server",
+      "node_type": null,
+      "egress_bytes": 300000000000,
+      "peak_egress_kbps": 65000,
+      "share_of_total": 0.3333
+    },
+    {
+      "key": "node:1",
+      "kind": "node",
+      "node_id": "1",
+      "name": "edge-eu-1",
+      "node_type": "proxy",
+      "egress_bytes": 600000000000,
+      "peak_egress_kbps": 90000,
+      "share_of_total": 0.6667
+    },
+    {
+      "key": "node:-1",
+      "kind": "node",
+      "name": "archived-edge",
+      "node_type": "proxy",
+      "egress_bytes": 0,
+      "peak_egress_kbps": 0,
+      "share_of_total": 0
+    }
+  ],
+  "points": [
+    {
+      "date": "2026-01-01",
+      "egress_bytes": 30000000000,
+      "playback_egress_bytes": 27000000000,
+      "download_egress_bytes": 3000000000,
+      "api_egress_bytes": 10000000000,
+      "peak_egress_kbps": 145000,
+      "peak_download_kbps": 42000,
+      "bytes_by_source": {
+        "api": 10000000000,
+        "node:1": 20000000000
+      },
+      "peak_kbps_by_source": {
+        "api": 65000,
+        "node:1": 90000
+      }
+    }
+  ]
+}

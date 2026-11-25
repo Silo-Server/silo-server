@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { toast } from "sonner";
 import { Plus } from "lucide-react";
 
+import { readableErrorText } from "@/api/v2/request";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import {
   ProviderPanelActions,
@@ -19,6 +20,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  useAIProviderCreatePending,
   useAIProviders,
   useCheckAIProvider,
   useCreateAIProvider,
@@ -99,10 +101,6 @@ function draftForType(type: AIProviderType, capability: AICapability): AIProvide
     base_url: type.default_base_url,
     capabilities: type.capabilities.length > 0 ? type.capabilities : [capability],
   };
-}
-
-function errorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error && error.message ? error.message : fallback;
 }
 
 /**
@@ -293,7 +291,8 @@ const CHATGPT_TYPE = "chatgpt";
  * Connects a provider in two steps: what kind it is, then where it is and its
  * key. `types` is never empty while the dialog is open. `capability` is what a
  * new custom endpoint is assumed to serve until the administrator says
- * otherwise.
+ * otherwise. It stays open while Add is pending, so a caller staging the new
+ * provider from `onCreated` (the setup wizard) gets it before moving on.
  */
 export function AddAIProviderDialog({
   open,
@@ -310,9 +309,10 @@ export function AddAIProviderDialog({
   onCreated?: (provider: AIProvider) => void;
   onChooseChatGPT?: () => void;
 }) {
+  const saving = useAIProviderCreatePending();
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+    <Dialog open={open} onOpenChange={saving ? undefined : onOpenChange}>
+      <DialogContent className="sm:max-w-2xl" showCloseButton={!saving}>
         {/* Remounting on every open starts the wizard at step one. */}
         {open ? (
           <AddAIProviderSteps
@@ -498,7 +498,7 @@ function ProviderPanel({
     } catch (error) {
       setTest({
         ok: false,
-        message: errorMessage(error, t("web.admin.settings.ai.providers.checkFailed")),
+        message: readableErrorText(error, t("web.admin.settings.ai.providers.checkFailed")),
         at: Date.now(),
         durationMs: Date.now() - started,
       });
@@ -523,7 +523,7 @@ function ProviderPanel({
       }
       onDone();
     } catch (error) {
-      toast.error(errorMessage(error, t("web.admin.settings.ai.providers.saveFailed")));
+      toast.error(readableErrorText(error, t("web.admin.settings.ai.providers.saveFailed")));
     }
   }
 
@@ -534,7 +534,7 @@ function ProviderPanel({
       toast.success(t("web.admin.settings.ai.providers.removed", { name: provider.name }));
       onDone();
     } catch (error) {
-      toast.error(errorMessage(error, t("web.admin.settings.ai.providers.removeFailed")));
+      toast.error(readableErrorText(error, t("web.admin.settings.ai.providers.removeFailed")));
     } finally {
       setConfirmDelete(false);
     }
@@ -726,12 +726,15 @@ export function EmbeddingProviderField({
   value,
   onChange,
   disabled,
+  dirty,
   restartRequired,
   managedByEnv,
 }: {
   value: string;
   onChange: (id: string) => void;
   disabled?: boolean;
+  /** Marks the row as holding an unsaved edit. */
+  dirty?: boolean;
   restartRequired?: boolean;
   /** The variable that sets the embedding provider; locks the choice. */
   managedByEnv?: string;
@@ -757,6 +760,7 @@ export function EmbeddingProviderField({
         type="select"
         value={value || NO_EMBEDDING_PROVIDER}
         disabled={disabled || list.isLoading}
+        dirty={dirty}
         restartRequired={restartRequired}
         managedByEnv={managedByEnv}
         description={t("web.admin.settings.ai.embeddingProvider.description")}

@@ -257,6 +257,15 @@ describe("Catalog page", () => {
     expect(markup).not.toContain("Find films, series, performances");
   });
 
+  it("lists a filtered query across libraries without search text", () => {
+    appInitialEntries = [
+      "/catalog?source=query&type=movie&groups%5B0%5D%5Brules%5D%5B0%5D%5Bfield%5D=studio&groups%5B0%5D%5Brules%5D%5B0%5D%5Bop%5D=is&groups%5B0%5D%5Brules%5D%5B0%5D%5Bvalue%5D=Pixar",
+    ];
+    const markup = staticApp();
+    expect(mockUseCatalogWindow).toHaveBeenCalled();
+    expect(markup).not.toContain("Find films, series, performances");
+  });
+
   it("renders the search-first landing for empty query catalog routes", () => {
     appInitialEntries = ["/catalog?source=query"];
 

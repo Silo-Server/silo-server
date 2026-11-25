@@ -1,4 +1,5 @@
 import { startsRightToLeft } from "@/lib/direction";
+import { graphemeStarts } from "@/lib/text";
 
 /** Enough to keep a worker's number and role, as in "-4 Transcode". */
 const TAIL_LENGTH = 12;
@@ -11,9 +12,10 @@ const RIGHT_TO_LEFT =
 const STARTS_RIGHT_TO_LEFT = new RegExp(`^${RIGHT_TO_LEFT.source}`, "u");
 const ENDS_RIGHT_TO_LEFT = new RegExp(`${RIGHT_TO_LEFT.source}$`, "u");
 const STARTS_WITH_LETTER = /^\p{L}/u;
-// A mark belongs to the letter before it, a lone low surrogate to the character
-// before it, and the zero-width joiner joins the characters on either side.
-const STARTS_ATTACHED = /^[\p{M}\udc00-\udfff\u200d]/u;
+// A mark belongs to the letter before it, and the zero-width joiner joins the
+// characters on either side. Grapheme starts cover both, but not without
+// Intl.Segmenter.
+const STARTS_ATTACHED = /^[\p{M}\u200d]/u;
 // Marks, tatweel and the zero-width joiner join a letter to the one after them.
 const ENDS_JOINING = /[\p{M}\u0640\u200d]$/u;
 // The right-to-left mark, and the embeddings, overrides and isolates, whose
@@ -75,11 +77,12 @@ function leavesBracketOpen(head: string) {
 /**
  * Where to cut a name so that its two pieces, laid out in the name's own
  * direction, read exactly as the whole name does. A name with no right-to-left
- * characters can be cut anywhere outside a character. Otherwise the end piece
- * must start with a letter of the name's direction, so it resolves on its own
- * as it does inside the name and no part of a mixed name changes places, the
- * cut must not separate right-to-left letters, which may join, and it must not
- * fall inside brackets, which pair across the whole name. A right-to-left mark
+ * characters can be cut between any two characters as a reader sees them, so
+ * never inside an emoji or a flag. Otherwise the end piece must also start with
+ * a letter of the name's direction, so it resolves on its own as it does
+ * inside the name and no part of a mixed name changes places, the cut must not
+ * separate right-to-left letters, which may join, and it must not fall inside
+ * brackets, which pair across the whole name. A right-to-left mark
  * makes a name mixed; a bidi control that the cut would end means no cut. Tries
  * the usual length, then longer, then shorter ends; `null` when the name is
  * short or has no such point.
@@ -101,7 +104,11 @@ function nodeNameCut(name: string, rightToLeft: boolean) {
   const lengths = [];
   for (let n = TAIL_LENGTH; n <= longest; n++) lengths.push(n);
   for (let n = TAIL_LENGTH - 1; n > 0; n--) lengths.push(n);
+  const starts = graphemeStarts(name);
   for (const n of lengths) {
+    // A cut inside a character, such as between a flag's two letters or the
+    // parts of a joined emoji, would show each piece as a broken glyph.
+    if (!starts.has(name.length - n)) continue;
     const head = name.slice(0, -n);
     const tail = name.slice(-n);
     // The head without what letters join across, to check what it joins to.

@@ -669,6 +669,12 @@ func SourceVideoKbps(fileKbps, videoTrackKbps int) int {
 	return normalizeBitrateKbpsV3(fileKbps)
 }
 
+// NormalizeBitrateKbps converts legacy bps values stored in media_files.bitrate
+// (> 10_000_000) to kbps while passing kbps values through unchanged.
+func NormalizeBitrateKbps(value int) int {
+	return normalizeBitrateKbpsV3(value)
+}
+
 func normalizeBitrateKbpsV3(value int) int {
 	if value > 10_000_000 {
 		return value / 1000

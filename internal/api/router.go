@@ -174,6 +174,7 @@ type Dependencies struct {
 	EmailBrand        *mail.BrandLoader             // server branding for outgoing email (nil sends Silo's default)
 	FolderRepo        *catalog.FolderRepository     // media folder repository (may be nil)
 	FileRepo          *scanner.FileRepository       // media file repository (may be nil)
+	StreamEnds        *playback.StreamEndRecorder   // stores where a transcode found a file's media ends (may be nil)
 	Scanner           *scanner.Scanner              // scanner instance (may be nil)
 	LibraryIngester   *libraryingest.Executor       // shared library ingest executor (may be nil)
 	ProbeEnsurer      handlers.PlaybackProbeEnsurer // on-demand probe repair for playback/detail (may be nil)
@@ -236,7 +237,7 @@ type Dependencies struct {
 	// SignInAttempts bounds password sign-ins per sign-in name, shared with
 	// the Jellyfin and Audiobookshelf sign-ins so every surface counts against
 	// one budget. Nil gets a process-local limiter.
-	SignInAttempts   *ratelimit.AttemptLimiter
+	SignInAttempts   *ratelimit.SignInLimiter
 	ClientIPResolver *clientip.Resolver
 	// NetworkAccess is the ingress-token registry and provider status cache
 	// for network access provider plugins on this host. The token middleware
@@ -373,6 +374,7 @@ type Dependencies struct {
 	AdminTopActivityProvider      handlers.AdminTopActivitySource
 	AdminTimeseriesProvider       handlers.AdminTimeseriesSource
 	AdminDownloadsStatsProvider   handlers.AdminDownloadsStatsSource
+	AdminInsightsProvider         handlers.AdminInsightsSource
 
 	// ABSHandler is the Audiobookshelf-compatible HTTP handler. When non-nil
 	// it is mounted at the root router level (not under /api/v1/) so that ABS
@@ -719,7 +721,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		signInAttempts := deps.SignInAttempts
 		if signInAttempts == nil {
-			signInAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.SignInNamePolicy)
+			signInAttempts = ratelimit.NewMemorySignInLimiter(ratelimit.SignInNamePolicy, ratelimit.SignInSourcePolicy)
 		}
 		authService.SetSignInAttempts(signInAttempts)
 		if settingsRepo != nil {
@@ -1253,7 +1255,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// this server issued, so a monitoring tool never needs a provider's host.
 	var itemPosters *artworkurl.ItemPosters
 	if cfg := deps.CurrentConfig(); detailSvc != nil && cfg != nil {
-		itemPosters = artworkurl.NewItemPosters(cfg.Auth.JWTSecret, cfg.S3.MetadataPresignExpiry, detailSvc)
+		itemPosters = artworkurl.NewItemPosters(cfg.Auth.JWTSecret, cfg.S3.MetadataPresignExpiry, detailSvc, deps.ArtworkSigner)
 	}
 	if deps.DB != nil {
 		playbackSessionsLoader = handlers.NewPlaybackSessionsLoader(deps.DB, deps.UserStoreProvider, detailSvc)
@@ -1471,6 +1473,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			playbackHandler = handlers.NewPlaybackHandler(deps.SessionMgr)
 		}
 		playbackHandler.StreamTelemetry = deps.StreamTelemetry
+		playbackHandler.ReportingNode = deps.NodeID
 		playbackHandler.ItemAccess = itemRepo
 		if itemsHandler != nil {
 			playbackHandler.FileNamesVisible = itemsHandler.CanViewFilePaths
@@ -1604,6 +1607,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			}
 		}
 		playbackHandler.ProbeEnsurer = deps.ProbeEnsurer
+		playbackHandler.StreamEnds = deps.StreamEnds
 		playbackHandler.ChapterThumbnailQueuer = deps.ChapterThumbnailQueuer
 		if settingsRepo != nil {
 			playbackHandler.SettingsRepo = settingsRepo
@@ -1817,6 +1821,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		adminHandler.TopActivitySource = deps.AdminTopActivityProvider
 		adminHandler.TimeseriesSource = deps.AdminTimeseriesProvider
 		adminHandler.DownloadsStatsSource = deps.AdminDownloadsStatsProvider
+		adminHandler.InsightsSource = deps.AdminInsightsProvider
 		adminHandler.RedisClient = deps.RedisClient
 		adminHandler.RealtimeHub = deps.RealtimeHub
 		adminHandler.AccessGroups = accessGroupStore
@@ -3142,6 +3147,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if adminHandler != nil {
 		v2deps.AdminDashboardInsights = adminHandler
+		v2deps.AdminInsights = adminHandler
 		v2deps.AdminDashboardStats = adminHandler
 		v2deps.AdminDashboardLayout = adminHandler
 		v2deps.AdminDashboardLayoutResets = adminHandler
@@ -3492,6 +3498,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			Telemetry:  streamtelemetry.NodeSnapshotStore(deps.StreamTelemetry),
 			Events:     deps.EventBus,
 			Deny:       playback.NewStreamDeny(deps.RedisClient),
+			StreamEnds: deps.StreamEnds,
 			// Main cancels the app context before it shuts the listener
 			// down, which cuts source byte streams instead of waiting on them.
 			Lifetime: deps.AppContext,
@@ -3509,6 +3516,9 @@ func newChiRouter(deps Dependencies) chi.Router {
 		// nothing and revokes nothing.
 		nodeRecipes := noderecipe.NewStore(deps.RedisClient, 0)
 		nodeControlOptions.Recipes, nodeControlOptions.Revocations = nodeRecipes, nodeRecipes
+		if deps.SessionMgr != nil {
+			nodeControlOptions.Transcodes = deps.SessionMgr
+		}
 		deps.wireNodeSources(&nodeControlOptions)
 		if nodeHandler != nil {
 			// A node's declaration goes through the admin node service, so
@@ -3609,6 +3619,8 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	}
 
 	r.Use(apimw.RequestLogger(deps.NodeID))
+	// This Recoverer answers a panic in the recording middleware below. A
+	// handler's panic is answered by the one after the activity log.
 	r.Use(middleware.Recoverer)
 	r.Use(apimw.Metrics)
 
@@ -3622,6 +3634,11 @@ func useBaseMiddleware(r chi.Router, deps Dependencies) {
 	if deps.ActivityLogWriter != nil {
 		r.Use(activitylog.NewMiddleware(deps.ActivityLogWriter, deps.NodeID, deps.LogStreamHub))
 	}
+
+	// A handler's panic becomes its 500 here, inside the request metrics and
+	// the activity log, so both record it like any other server error
+	// (#3735), an upgrade request included.
+	r.Use(apimw.Recoverer)
 }
 
 // nodeConfigSettings reads the server settings a transcode node's

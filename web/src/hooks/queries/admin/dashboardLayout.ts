@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useIsMutating, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import {
@@ -28,6 +28,28 @@ const RESET_TOAST_ID = "admin-dashboard-layout-reset";
  * resurrects the arrangement it just discarded.
  */
 const LAYOUT_MUTATION_SCOPE = { id: "admin-dashboard-layout" } as const;
+
+/**
+ * Saves and resets share one key, so a page can tell that a write it did not
+ * start, such as an Insights card's Add to dashboard, is still on its way.
+ */
+const LAYOUT_MUTATION_KEY = ["admin", "dashboard-layout-write"] as const;
+
+/**
+ * Whether a layout save or reset from any page is still running, the refetch
+ * it triggers included. `running` re-renders the caller when the count
+ * changes; `isRunning` reads the mutation cache when called, for an effect
+ * that runs in the same commit as another page's unmount flush.
+ */
+export function useDashboardLayoutWrites() {
+  const queryClient = useQueryClient();
+  const running = useIsMutating({ mutationKey: LAYOUT_MUTATION_KEY });
+  const isRunning = useCallback(
+    () => queryClient.isMutating({ mutationKey: LAYOUT_MUTATION_KEY }) > 0,
+    [queryClient],
+  );
+  return { running, isRunning };
+}
 
 /** Reads the canonical account layout under the current request authority. */
 export function useAdminDashboardLayout() {
@@ -83,6 +105,7 @@ export function captureDashboardLayoutSave(
 export function useSaveAdminDashboardLayout() {
   const queryClient = useQueryClient();
   const mutation = useMutation({
+    mutationKey: LAYOUT_MUTATION_KEY,
     scope: LAYOUT_MUTATION_SCOPE,
     retry: false,
     mutationFn: async (intent: DashboardLayoutSaveIntent) => {
@@ -166,6 +189,7 @@ function captureLayoutReset(): ProfileRequestContextSnapshot {
 export function useResetAdminDashboardLayout() {
   const queryClient = useQueryClient();
   const mutation = useMutation({
+    mutationKey: LAYOUT_MUTATION_KEY,
     scope: LAYOUT_MUTATION_SCOPE,
     retry: false,
     mutationFn: async (authority: ProfileRequestContextSnapshot) => {

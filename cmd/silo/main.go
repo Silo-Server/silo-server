@@ -1924,6 +1924,7 @@ func main() {
 		fileRepo := scanner.NewFileRepository(deps.DB)
 		deps.FolderRepo = folderRepo
 		deps.FileRepo = fileRepo
+		deps.StreamEnds = playback.NewStreamEndRecorder(fileRepo)
 
 		ffprobePath := scanner.FFprobePathFromFFmpeg(cfg.Playback.FFmpegPath)
 		s := scanner.NewScanner(fileRepo, ffprobePath, deps.Blobs.Assets, cfg.Scanner.Workers, cfg.Scanner.EmptyTrashAfterScan, cfg.Scanner.FileRemovalGrace)
@@ -3140,6 +3141,13 @@ func main() {
 		defer downloadsStatsProvider.Close()
 		deps.AdminDownloadsStatsProvider = downloadsStatsProvider
 
+		insightsProvider, insightsErr := handlers.NewAdminInsightsProvider(appCtx, deps.DB, deps.EventBus)
+		if insightsErr != nil {
+			log.Fatalf("failed to create admin insights provider: %v", insightsErr)
+		}
+		defer insightsProvider.Close()
+		deps.AdminInsightsProvider = insightsProvider
+
 		// The dashboard metrics sampler is the only writer of concurrent-stream
 		// and egress history. Proxy and transcode nodes serve bytes but do not
 		// own the catalog database, so only the API-facing modes sample. An
@@ -3380,7 +3388,7 @@ func main() {
 	// The per-name password sign-in budget follows the same rule. One
 	// limiter serves the native, Jellyfin and Audiobookshelf auth services,
 	// so no listener gets its own allowance.
-	deps.SignInAttempts = ratelimit.NewSignInNameAttemptLimiter(apiRedisClient)
+	deps.SignInAttempts = ratelimit.NewSignInLimiter(apiRedisClient)
 
 	// Activity log writer + consumer.
 	if err := activitylog.SeedDefaults(ctx, settingsRepo); err != nil {
@@ -4343,6 +4351,7 @@ func main() {
 		// Wire direct dependencies when DB is available.
 		if deps.DB != nil {
 			compatDeps.RestoreReconstructedWatch = handlers.ReconstructedWatchRestorer(handlers.NewPGPlaybackAdminStore(deps.DB, nil))
+			compatDeps.StreamEnds = deps.StreamEnds
 			browseRepo := catalog.NewBrowseRepository(deps.DB)
 			itemRepo := catalog.NewItemRepository(deps.DB)
 			seasonRepo := catalog.NewSeasonRepository(deps.DB)
