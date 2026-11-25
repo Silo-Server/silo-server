@@ -165,16 +165,16 @@ export function LocalPasswordOffDialog({
               </Link>
             </>
           )}
-          <p className="text-muted-foreground">
-            {t("web.admin.settings.signIn.passwordsOff.sessions", {
-              link: (chunks) => (
-                <Link to="/admin/users" className="underline underline-offset-4">
-                  {chunks}
-                </Link>
-              ),
-            })}
-          </p>
         </div>
+        <p className="text-muted-foreground text-sm">
+          {t("web.admin.settings.signIn.passwordsOff.sessions", {
+            link: (chunks) => (
+              <Link to="/admin/users" className="underline underline-offset-4">
+                {chunks}
+              </Link>
+            ),
+          })}
+        </p>
         <AlertDialogFooter>
           <AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
           <AlertDialogAction variant="destructive" onClick={onConfirm} disabled={loading}>
