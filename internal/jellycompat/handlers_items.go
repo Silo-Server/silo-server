@@ -2271,9 +2271,9 @@ func (h *ItemsHandler) handleEpisodeBrowse(w http.ResponseWriter, r *http.Reques
 }
 
 // browseEpisodeItems pages the episodes of every series (or of the ParentId
-// library) that match query, from offset for up to limit rows; a zero limit
-// only counts them. ok is false when the ParentId library is outside the
-// session's libraries, so no episode can match.
+// library, series, or season) that match query, from offset for up to limit
+// rows; a zero limit only counts them. ok is false when the ParentId library
+// is outside the session's libraries, so no episode can match.
 func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session, query itemsQuery, repo episodeBrowser, offset, limit int) ([]upstreamListItem, map[string]compatEpisodeTarget, int, bool, error) {
 	access, filters := h.episodeBrowseFilters(ctx, session, query)
 	// The access filter checks each episode's series, so a ParentId library is
@@ -2288,7 +2288,9 @@ func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session,
 	}
 	filters.Offset = offset
 	filters.Limit = limit
-	episodes, total, err := h.browseEpisodes(ctx, session, repo, "", "", nil, "", filters, access, query.enableTotalRecordCount)
+	// Only an Ids lookup reaches here with a series or season ParentId, whose
+	// episodes it keeps.
+	episodes, total, err := h.browseEpisodes(ctx, session, repo, query.parentItemID, query.parentSeasonID, nil, "", filters, access, query.enableTotalRecordCount)
 	if err != nil {
 		return nil, nil, 0, false, err
 	}
@@ -2309,12 +2311,11 @@ func (h *ItemsHandler) browseEpisodeItems(ctx context.Context, session *Session,
 // mixedEpisodeBrowser returns the episode browse when a search lists Episode
 // beside other types, such as IncludeItemTypes=Episode,Movie; Ids narrow both
 // parts. The media_items browse serves the other types but holds no episodes
-// (#4257, #4546). As
-// in Jellyfin, a type filter at the user root and an IncludeItemTypes that
-// names Episode under a library ParentId search recursively even without
-// Recursive. A non-recursive library browse whose Episode comes only from an
-// ExcludeItemTypes filter lists the library's direct children, which are never
-// episodes.
+// (#4257, #4546). As in Jellyfin, a type filter at the user root and an
+// IncludeItemTypes that names Episode under a library ParentId search
+// recursively even without Recursive. A non-recursive library browse whose
+// Episode comes only from an ExcludeItemTypes filter lists the library's
+// direct children, which are never episodes.
 func (h *ItemsHandler) mixedEpisodeBrowser(query itemsQuery) (episodeBrowser, bool) {
 	if (!query.recursive && query.parentLibraryID > 0 && !query.includesEpisode) || len(query.itemTypes) < 2 || !slices.Contains(query.itemTypes, compatEpisodeType) || !query.allowsVideo() {
 		return nil, false

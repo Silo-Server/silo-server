@@ -54,11 +54,12 @@ type mixedBrowseEpisodes struct {
 	pages []catalog.BrowseFilters
 }
 
-func (r *mixedBrowseEpisodes) BrowseEpisodes(_ context.Context, _, _ string, _ *int, _ string, f catalog.BrowseFilters, _ catalog.AccessFilter, includeTotal bool) ([]*models.Episode, int, error) {
+func (r *mixedBrowseEpisodes) BrowseEpisodes(_ context.Context, seriesID, seasonID string, _ *int, _ string, f catalog.BrowseFilters, _ catalog.AccessFilter, includeTotal bool) ([]*models.Episode, int, error) {
 	r.pages = append(r.pages, f)
 	// ep-1 is the favorite; ContentIDs is an Ids allowlist.
 	all := slices.DeleteFunc(slices.Clone(r.all), func(ep *models.Episode) bool {
-		return (f.IsFavorite && ep.ContentID != "ep-1") || (f.ContentIDs != nil && !slices.Contains(f.ContentIDs, ep.ContentID))
+		return (f.IsFavorite && ep.ContentID != "ep-1") || (f.ContentIDs != nil && !slices.Contains(f.ContentIDs, ep.ContentID)) ||
+			(seriesID != "" && ep.SeriesID != seriesID) || (seasonID != "" && ep.SeasonID != seasonID)
 	})
 	total := 0
 	if includeTotal {
@@ -185,15 +186,20 @@ func TestFavoritesAndIdsWithEpisodeAndOtherTypesIncludeEpisodes(t *testing.T) {
 	for _, tc := range []struct {
 		params  string
 		ids     []string
+		parent  string
 		wantIDs []string
 	}{
-		{"IncludeItemTypes=Movie,Series,Episode&Filters=IsFavorite&Recursive=true", nil, []string{"movie-1", "ep-1"}},
-		{"IncludeItemTypes=Movie,Series,Episode&Filters=IsFavorite&Recursive=true&SortBy=SortName", nil, []string{"movie-1", "ep-1"}},
-		{"IncludeItemTypes=Movie,Episode", []string{"movie-2", "ep-2"}, []string{"movie-2", "ep-2"}},
-		{"IncludeItemTypes=Episode", []string{"movie-2", "ep-2"}, []string{"ep-2"}},
-		{"IncludeItemTypes=Movie,Episode&Filters=IsFavorite", []string{"movie-1", "movie-2", "ep-1", "ep-3"}, []string{"movie-1", "ep-1"}},
+		{"IncludeItemTypes=Movie,Series,Episode&Filters=IsFavorite&Recursive=true", nil, "", []string{"movie-1", "ep-1"}},
+		{"IncludeItemTypes=Movie,Series,Episode&Filters=IsFavorite&Recursive=true&SortBy=SortName", nil, "", []string{"movie-1", "ep-1"}},
+		{"IncludeItemTypes=Movie,Episode", []string{"movie-2", "ep-2"}, "", []string{"movie-2", "ep-2"}},
+		{"IncludeItemTypes=Episode", []string{"movie-2", "ep-2"}, "", []string{"ep-2"}},
+		{"IncludeItemTypes=Movie,Episode&Filters=IsFavorite", []string{"movie-1", "movie-2", "ep-1", "ep-3"}, "", []string{"movie-1", "ep-1"}},
+		// A series or season ParentId keeps only its own episodes.
+		{"IncludeItemTypes=Episode&Recursive=true", []string{"ep-1", "ep-2"}, "series", []string{"ep-1", "ep-2"}},
+		{"IncludeItemTypes=Episode&Recursive=true", []string{"ep-1", "ep-2"}, "other-series", nil},
+		{"IncludeItemTypes=Episode&Recursive=true", []string{"ep-1", "ep-3"}, "season-2", []string{"ep-3"}},
 	} {
-		t.Run(fmt.Sprintf("%s/Ids=%v", tc.params, tc.ids), func(t *testing.T) {
+		t.Run(fmt.Sprintf("%s/Ids=%v/ParentId=%s", tc.params, tc.ids, tc.parent), func(t *testing.T) {
 			h, _ := newMixedBrowseHandler(&mixedBrowseMovies{})
 			h.userData = &favoriteMoviesUserData{}
 			path := "/Items?" + tc.params
@@ -203,6 +209,13 @@ func TestFavoritesAndIdsWithEpisodeAndOtherTypesIncludeEpisodes(t *testing.T) {
 					encoded[i] = h.codec.EncodeStringID(EncodedIDItem, id)
 				}
 				path += "&Ids=" + strings.Join(encoded, ",")
+			}
+			if tc.parent != "" {
+				kind := EncodedIDItem
+				if strings.HasPrefix(tc.parent, "season") {
+					kind = EncodedIDSeason
+				}
+				path += "&ParentId=" + h.codec.EncodeStringID(kind, tc.parent)
 			}
 
 			result := performItemsRequest(t, h, path)
@@ -221,7 +234,7 @@ func newMixedBrowseHandler(movies *mixedBrowseMovies) (*ItemsHandler, *mixedBrow
 	episodes := &mixedBrowseEpisodes{all: []*models.Episode{
 		{ContentID: "ep-1", SeriesID: "series", SeasonNumber: 1, EpisodeNumber: 1, Title: "One"},
 		{ContentID: "ep-2", SeriesID: "series", SeasonNumber: 1, EpisodeNumber: 2, Title: "Two"},
-		{ContentID: "ep-3", SeriesID: "series", SeasonNumber: 1, EpisodeNumber: 3, Title: "Three"},
+		{ContentID: "ep-3", SeriesID: "series", SeasonID: "season-2", SeasonNumber: 2, EpisodeNumber: 1, Title: "Three"},
 	}}
 	return &ItemsHandler{
 		catalogUserState: true,
