@@ -66,14 +66,14 @@ func TestKeyCreatingRoutesNeedVerifiedMainProfile(t *testing.T) {
 		households userstore.UserStoreProvider
 		refused    *ProblemType
 	}{
-		{name: "secondary profile", headers: with(bearer(householdToken), "X-Profile-Id", "p-kid"), refused: &TypePermissionDenied},
+		{name: "secondary profile", headers: with(bearer(householdToken), "X-Profile-Id", "p-kid"), refused: &TypeMainProfileRequired},
 		{name: "main profile with a PIN, unverified", headers: locked, refused: &TypeProfileVerificationRequired},
 		{name: "main profile with a PIN, verified", headers: with(locked, "X-Profile-Token", "ptok")},
 		{name: "main profile without a PIN", headers: mainProfile(memberToken)},
-		{name: "one profile without a PIN, no header, not an administrator", headers: bearer(memberToken), refused: &TypePermissionDenied},
+		{name: "one profile without a PIN, no header, not an administrator", headers: bearer(memberToken), refused: &TypeMainProfileRequired},
 		{name: "one profile without a PIN, no header, administrator", headers: bearer(adminToken)},
-		{name: "main profile with a PIN, no header, administrator", headers: bearer(adminToken), households: lockedAdminHouseholds{}, refused: &TypePermissionDenied},
-		{name: "two profiles without a PIN, no header, administrator", headers: bearer(adminToken), households: twoProfileAdminHouseholds{}, refused: &TypePermissionDenied},
+		{name: "main profile with a PIN, no header, administrator", headers: bearer(adminToken), households: lockedAdminHouseholds{}, refused: &TypeMainProfileRequired},
+		{name: "two profiles without a PIN, no header, administrator", headers: bearer(adminToken), households: twoProfileAdminHouseholds{}, refused: &TypeMainProfileRequired},
 		{name: "two profiles without a PIN, main profile named, administrator", headers: mainProfile(adminToken), households: twoProfileAdminHouseholds{}},
 	} {
 		for _, route := range routes {

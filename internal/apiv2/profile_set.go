@@ -261,6 +261,7 @@ const putProfileSetDescription = "Makes the account's household profiles match a
 	"The body is either a signed profile-set envelope ({kid, payload, sig}, signed by the account's person key on a challenge from createAppKeyChallenge; with or without a login session), " +
 	"or {set, pairs?, edits_seen?} over the account's own login session acting as its main profile (X-Profile-Id), with X-Profile-Token when that profile has a PIN. " +
 	"The signed form is refused for an administrator's account (403 permission_denied) and while auth.app_key_sign_in is off (409 capability_disabled); the session form takes neither rule. " +
+	"A session form that is not acting as the main profile is 403 main_profile_required. " +
 	"Sessions opened by device sign-in, by another app's key, or by an administrator acting as the account, remote-playback handoffs, and sessions older than the record of how sessions open are 403 permission_denied; an API key carries no login session and is 401 authentication_required. In demo mode a non-administrator is 403 permission_denied in both forms. " +
 	"The first item is the main profile; items match profiles by sync_id, then by pairs, and are otherwise created in set order up to the household's profile limit (the rest are left_off; nothing is deleted to fit). " +
 	"A profile holding a sync_id the set no longer has is deleted with everything that belongs to it; a profile with no sync_id that pairs does not name is left alone. " +
@@ -416,6 +417,8 @@ func profileSetProblem(err error, signed bool) error {
 		return NewProblem(TypeProfileSetStale, "This server holds a newer profile set, or the same version with other content; read it and send a newer one.")
 	case errors.Is(err, auth.ErrProfileSetAdminAccount):
 		return NewProblem(TypePermissionDenied, "An administrator's profiles change only from a session verified as the main profile.")
+	case errors.Is(err, handlers.ErrProfileSetNotMainProfile):
+		return mainProfileRequiredProblem()
 	case errors.Is(err, access.ErrProfileUnverified):
 		return NewProblem(TypeProfileVerificationRequired, "Verify the main profile's PIN first.")
 	case errors.Is(err, userstore.ErrProfileSetAccountGone):

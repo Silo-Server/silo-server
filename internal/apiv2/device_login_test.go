@@ -411,8 +411,8 @@ func TestDevicePreapprovalOperations(t *testing.T) {
 		hdr  map[string]string
 		want ProblemType
 	}{
-		{"no profile named", bearer(memberToken), TypePermissionDenied},
-		{"secondary profile", with(bearer(householdToken), "X-Profile-Id", "p-kid"), TypePermissionDenied},
+		{"no profile named", bearer(memberToken), TypeMainProfileRequired},
+		{"secondary profile", with(bearer(householdToken), "X-Profile-Id", "p-kid"), TypeMainProfileRequired},
 		{"main profile with a PIN, unverified", with(bearer(householdToken), "X-Profile-Id", "p-primary-locked"), TypeProfileVerificationRequired},
 	} {
 		t.Run(caller.name, func(t *testing.T) {
