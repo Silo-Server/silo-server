@@ -22,7 +22,9 @@ export function OpenSiloStep({
   renewing: boolean;
 }) {
   // A new code remounts the step (keyed by the caller), so expiry restarts.
-  return <OpenSiloStepFor key={appCode.code} appCode={appCode} onRenew={onRenew} renewing={renewing} />;
+  return (
+    <OpenSiloStepFor key={appCode.code} appCode={appCode} onRenew={onRenew} renewing={renewing} />
+  );
 }
 
 function OpenSiloStepFor({
@@ -44,21 +46,23 @@ function OpenSiloStepFor({
   return (
     <section aria-labelledby="open-silo-title" className="space-y-3">
       <h2 id="open-silo-title" className="text-lg font-semibold">
-        {t("web.appCode.title")}
+        {t("web.auth.appCode.title")}
       </h2>
-      <p className="text-muted-foreground text-sm leading-6">{t("web.appCode.instructions")}</p>
+      <p className="text-muted-foreground text-sm leading-6">
+        {t("web.auth.appCode.instructions")}
+      </p>
       {expired ? (
         <div role="status" className="space-y-3">
-          <p>{t("web.appCode.expired")}</p>
+          <p>{t("web.auth.appCode.expired")}</p>
           <Button type="button" className="w-full" onClick={onRenew} disabled={renewing}>
-            {t("web.appCode.renew")}
+            {t("web.auth.appCode.renew")}
           </Button>
         </div>
       ) : (
         <>
           <Button asChild size="lg" className="h-12 w-full text-base font-semibold">
             <a href={buildJoinLink(appCode.server_address, appCode.code, "silo")}>
-              <Smartphone className="me-2 h-5 w-5" /> {t("web.appCode.open")}
+              <Smartphone className="me-2 h-5 w-5" /> {t("web.auth.appCode.open")}
             </a>
           </Button>
           <p className="text-center text-sm">
@@ -66,10 +70,12 @@ function OpenSiloStepFor({
               className="text-foreground underline hover:no-underline"
               href={buildJoinLink(appCode.server_address, appCode.code, "https")}
             >
-              {t("web.appCode.webLink")}
+              {t("web.auth.appCode.webLink")}
             </a>
           </p>
-          <p className="text-muted-foreground text-center text-xs">{t("web.appCode.singleUse")}</p>
+          <p className="text-muted-foreground text-center text-xs">
+            {t("web.auth.appCode.singleUse")}
+          </p>
         </>
       )}
     </section>

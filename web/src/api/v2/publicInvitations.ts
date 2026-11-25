@@ -27,6 +27,8 @@ export async function lookupPublicInvitation(token: string, signal: AbortSignal)
     typeof result.inviter_name !== "string" ||
     typeof result.show_tour !== "boolean" ||
     typeof result.acceptance_available !== "boolean" ||
+    typeof result.password_join !== "boolean" ||
+    typeof result.app_join !== "boolean" ||
     typeof result.expires_at !== "string"
   ) {
     throw new V2TransportError("lookupInvitation", 200, "Invalid invitation response");

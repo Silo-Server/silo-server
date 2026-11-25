@@ -60,7 +60,7 @@ export function OpenInSiloSection() {
       )}
       {failed && (
         <p role="alert" className="text-destructive text-sm">
-          {t("web.appCode.failed")}
+          {t("web.auth.appCode.failed")}
         </p>
       )}
     </section>
