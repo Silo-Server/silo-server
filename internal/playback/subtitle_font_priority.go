@@ -239,39 +239,65 @@ const (
 	fontNameIDTypographicFamily = 16
 )
 
+// A font's names are read within a fixed budget, so a crafted attachment
+// cannot keep bundle selection busy: each distinct name table is read once,
+// every name record examined counts toward maxFontNameRecords for the whole
+// attachment, collection included, a name stored in more than
+// maxFontNameBytes is skipped, and at most maxFontNames distinct names are
+// kept. Real fonts, CJK collections included, carry a few hundred records
+// and a few dozen short names.
+const (
+	maxFontNames       = 512
+	maxFontNameBytes   = 256
+	maxFontNameRecords = 8192
+)
+
+// fontNameReader collects an attachment's names within the budget above.
+type fontNameReader struct {
+	names   []string
+	records int
+	tables  map[[2]int]bool
+}
+
 // fontNames returns the names a TrueType or OpenType font, or each font of a
-// collection, gives itself in its name table, in every language it carries.
-// It returns nil for data it cannot read, such as WOFF.
+// collection, gives itself in its name table, in every language it carries,
+// within the budget above. It returns nil for data it cannot read, such as
+// WOFF.
 func fontNames(data []byte) []string {
 	if len(data) < 12 {
 		return nil
 	}
+	r := fontNameReader{tables: make(map[[2]int]bool)}
 	if string(data[:4]) != "ttcf" {
-		return sfntNames(data, 0)
+		r.sfnt(data, 0)
+		return r.names
 	}
 	count := int(binary.BigEndian.Uint32(data[8:12]))
-	var names []string
 	for i := range min(count, 256) {
 		at := 12 + 4*i
-		if at+4 > len(data) {
+		if at+4 > len(data) || r.spent() {
 			break
 		}
-		names = append(names, sfntNames(data, int(binary.BigEndian.Uint32(data[at:at+4])))...)
+		r.sfnt(data, int(binary.BigEndian.Uint32(data[at:at+4])))
 	}
-	return names
+	return r.names
 }
 
-// sfntNames reads the name table of the font whose table directory is at
-// offset in data.
-func sfntNames(data []byte, offset int) []string {
+func (r *fontNameReader) spent() bool {
+	return r.records >= maxFontNameRecords || len(r.names) >= maxFontNames
+}
+
+// sfnt reads the name table of the font whose table directory is at offset
+// in data, unless an earlier font of the collection shares it.
+func (r *fontNameReader) sfnt(data []byte, offset int) {
 	if offset < 0 || offset+12 > len(data) {
-		return nil
+		return
 	}
 	tables := int(binary.BigEndian.Uint16(data[offset+4:]))
 	for i := range tables {
 		rec := offset + 12 + 16*i
 		if rec+16 > len(data) {
-			return nil
+			return
 		}
 		if string(data[rec:rec+4]) != "name" {
 			continue
@@ -279,21 +305,29 @@ func sfntNames(data []byte, offset int) []string {
 		start := int(binary.BigEndian.Uint32(data[rec+8:]))
 		length := int(binary.BigEndian.Uint32(data[rec+12:]))
 		if start < 0 || length < 6 || start > len(data) || length > len(data)-start {
-			return nil
+			return
 		}
-		return nameTableNames(data[start : start+length])
+		if key := [2]int{start, length}; !r.tables[key] {
+			r.tables[key] = true
+			r.nameTable(data[start : start+length])
+		}
+		return
 	}
-	return nil
 }
 
-func nameTableNames(table []byte) []string {
+// nameTable adds a name table's distinct names, charging every record it
+// examines to the budget.
+func (r *fontNameReader) nameTable(table []byte) {
 	count := int(binary.BigEndian.Uint16(table[2:]))
 	storage := int(binary.BigEndian.Uint16(table[4:]))
-	var names []string
 	for i := range count {
+		if r.spent() {
+			return
+		}
+		r.records++
 		rec := 6 + 12*i
 		if rec+12 > len(table) {
-			break
+			return
 		}
 		platform := binary.BigEndian.Uint16(table[rec:])
 		encoding := binary.BigEndian.Uint16(table[rec+2:])
@@ -304,7 +338,7 @@ func nameTableNames(table []byte) []string {
 		}
 		length := int(binary.BigEndian.Uint16(table[rec+8:]))
 		start := storage + int(binary.BigEndian.Uint16(table[rec+10:]))
-		if start+length > len(table) {
+		if length > maxFontNameBytes || start+length > len(table) {
 			continue
 		}
 		raw := table[start : start+length]
@@ -326,9 +360,8 @@ func nameTableNames(table []byte) []string {
 		default:
 			continue
 		}
-		if name = strings.TrimSpace(name); name != "" && !slices.Contains(names, name) {
-			names = append(names, name)
+		if name = strings.TrimSpace(name); name != "" && !slices.Contains(r.names, name) {
+			r.names = append(r.names, name)
 		}
 	}
-	return names
 }

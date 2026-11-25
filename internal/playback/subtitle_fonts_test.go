@@ -3,6 +3,7 @@ package playback
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"os"
@@ -250,5 +251,49 @@ func TestSubtitleScriptFontsReadsSelectedTrack(t *testing.T) {
 	}
 	if got, want := subtitleScriptFonts(t.Context(), media, 0, cache), []string{"first style"}; !slices.Equal(got, want) {
 		t.Fatalf("track 0 = %q, want %q", got, want)
+	}
+}
+
+// A crafted collection gives each directory its own header over one shared
+// name table, each seeing a slightly different slice of it so no two look
+// alike, and fills the table with records that repeat one name. Without a
+// budget on the records examined it decodes the table 256 times, about 11 s
+// of CPU per attachment, past the extraction deadline.
+func TestFontNamesBoundsCraftedCollection(t *testing.T) {
+	const records = 65535
+	table := binary.BigEndian.AppendUint16(nil, 0)
+	table = binary.BigEndian.AppendUint16(table, records)
+	// Storage at 0: every record names the same 256 bytes.
+	table = binary.BigEndian.AppendUint16(table, 0)
+	for range records {
+		for _, v := range []uint16{1, 0, 0, fontNameIDFamily, maxFontNameBytes, 0} {
+			table = binary.BigEndian.AppendUint16(table, v)
+		}
+	}
+
+	const dirs = 256
+	headersAt := 12 + 4*dirs
+	tableAt := headersAt + 28*dirs
+	data := append([]byte("ttcf"), 0, 1, 0, 0)
+	data = binary.BigEndian.AppendUint32(data, dirs)
+	for i := range dirs {
+		data = binary.BigEndian.AppendUint32(data, uint32(headersAt+28*i))
+	}
+	for i := range dirs {
+		data = append(data, 0, 1, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0)
+		data = append(data, "name"...)
+		data = binary.BigEndian.AppendUint32(data, 0)
+		data = binary.BigEndian.AppendUint32(data, uint32(tableAt))
+		data = binary.BigEndian.AppendUint32(data, uint32(len(table)-i))
+	}
+	data = append(data, table...)
+
+	start := time.Now()
+	names := fontNames(data)
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("fontNames took %s on a crafted collection", elapsed)
+	}
+	if len(names) != 1 {
+		t.Fatalf("fontNames kept %d names, want the one repeated name", len(names))
 	}
 }
