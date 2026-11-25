@@ -151,7 +151,15 @@ func registerAppKeySignIn(reg *Registry) {
 		Class: ClassAuthenticated, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
 	Register(reg, enrollOp, reg.enrollAppKeys)
 
-	declareRetryAfter(reg, challengeOp, introduceOp, signInOp, enrollOp)
+	redeem := humaOp(http.MethodPost, Prefix+"/auth/grants/redeem", "redeemAppKeyGrant", "app-keys",
+		"Enroll another app's key with a grant the person signed and open the app's login session.")
+	redeem.Description = "The body is a grant-redeem envelope signed with the app's own key, the app_key the grant inside it names, with no device_sig. The grant is a grant envelope signed by the account's person key away from this server: good for at most five minutes, for this server_id, and once. origin must be one of the grant's origins. The app's key is enrolled as kind app, enrolled_by grant, named device_name or else the grant's app_name, and takes the provider identity of the person key that signed the grant. A session it opens cannot enroll keys, replace the person key, approve a device sign-in or revoke any key but its own. 403 app_grant_invalid: the grant was already used, is for another server, app key or address, does not verify by the account's live person key, or names an administrator's or disabled account; a kid that is not the app key's ID is app_grant_invalid too. 403 app_grant_expired: the grant's own exp has passed (a grant-redeem envelope outside its own iat and exp is 401 signature_invalid). A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget." + appKeySignedBodyNote + sealedReplyDescriptionSignedIn + providerAnswersDescription
+	redeem.Errors = []int{http.StatusUnauthorized, http.StatusForbidden, http.StatusConflict, http.StatusUnprocessableEntity, http.StatusTooManyRequests}
+	redeemOp := Operation{Operation: redeem, RetrySafety: RetrySafetyNonRetryable,
+		Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketKeySignIn, MaxBodyBytes: 16 << 10}
+	Register(reg, redeemOp, reg.redeemAppKeyGrant)
+
+	declareRetryAfter(reg, challengeOp, introduceOp, signInOp, enrollOp, redeemOp)
 }
 
 // declareRetryAfter documents the Retry-After header the app key routes send
@@ -219,6 +227,12 @@ func (reg *Registry) introduceAppKey(ctx context.Context, in *AppKeyEnvelopeInpu
 func (reg *Registry) signInWithAppKey(ctx context.Context, in *AppKeyEnvelopeInput) (*SealedReplyOutput, error) {
 	return reg.signedKeyRequest(ctx, in, appkeys.PurposeSignIn, func(svc AppKeyService, ctx context.Context, req auth.KeyRequest) (*handlers.AppKeyAnswer, error) {
 		return svc.SignInWithAppKey(ctx, req)
+	})
+}
+
+func (reg *Registry) redeemAppKeyGrant(ctx context.Context, in *AppKeyEnvelopeInput) (*SealedReplyOutput, error) {
+	return reg.signedKeyRequest(ctx, in, appkeys.PurposeGrantRedeem, func(svc AppKeyService, ctx context.Context, req auth.KeyRequest) (*handlers.AppKeyAnswer, error) {
+		return svc.RedeemAppKeyGrant(ctx, req)
 	})
 }
 
@@ -408,6 +422,15 @@ func appKeyProblemAt(err error, payloadLocation string) error {
 		return NewProblem(TypeRateLimited, detail).WithRetryAfter(int(retry.RetryAfter.Seconds()))
 	}
 	if code := appkeys.CodeOf(err); code != "" {
+		// The verifier names these as the protocol's test vectors do; the
+		// API answers app_grant_invalid and app_grant_expired, which can't
+		// be mistaken for the OAuth problem invalid_grant.
+		switch code {
+		case appkeys.CodeGrantInvalid, appkeys.CodeOriginNotGranted:
+			return NewProblem(TypeAppGrantInvalid, grantInvalidDetail)
+		case appkeys.CodeGrantExpired:
+			return NewProblem(TypeAppGrantExpired, "The grant has expired; ask the person to allow the app again.")
+		}
 		switch code.Stage() {
 		case appkeys.StageShape:
 			location := locationBody
@@ -429,12 +452,15 @@ func appKeyProblemAt(err error, payloadLocation string) error {
 	return serviceProblem(err)
 }
 
+const grantInvalidDetail = "The grant is used, or not valid for this server, app, address or account."
+
 var appKeyProblems = []struct {
 	err    error
 	kind   ProblemType
 	detail string
 }{
 	{auth.ErrKeySignatureInvalid, TypeSignatureInvalid, "The signed message did not verify."},
+	{auth.ErrGrantInvalid, TypeAppGrantInvalid, grantInvalidDetail},
 	{auth.ErrKeyChallengeInvalid, TypeChallengeInvalid, "The challenge is unknown, used or expired; ask for a new one."},
 	{auth.ErrKeyOriginMismatch, TypeOriginMismatch, "The signed origin is not the address this request arrived on."},
 	{auth.ErrAppKeyDenied, TypeKeyDenied, "This device was not approved."},

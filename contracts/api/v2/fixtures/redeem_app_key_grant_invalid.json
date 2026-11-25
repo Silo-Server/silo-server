@@ -1,0 +1,7 @@
+{
+  "type": "https://siloserver.org/docs/api/v2/problems/app_grant_invalid",
+  "title": "App grant invalid",
+  "status": 403,
+  "detail": "The grant is used, or not valid for this server, app, address or account.",
+  "instance": "urn:silo:request:00000000000000000000034a"
+}

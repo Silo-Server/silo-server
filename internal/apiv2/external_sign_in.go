@@ -453,7 +453,7 @@ func registerExternalSignIn(reg *Registry) {
 			if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
 				return nil, p
 			}
-			claims, p := linkingClaims(ctx)
+			claims, p := reg.linkingClaims(ctx)
 			if p != nil {
 				return nil, p
 			}
@@ -489,7 +489,7 @@ func registerExternalSignIn(reg *Registry) {
 			if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
 				return nil, p
 			}
-			claims, p := linkingClaims(ctx)
+			claims, p := reg.linkingClaims(ctx)
 			if p != nil {
 				return nil, p
 			}

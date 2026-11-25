@@ -433,6 +433,12 @@ func TestSessionAllowsDB(t *testing.T) {
 			}
 			allowed(ActionManageKeys, tc.manage)
 			allowed(ActionApproveDeviceSignIn, tc.approve)
+			// A personal API key or a linked sign-in is refused only to
+			// another app's session; the operations' own rules decide
+			// the rest, as before app keys.
+			if err := SessionMayIssueCredential(ctx, env.pool, tc.claims); tc.approve && err != nil || !tc.approve && !errors.Is(err, ErrSessionNotAllowed) {
+				t.Fatalf("issuing a credential: err = %v, want allowed %v", err, tc.approve)
+			}
 		})
 	}
 }

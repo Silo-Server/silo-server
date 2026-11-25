@@ -290,6 +290,22 @@ func (r *AppKeyRepository) PersonKeyByKeyID(ctx context.Context, keyID string) (
 	return scanPersonKey(r.pool.QueryRow(ctx, `SELECT `+personKeyColumns+` FROM auth_person_keys WHERE key_id = $1`, keyID))
 }
 
+// LivePersonKey finds the account's person key that is not revoked, leaving
+// out a provider-bound key whose identity is gone from the account, as the
+// key list does.
+func (r *AppKeyRepository) LivePersonKey(ctx context.Context, userID int) (*models.AppPersonKey, error) {
+	return scanPersonKey(r.pool.QueryRow(ctx, `SELECT `+personKeyColumns+` FROM auth_person_keys k
+		WHERE user_id = $1 AND revoked_at IS NULL AND `+identityLive, userID))
+}
+
+// UnrevokedPersonKey finds the account's person key that is not revoked,
+// whether or not its identity still exists: a caller that goes on to use the
+// key revokes one whose identity is gone.
+func (r *AppKeyRepository) UnrevokedPersonKey(ctx context.Context, userID int) (*models.AppPersonKey, error) {
+	return scanPersonKey(r.pool.QueryRow(ctx, `SELECT `+personKeyColumns+` FROM auth_person_keys
+		WHERE user_id = $1 AND revoked_at IS NULL`, userID))
+}
+
 // DeviceKeyByKeyID finds a device key by its key ID, revoked or not.
 func (r *AppKeyRepository) DeviceKeyByKeyID(ctx context.Context, keyID string) (*models.AppDeviceKey, error) {
 	if !ValidTextKey(keyID) {
@@ -314,8 +330,7 @@ const identityLive = `(NOT k.provider_bound OR k.identity_id IS NULL OR EXISTS (
 // ListAccountKeys returns the account's live keys, device keys newest first.
 func (r *AppKeyRepository) ListAccountKeys(ctx context.Context, userID int) (AccountKeys, error) {
 	var out AccountKeys
-	person, err := scanPersonKey(r.pool.QueryRow(ctx, `SELECT `+personKeyColumns+` FROM auth_person_keys k
-		WHERE user_id = $1 AND revoked_at IS NULL AND `+identityLive, userID))
+	person, err := r.LivePersonKey(ctx, userID)
 	switch {
 	case err == nil:
 		out.Person = person

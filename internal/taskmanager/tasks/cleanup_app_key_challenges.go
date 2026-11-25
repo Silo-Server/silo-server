@@ -11,13 +11,15 @@ import (
 )
 
 // expiredKeyChallengeDeleter removes app key challenges that expired
-// unspent; *auth.KeyChallenges satisfies it.
+// unspent and the IDs of used grants past their life; *auth.KeyChallenges
+// satisfies it.
 type expiredKeyChallengeDeleter interface {
 	DeleteExpiredChallenges(ctx context.Context) (int, error)
 }
 
-// AppKeyChallengeCleanupTask deletes app key challenges nobody spent. Spending
-// a challenge deletes it; nothing else removes one that was never used.
+// AppKeyChallengeCleanupTask deletes app key challenges nobody spent, and the
+// records of used grants once their grant has expired. Spending a challenge
+// deletes it; nothing else removes one that was never used.
 type AppKeyChallengeCleanupTask struct {
 	challenges expiredKeyChallengeDeleter
 }
@@ -35,7 +37,7 @@ func NewAppKeyChallengeCleanupTask(challenges expiredKeyChallengeDeleter) *AppKe
 func (t *AppKeyChallengeCleanupTask) Key() string  { return "cleanup_app_key_challenges" }
 func (t *AppKeyChallengeCleanupTask) Name() string { return "Cleanup Expired App Key Challenges" }
 func (t *AppKeyChallengeCleanupTask) Description() string {
-	return "Deletes app key sign-in challenges that expired unused"
+	return "Deletes app key sign-in challenges that expired unused, and records of used grants that have expired"
 }
 func (t *AppKeyChallengeCleanupTask) Category() taskmanager.TaskCategory {
 	return taskmanager.TaskCategorySystem
