@@ -41,8 +41,10 @@ var allowedMDBListHosts = map[string]struct{}{
 // case, are tolerated. It does not validate the host; call ValidateMDBListURL
 // (or CanonicalMDBListURL) before fetching.
 func NormalizeMDBListURL(raw string) string {
-	raw, _, _ = strings.Cut(strings.TrimSpace(raw), "#")
-	path, query, _ := strings.Cut(raw, "?")
+	// Trim after each cut: space before a removed #fragment or /json would
+	// otherwise survive this pass and be trimmed by the next.
+	raw, _, _ = strings.Cut(raw, "#")
+	path, query, _ := strings.Cut(strings.TrimSpace(raw), "?")
 	path = strings.TrimRight(path, "/")
 	for hasJSONSuffix(path) {
 		path = strings.TrimRight(path[:len(path)-len("/json")], "/")
@@ -54,7 +56,7 @@ func NormalizeMDBListURL(raw string) string {
 	// they stored recovers on its next sync. No feed parameter value ends in
 	// /json, and trimming every one keeps a second pass from changing the URL.
 	for strings.HasSuffix(query, "/json") {
-		query = strings.TrimSuffix(query, "/json")
+		query = strings.TrimSpace(strings.TrimSuffix(query, "/json"))
 	}
 	if query != "" {
 		return path + "/json?" + query

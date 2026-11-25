@@ -42,6 +42,8 @@ func TestCanonicalMDBListURLPutsJSONOnThePath(t *testing.T) {
 		list + "?sort=rank&sortorder=asc/json": list + "/json?sort=rank&sortorder=asc",
 		list + "#top/json":                     list + "/json",
 		list + "/json?sort=rank/json/json":     list + "/json?sort=rank",
+		list + "/json?sort=rank #top":          list + "/json?sort=rank",
+		list + "/json?sort=rank /json":         list + "/json?sort=rank",
 	} {
 		got, err := CanonicalMDBListURL(raw)
 		if err != nil {
