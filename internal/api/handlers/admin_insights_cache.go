@@ -36,8 +36,8 @@ import (
 // A sweep refreshes keys an event marked stale and read within
 // adminInsightsKeepWarmFor, every insightsKeepWarmInterval of their cost, and
 // drops keys nobody read within adminInsightsServeStaleFor. Background
-// refreshes run one at a time, so they hold at most one read-gate slot. Title detail and custom ranges are read on
-// demand and not cached.
+// refreshes run one at a time, so they hold at most one read-gate slot. Title
+// detail and custom ranges are read on demand and not cached.
 type AdminInsightsProvider struct {
 	pool *pgxpool.Pool
 
