@@ -1,0 +1,208 @@
+package apiv2
+
+import (
+	"context"
+	"errors"
+	"net/http"
+
+	"github.com/Silo-Server/silo-server/internal/appkeys"
+	"github.com/Silo-Server/silo-server/internal/auth"
+)
+
+// AdminAppKeyService is an administrator's view of one account's app keys
+// (docs/architecture/app-keys.md, "Administrators"). *handlers.AuthHandler
+// implements it; the mutations read the acting administrator from the
+// request and apply the Owner rules.
+type AdminAppKeyService interface {
+	AdminListAppKeys(ctx context.Context, userID int) (auth.AdminAccountKeys, error)
+	AdminRevokeAppDeviceKey(ctx context.Context, userID int, id string) error
+	AdminRevokeAppPersonKey(ctx context.Context, userID int) error
+	AdminDenyPendingAppKey(ctx context.Context, userID int, id string) error
+}
+
+// AdminAppPersonKey is an account's person key as an administrator sees it.
+type AdminAppPersonKey struct {
+	AppPersonKey
+	EnrolledBy    string `json:"enrolled_by" enum:"session,app-code" doc:"How the key was enrolled: from a signed-in session or with an app code" example:"session"`
+	ProviderBound bool   `json:"provider_bound" doc:"Enrolled from a sign-in provider session: it vouches for a device only while that provider account is linked"`
+	IdentityGone  bool   `json:"identity_gone" doc:"Provider-bound and its provider account is no longer linked to the account: it can't introduce a device again"`
+}
+
+// AdminAppDeviceKey is one of an account's device keys as an administrator
+// sees it: the person's own list object plus how it signs in.
+type AdminAppDeviceKey struct {
+	AppDeviceKey
+	ProviderBound bool     `json:"provider_bound" doc:"Enrolled from a sign-in provider session, or introduced by a person key that was: the provider checks the person again at each sign-in"`
+	IdentityGone  bool     `json:"identity_gone" doc:"Provider-bound and its provider account is no longer linked to the account: it can't sign in again and is revoked at its next try. The person's own list leaves such a key out"`
+	WaitingUntil  *Instant `json:"waiting_until" nullable:"true" doc:"For a key with status pending, when it stops waiting for approval (24 hours after it asked); null otherwise"`
+}
+
+// AdminAppKeyList is an account's app keys as an administrator sees them.
+type AdminAppKeyList struct {
+	PersonKey *AdminAppPersonKey  `json:"person_key,omitempty" doc:"The account's person key; absent when it has none"`
+	Devices   []AdminAppDeviceKey `json:"devices" doc:"Active keys, keys waiting for approval inside their 24 hours, and keys whose provider account is gone, newest first; revoked and denied keys are left out"`
+}
+
+// AdminAppKeyListOutput is the listAdminUserAppKeys response.
+type AdminAppKeyListOutput struct {
+	Body AdminAppKeyList
+}
+
+// AdminAppKeysInput names the account.
+type AdminAppKeysInput struct {
+	UserID ID `path:"user_id"`
+}
+
+// AdminAppDeviceKeyInput names one of the account's device keys.
+type AdminAppDeviceKeyInput struct {
+	UserID ID     `path:"user_id"`
+	ID     string `path:"id" format:"uuid" doc:"The device key's id from listAdminUserAppKeys" example:"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"`
+}
+
+// AdminPendingAppKeyInput names one of the account's waiting device keys;
+// the body is an empty JSON object.
+type AdminPendingAppKeyInput struct {
+	UserID  ID     `path:"user_id"`
+	ID      string `path:"id" format:"uuid" doc:"The waiting device key's id from listAdminUserAppKeys" example:"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11"`
+	RawBody []byte
+	Body    struct{}
+}
+
+// adminKeyRule is who may change another account's keys.
+const adminKeyRule = " Any administrator may act on an ordinary account and on their own; only the server Owner may act on another administrator or on the Owner (403 permission_denied). Answers while auth.app_key_sign_in is off."
+
+func adminAppKeyOperation(method, path, id, summary, description string) Operation {
+	op := adminAccountOperation(method, "/{user_id}/keys"+path, id, false)
+	op.Summary = summary
+	op.Description = description
+	op.Errors = []int{http.StatusNotFound, http.StatusForbidden}
+	if method != http.MethodGet {
+		op.DefaultStatus = http.StatusNoContent
+		op.RetrySafety = RetrySafetyNaturalIdempotent
+	}
+	return op
+}
+
+func registerAdminAppKeys(reg *Registry) {
+	Register(reg, adminAppKeyOperation(http.MethodGet, "", "listAdminUserAppKeys",
+		"List an account's Silo app keys: its person key, its devices and the devices waiting for approval.",
+		"Shows what the person's own listAppKeys shows, plus how each key signs in and the keys whose sign-in provider account is gone. Any administrator may list any account. Answers while auth.app_key_sign_in is off."),
+		reg.listAdminUserAppKeys)
+	Register(reg, adminAppKeyOperation(http.MethodDelete, "/devices/{id}", "revokeAdminUserDeviceKey",
+		"Revoke one of an account's device keys and end the sessions it opened.",
+		"The device is signed out and its key can't sign in again. Revoking a revoked key changes nothing; a key of another account is 404 not_found. Audited as user.device_key_revoked."+adminKeyRule),
+		reg.revokeAdminUserDeviceKey)
+	Register(reg, adminAppKeyOperation(http.MethodDelete, "/person", "revokeAdminUserPersonKey",
+		"Revoke an account's person key.",
+		"No new device can be introduced with it, and the devices it introduced that are still waiting for approval are denied. Devices already enrolled keep their keys and sessions. The person sets up a new person key from a signed-in device (replacePersonKey). 404 not_found when the account has no person key. Audited as user.person_key_revoked."+adminKeyRule),
+		reg.revokeAdminUserPersonKey)
+	Register(reg, adminAppKeyOperation(http.MethodPost, "/pending/{id}/deny", "denyAdminUserPendingKey",
+		"Deny one of an account's device keys waiting for approval.",
+		"The key's next sign-in answers 403 key_denied and neither list shows it. Denying a denied key changes nothing; an active, revoked or unknown key is 404 not_found. No administrator operation approves a waiting key: only the person does, from one of their own sessions (approvePendingAppKey). Audited as user.device_key_denied."+adminKeyRule),
+		reg.denyAdminUserPendingKey)
+}
+
+func (reg *Registry) adminAppKeys() (AdminAppKeyService, *Problem) {
+	if reg.deps.AdminAppKeys == nil {
+		return nil, unavailable("app key administration")
+	}
+	return reg.deps.AdminAppKeys, nil
+}
+
+// adminAppKeyProblem maps an administrator key operation's error: a missing
+// account as account administration answers it, the rest as the app key
+// operations do.
+func adminAppKeyProblem(err error) error {
+	if errors.Is(err, auth.ErrNotFound) {
+		return adminAccountError(err)
+	}
+	return appKeyProblem(err)
+}
+
+func (reg *Registry) listAdminUserAppKeys(ctx context.Context, in *AdminAppKeysInput) (*AdminAppKeyListOutput, error) {
+	svc, p := reg.adminAppKeys()
+	if p != nil {
+		return nil, p
+	}
+	id, p := adminAccountID(in.UserID)
+	if p != nil {
+		return nil, p
+	}
+	keys, err := svc.AdminListAppKeys(ctx, id)
+	if err != nil {
+		return nil, adminAppKeyProblem(err)
+	}
+	out := AdminAppKeyList{Devices: make([]AdminAppDeviceKey, 0, len(keys.Devices))}
+	if person := keys.Person; person != nil {
+		out.PersonKey = &AdminAppPersonKey{
+			AppPersonKey:  AppPersonKey{KeyID: person.KeyID, EnrolledAt: NewInstant(person.CreatedAt)},
+			EnrolledBy:    enrolledBy(person.EnrolledVia),
+			ProviderBound: person.ProviderBound,
+			IdentityGone:  person.IdentityGone,
+		}
+	}
+	for _, key := range keys.Devices {
+		device := AdminAppDeviceKey{
+			AppDeviceKey:  appDeviceKeyOf(key.AppDeviceKey, keys.AllowedBy),
+			ProviderBound: key.ProviderBound,
+			IdentityGone:  key.IdentityGone,
+		}
+		if device.Status == "pending" {
+			until := NewInstant(key.CreatedAt.Add(appkeys.PendingKeyLifetime))
+			device.WaitingUntil = &until
+		}
+		out.Devices = append(out.Devices, device)
+	}
+	return &AdminAppKeyListOutput{Body: out}, nil
+}
+
+func (reg *Registry) revokeAdminUserDeviceKey(ctx context.Context, in *AdminAppDeviceKeyInput) (*struct{}, error) {
+	svc, p := reg.adminAppKeys()
+	if p != nil {
+		return nil, p
+	}
+	id, p := adminAccountID(in.UserID)
+	if p != nil {
+		return nil, p
+	}
+	if err := svc.AdminRevokeAppDeviceKey(ctx, id, in.ID); err != nil {
+		return nil, adminAppKeyProblem(err)
+	}
+	return nil, nil
+}
+
+func (reg *Registry) revokeAdminUserPersonKey(ctx context.Context, in *AdminAppKeysInput) (*struct{}, error) {
+	svc, p := reg.adminAppKeys()
+	if p != nil {
+		return nil, p
+	}
+	id, p := adminAccountID(in.UserID)
+	if p != nil {
+		return nil, p
+	}
+	if err := svc.AdminRevokeAppPersonKey(ctx, id); err != nil {
+		if errors.Is(err, auth.ErrAppKeyNotFound) {
+			return nil, NewProblem(TypeNotFound, "This account has no person key.")
+		}
+		return nil, adminAppKeyProblem(err)
+	}
+	return nil, nil
+}
+
+func (reg *Registry) denyAdminUserPendingKey(ctx context.Context, in *AdminPendingAppKeyInput) (*struct{}, error) {
+	if p := rejectNonNullableNulls(in.RawBody, nil); p != nil {
+		return nil, p
+	}
+	svc, p := reg.adminAppKeys()
+	if p != nil {
+		return nil, p
+	}
+	id, p := adminAccountID(in.UserID)
+	if p != nil {
+		return nil, p
+	}
+	if err := svc.AdminDenyPendingAppKey(ctx, id, in.ID); err != nil {
+		return nil, adminAppKeyProblem(err)
+	}
+	return nil, nil
+}

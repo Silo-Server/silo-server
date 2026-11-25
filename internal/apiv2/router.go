@@ -460,7 +460,11 @@ type Dependencies struct {
 	AdminAPIKeys            AdminAPIKeyService
 	PersonalAPIKeys         PersonalAPIKeyService
 	// AppKeys stores app keys; nil reports the capability not_configured.
-	AppKeys          AppKeyService
+	AppKeys AppKeyService
+	// AdminAppKeys lists and revokes another account's app keys; nil leaves
+	// those operations not configured and the account capability app_keys
+	// false.
+	AdminAppKeys     AdminAppKeyService
 	PolicyCapability PolicyCapabilityService
 	Branding         BrandingService
 	OverlayImages    OverlayImageService

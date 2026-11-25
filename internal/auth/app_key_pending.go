@@ -149,29 +149,11 @@ func (a *AppKeySignIn) DenyPendingKey(ctx context.Context, claims *Claims, id st
 	}
 	var audit *auditmutation.Entry
 	err := a.inTx(ctx, func(tx pgx.Tx) error {
-		user, err := lockUser(ctx, tx, claims.UserID)
-		if err != nil {
+		if _, err := lockUser(ctx, tx, claims.UserID); err != nil {
 			return err
 		}
-		key, err := lockDeviceKey(ctx, tx, user.ID, id)
-		if err != nil {
-			return err
-		}
-		if key.RevokedAt != nil {
-			return ErrAppKeyNotFound
-		}
-		switch key.Status {
-		case models.DeviceKeyStatusDenied:
-			return nil
-		case models.DeviceKeyStatusPending:
-		default:
-			return ErrAppKeyNotFound
-		}
-		if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET status = $2 WHERE id = $1`, key.ID, models.DeviceKeyStatusDenied); err != nil {
-			return fmt.Errorf("denying device key: %w", err)
-		}
-		audit, err = auditmutation.RecordMutation(ctx, tx, auditmutation.ActionDeviceKeyDenied, auditmutation.TargetUser,
-			strconv.Itoa(user.ID), http.StatusNoContent, auditmutation.Created(auditFieldDeviceKey, key.ID))
+		var err error
+		audit, err = denyPendingKeyTx(ctx, tx, claims.UserID, id)
 		return err
 	})
 	if err != nil {
@@ -179,6 +161,32 @@ func (a *AppKeySignIn) DenyPendingKey(ctx context.Context, claims *Claims, id st
 	}
 	auditmutation.CommitMutation(ctx, audit)
 	return nil
+}
+
+// denyPendingKeyTx denies one of the account's waiting device keys in tx,
+// which holds the account row lock, and records the audit row. It returns no
+// row for a key that was denied already; an active, revoked or unknown key is
+// ErrAppKeyNotFound.
+func denyPendingKeyTx(ctx context.Context, tx pgx.Tx, userID int, id string) (*auditmutation.Entry, error) {
+	key, err := lockDeviceKey(ctx, tx, userID, id)
+	if err != nil {
+		return nil, err
+	}
+	if key.RevokedAt != nil {
+		return nil, ErrAppKeyNotFound
+	}
+	switch key.Status {
+	case models.DeviceKeyStatusDenied:
+		return nil, nil
+	case models.DeviceKeyStatusPending:
+	default:
+		return nil, ErrAppKeyNotFound
+	}
+	if _, err := tx.Exec(ctx, `UPDATE auth_device_keys SET status = $2 WHERE id = $1`, key.ID, models.DeviceKeyStatusDenied); err != nil {
+		return nil, fmt.Errorf("denying device key: %w", err)
+	}
+	return auditmutation.RecordMutation(ctx, tx, auditmutation.ActionDeviceKeyDenied, auditmutation.TargetUser,
+		strconv.Itoa(userID), http.StatusNoContent, auditmutation.Created(auditFieldDeviceKey, key.ID))
 }
 
 // pendingKeyExpired reports whether a waiting key has outlived
