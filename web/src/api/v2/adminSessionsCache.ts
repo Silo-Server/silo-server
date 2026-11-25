@@ -39,13 +39,19 @@ export function applyAdminSessionPauseEvent(
 }
 
 /**
- * Keeps a pause state the cache took from an event newer than a list read
- * that was already in flight, so that read cannot put the old state back.
+ * Reads the session list for the cache, keeping a pause state the cache took
+ * from an event while the read was in flight: that event is newer than the
+ * read, which would otherwise put the old state back.
  */
-export function keepNewerPauseStates(
-  cached: AdminSession[] | undefined,
-  fetched: AdminSession[],
-): AdminSession[] {
+export async function readAdminSessionsKeepingPauseEvents(
+  queryClient: QueryClient,
+  context: ProfileRequestContextSnapshot | null,
+  read: () => Promise<AdminSession[]>,
+): Promise<AdminSession[]> {
+  const fetched = await read();
+  // Look at the cache only now, after the read: the events that matter are
+  // the ones applied while it ran.
+  const cached = queryClient.getQueryData<AdminSession[]>(adminSessionsKey(context));
   if (!cached?.length) return fetched;
   const byID = new Map(cached.map((row) => [row.session_id, row]));
   return fetched.map((row) => {

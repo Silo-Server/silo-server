@@ -5,7 +5,7 @@ import type { AdminSession } from "@/api/types";
 import {
   adminSessionsKey,
   applyAdminSessionPauseEvent,
-  keepNewerPauseStates,
+  readAdminSessionsKeepingPauseEvents,
 } from "./adminSessionsCache";
 
 const authority: ProfileRequestContextSnapshot = {
@@ -46,12 +46,18 @@ describe("admin session pause state", () => {
     expect(cached(client)).toEqual([row("a", true, 7), row("b", true, 2)]);
   });
 
-  it("keeps an event's state over a list read that started before it", () => {
-    const fetched = [row("a", false, 4), row("b", true, 9), row("c", false)];
-    expect(keepNewerPauseStates([row("a", true, 7), row("b", false, 8)], fetched)).toEqual([
-      row("a", true, 7),
-      row("b", true, 9),
-      row("c", false),
-    ]);
+  it("keeps an event's state over a list read that was in flight before it", async () => {
+    const client = new QueryClient();
+    client.setQueryData(adminSessionsKey(authority), [row("a", false, 4), row("b", false, 8)]);
+    let answer: (rows: AdminSession[]) => void = () => {};
+    const read = readAdminSessionsKeepingPauseEvents(
+      client,
+      authority,
+      () => new Promise<AdminSession[]>((resolve) => (answer = resolve)),
+    );
+    // The pause arrives while the read runs; the read answers from before it.
+    applyAdminSessionPauseEvent(client, authority, { session_id: "a", seq: 7, state: "paused" });
+    answer([row("a", false, 4), row("b", true, 9), row("c", false)]);
+    expect(await read).toEqual([row("a", true, 7), row("b", true, 9), row("c", false)]);
   });
 });

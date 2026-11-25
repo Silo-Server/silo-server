@@ -12,7 +12,7 @@ import { adminKeys } from "../keys";
 import { listAdminPlaybackSessions } from "@/api/v2/adminSessions";
 import { captureAdminAuthority } from "@/api/v2/adminAuthority";
 
-import { adminSessionsKey, keepNewerPauseStates } from "@/api/v2/adminSessionsCache";
+import { adminSessionsKey, readAdminSessionsKeepingPauseEvents } from "@/api/v2/adminSessionsCache";
 
 const ADMIN_STALE_TIME = 30_000;
 
@@ -53,14 +53,11 @@ export function useAdminStats() {
 export function useAdminSessions() {
   const queryClient = useQueryClient();
   const context = captureProfileRequestContext();
-  const queryKey = adminSessionsKey(context);
   return useQuery({
-    queryKey,
-    // A pause event applied while this read was in flight is newer than it.
-    queryFn: async () =>
-      keepNewerPauseStates(
-        queryClient.getQueryData(queryKey),
-        await listAdminPlaybackSessions(context ?? captureAdminAuthority()),
+    queryKey: adminSessionsKey(context),
+    queryFn: () =>
+      readAdminSessionsKeepingPauseEvents(queryClient, context, () =>
+        listAdminPlaybackSessions(context ?? captureAdminAuthority()),
       ),
     enabled: context !== null,
     staleTime: ADMIN_STALE_TIME,
