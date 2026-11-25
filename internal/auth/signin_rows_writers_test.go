@@ -91,7 +91,7 @@ var signInRowWriters = map[string]string{
 // signInRowWrite matches SQL that writes the tables, allowing a schema and
 // any spacing; a table name inside a longer one does not match.
 var signInRowWrite = regexp.MustCompile(`(?is)\b(?:update(?:\s+only)?|insert\s+into|delete\s+from(?:\s+only)?)\s+(?:"?public"?\.)?"?(?:auth_sessions|device_login_requests)\b` +
-	`|(?is)\bdelete\s+from(?:\s+only)?\s+(?:"?public"?\.)?"?(?:plugin_auth_identities|users|plugin_installations|user_profiles)\b`)
+	`|\bdelete\s+from(?:\s+only)?\s+(?:"?public"?\.)?"?(?:plugin_auth_identities|users|plugin_installations|user_profiles)\b`)
 
 // Every writer of an account's sign-in rows is listed in signInRowWriters
 // with the rule that keeps it from deadlocking with a plugin uninstall. A new
