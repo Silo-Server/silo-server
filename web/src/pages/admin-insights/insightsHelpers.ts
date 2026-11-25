@@ -1,3 +1,5 @@
+import type { MouseEvent } from "react";
+
 import type { WidgetRange } from "@/components/admin/dashboard/types";
 import type { Translate } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
@@ -407,18 +409,25 @@ export function formatHwAccelLabel(
 
 /**
  * Props for a region that shows the previous result while a new sort, search,
- * or filter loads. The dim waits 150 ms so a quick response never flickers,
- * and lifts at once when the new data lands. Links in the region stop working
- * until then: they mix the new filters with the old result's window. Buttons
- * stay live, so a second sort or toggle still works.
+ * or filter loads. The region stays opaque and shows a sweep along its top
+ * edge (`.insight-refreshing` in app.css). Its links stop working until the
+ * new result lands, for the mouse and for Enter alike, because they mix the
+ * new filters with the old result's window. Buttons stay live, so a second
+ * sort or toggle still works.
  */
 export function insightRefreshProps(refreshing: boolean, className?: string) {
   return {
     "aria-busy": refreshing || undefined,
-    className: cn(
-      "transition-opacity duration-200",
-      refreshing && "opacity-50 delay-150 [&_a]:pointer-events-none",
-      className,
-    ),
+    className: cn(refreshing && "insight-refreshing", className),
+    onClickCapture: refreshing ? blockLinkActivation : undefined,
   };
+}
+
+// Enter on a focused link fires a click, so this covers the keyboard too.
+// Capture runs before the router link's own handler, which skips navigation
+// once the default is prevented.
+function blockLinkActivation(event: MouseEvent) {
+  if (event.target instanceof Element && event.target.closest("a")) {
+    event.preventDefault();
+  }
 }
