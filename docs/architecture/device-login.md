@@ -171,7 +171,11 @@ the fingerprint. Nothing on the poll changes for the TV.
   `expires_at`. Only the account's own login session may call it: an API key,
   a session an administrator opened as the account, or a remote-playback
   handoff is 403 `permission_denied`, and a temporary-password session is
-  stopped by the middleware as for every other route. The account and the
+  stopped by the middleware as for every other route. A session opened by
+  device sign-in, or by an app key that another app was granted, is refused
+  with 403 `permission_denied` too (`auth.SessionAllows`, see
+  [app-keys.md](app-keys.md#who-decides)): the sign-in it creates outlives the
+  session that made it. The account and the
   approving session are locked and checked as for an ordinary approval, and the
   row is inserted `approved`, with `preapproved_at` set, `ip_address` NULL and
   the session's provider chain. The row keeps `client_purpose = 'device_login'`,

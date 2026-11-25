@@ -744,6 +744,11 @@ func (s *DeviceLoginService) approvingProviderChain(ctx context.Context, tx pgx.
 	if claims.UserID != approverUserID || !claims.IsOwnLoginSession() {
 		return sessionProviderChain{}, ErrSessionRevoked
 	}
+	// A session another app opened with a grant-enrolled key may not approve
+	// a device: the device's session would outlive revoking that app's key.
+	if err := SessionAllows(ctx, tx, claims, ActionApproveDeviceSignIn); err != nil {
+		return sessionProviderChain{}, err
+	}
 	return sessionProviderChainOf(ctx, tx, claims.SessionID, approverUserID)
 }
 
@@ -929,6 +934,7 @@ func (s *DeviceLoginService) deviceLoginSession(record *deviceLoginRecord, user 
 		// would have ended the approver's.
 		IdentityID:    record.ApprovedIdentityID,
 		ProviderSince: record.ApprovedProviderSince,
+		OpenedVia:     models.SessionOpenedDeviceLogin,
 	}
 	claims := Claims{
 		UserID:                 user.ID,

@@ -1,0 +1,92 @@
+{
+  "description": "Public key encoding, key IDs, token hashes, and public keys a verifier refuses.",
+  "protocol": "silo-sync-v1",
+  "cases": [
+    {
+      "type": "key",
+      "name": "person key",
+      "valid": true,
+      "private_key": "PDwBBNG4ubcNYSjc2TuoCagsFpSeTwUsoAECTeqw9p8",
+      "public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "kid": "PgujdSfBbNNyXngLWCsOgw"
+    },
+    {
+      "type": "key",
+      "name": "device key",
+      "valid": true,
+      "private_key": "VOZvj59xTdi0j_cOA-RlcuSVIuWv-cnjHaE234xbacY",
+      "public_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "kid": "zT321tSgcB7emUH9k0B0oA"
+    },
+    {
+      "type": "key",
+      "name": "app device key",
+      "valid": true,
+      "private_key": "ru-bFNr3OeqDf22jiZdb_lQ8xbJApjHF-KH1qcZVY4E",
+      "public_key": "BENo1hDSgZqxAymcAvFkbSX8AGX6i0mfvhyOz749Dw80E-nLNAeHfItCEqtjpp9ASEdB_NXZd20PrmhR6NgOba8",
+      "kid": "iX--ofJySUkUOsEpPo17PQ"
+    },
+    {
+      "type": "key",
+      "name": "reply key",
+      "valid": true,
+      "private_key": "K0ZuFFI9I_AHPvwNAu0Slt4P2H8NSnTbRCoelcAhdXA",
+      "public_key": "BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4",
+      "kid": "H1EX0cvFS9U-FTwEQyWsnw"
+    },
+    {
+      "type": "token-hash",
+      "name": "device token",
+      "valid": true,
+      "token": "mbQJoNlX-lrKo5nBZJrJYgZN82mnqSd1_A5nt1bm-OI",
+      "token_hash": "16o3n6cUuWP4jNH9qk5nb_cVZW1hqlBrwx6W9bVJCMs"
+    },
+    {
+      "type": "token-hash",
+      "name": "inbox reader token",
+      "valid": true,
+      "token": "SoN7kUnU6-2nTxrVtcRXILMvUdsdW-eZrPDOntIPwMg",
+      "token_hash": "qf3RWYWpXg_Vhth1BvGJZ1KDrZfWt5wjbxZRQXCYh5E"
+    },
+    {
+      "type": "public-key",
+      "name": "refuse a point not on the curve (last byte of y changed)",
+      "valid": false,
+      "reason": "a point not on the curve (last byte of y changed)",
+      "error": "not_a_point",
+      "public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5U"
+    },
+    {
+      "type": "public-key",
+      "name": "refuse the compressed form",
+      "valid": false,
+      "reason": "the compressed form",
+      "error": "not_a_point",
+      "public_key": "AoXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uD"
+    },
+    {
+      "type": "public-key",
+      "name": "refuse a 0x05 prefix",
+      "valid": false,
+      "reason": "a 0x05 prefix",
+      "error": "not_a_point",
+      "public_key": "BYXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q"
+    },
+    {
+      "type": "public-key",
+      "name": "refuse x equal to the field prime",
+      "valid": false,
+      "reason": "x equal to the field prime",
+      "error": "not_a_point",
+      "public_key": "BP____8AAAABAAAAAAAAAAAAAAAA________________N7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q"
+    },
+    {
+      "type": "public-key",
+      "name": "refuse 64 bytes, no prefix",
+      "valid": false,
+      "reason": "64 bytes, no prefix",
+      "error": "not_a_point",
+      "public_key": "hc968bbLE-siTChGVK5nRzQOV2xVf_c4RPdLRh4_S4M3suP5JAxxwAx282KZf468TrZGqOU78WWX4X0xT-TDlA"
+    }
+  ]
+}

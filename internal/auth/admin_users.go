@@ -59,6 +59,19 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	if err != nil {
 		return current, err
 	}
+	// App keys go before sessions, the order every sweep takes. Deleting
+	// the account deletes them outright, ending the sessions they opened by
+	// cascade; a promotion revokes them (revokeCredentialsIssuedToNonAdmin).
+	switch {
+	case input == nil:
+		if err = deleteAccountKeysTx(ctx, tx, id); err != nil {
+			return current, err
+		}
+	case promotes(before, input):
+		if err = revokeAccountKeysTx(ctx, tx, id); err != nil {
+			return current, err
+		}
+	}
 	if input == nil || revoke {
 		if err = RevokeSignInsInTransaction(ctx, tx, id); err != nil {
 			return current, err
@@ -88,4 +101,9 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	}
 	auditmutation.CommitMutation(ctx, audit)
 	return current, nil
+}
+
+// promotes reports whether input makes a non-admin an admin.
+func promotes(before *models.User, input *models.UpdateUserInput) bool {
+	return input != nil && input.Role != nil && *input.Role == models.RoleAdmin && before != nil && before.Role != models.RoleAdmin
 }

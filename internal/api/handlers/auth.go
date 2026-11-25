@@ -25,6 +25,8 @@ type AuthHandler struct {
 	oauthRoutesAvailable bool
 	accessGroups         access.GroupPolicyProvider
 	checkPrimaryProfile  apimw.PrimaryProfileChecker
+	// appKeys signs devices in with app keys; nil until SetAppKeySignIn.
+	appKeys *auth.AppKeySignIn
 }
 
 type accountPasswordService interface {

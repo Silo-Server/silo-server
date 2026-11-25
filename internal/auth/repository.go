@@ -579,13 +579,17 @@ func updateUser(ctx context.Context, db interface {
 			return err
 		}
 	}
+	// The promoted account's keys go before any session is touched: key rows
+	// are locked before sessions on every path.
+	if promoting {
+		if err := revokeCredentialsIssuedToNonAdmin(ctx, db, id); err != nil {
+			return err
+		}
+	}
 	if roleChanging {
 		if err := endImpersonationsInvolving(ctx, db, id); err != nil {
 			return err
 		}
-	}
-	if promoting {
-		return revokeCredentialsIssuedToNonAdmin(ctx, db, id)
 	}
 	return nil
 }
@@ -641,9 +645,10 @@ func endImpersonationsInvolving(ctx context.Context, db interface {
 }
 
 // revokeCredentialsIssuedToNonAdmin deletes the API keys and reset links of
-// an account being made an admin or the Owner. Other admins may have minted
-// them and kept them; afterwards they would carry authority that only the
-// Owner grants.
+// an account being made an admin or the Owner, and revokes its app keys.
+// Other admins may have minted them and kept them; afterwards they would
+// carry authority that only the Owner grants. An admin's app keys also need
+// the admin's own approval, which keys enrolled before were never given.
 func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
 }, id int) error {
@@ -653,7 +658,7 @@ func revokeCredentialsIssuedToNonAdmin(ctx context.Context, db interface {
 	if _, err := db.Exec(ctx, `DELETE FROM password_reset_tokens WHERE user_id = $1`, id); err != nil {
 		return fmt.Errorf("deleting the promoted account's reset links: %w", err)
 	}
-	return nil
+	return revokeAccountKeysTx(ctx, db, id)
 }
 
 // CompareAndSwapPassword replaces the bcrypt hash only if it is still the one

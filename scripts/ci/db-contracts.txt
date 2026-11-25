@@ -328,6 +328,25 @@
 ./internal/auth TestLoginSessionActivityAndAdminRevocationDB
 ./internal/auth TestDeviceKeyRevocationEndsItsSessionsDB
 ./internal/auth TestAccountKeyRulesDB
+./internal/auth TestKeyChallengeRulesDB
+./internal/auth TestKeySignInRefusalsDB
+./internal/auth TestKeySignInAdminWaitsForApprovalDB
+./internal/auth TestSessionAllowsDB
+./internal/auth TestKeyEnrollRulesDB
+./internal/auth TestRevokeOwnDeviceKeyRulesDB
+./internal/auth TestKeySignInLocalPasswordsOffDB
+./internal/auth TestKeySessionContinuesProviderChainDB
+./internal/auth TestPromotionRevokesAppKeysDB
+./internal/auth TestLinkingBindsAppKeysDB
+./internal/auth TestProviderRefusalRevokesAppKeysDB
+./internal/auth TestAccountWithKeysCanBeDeletedDB
+./internal/auth TestUninstallNeverTouchesKeyRowsDB
+./internal/auth TestKeysOfAGoneIdentityAreDeadDB
+./internal/auth TestDeadPersonKeyDoesNotBlockEnrollDB
+./internal/auth TestAdminUnlinkLocksIdentityBeforeKeysDB
+./internal/auth TestUnlinkRevokesItsKeysDB
+./internal/auth TestKeyChallengeSpentOnKidMismatchDB
+./internal/auth TestKeySessionRefusedPastItsLimitDB
 ./internal/auth TestChangePasswordSignOutOtherSessionsDB
 ./internal/auth TestSignupPolicySerializationDB
 ./internal/apiv2 TestSignupCommitPolicyErrorsDB
@@ -751,6 +770,7 @@
 # secrets spend the request's own budget and never change it.
 ./internal/auth TestDevicePreapprovalRedeemDB
 ./internal/auth TestDevicePreapprovalRefusedDB
+./internal/auth TestDevicePreapprovalSessionRuleDB
 ./internal/auth TestDevicePreapprovalWithdrawnWithSessionDB
 ./internal/auth TestDevicePreapprovalProviderIdentityDB
 ./internal/auth TestDevicePreapprovalCapDB

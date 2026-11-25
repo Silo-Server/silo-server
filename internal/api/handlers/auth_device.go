@@ -250,6 +250,8 @@ func deviceDecisionError(err error) *APIError {
 		out = apiError(http.StatusForbidden, "user_disabled", "User account is disabled")
 	case errors.Is(err, auth.ErrSessionRevoked):
 		out = apiError(http.StatusUnauthorized, "unauthorized", "Login session is no longer valid")
+	case errors.Is(err, auth.ErrSessionNotAllowed):
+		out = apiError(http.StatusForbidden, "forbidden", "This sign-in cannot approve a device")
 	case errors.Is(err, auth.ErrDeviceLoginPurpose):
 		out = apiError(http.StatusConflict, "purpose_mismatch", "Device login purpose does not match this approval route")
 	case errors.Is(err, auth.ErrDeviceLoginConflict):

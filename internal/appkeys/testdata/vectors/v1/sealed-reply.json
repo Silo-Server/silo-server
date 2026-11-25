@@ -1,0 +1,106 @@
+{
+  "description": "Sealed replies: ECDH with the request's reply_key, KDF(Z || E || P) salted with the challenge, AES-256-GCM with no additional data.",
+  "protocol": "silo-sync-v1",
+  "cases": [
+    {
+      "type": "sealed-reply",
+      "name": "signed_in reply to the introduce request in signed-messages.json",
+      "valid": true,
+      "challenge": "8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA",
+      "reply_private_key": "K0ZuFFI9I_AHPvwNAu0Slt4P2H8NSnTbRCoelcAhdXA",
+      "reply_public_key": "BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4",
+      "ephemeral_private_key": "zmzUk6ZJxT9piQBwbDXTGn8lpClOnnS3HiUgCR_4zOE",
+      "ephemeral_public_key": "BFAoQ6TpfXoAHwrvxBK7VXdPfM6Gwt7mqjIgxbn3PwlULI5vaNn1PcXf-cAKZEbeofM3XQ-a3E2RHfUs7rR74Kk",
+      "z": "PBjdfVr9VLq1JgIFMgKgEmfLTfUeosWP9A0hvLeDFP0",
+      "kdf_input": "PBjdfVr9VLq1JgIFMgKgEmfLTfUeosWP9A0hvLeDFP0EUChDpOl9egAfCu_EErtVd098zobC3uaqMiDFufc_CVQsjm9o2fU9xd_5wApkRt6h8zddD5rcTZEd9SzutHvgqQQA_Ikh3_qHIyrFdiKi3tErnIU8-SFiCYvPXY6lsB7s_bxQCfj0FBZSbc7TQkFGITeEtsVVV6M0oAobgZXlItTe",
+      "key": "aTGEOKTnahQE4Ay7tjq4DtHVVRM1yfi0NDGHLA4rSoo",
+      "nonce": "uTfZ9MxcZfYkDOcc",
+      "plaintext_json": "{\"status\":\"signed_in\",\"device_id\":\"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11\",\"account_id\":\"4\",\"tokens\":{\"access_token\":\"access-token-for-vectors\",\"refresh_token\":\"refresh-token-for-vectors\",\"expires_in\":28800,\"user\":{\"id\":\"4\",\"username\":\"sam\",\"email\":\"sam@example.com\",\"role\":\"user\",\"permissions\":[],\"download_allowed\":true,\"password_change_required\":false}}}",
+      "sealed": {
+        "epk": "BFAoQ6TpfXoAHwrvxBK7VXdPfM6Gwt7mqjIgxbn3PwlULI5vaNn1PcXf-cAKZEbeofM3XQ-a3E2RHfUs7rR74Kk",
+        "nonce": "uTfZ9MxcZfYkDOcc",
+        "ciphertext": "7cIOXUYt3sqI8nnY6X7-K1MX4_N8D-XCLX6QJ3VWJKdoY8BXDOvMk1F35sjIC7OmG2j9Qu7fN5hrQazYuq65tfvYihNB0sB39l4qYbOniubEyZ8QgscBVd_9Uw6WVDZ4La11aKB4F8vVRA8Yehr8lNAI29Lsx8ZiHHEFKtmOG642SbwHPFhEtlv58ROFVpHKn93oAHG2T1bCWM44uiWQnq1xdervx_e0WJu3-CNufUpSc1WuPS4Ii6Z1_tnrG_2qQib3Osy_hnRhq4mdM9aPiatyUF0RJ3CB9sP9wQd7sQ43FqU6rX7NyE8zjnkniquETeZy0dbfvNQzM6O6mMll3usH-WUAQjIFuNZzHMqw5Qd-7UR5dZ4hUFee2SaujK4qfUcKXywHwoaEGG1-rPRDLSkQpfd87cZAbjyOukfJcW1y20tiAeX2db1WRV8hHiDgqi29fArBtbagopVdj2ny-rY9tAfql1UEtNDNmbZ0nO511ZQ"
+      }
+    },
+    {
+      "type": "sealed-reply",
+      "name": "approval_required reply to the introduce request in signed-messages.json",
+      "valid": true,
+      "challenge": "8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA",
+      "reply_private_key": "K0ZuFFI9I_AHPvwNAu0Slt4P2H8NSnTbRCoelcAhdXA",
+      "reply_public_key": "BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4",
+      "ephemeral_private_key": "zmzUk6ZJxT9piQBwbDXTGn8lpClOnnS3HiUgCR_4zOE",
+      "ephemeral_public_key": "BFAoQ6TpfXoAHwrvxBK7VXdPfM6Gwt7mqjIgxbn3PwlULI5vaNn1PcXf-cAKZEbeofM3XQ-a3E2RHfUs7rR74Kk",
+      "z": "PBjdfVr9VLq1JgIFMgKgEmfLTfUeosWP9A0hvLeDFP0",
+      "kdf_input": "PBjdfVr9VLq1JgIFMgKgEmfLTfUeosWP9A0hvLeDFP0EUChDpOl9egAfCu_EErtVd098zobC3uaqMiDFufc_CVQsjm9o2fU9xd_5wApkRt6h8zddD5rcTZEd9SzutHvgqQQA_Ikh3_qHIyrFdiKi3tErnIU8-SFiCYvPXY6lsB7s_bxQCfj0FBZSbc7TQkFGITeEtsVVV6M0oAobgZXlItTe",
+      "key": "aTGEOKTnahQE4Ay7tjq4DtHVVRM1yfi0NDGHLA4rSoo",
+      "nonce": "a8Ht8af-JFwTZ0g0",
+      "plaintext_json": "{\"status\":\"approval_required\",\"device_id\":\"0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11\",\"account_id\":\"4\"}",
+      "sealed": {
+        "epk": "BFAoQ6TpfXoAHwrvxBK7VXdPfM6Gwt7mqjIgxbn3PwlULI5vaNn1PcXf-cAKZEbeofM3XQ-a3E2RHfUs7rR74Kk",
+        "nonce": "a8Ht8af-JFwTZ0g0",
+        "ciphertext": "HmXEoRjnf6js2Ld9mI4A7szSS2-nsCuQzNNZO1CwSospE23QUKm4-bd0UFW1DX66MCN6h1UL8WjcPnx6SdX5jSe2LxkwNLcI62GYAmMgiD6KM68A8VH29vBNwSc9tIhfPHdNmOXaL1xD2Umeu1hGUMZF"
+      }
+    },
+    {
+      "type": "sealed-reply",
+      "valid": false,
+      "error": "open_failed",
+      "reply_private_key": "K0ZuFFI9I_AHPvwNAu0Slt4P2H8NSnTbRCoelcAhdXA",
+      "reply_public_key": "BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4",
+      "name": "opened with the wrong challenge as salt",
+      "reason": "the key is salted with the request's challenge",
+      "challenge": "pjOtCai9TI5LSHXH2P-nVN6o_GoawLY7ez15LFxiYtc",
+      "sealed": {
+        "epk": "BFAoQ6TpfXoAHwrvxBK7VXdPfM6Gwt7mqjIgxbn3PwlULI5vaNn1PcXf-cAKZEbeofM3XQ-a3E2RHfUs7rR74Kk",
+        "nonce": "uTfZ9MxcZfYkDOcc",
+        "ciphertext": "7cIOXUYt3sqI8nnY6X7-K1MX4_N8D-XCLX6QJ3VWJKdoY8BXDOvMk1F35sjIC7OmG2j9Qu7fN5hrQazYuq65tfvYihNB0sB39l4qYbOniubEyZ8QgscBVd_9Uw6WVDZ4La11aKB4F8vVRA8Yehr8lNAI29Lsx8ZiHHEFKtmOG642SbwHPFhEtlv58ROFVpHKn93oAHG2T1bCWM44uiWQnq1xdervx_e0WJu3-CNufUpSc1WuPS4Ii6Z1_tnrG_2qQib3Osy_hnRhq4mdM9aPiatyUF0RJ3CB9sP9wQd7sQ43FqU6rX7NyE8zjnkniquETeZy0dbfvNQzM6O6mMll3usH-WUAQjIFuNZzHMqw5Qd-7UR5dZ4hUFee2SaujK4qfUcKXywHwoaEGG1-rPRDLSkQpfd87cZAbjyOukfJcW1y20tiAeX2db1WRV8hHiDgqi29fArBtbagopVdj2ny-rY9tAfql1UEtNDNmbZ0nO511ZQ"
+      }
+    },
+    {
+      "type": "sealed-reply",
+      "valid": false,
+      "error": "open_failed",
+      "reply_private_key": "K0ZuFFI9I_AHPvwNAu0Slt4P2H8NSnTbRCoelcAhdXA",
+      "reply_public_key": "BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4",
+      "name": "a flipped ciphertext bit",
+      "reason": "GCM tag check fails",
+      "challenge": "8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA",
+      "sealed": {
+        "epk": "BFAoQ6TpfXoAHwrvxBK7VXdPfM6Gwt7mqjIgxbn3PwlULI5vaNn1PcXf-cAKZEbeofM3XQ-a3E2RHfUs7rR74Kk",
+        "nonce": "uTfZ9MxcZfYkDOcc",
+        "ciphertext": "7cIOXUYs3sqI8nnY6X7-K1MX4_N8D-XCLX6QJ3VWJKdoY8BXDOvMk1F35sjIC7OmG2j9Qu7fN5hrQazYuq65tfvYihNB0sB39l4qYbOniubEyZ8QgscBVd_9Uw6WVDZ4La11aKB4F8vVRA8Yehr8lNAI29Lsx8ZiHHEFKtmOG642SbwHPFhEtlv58ROFVpHKn93oAHG2T1bCWM44uiWQnq1xdervx_e0WJu3-CNufUpSc1WuPS4Ii6Z1_tnrG_2qQib3Osy_hnRhq4mdM9aPiatyUF0RJ3CB9sP9wQd7sQ43FqU6rX7NyE8zjnkniquETeZy0dbfvNQzM6O6mMll3usH-WUAQjIFuNZzHMqw5Qd-7UR5dZ4hUFee2SaujK4qfUcKXywHwoaEGG1-rPRDLSkQpfd87cZAbjyOukfJcW1y20tiAeX2db1WRV8hHiDgqi29fArBtbagopVdj2ny-rY9tAfql1UEtNDNmbZ0nO511ZQ"
+      }
+    },
+    {
+      "type": "sealed-reply",
+      "valid": false,
+      "error": "open_failed",
+      "reply_private_key": "K0ZuFFI9I_AHPvwNAu0Slt4P2H8NSnTbRCoelcAhdXA",
+      "reply_public_key": "BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4",
+      "name": "an epk not on the curve",
+      "reason": "the recipient refuses an E that is not a point on P-256",
+      "challenge": "8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA",
+      "sealed": {
+        "epk": "BFAoQ6TpfXoAHwrvxBK7VXdPfM6Gwt7mqjIgxbn3PwlULI5vaNn1PcXf-cAKZEbeofM3XQ-a3E2RHfUs7rR74Kg",
+        "nonce": "uTfZ9MxcZfYkDOcc",
+        "ciphertext": "7cIOXUYt3sqI8nnY6X7-K1MX4_N8D-XCLX6QJ3VWJKdoY8BXDOvMk1F35sjIC7OmG2j9Qu7fN5hrQazYuq65tfvYihNB0sB39l4qYbOniubEyZ8QgscBVd_9Uw6WVDZ4La11aKB4F8vVRA8Yehr8lNAI29Lsx8ZiHHEFKtmOG642SbwHPFhEtlv58ROFVpHKn93oAHG2T1bCWM44uiWQnq1xdervx_e0WJu3-CNufUpSc1WuPS4Ii6Z1_tnrG_2qQib3Osy_hnRhq4mdM9aPiatyUF0RJ3CB9sP9wQd7sQ43FqU6rX7NyE8zjnkniquETeZy0dbfvNQzM6O6mMll3usH-WUAQjIFuNZzHMqw5Qd-7UR5dZ4hUFee2SaujK4qfUcKXywHwoaEGG1-rPRDLSkQpfd87cZAbjyOukfJcW1y20tiAeX2db1WRV8hHiDgqi29fArBtbagopVdj2ny-rY9tAfql1UEtNDNmbZ0nO511ZQ"
+      }
+    },
+    {
+      "type": "sealed-reply",
+      "valid": false,
+      "error": "open_failed",
+      "reply_private_key": "K0ZuFFI9I_AHPvwNAu0Slt4P2H8NSnTbRCoelcAhdXA",
+      "reply_public_key": "BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4",
+      "name": "sealed with Z alone as the KDF input",
+      "reason": "the KDF input is Z || E || P",
+      "challenge": "8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA",
+      "sealed": {
+        "epk": "BFAoQ6TpfXoAHwrvxBK7VXdPfM6Gwt7mqjIgxbn3PwlULI5vaNn1PcXf-cAKZEbeofM3XQ-a3E2RHfUs7rR74Kk",
+        "nonce": "TaHMzhwSUn9YCRel",
+        "ciphertext": "3yKqP2qcggf5wRhzwVh9KLs30aly0SpilO_P4Yn6ow7mZcKc0aCIGTm9PPgIPfS32ydIEoPv-zdNzAmlLhFW2XyFadn1ef3iq7q8hpE-aummv9_FBN2zGuw0wZwSv4mRHFvk0cLTQf9QjPpX7pbYeu8V"
+      }
+    }
+  ]
+}

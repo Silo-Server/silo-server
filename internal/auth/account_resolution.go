@@ -246,6 +246,12 @@ func (r *AccountResolver) resolve(ctx context.Context, tx pgx.Tx, in ResolveInpu
 					if err != nil {
 						return err
 					}
+					// Whoever held the account before the match may hold its
+					// app keys too. Keys before sessions, the order every
+					// sweep takes (revokeAccountKeysTx).
+					if err := revokeAccountKeysTx(ctx, tx, user.ID); err != nil {
+						return err
+					}
 					if err := RevokeSignInsInTransaction(ctx, tx, user.ID); err != nil {
 						return err
 					}
@@ -369,6 +375,11 @@ func linkIdentityTx(ctx context.Context, tx pgx.Tx, user *models.User, installat
 			WHERE user_id = $2 AND identity_id IS NULL AND impersonator_user_id IS NULL
 				AND revoked_at IS NULL AND expires_at > NOW()`, linked.ID, user.ID); err != nil {
 			return nil, fmt.Errorf("attaching sessions to the identity: %w", err)
+		}
+		// Its app keys too: a key enrolled from a password session would
+		// otherwise keep opening sessions the provider never re-checks.
+		if err := bindAccountKeysToIdentity(ctx, tx, user.ID, linked.ID); err != nil {
+			return nil, err
 		}
 	}
 	return linked, nil

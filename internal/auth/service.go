@@ -674,6 +674,7 @@ func (s *Service) OpenIdentitySession(ctx context.Context, db OAuthSessionDB, c 
 		IPAddress:  c.IP,
 		ExpiresAt:  time.Now().Add(s.jwt.RefreshExpiry()),
 		IdentityID: identityRef(c.IdentityID),
+		OpenedVia:  models.SessionOpenedProvider,
 	}
 	if err := s.sessions.createWithQuerier(ctx, db, session); err != nil {
 		return nil, fmt.Errorf("creating session: %w", err)
@@ -911,6 +912,7 @@ func (s *Service) loginWithProvider(
 		DeviceName: deviceName,
 		IPAddress:  ip,
 		ExpiresAt:  time.Now().Add(s.jwt.RefreshExpiry()),
+		OpenedVia:  models.SessionOpenedPassword,
 	}
 
 	if providerID == LocalProviderID {
@@ -1040,6 +1042,7 @@ func (s *Service) SetupInitialUser(
 			DeviceName: deviceName,
 			IPAddress:  ip,
 			ExpiresAt:  time.Now().Add(s.jwt.RefreshExpiry()),
+			OpenedVia:  models.SessionOpenedPassword,
 		}
 		if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
 			return err
@@ -1243,6 +1246,7 @@ func (s *Service) StartImpersonation(ctx context.Context, adminUserID, targetUse
 		ExpiresAt:              startedAt.Add(s.jwt.RefreshExpiry()),
 		ImpersonatorUserID:     &impersonatorUserID,
 		ImpersonationStartedAt: &startedAt,
+		OpenedVia:              models.SessionOpenedImpersonation,
 	}
 
 	if err := s.sessions.createWithQuerier(ctx, tx, session); err != nil {
@@ -1405,27 +1409,52 @@ func (s *Service) checkSessionStanding(ctx context.Context, sessionID string) (*
 		return nil, sessionCheckUnavailable("checking impersonator", err)
 	}
 
-	now := time.Now()
-	newExpiry := now.Add(s.jwt.RefreshExpiry())
+	newExpiry, rechecked, err := s.providerExpiry(ctx, session, time.Now())
+	if err != nil {
+		return nil, err
+	}
+	// A session with an absolute end (a remote-playback handoff) never
+	// slides past it; the database trigger holds the same limit for every
+	// other writer.
+	if session.AbsoluteExpiresAt != nil && session.AbsoluteExpiresAt.Before(newExpiry) {
+		newExpiry = *session.AbsoluteExpiresAt
+	}
+	return &sessionStanding{session: session, user: user, expiry: newExpiry, rechecked: rechecked}, nil
+}
 
-	// A session opened through an external provider is re-checked with the
-	// provider once its identity's last answer is older than the re-check
-	// interval (docs/architecture/external-sign-in.md). One whose identity is
-	// gone (unlinked, plugin removed) can no longer be re-checked at all.
+// errProviderChainEnded is the ErrSessionRevoked of a session past its
+// absolute age: the provider can't re-check it and last vouched more than
+// refresh_token_expiry ago. Opening a session by app key tells it apart from
+// a refusal.
+var errProviderChainEnded = fmt.Errorf("%w: the provider has not vouched for the person recently enough", ErrSessionRevoked)
+
+// providerExpiry is the furthest session may run under its provider chain,
+// from now: refresh_token_expiry for a session the provider vouches for or
+// that has none, and at most refresh_token_expiry after the provider last
+// vouched (providerAnchor) for one the provider can no longer re-check. A
+// session opened through an external provider is re-checked with the
+// provider once its identity's last answer is older than the re-check
+// interval (docs/architecture/external-sign-in.md); one whose identity is
+// gone (unlinked, plugin removed) can no longer be re-checked at all. It
+// answers ErrSessionRevoked for a session that can no longer refresh and
+// reports whether the provider was consulted. Refresh and opening a session
+// by app key (keyProviderExpiry) both decide with it.
+func (s *Service) providerExpiry(ctx context.Context, session *models.AuthSession, now time.Time) (time.Time, bool, error) {
+	newExpiry := now.Add(s.jwt.RefreshExpiry())
 	absoluteAge := session.IdentityID == nil && session.ProviderSince != nil && session.ImpersonatorUserID == nil
 	rechecked := session.IdentityID != nil && session.ImpersonatorUserID == nil && s.recheck != nil
 	if rechecked {
 		verdict, err := s.recheck.check(ctx, session)
 		if err != nil {
 			if errors.Is(err, ErrSessionRevoked) || errors.Is(err, ErrProviderUnavailable) {
-				return nil, err
+				return time.Time{}, rechecked, err
 			}
 			if errors.Is(err, errAnswerNotApplied) {
 				// Not an outage: retrying would ask the provider again and
 				// fail the same way, so the token is refused as before.
-				return nil, fmt.Errorf("re-checking provider identity: %w", err)
+				return time.Time{}, rechecked, fmt.Errorf("re-checking provider identity: %w", err)
 			}
-			return nil, sessionCheckUnavailable("re-checking provider identity", err)
+			return time.Time{}, rechecked, sessionCheckUnavailable("re-checking provider identity", err)
 		}
 		absoluteAge = verdict == verdictAbsoluteAge
 	}
@@ -1435,20 +1464,14 @@ func (s *Service) checkSessionStanding(ctx context.Context, sessionID string) (*
 		// did, and refresh no longer slides it.
 		limit := providerAnchor(session).Add(s.jwt.RefreshExpiry())
 		if !limit.After(now) {
-			return nil, ErrSessionRevoked
+			return time.Time{}, rechecked, errProviderChainEnded
 		}
 		newExpiry = limit
-		if session.ExpiresAt.Before(limit) {
+		if !session.ExpiresAt.IsZero() && session.ExpiresAt.Before(limit) {
 			newExpiry = session.ExpiresAt
 		}
 	}
-	// A session with an absolute end (a remote-playback handoff) never
-	// slides past it; the database trigger holds the same limit for every
-	// other writer.
-	if session.AbsoluteExpiresAt != nil && session.AbsoluteExpiresAt.Before(newExpiry) {
-		newExpiry = *session.AbsoluteExpiresAt
-	}
-	return &sessionStanding{session: session, user: user, expiry: newExpiry, rechecked: rechecked}, nil
+	return newExpiry, rechecked, nil
 }
 
 // RenewPluginAccess re-issues a plugin access token from claims, a valid

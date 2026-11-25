@@ -1,0 +1,619 @@
+{
+  "description": "The pairing QR string, join links, the Allow access entry link, and the two address forms: origin and server address. Error codes are @silo-sync/core's parser errors.",
+  "protocol": "silo-sync-v1",
+  "cases": [
+    {
+      "type": "pairing-qr",
+      "name": "IPv4",
+      "valid": true,
+      "string": "https://siloserver.org/pair#v2.OheCrSGXshurMXhW9ZLo9Q.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw.192.168.1.20:52830",
+      "length": 116,
+      "session_id": "OheCrSGXshurMXhW9ZLo9Q",
+      "key": "PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw",
+      "lan": "192.168.1.20:52830"
+    },
+    {
+      "type": "pairing-qr",
+      "name": "bracketed unique-local IPv6",
+      "valid": true,
+      "string": "https://siloserver.org/pair#v2.OheCrSGXshurMXhW9ZLo9Q.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw.[fd12:3456:789a::20]:52830",
+      "length": 124,
+      "session_id": "OheCrSGXshurMXhW9ZLo9Q",
+      "key": "PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw",
+      "lan": "[fd12:3456:789a::20]:52830"
+    },
+    {
+      "type": "pairing-qr",
+      "name": "bracketed global IPv6",
+      "valid": true,
+      "string": "https://siloserver.org/pair#v2.OheCrSGXshurMXhW9ZLo9Q.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw.[2001:db8::20]:52830",
+      "length": 118,
+      "session_id": "OheCrSGXshurMXhW9ZLo9Q",
+      "key": "PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw",
+      "lan": "[2001:db8::20]:52830"
+    },
+    {
+      "type": "pairing-qr",
+      "name": "empty LAN part",
+      "valid": true,
+      "string": "https://siloserver.org/pair#v2.OheCrSGXshurMXhW9ZLo9Q.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw.",
+      "length": 98,
+      "session_id": "OheCrSGXshurMXhW9ZLo9Q",
+      "key": "PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw",
+      "lan": ""
+    },
+    {
+      "type": "pairing-qr",
+      "name": "a DNS name filling the string to 213 bytes",
+      "valid": true,
+      "string": "https://siloserver.org/pair#v2.OheCrSGXshurMXhW9ZLo9Q.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:52830",
+      "length": 213,
+      "session_id": "OheCrSGXshurMXhW9ZLo9Q",
+      "key": "PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw",
+      "lan": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:52830"
+    },
+    {
+      "type": "pairing-qr",
+      "name": "refuse wrong version token",
+      "valid": false,
+      "reason": "wrong version token",
+      "error": "version",
+      "string": "https://siloserver.org/pair#v1.OheCrSGXshurMXhW9ZLo9Q.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw.192.168.1.20:52830"
+    },
+    {
+      "type": "pairing-qr",
+      "name": "refuse a 31-byte key",
+      "valid": false,
+      "reason": "a 31-byte key",
+      "error": "key",
+      "string": "https://siloserver.org/pair#v2.OheCrSGXshurMXhW9ZLo9Q.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Ow.192.168.1.20:52830"
+    },
+    {
+      "type": "pairing-qr",
+      "name": "refuse a 15-byte session ID",
+      "valid": false,
+      "reason": "a 15-byte session ID",
+      "error": "session_id",
+      "string": "https://siloserver.org/pair#v2.OheCrSGXshurMXhW9ZLo.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw.192.168.1.20:52830"
+    },
+    {
+      "type": "pairing-qr",
+      "name": "refuse 214 bytes",
+      "valid": false,
+      "reason": "214 bytes",
+      "error": "too_long",
+      "string": "https://siloserver.org/pair#v2.OheCrSGXshurMXhW9ZLo9Q.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:52830"
+    },
+    {
+      "type": "pairing-qr",
+      "name": "refuse a LAN part without a port",
+      "valid": false,
+      "reason": "a LAN part without a port",
+      "error": "lan",
+      "string": "https://siloserver.org/pair#v2.OheCrSGXshurMXhW9ZLo9Q.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw.192.168.1.20"
+    },
+    {
+      "type": "pairing-qr",
+      "name": "refuse a link-local IPv6 address",
+      "valid": false,
+      "reason": "a link-local IPv6 address",
+      "error": "lan",
+      "string": "https://siloserver.org/pair#v2.OheCrSGXshurMXhW9ZLo9Q.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw.[fe80::1]:52830"
+    },
+    {
+      "type": "pairing-qr",
+      "name": "refuse an IPv6 zone ID",
+      "valid": false,
+      "reason": "an IPv6 zone ID",
+      "error": "lan",
+      "string": "https://siloserver.org/pair#v2.OheCrSGXshurMXhW9ZLo9Q.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw.[fd12::20%25en0]:52830"
+    },
+    {
+      "type": "pairing-qr",
+      "name": "refuse no LAN separator",
+      "valid": false,
+      "reason": "no LAN separator",
+      "error": "parts",
+      "string": "https://siloserver.org/pair#v2.OheCrSGXshurMXhW9ZLo9Q.PpIAOMGEmbNuds62KWVKjAWmq3X46-Ps95gIyYP4Oxw"
+    },
+    {
+      "type": "join-link",
+      "name": "https form",
+      "valid": true,
+      "form": "https",
+      "string": "https://siloserver.org/join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
+      "address": "https://media.example.com",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "join-link",
+      "name": "silo form",
+      "valid": true,
+      "form": "silo",
+      "string": "silo://join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
+      "address": "https://media.example.com",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "join-link",
+      "name": "an address with a path",
+      "valid": true,
+      "form": "https",
+      "string": "https://siloserver.org/join#v1.aHR0cHM6Ly9leGFtcGxlLmNvbS9zaWxv.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
+      "address": "https://example.com/silo",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "join-link",
+      "name": "a LAN address with a port",
+      "valid": true,
+      "form": "silo",
+      "string": "silo://join#v1.aHR0cDovLzE5Mi4xNjguMS4yMDo4MDgw.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o",
+      "address": "http://192.168.1.20:8080",
+      "app_code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "join-link",
+      "name": "refuse wrong version token",
+      "valid": false,
+      "reason": "wrong version token",
+      "error": "version",
+      "string": "https://siloserver.org/join#v2.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "join-link",
+      "name": "refuse an address with a trailing slash",
+      "valid": false,
+      "reason": "an address with a trailing slash",
+      "error": "address",
+      "string": "silo://join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbS8.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "join-link",
+      "name": "refuse a 31-byte app code",
+      "valid": false,
+      "reason": "a 31-byte app code",
+      "error": "app_code",
+      "string": "https://siloserver.org/join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9psw"
+    },
+    {
+      "type": "join-link",
+      "name": "refuse another host",
+      "valid": false,
+      "reason": "another host",
+      "error": "prefix",
+      "string": "https://example.org/join#v1.aHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbQ.2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+    },
+    {
+      "type": "allow-link",
+      "name": "return-link form",
+      "valid": true,
+      "string": "https://sync.siloserver.org/allow#v1.eyJuYW1lIjoiRXhhbXBsZSBQbGF5ZXIiLCJrZXkiOiJCRU5vMWhEU2dacXhBeW1jQXZGa2JTWDhBR1g2aTBtZnZoeU96NzQ5RHc4MEUtbkxOQWVIZkl0Q0VxdGpwcDlBU0VkQl9OWFpkMjBQcm1oUjZOZ09iYTgiLCJyZXR1cm4iOiJleGFtcGxlcGxheWVyOi8vc2lsby1ncmFudHMifQ",
+      "request_json": "{\"name\":\"Example Player\",\"key\":\"BENo1hDSgZqxAymcAvFkbSX8AGX6i0mfvhyOz749Dw80E-nLNAeHfItCEqtjpp9ASEdB_NXZd20PrmhR6NgOba8\",\"return\":\"exampleplayer://silo-grants\"}",
+      "request": {
+        "name": "Example Player",
+        "key": "BENo1hDSgZqxAymcAvFkbSX8AGX6i0mfvhyOz749Dw80E-nLNAeHfItCEqtjpp9ASEdB_NXZd20PrmhR6NgOba8",
+        "return": "exampleplayer://silo-grants"
+      }
+    },
+    {
+      "type": "allow-link",
+      "name": "relay form",
+      "valid": true,
+      "string": "https://sync.siloserver.org/allow#v1.eyJuYW1lIjoiRXhhbXBsZSBQbGF5ZXIiLCJrZXkiOiJCRU5vMWhEU2dacXhBeW1jQXZGa2JTWDhBR1g2aTBtZnZoeU96NzQ5RHc4MEUtbkxOQWVIZkl0Q0VxdGpwcDlBU0VkQl9OWFpkMjBQcm1oUjZOZ09iYTgiLCJyZWxheSI6eyJzZXNzaW9uIjoiRzFlUEo5TVc5QVZUcmlTYmhMcUlRZyIsImtleSI6Ikx2T19LMk9aOGE5TlNRdGpZT1hMLURLdjlwRmZmTlMyWTZ4eVpmaUFDVDgifX0",
+      "request_json": "{\"name\":\"Example Player\",\"key\":\"BENo1hDSgZqxAymcAvFkbSX8AGX6i0mfvhyOz749Dw80E-nLNAeHfItCEqtjpp9ASEdB_NXZd20PrmhR6NgOba8\",\"relay\":{\"session\":\"G1ePJ9MW9AVTriSbhLqIQg\",\"key\":\"LvO_K2OZ8a9NSQtjYOXL-DKv9pFffNS2Y6xyZfiACT8\"}}",
+      "request": {
+        "name": "Example Player",
+        "key": "BENo1hDSgZqxAymcAvFkbSX8AGX6i0mfvhyOz749Dw80E-nLNAeHfItCEqtjpp9ASEdB_NXZd20PrmhR6NgOba8",
+        "relay": {
+          "session": "G1ePJ9MW9AVTriSbhLqIQg",
+          "key": "LvO_K2OZ8a9NSQtjYOXL-DKv9pFffNS2Y6xyZfiACT8"
+        }
+      }
+    },
+    {
+      "type": "allow-link",
+      "name": "relay form naming a self-hosted relay",
+      "valid": true,
+      "string": "https://sync.siloserver.org/allow#v1.eyJuYW1lIjoiRXhhbXBsZSBQbGF5ZXIiLCJrZXkiOiJCRU5vMWhEU2dacXhBeW1jQXZGa2JTWDhBR1g2aTBtZnZoeU96NzQ5RHc4MEUtbkxOQWVIZkl0Q0VxdGpwcDlBU0VkQl9OWFpkMjBQcm1oUjZOZ09iYTgiLCJyZWxheSI6eyJzZXNzaW9uIjoiRzFlUEo5TVc5QVZUcmlTYmhMcUlRZyIsImtleSI6Ikx2T19LMk9aOGE5TlNRdGpZT1hMLURLdjlwRmZmTlMyWTZ4eVpmaUFDVDgiLCJ1cmwiOiJodHRwczovL3BhaXIuZXhhbXBsZS5uZXQifX0",
+      "request_json": "{\"name\":\"Example Player\",\"key\":\"BENo1hDSgZqxAymcAvFkbSX8AGX6i0mfvhyOz749Dw80E-nLNAeHfItCEqtjpp9ASEdB_NXZd20PrmhR6NgOba8\",\"relay\":{\"session\":\"G1ePJ9MW9AVTriSbhLqIQg\",\"key\":\"LvO_K2OZ8a9NSQtjYOXL-DKv9pFffNS2Y6xyZfiACT8\",\"url\":\"https://pair.example.net\"}}",
+      "request": {
+        "name": "Example Player",
+        "key": "BENo1hDSgZqxAymcAvFkbSX8AGX6i0mfvhyOz749Dw80E-nLNAeHfItCEqtjpp9ASEdB_NXZd20PrmhR6NgOba8",
+        "relay": {
+          "session": "G1ePJ9MW9AVTriSbhLqIQg",
+          "key": "LvO_K2OZ8a9NSQtjYOXL-DKv9pFffNS2Y6xyZfiACT8",
+          "url": "https://pair.example.net"
+        }
+      }
+    },
+    {
+      "type": "allow-link",
+      "name": "refuse wrong version token",
+      "valid": false,
+      "reason": "wrong version token",
+      "error": "version",
+      "string": "https://sync.siloserver.org/allow#v2.eyJuYW1lIjoiRXhhbXBsZSBQbGF5ZXIiLCJrZXkiOiJCRU5vMWhEU2dacXhBeW1jQXZGa2JTWDhBR1g2aTBtZnZoeU96NzQ5RHc4MEUtbkxOQWVIZkl0Q0VxdGpwcDlBU0VkQl9OWFpkMjBQcm1oUjZOZ09iYTgiLCJyZXR1cm4iOiJleGFtcGxlcGxheWVyOi8vc2lsby1ncmFudHMifQ"
+    },
+    {
+      "type": "allow-link",
+      "name": "refuse both return and relay",
+      "valid": false,
+      "reason": "both return and relay",
+      "error": "answer",
+      "string": "https://sync.siloserver.org/allow#v1.eyJuYW1lIjoiRXhhbXBsZSBQbGF5ZXIiLCJrZXkiOiJCRU5vMWhEU2dacXhBeW1jQXZGa2JTWDhBR1g2aTBtZnZoeU96NzQ5RHc4MEUtbkxOQWVIZkl0Q0VxdGpwcDlBU0VkQl9OWFpkMjBQcm1oUjZOZ09iYTgiLCJyZXR1cm4iOiJleGFtcGxlcGxheWVyOi8vc2lsby1ncmFudHMiLCJyZWxheSI6eyJzZXNzaW9uIjoiRzFlUEo5TVc5QVZUcmlTYmhMcUlRZyIsImtleSI6Ikx2T19LMk9aOGE5TlNRdGpZT1hMLURLdjlwRmZmTlMyWTZ4eVpmaUFDVDgifX0"
+    },
+    {
+      "type": "allow-link",
+      "name": "refuse a key not on the curve",
+      "valid": false,
+      "reason": "a key not on the curve",
+      "error": "key",
+      "string": "https://sync.siloserver.org/allow#v1.eyJuYW1lIjoiRXhhbXBsZSBQbGF5ZXIiLCJrZXkiOiJCRU5vMWhEU2dacXhBeW1jQXZGa2JTWDhBR1g2aTBtZnZoeU96NzQ5RHc4MEUtbkxOQWVIZkl0Q0VxdGpwcDlBU0VkQl9OWFpkMjBQcm1oUjZOZ09iYTQiLCJyZXR1cm4iOiJleGFtcGxlcGxheWVyOi8veCJ9"
+    },
+    {
+      "type": "allow-link",
+      "name": "refuse a relay url with a trailing slash",
+      "valid": false,
+      "reason": "a relay url with a trailing slash",
+      "error": "relay",
+      "string": "https://sync.siloserver.org/allow#v1.eyJuYW1lIjoiRXhhbXBsZSBQbGF5ZXIiLCJrZXkiOiJCRU5vMWhEU2dacXhBeW1jQXZGa2JTWDhBR1g2aTBtZnZoeU96NzQ5RHc4MEUtbkxOQWVIZkl0Q0VxdGpwcDlBU0VkQl9OWFpkMjBQcm1oUjZOZ09iYTgiLCJyZWxheSI6eyJzZXNzaW9uIjoiRzFlUEo5TVc5QVZUcmlTYmhMcUlRZyIsImtleSI6Ikx2T19LMk9aOGE5TlNRdGpZT1hMLURLdjlwRmZmTlMyWTZ4eVpmaUFDVDgiLCJ1cmwiOiJodHRwczovL3BhaXIuZXhhbXBsZS5uZXQvIn19"
+    },
+    {
+      "type": "allow-link",
+      "name": "refuse a 31-byte relay key",
+      "valid": false,
+      "reason": "a 31-byte relay key",
+      "error": "relay",
+      "string": "https://sync.siloserver.org/allow#v1.eyJuYW1lIjoiRXhhbXBsZSBQbGF5ZXIiLCJrZXkiOiJCRU5vMWhEU2dacXhBeW1jQXZGa2JTWDhBR1g2aTBtZnZoeU96NzQ5RHc4MEUtbkxOQWVIZkl0Q0VxdGpwcDlBU0VkQl9OWFpkMjBQcm1oUjZOZ09iYTgiLCJyZWxheSI6eyJzZXNzaW9uIjoiRzFlUEo5TVc5QVZUcmlTYmhMcUlRZyIsImtleSI6Ikx2T19LMk9aOGE5TlNRdGpZT1hMLURLdjlwRmZmTlMyWTZ4eVpmaUFDUSJ9fQ"
+    },
+    {
+      "type": "origin",
+      "name": "origin of https://media.example.com",
+      "valid": true,
+      "input": "https://media.example.com",
+      "origin": "https://media.example.com"
+    },
+    {
+      "type": "origin",
+      "name": "origin of https://example.com/silo/",
+      "valid": true,
+      "input": "https://example.com/silo/",
+      "origin": "https://example.com"
+    },
+    {
+      "type": "origin",
+      "name": "origin of https://Media.Example.COM",
+      "valid": true,
+      "input": "https://Media.Example.COM",
+      "origin": "https://media.example.com"
+    },
+    {
+      "type": "origin",
+      "name": "origin of https://media.example.com:443/",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://media.example.com:443/",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of http://192.168.1.20:80",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "http://192.168.1.20:80",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of https://K.com",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://K.com",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of https://İ.com",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://İ.com",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of http://192.168.1.20:8080/web/index.html?x=1#y",
+      "valid": true,
+      "input": "http://192.168.1.20:8080/web/index.html?x=1#y",
+      "origin": "http://192.168.1.20:8080"
+    },
+    {
+      "type": "origin",
+      "name": "origin of HTTP://[2001:DB8::1]:8443/",
+      "valid": true,
+      "input": "HTTP://[2001:DB8::1]:8443/",
+      "origin": "http://[2001:db8::1]:8443"
+    },
+    {
+      "type": "origin",
+      "name": "origin of ftp://media.example.com",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "ftp://media.example.com",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of media.example.com",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "media.example.com",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of http://[2001:0db8:0000::1]",
+      "valid": true,
+      "input": "http://[2001:0db8:0000::1]",
+      "origin": "http://[2001:db8::1]"
+    },
+    {
+      "type": "origin",
+      "name": "origin of http://[1:0:0:2:0:0:0:3]",
+      "valid": true,
+      "input": "http://[1:0:0:2:0:0:0:3]",
+      "origin": "http://[1:0:0:2::3]"
+    },
+    {
+      "type": "origin",
+      "name": "origin of http://0x7f.0.0.1",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "http://0x7f.0.0.1",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of http://127.1",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "http://127.1",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of https://bücher.example",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://bücher.example",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of https://a.com:0443",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://a.com:0443",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of https://a.com:",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://a.com:",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of https://user@a.com",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://user@a.com",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of http://[::ffff:127.0.0.1]",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "http://[::ffff:127.0.0.1]",
+      "origin": null
+    },
+    {
+      "type": "origin",
+      "name": "origin of http://[fe80::1%25en0]",
+      "valid": false,
+      "reason": "not an http or https address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "http://[fe80::1%25en0]",
+      "origin": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://example.com/silo",
+      "valid": true,
+      "input": "https://example.com/silo",
+      "address": "https://example.com/silo"
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://Example.COM/silo/",
+      "valid": true,
+      "input": "https://Example.COM/silo/",
+      "address": "https://example.com/silo"
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://example.com:8443/silo?x=1#y",
+      "valid": true,
+      "input": "https://example.com:8443/silo?x=1#y",
+      "address": "https://example.com:8443/silo"
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://example.com:443/silo",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://example.com:443/silo",
+      "address": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://K.com/silo",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://K.com/silo",
+      "address": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://İ.com/silo",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://İ.com/silo",
+      "address": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of http://192.168.1.20:8080/",
+      "valid": true,
+      "input": "http://192.168.1.20:8080/",
+      "address": "http://192.168.1.20:8080"
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://example.com/a/b//",
+      "valid": true,
+      "input": "https://example.com/a/b//",
+      "address": "https://example.com/a/b"
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://media.example.com",
+      "valid": true,
+      "input": "https://media.example.com",
+      "address": "https://media.example.com"
+    },
+    {
+      "type": "server-address",
+      "name": "server address of silo://media.example.com",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "silo://media.example.com",
+      "address": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of http://[2001:0db8:0000::1]/silo",
+      "valid": true,
+      "input": "http://[2001:0db8:0000::1]/silo",
+      "address": "http://[2001:db8::1]/silo"
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://a.com/a/../b",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://a.com/a/../b",
+      "address": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://a.com/./b",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://a.com/./b",
+      "address": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://a.com/%2E%2E/b",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://a.com/%2E%2E/b",
+      "address": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://a.com//b",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://a.com//b",
+      "address": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://a.com/a b",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://a.com/a b",
+      "address": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://a.com/b%2fc",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://a.com/b%2fc",
+      "address": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://a.com/b%2Fc",
+      "valid": true,
+      "input": "https://a.com/b%2Fc",
+      "address": "https://a.com/b%2Fc"
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://user:pw@a.com/silo",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://user:pw@a.com/silo",
+      "address": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of http://0x7f.0.0.1/silo",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "http://0x7f.0.0.1/silo",
+      "address": null
+    },
+    {
+      "type": "server-address",
+      "name": "server address of https://a.com:0443/silo",
+      "valid": false,
+      "reason": "not a server address that can be written in exactly one way",
+      "error": "not_an_address",
+      "input": "https://a.com:0443/silo",
+      "address": null
+    }
+  ]
+}

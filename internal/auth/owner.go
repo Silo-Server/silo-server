@@ -322,6 +322,12 @@ func moveOwnership(ctx context.Context, tx pgx.Tx, fromID, toID int) error {
 	if _, err := tx.Exec(ctx, `UPDATE users SET is_owner = true, break_glass = true WHERE id = $1`, toID); err != nil {
 		return err
 	}
+	// The previous Owner may have created keys and a reset link on the
+	// account before handing it over; none of them may carry Owner authority.
+	// They go first: key rows are locked before sessions on every path.
+	if err := revokeCredentialsIssuedToNonAdmin(ctx, tx, toID); err != nil {
+		return err
+	}
 	if _, err := tx.Exec(ctx, `
 		UPDATE auth_sessions SET revoked_at = NOW()
 		WHERE user_id = $1 AND impersonator_user_id IS NOT NULL AND revoked_at IS NULL`, toID); err != nil {
@@ -342,9 +348,7 @@ func moveOwnership(ctx context.Context, tx pgx.Tx, fromID, toID int) error {
 		WHERE role = 'admin' AND accepted_at IS NULL AND revoked_at IS NULL`); err != nil {
 		return fmt.Errorf("revoking pending admin invitations: %w", err)
 	}
-	// The previous Owner may have created keys and a reset link on the
-	// account before handing it over; none of them may carry Owner authority.
-	return revokeCredentialsIssuedToNonAdmin(ctx, tx, toID)
+	return nil
 }
 
 // SetOwner makes the account username the Owner, for recovery from the

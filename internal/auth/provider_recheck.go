@@ -709,6 +709,12 @@ func (r *ProviderRecheck) applyAnswer(ctx context.Context, tx pgx.Tx, identity *
 				"break_glass", user.BreakGlass, "primary_identity", authority.defers}})
 			return nil
 		}
+		// App keys would open new sessions, so they are revoked too, before
+		// the sessions: key rows are always locked before the sessions they
+		// opened (revokeAccountKeysTx), as deleting an identity locks them.
+		if err := revokeAccountKeysTx(ctx, tx, identity.UserID); err != nil {
+			return err
+		}
 		if err := RevokeSignInsInTransaction(ctx, tx, identity.UserID); err != nil {
 			return err
 		}

@@ -113,6 +113,12 @@ func DefaultConfig() Config {
 			// to the GET start, and a native start off the public origin
 			// resumes there. Hence twice device_start.
 			"oauth_start": {RequestsPerMinute: 40, Burst: 20},
+			// App key sign-in. Every signed request is on a challenge, and a
+			// device waiting for an administrator's approval asks again every
+			// five seconds (12 a minute), so both allow a few such devices
+			// behind one address.
+			"key_challenge": {RequestsPerMinute: 60, Burst: 20},
+			"key_sign_in":   {RequestsPerMinute: 60, Burst: 20},
 			// A dashboard can request several hundred posters when it opens.
 			ItemPosterBucket: {RequestsPerMinute: 600, Burst: 400},
 			// Invitation claim lookups and accepts: single-use tokens with

@@ -1,0 +1,998 @@
+{
+  "description": "Signed envelopes for every purpose, signed with RFC 6979 nonces, and the envelopes a verifier refuses with the first check that fails. Error codes are @silo-sync/core's SignedMessageErrorCode.",
+  "protocol": "silo-sync-v1",
+  "cases": [
+    {
+      "type": "signed-message",
+      "name": "introduce",
+      "valid": true,
+      "purpose": "introduce",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "PDwBBNG4ubcNYSjc2TuoCagsFpSeTwUsoAECTeqw9p8",
+      "signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "device_private_key": "VOZvj59xTdi0j_cOA-RlcuSVIuWv-cnjHaE234xbacY",
+      "device_public_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "payload_json": "{\"purpose\":\"introduce\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600,\"exp\":1795578720,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"origin\":\"https://media.example.com\",\"reply_key\":\"BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4\",\"device_key\":\"BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM\",\"device_name\":\"Sam's iPhone\",\"device_platform\":\"ios\"}",
+      "payload": "eyJwdXJwb3NlIjoiaW50cm9kdWNlIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+      "signing_input": "silo-sync-v1.introduce.eyJwdXJwb3NlIjoiaW50cm9kdWNlIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+      "sig": "nnyAt7pV-XsUSmpX0IAk1d0QmUrO4z9CZ5Oeoy9QlVSyCq2EED4Ns_Aakhd5DgOmSqWWrT5xs8an1Ye0a4smgg",
+      "device_sig": "fMNUAuxbYE4rOU1dn5PqgBmxSoSu8GmnvtS_M3syK8N-uOt2jcfwhFX5z3BbCfmGy8V3ToHIzxZ8ySiNfdXqOw",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoiaW50cm9kdWNlIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+        "sig": "nnyAt7pV-XsUSmpX0IAk1d0QmUrO4z9CZ5Oeoy9QlVSyCq2EED4Ns_Aakhd5DgOmSqWWrT5xs8an1Ye0a4smgg",
+        "device_sig": "fMNUAuxbYE4rOU1dn5PqgBmxSoSu8GmnvtS_M3syK8N-uOt2jcfwhFX5z3BbCfmGy8V3ToHIzxZ8ySiNfdXqOw"
+      },
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q"
+    },
+    {
+      "type": "signed-message",
+      "name": "enroll",
+      "valid": true,
+      "purpose": "enroll",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "PDwBBNG4ubcNYSjc2TuoCagsFpSeTwUsoAECTeqw9p8",
+      "signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "device_private_key": "VOZvj59xTdi0j_cOA-RlcuSVIuWv-cnjHaE234xbacY",
+      "device_public_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "payload_json": "{\"purpose\":\"enroll\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600,\"exp\":1795578720,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"origin\":\"https://media.example.com\",\"reply_key\":\"BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4\",\"device_key\":\"BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM\",\"device_name\":\"Sam's iPhone\",\"device_platform\":\"ios\"}",
+      "payload": "eyJwdXJwb3NlIjoiZW5yb2xsIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+      "signing_input": "silo-sync-v1.enroll.eyJwdXJwb3NlIjoiZW5yb2xsIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+      "sig": "zzmwOjhNCqRxdJABg7dV3QArFuyHE6HAPinDMBYu2fshu1HSKxRQtEBcIG7xqKvB3MyRCUBWoQIH_J5okCWJrQ",
+      "device_sig": "iC0n7--le4mgDblNwtTZbSQEVPv8THyLx8Gj2j9tZ2T3WAqUx1XUVZW2Qg_eUg9HD3e8yZJ-Ugy2BAVX7Z1aDw",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoiZW5yb2xsIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+        "sig": "zzmwOjhNCqRxdJABg7dV3QArFuyHE6HAPinDMBYu2fshu1HSKxRQtEBcIG7xqKvB3MyRCUBWoQIH_J5okCWJrQ",
+        "device_sig": "iC0n7--le4mgDblNwtTZbSQEVPv8THyLx8Gj2j9tZ2T3WAqUx1XUVZW2Qg_eUg9HD3e8yZJ-Ugy2BAVX7Z1aDw"
+      },
+      "body": {
+        "person_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+        "message": {
+          "kid": "PgujdSfBbNNyXngLWCsOgw",
+          "payload": "eyJwdXJwb3NlIjoiZW5yb2xsIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+          "sig": "zzmwOjhNCqRxdJABg7dV3QArFuyHE6HAPinDMBYu2fshu1HSKxRQtEBcIG7xqKvB3MyRCUBWoQIH_J5okCWJrQ",
+          "device_sig": "iC0n7--le4mgDblNwtTZbSQEVPv8THyLx8Gj2j9tZ2T3WAqUx1XUVZW2Qg_eUg9HD3e8yZJ-Ugy2BAVX7Z1aDw"
+        }
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "redeem",
+      "valid": true,
+      "purpose": "redeem",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "PDwBBNG4ubcNYSjc2TuoCagsFpSeTwUsoAECTeqw9p8",
+      "signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "device_private_key": "VOZvj59xTdi0j_cOA-RlcuSVIuWv-cnjHaE234xbacY",
+      "device_public_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "payload_json": "{\"purpose\":\"redeem\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600,\"exp\":1795578720,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"origin\":\"https://media.example.com\",\"reply_key\":\"BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4\",\"device_key\":\"BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM\",\"device_name\":\"Sam's iPhone\",\"device_platform\":\"ios\",\"code\":\"2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o\"}",
+      "payload": "eyJwdXJwb3NlIjoicmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIiwiY29kZSI6IjJ0NW9OdzVUSHgwdHlDYzNTbmhYMGt6MlBZSnVwN01JZHIwTW14OXBzMG8ifQ",
+      "signing_input": "silo-sync-v1.redeem.eyJwdXJwb3NlIjoicmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIiwiY29kZSI6IjJ0NW9OdzVUSHgwdHlDYzNTbmhYMGt6MlBZSnVwN01JZHIwTW14OXBzMG8ifQ",
+      "sig": "oILiTVoquhUVLJ7HeLP74LjwEEjKhCQuAw9_LVNjvFc0mAZf1DZztrMcqxnuVWq8Hsz56XKzI88DqwdzJljjUA",
+      "device_sig": "6tp8dRcy0TkkF2OlkWpK5QSM76-6g1whYfGFycOyhAN9aL6SWxPifoNThVzpILiQGPMQFYhhNdZh6L2osMJAMw",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoicmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIiwiY29kZSI6IjJ0NW9OdzVUSHgwdHlDYzNTbmhYMGt6MlBZSnVwN01JZHIwTW14OXBzMG8ifQ",
+        "sig": "oILiTVoquhUVLJ7HeLP74LjwEEjKhCQuAw9_LVNjvFc0mAZf1DZztrMcqxnuVWq8Hsz56XKzI88DqwdzJljjUA",
+        "device_sig": "6tp8dRcy0TkkF2OlkWpK5QSM76-6g1whYfGFycOyhAN9aL6SWxPifoNThVzpILiQGPMQFYhhNdZh6L2osMJAMw"
+      },
+      "body": {
+        "person_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+        "message": {
+          "kid": "PgujdSfBbNNyXngLWCsOgw",
+          "payload": "eyJwdXJwb3NlIjoicmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIiwiY29kZSI6IjJ0NW9OdzVUSHgwdHlDYzNTbmhYMGt6MlBZSnVwN01JZHIwTW14OXBzMG8ifQ",
+          "sig": "oILiTVoquhUVLJ7HeLP74LjwEEjKhCQuAw9_LVNjvFc0mAZf1DZztrMcqxnuVWq8Hsz56XKzI88DqwdzJljjUA",
+          "device_sig": "6tp8dRcy0TkkF2OlkWpK5QSM76-6g1whYfGFycOyhAN9aL6SWxPifoNThVzpILiQGPMQFYhhNdZh6L2osMJAMw"
+        }
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "sign-in",
+      "valid": true,
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "VOZvj59xTdi0j_cOA-RlcuSVIuWv-cnjHaE234xbacY",
+      "signer_public_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "payload_json": "{\"purpose\":\"sign-in\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600,\"exp\":1795578720,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"origin\":\"https://media.example.com\",\"reply_key\":\"BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4\"}",
+      "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+      "signing_input": "silo-sync-v1.sign-in.eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+      "sig": "ZE6qBdDxRz6g7JvynE2oZCrMB5wKn9AD5ib7D8batJb7QIbq2wIbSAKyev79M1kA8-ySObjosGkii7Zf1nfWUg",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "ZE6qBdDxRz6g7JvynE2oZCrMB5wKn9AD5ib7D8batJb7QIbq2wIbSAKyev79M1kA8-ySObjosGkii7Zf1nfWUg"
+      },
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM"
+    },
+    {
+      "type": "signed-message",
+      "name": "grant",
+      "valid": true,
+      "purpose": "grant",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "PDwBBNG4ubcNYSjc2TuoCagsFpSeTwUsoAECTeqw9p8",
+      "signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "payload_json": "{\"purpose\":\"grant\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600,\"exp\":1795578900,\"grant_id\":\"CFnyeqzKjDeP9B3HSKe4Wg\",\"account_id\":\"4\",\"origins\":[\"https://media.example.com\",\"http://192.168.1.20:8080\"],\"app_key\":\"BENo1hDSgZqxAymcAvFkbSX8AGX6i0mfvhyOz749Dw80E-nLNAeHfItCEqtjpp9ASEdB_NXZd20PrmhR6NgOba8\",\"app_name\":\"Example Player\"}",
+      "payload": "eyJwdXJwb3NlIjoiZ3JhbnQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODkwMCwiZ3JhbnRfaWQiOiJDRm55ZXF6S2pEZVA5QjNIU0tlNFdnIiwiYWNjb3VudF9pZCI6IjQiLCJvcmlnaW5zIjpbImh0dHBzOi8vbWVkaWEuZXhhbXBsZS5jb20iLCJodHRwOi8vMTkyLjE2OC4xLjIwOjgwODAiXSwiYXBwX2tleSI6IkJFTm8xaERTZ1pxeEF5bWNBdkZrYlNYOEFHWDZpMG1mdmh5T3o3NDlEdzgwRS1uTE5BZUhmSXRDRXF0anBwOUFTRWRCX05YWmQyMFBybWhSNk5nT2JhOCIsImFwcF9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIifQ",
+      "signing_input": "silo-sync-v1.grant.eyJwdXJwb3NlIjoiZ3JhbnQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODkwMCwiZ3JhbnRfaWQiOiJDRm55ZXF6S2pEZVA5QjNIU0tlNFdnIiwiYWNjb3VudF9pZCI6IjQiLCJvcmlnaW5zIjpbImh0dHBzOi8vbWVkaWEuZXhhbXBsZS5jb20iLCJodHRwOi8vMTkyLjE2OC4xLjIwOjgwODAiXSwiYXBwX2tleSI6IkJFTm8xaERTZ1pxeEF5bWNBdkZrYlNYOEFHWDZpMG1mdmh5T3o3NDlEdzgwRS1uTE5BZUhmSXRDRXF0anBwOUFTRWRCX05YWmQyMFBybWhSNk5nT2JhOCIsImFwcF9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIifQ",
+      "sig": "QfY3pj76Iv1UaUJ4B_NcLHdGV7NtLacsosFA0Vs2-S5Dn3t1CHaRLH2UTXFjeYD_P2pMNK2eYGMQLjwJ9Q99LQ",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoiZ3JhbnQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODkwMCwiZ3JhbnRfaWQiOiJDRm55ZXF6S2pEZVA5QjNIU0tlNFdnIiwiYWNjb3VudF9pZCI6IjQiLCJvcmlnaW5zIjpbImh0dHBzOi8vbWVkaWEuZXhhbXBsZS5jb20iLCJodHRwOi8vMTkyLjE2OC4xLjIwOjgwODAiXSwiYXBwX2tleSI6IkJFTm8xaERTZ1pxeEF5bWNBdkZrYlNYOEFHWDZpMG1mdmh5T3o3NDlEdzgwRS1uTE5BZUhmSXRDRXF0anBwOUFTRWRCX05YWmQyMFBybWhSNk5nT2JhOCIsImFwcF9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIifQ",
+        "sig": "QfY3pj76Iv1UaUJ4B_NcLHdGV7NtLacsosFA0Vs2-S5Dn3t1CHaRLH2UTXFjeYD_P2pMNK2eYGMQLjwJ9Q99LQ"
+      },
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q"
+    },
+    {
+      "type": "signed-message",
+      "name": "grant-redeem embedding the grant",
+      "valid": true,
+      "purpose": "grant-redeem",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "ru-bFNr3OeqDf22jiZdb_lQ8xbJApjHF-KH1qcZVY4E",
+      "signer_public_key": "BENo1hDSgZqxAymcAvFkbSX8AGX6i0mfvhyOz749Dw80E-nLNAeHfItCEqtjpp9ASEdB_NXZd20PrmhR6NgOba8",
+      "payload_json": "{\"purpose\":\"grant-redeem\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600,\"exp\":1795578720,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"reply_key\":\"BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4\",\"origin\":\"https://media.example.com\",\"grant\":{\"kid\":\"PgujdSfBbNNyXngLWCsOgw\",\"payload\":\"eyJwdXJwb3NlIjoiZ3JhbnQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODkwMCwiZ3JhbnRfaWQiOiJDRm55ZXF6S2pEZVA5QjNIU0tlNFdnIiwiYWNjb3VudF9pZCI6IjQiLCJvcmlnaW5zIjpbImh0dHBzOi8vbWVkaWEuZXhhbXBsZS5jb20iLCJodHRwOi8vMTkyLjE2OC4xLjIwOjgwODAiXSwiYXBwX2tleSI6IkJFTm8xaERTZ1pxeEF5bWNBdkZrYlNYOEFHWDZpMG1mdmh5T3o3NDlEdzgwRS1uTE5BZUhmSXRDRXF0anBwOUFTRWRCX05YWmQyMFBybWhSNk5nT2JhOCIsImFwcF9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIifQ\",\"sig\":\"QfY3pj76Iv1UaUJ4B_NcLHdGV7NtLacsosFA0Vs2-S5Dn3t1CHaRLH2UTXFjeYD_P2pMNK2eYGMQLjwJ9Q99LQ\"},\"device_name\":\"Example Player on Sam's iPad\",\"device_platform\":\"ipados\"}",
+      "payload": "eyJwdXJwb3NlIjoiZ3JhbnQtcmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwiZ3JhbnQiOnsia2lkIjoiUGd1amRTZkJiTk55WG5nTFdDc09ndyIsInBheWxvYWQiOiJleUp3ZFhKd2IzTmxJam9pWjNKaGJuUWlMQ0p6WlhKMlpYSmZhV1FpT2lJNU5tTXhZbVF3T0MxaU9ETTVMVFJrTkRjdE9UZ3daUzAxTjJRMFpUZGhORFJqWm1FaUxDSnBZWFFpT2pFM09UVTFOemcyTURBc0ltVjRjQ0k2TVRjNU5UVTNPRGt3TUN3aVozSmhiblJmYVdRaU9pSkRSbTU1WlhGNlMycEVaVkE1UWpOSVUwdGxORmRuSWl3aVlXTmpiM1Z1ZEY5cFpDSTZJalFpTENKdmNtbG5hVzV6SWpwYkltaDBkSEJ6T2k4dmJXVmthV0V1WlhoaGJYQnNaUzVqYjIwaUxDSm9kSFJ3T2k4dk1Ua3lMakUyT0M0eExqSXdPamd3T0RBaVhTd2lZWEJ3WDJ0bGVTSTZJa0pGVG04eGFFUlRaMXB4ZUVGNWJXTkJka1pyWWxOWU9FRkhXRFpwTUcxbWRtaDVUM28zTkRsRWR6Z3dSUzF1VEU1QlpVaG1TWFJEUlhGMGFuQndPVUZUUldSQ1gwNVlXbVF5TUZCeWJXaFNOazVuVDJKaE9DSXNJbUZ3Y0Y5dVlXMWxJam9pUlhoaGJYQnNaU0JRYkdGNVpYSWlmUSIsInNpZyI6IlFmWTNwajc2SXYxVWFVSjRCX05jTEhkR1Y3TnRMYWNzb3NGQTBWczItUzVEbjN0MUNIYVJMSDJVVFhGamVZRF9QMnBNTksyZVlHTVFMandKOVE5OUxRIn0sImRldmljZV9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIgb24gU2FtJ3MgaVBhZCIsImRldmljZV9wbGF0Zm9ybSI6ImlwYWRvcyJ9",
+      "signing_input": "silo-sync-v1.grant-redeem.eyJwdXJwb3NlIjoiZ3JhbnQtcmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwiZ3JhbnQiOnsia2lkIjoiUGd1amRTZkJiTk55WG5nTFdDc09ndyIsInBheWxvYWQiOiJleUp3ZFhKd2IzTmxJam9pWjNKaGJuUWlMQ0p6WlhKMlpYSmZhV1FpT2lJNU5tTXhZbVF3T0MxaU9ETTVMVFJrTkRjdE9UZ3daUzAxTjJRMFpUZGhORFJqWm1FaUxDSnBZWFFpT2pFM09UVTFOemcyTURBc0ltVjRjQ0k2TVRjNU5UVTNPRGt3TUN3aVozSmhiblJmYVdRaU9pSkRSbTU1WlhGNlMycEVaVkE1UWpOSVUwdGxORmRuSWl3aVlXTmpiM1Z1ZEY5cFpDSTZJalFpTENKdmNtbG5hVzV6SWpwYkltaDBkSEJ6T2k4dmJXVmthV0V1WlhoaGJYQnNaUzVqYjIwaUxDSm9kSFJ3T2k4dk1Ua3lMakUyT0M0eExqSXdPamd3T0RBaVhTd2lZWEJ3WDJ0bGVTSTZJa0pGVG04eGFFUlRaMXB4ZUVGNWJXTkJka1pyWWxOWU9FRkhXRFpwTUcxbWRtaDVUM28zTkRsRWR6Z3dSUzF1VEU1QlpVaG1TWFJEUlhGMGFuQndPVUZUUldSQ1gwNVlXbVF5TUZCeWJXaFNOazVuVDJKaE9DSXNJbUZ3Y0Y5dVlXMWxJam9pUlhoaGJYQnNaU0JRYkdGNVpYSWlmUSIsInNpZyI6IlFmWTNwajc2SXYxVWFVSjRCX05jTEhkR1Y3TnRMYWNzb3NGQTBWczItUzVEbjN0MUNIYVJMSDJVVFhGamVZRF9QMnBNTksyZVlHTVFMandKOVE5OUxRIn0sImRldmljZV9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIgb24gU2FtJ3MgaVBhZCIsImRldmljZV9wbGF0Zm9ybSI6ImlwYWRvcyJ9",
+      "sig": "FiejXoWAw0vTrwNEPXoxp9O2UkEB-ifxFjNyUlg13Eio9O6PbPO2eCp3h9i_1K-T-utWTnqQu9crydOtzd_Ouw",
+      "envelope": {
+        "kid": "iX--ofJySUkUOsEpPo17PQ",
+        "payload": "eyJwdXJwb3NlIjoiZ3JhbnQtcmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwiZ3JhbnQiOnsia2lkIjoiUGd1amRTZkJiTk55WG5nTFdDc09ndyIsInBheWxvYWQiOiJleUp3ZFhKd2IzTmxJam9pWjNKaGJuUWlMQ0p6WlhKMlpYSmZhV1FpT2lJNU5tTXhZbVF3T0MxaU9ETTVMVFJrTkRjdE9UZ3daUzAxTjJRMFpUZGhORFJqWm1FaUxDSnBZWFFpT2pFM09UVTFOemcyTURBc0ltVjRjQ0k2TVRjNU5UVTNPRGt3TUN3aVozSmhiblJmYVdRaU9pSkRSbTU1WlhGNlMycEVaVkE1UWpOSVUwdGxORmRuSWl3aVlXTmpiM1Z1ZEY5cFpDSTZJalFpTENKdmNtbG5hVzV6SWpwYkltaDBkSEJ6T2k4dmJXVmthV0V1WlhoaGJYQnNaUzVqYjIwaUxDSm9kSFJ3T2k4dk1Ua3lMakUyT0M0eExqSXdPamd3T0RBaVhTd2lZWEJ3WDJ0bGVTSTZJa0pGVG04eGFFUlRaMXB4ZUVGNWJXTkJka1pyWWxOWU9FRkhXRFpwTUcxbWRtaDVUM28zTkRsRWR6Z3dSUzF1VEU1QlpVaG1TWFJEUlhGMGFuQndPVUZUUldSQ1gwNVlXbVF5TUZCeWJXaFNOazVuVDJKaE9DSXNJbUZ3Y0Y5dVlXMWxJam9pUlhoaGJYQnNaU0JRYkdGNVpYSWlmUSIsInNpZyI6IlFmWTNwajc2SXYxVWFVSjRCX05jTEhkR1Y3TnRMYWNzb3NGQTBWczItUzVEbjN0MUNIYVJMSDJVVFhGamVZRF9QMnBNTksyZVlHTVFMandKOVE5OUxRIn0sImRldmljZV9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIgb24gU2FtJ3MgaVBhZCIsImRldmljZV9wbGF0Zm9ybSI6ImlwYWRvcyJ9",
+        "sig": "FiejXoWAw0vTrwNEPXoxp9O2UkEB-ifxFjNyUlg13Eio9O6PbPO2eCp3h9i_1K-T-utWTnqQu9crydOtzd_Ouw"
+      },
+      "grant_signer_private_key": "PDwBBNG4ubcNYSjc2TuoCagsFpSeTwUsoAECTeqw9p8",
+      "grant_signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q"
+    },
+    {
+      "type": "signed-message",
+      "name": "profile-set with a two-profile set",
+      "valid": true,
+      "purpose": "profile-set",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "PDwBBNG4ubcNYSjc2TuoCagsFpSeTwUsoAECTeqw9p8",
+      "signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "payload_json": "{\"purpose\":\"profile-set\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600,\"exp\":1795578720,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"account_id\":\"4\",\"set\":{\"version\":7,\"items\":[{\"sync_id\":\"2f0c0e4c-3b8a-4d7e-9a51-6f8e2b1c9d40\",\"name\":\"Sam\",\"picture\":\"preset:fox\",\"pin\":{\"keep\":true},\"is_child\":false,\"max_content_rating\":\"\",\"max_advisory_age\":null,\"require_advisory_age\":false,\"requests_blocked\":false,\"settings\":{\"playback.autoplay_next\":true}},{\"sync_id\":\"8a4b6c2d-1e3f-4a5b-8c7d-9e0f1a2b3c4d\",\"name\":\"Robin\",\"picture\":\"preset:owl\",\"pin\":{\"clear\":true},\"is_child\":true,\"max_content_rating\":\"PG\",\"max_advisory_age\":10,\"require_advisory_age\":true,\"requests_blocked\":true,\"settings\":{\"playback.autoplay_next\":false}}]}}",
+      "payload": "eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOjcsIml0ZW1zIjpbeyJzeW5jX2lkIjoiMmYwYzBlNGMtM2I4YS00ZDdlLTlhNTEtNmY4ZTJiMWM5ZDQwIiwibmFtZSI6IlNhbSIsInBpY3R1cmUiOiJwcmVzZXQ6Zm94IiwicGluIjp7ImtlZXAiOnRydWV9LCJpc19jaGlsZCI6ZmFsc2UsIm1heF9jb250ZW50X3JhdGluZyI6IiIsIm1heF9hZHZpc29yeV9hZ2UiOm51bGwsInJlcXVpcmVfYWR2aXNvcnlfYWdlIjpmYWxzZSwicmVxdWVzdHNfYmxvY2tlZCI6ZmFsc2UsInNldHRpbmdzIjp7InBsYXliYWNrLmF1dG9wbGF5X25leHQiOnRydWV9fSx7InN5bmNfaWQiOiI4YTRiNmMyZC0xZTNmLTRhNWItOGM3ZC05ZTBmMWEyYjNjNGQiLCJuYW1lIjoiUm9iaW4iLCJwaWN0dXJlIjoicHJlc2V0Om93bCIsInBpbiI6eyJjbGVhciI6dHJ1ZX0sImlzX2NoaWxkIjp0cnVlLCJtYXhfY29udGVudF9yYXRpbmciOiJQRyIsIm1heF9hZHZpc29yeV9hZ2UiOjEwLCJyZXF1aXJlX2Fkdmlzb3J5X2FnZSI6dHJ1ZSwicmVxdWVzdHNfYmxvY2tlZCI6dHJ1ZSwic2V0dGluZ3MiOnsicGxheWJhY2suYXV0b3BsYXlfbmV4dCI6ZmFsc2V9fV19fQ",
+      "signing_input": "silo-sync-v1.profile-set.eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOjcsIml0ZW1zIjpbeyJzeW5jX2lkIjoiMmYwYzBlNGMtM2I4YS00ZDdlLTlhNTEtNmY4ZTJiMWM5ZDQwIiwibmFtZSI6IlNhbSIsInBpY3R1cmUiOiJwcmVzZXQ6Zm94IiwicGluIjp7ImtlZXAiOnRydWV9LCJpc19jaGlsZCI6ZmFsc2UsIm1heF9jb250ZW50X3JhdGluZyI6IiIsIm1heF9hZHZpc29yeV9hZ2UiOm51bGwsInJlcXVpcmVfYWR2aXNvcnlfYWdlIjpmYWxzZSwicmVxdWVzdHNfYmxvY2tlZCI6ZmFsc2UsInNldHRpbmdzIjp7InBsYXliYWNrLmF1dG9wbGF5X25leHQiOnRydWV9fSx7InN5bmNfaWQiOiI4YTRiNmMyZC0xZTNmLTRhNWItOGM3ZC05ZTBmMWEyYjNjNGQiLCJuYW1lIjoiUm9iaW4iLCJwaWN0dXJlIjoicHJlc2V0Om93bCIsInBpbiI6eyJjbGVhciI6dHJ1ZX0sImlzX2NoaWxkIjp0cnVlLCJtYXhfY29udGVudF9yYXRpbmciOiJQRyIsIm1heF9hZHZpc29yeV9hZ2UiOjEwLCJyZXF1aXJlX2Fkdmlzb3J5X2FnZSI6dHJ1ZSwicmVxdWVzdHNfYmxvY2tlZCI6dHJ1ZSwic2V0dGluZ3MiOnsicGxheWJhY2suYXV0b3BsYXlfbmV4dCI6ZmFsc2V9fV19fQ",
+      "sig": "uVtH_RANs9Jm6I_XpqXw4xGgSBeu4Lw8bhCCtbo11pJQnZ4i_sf8u7hLJztMkrZZUkVzNz5l93IVfTR7-2oWXA",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOjcsIml0ZW1zIjpbeyJzeW5jX2lkIjoiMmYwYzBlNGMtM2I4YS00ZDdlLTlhNTEtNmY4ZTJiMWM5ZDQwIiwibmFtZSI6IlNhbSIsInBpY3R1cmUiOiJwcmVzZXQ6Zm94IiwicGluIjp7ImtlZXAiOnRydWV9LCJpc19jaGlsZCI6ZmFsc2UsIm1heF9jb250ZW50X3JhdGluZyI6IiIsIm1heF9hZHZpc29yeV9hZ2UiOm51bGwsInJlcXVpcmVfYWR2aXNvcnlfYWdlIjpmYWxzZSwicmVxdWVzdHNfYmxvY2tlZCI6ZmFsc2UsInNldHRpbmdzIjp7InBsYXliYWNrLmF1dG9wbGF5X25leHQiOnRydWV9fSx7InN5bmNfaWQiOiI4YTRiNmMyZC0xZTNmLTRhNWItOGM3ZC05ZTBmMWEyYjNjNGQiLCJuYW1lIjoiUm9iaW4iLCJwaWN0dXJlIjoicHJlc2V0Om93bCIsInBpbiI6eyJjbGVhciI6dHJ1ZX0sImlzX2NoaWxkIjp0cnVlLCJtYXhfY29udGVudF9yYXRpbmciOiJQRyIsIm1heF9hZHZpc29yeV9hZ2UiOjEwLCJyZXF1aXJlX2Fkdmlzb3J5X2FnZSI6dHJ1ZSwicmVxdWVzdHNfYmxvY2tlZCI6dHJ1ZSwic2V0dGluZ3MiOnsicGxheWJhY2suYXV0b3BsYXlfbmV4dCI6ZmFsc2V9fV19fQ",
+        "sig": "uVtH_RANs9Jm6I_XpqXw4xGgSBeu4Lw8bhCCtbo11pJQnZ4i_sf8u7hLJztMkrZZUkVzNz5l93IVfTR7-2oWXA"
+      },
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q"
+    },
+    {
+      "type": "signed-message",
+      "name": "sign-in with a high s",
+      "valid": true,
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "VOZvj59xTdi0j_cOA-RlcuSVIuWv-cnjHaE234xbacY",
+      "signer_public_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "payload_json": "{\"purpose\":\"sign-in\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600,\"exp\":1795578720,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"origin\":\"https://media.example.com\",\"reply_key\":\"BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4\"}",
+      "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+      "signing_input": "silo-sync-v1.sign-in.eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+      "sig": "ZE6qBdDxRz6g7JvynE2oZCrMB5wKn9AD5ib7D8batJb7QIbq2wIbSAKyev79M1kA8-ySObjosGkii7Zf1nfWUg",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "ZE6qBdDxRz6g7JvynE2oZCrMB5wKn9AD5ib7D8batJb7QIbq2wIbSAKyev79M1kA8-ySObjosGkii7Zf1nfWUg"
+      },
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "s_form": "high"
+    },
+    {
+      "type": "signed-message",
+      "name": "sign-in with a low s",
+      "valid": true,
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "VOZvj59xTdi0j_cOA-RlcuSVIuWv-cnjHaE234xbacY",
+      "signer_public_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "payload_json": "{\"purpose\":\"sign-in\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600,\"exp\":1795578720,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"origin\":\"https://media.example.com\",\"reply_key\":\"BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4\"}",
+      "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+      "signing_input": "silo-sync-v1.sign-in.eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+      "sig": "ZE6qBdDxRz6g7JvynE2oZCrMB5wKn9AD5ib7D8batJYEv3kUJP3kuP1NhQECzKb-yPpoc-4u7hvRLhRjJetO_w",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "ZE6qBdDxRz6g7JvynE2oZCrMB5wKn9AD5ib7D8batJYEv3kUJP3kuP1NhQECzKb-yPpoc-4u7hvRLhRjJetO_w"
+      },
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "s_form": "low"
+    },
+    {
+      "type": "signed-message",
+      "name": "sign-in with iat written 1795578600.0 and exp 1.79557872e9",
+      "valid": true,
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "VOZvj59xTdi0j_cOA-RlcuSVIuWv-cnjHaE234xbacY",
+      "signer_public_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "payload_json": "{\"purpose\":\"sign-in\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600.0,\"exp\":1.79557872e9,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"origin\":\"https://media.example.com\",\"reply_key\":\"BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4\"}",
+      "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMC4wLCJleHAiOjEuNzk1NTc4NzJlOSwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsIm9yaWdpbiI6Imh0dHBzOi8vbWVkaWEuZXhhbXBsZS5jb20iLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQifQ",
+      "signing_input": "silo-sync-v1.sign-in.eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMC4wLCJleHAiOjEuNzk1NTc4NzJlOSwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsIm9yaWdpbiI6Imh0dHBzOi8vbWVkaWEuZXhhbXBsZS5jb20iLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQifQ",
+      "sig": "XlKF49aT6M9m20n4XI5ZWR46By33p9FE-x1tAoxIaJSRRVevBxliOtj4lVL-7cPeD1wYCtl1ZGAqIxU4UoO-Ng",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMC4wLCJleHAiOjEuNzk1NTc4NzJlOSwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsIm9yaWdpbiI6Imh0dHBzOi8vbWVkaWEuZXhhbXBsZS5jb20iLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQifQ",
+        "sig": "XlKF49aT6M9m20n4XI5ZWR46By33p9FE-x1tAoxIaJSRRVevBxliOtj4lVL-7cPeD1wYCtl1ZGAqIxU4UoO-Ng"
+      },
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM"
+    },
+    {
+      "type": "signed-message",
+      "name": "profile-set with set.version written 7.0",
+      "valid": true,
+      "purpose": "profile-set",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "PDwBBNG4ubcNYSjc2TuoCagsFpSeTwUsoAECTeqw9p8",
+      "signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "payload_json": "{\"purpose\":\"profile-set\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600,\"exp\":1795578720,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"account_id\":\"4\",\"set\":{\"version\":7.0,\"items\":[{\"sync_id\":\"2f0c0e4c-3b8a-4d7e-9a51-6f8e2b1c9d40\",\"name\":\"Sam\",\"picture\":\"preset:fox\",\"pin\":{\"keep\":true},\"is_child\":false,\"max_content_rating\":\"\",\"max_advisory_age\":null,\"require_advisory_age\":false,\"requests_blocked\":false,\"settings\":{\"playback.autoplay_next\":true}},{\"sync_id\":\"8a4b6c2d-1e3f-4a5b-8c7d-9e0f1a2b3c4d\",\"name\":\"Robin\",\"picture\":\"preset:owl\",\"pin\":{\"clear\":true},\"is_child\":true,\"max_content_rating\":\"PG\",\"max_advisory_age\":10,\"require_advisory_age\":true,\"requests_blocked\":true,\"settings\":{\"playback.autoplay_next\":false}}]}}",
+      "payload": "eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOjcuMCwiaXRlbXMiOlt7InN5bmNfaWQiOiIyZjBjMGU0Yy0zYjhhLTRkN2UtOWE1MS02ZjhlMmIxYzlkNDAiLCJuYW1lIjoiU2FtIiwicGljdHVyZSI6InByZXNldDpmb3giLCJwaW4iOnsia2VlcCI6dHJ1ZX0sImlzX2NoaWxkIjpmYWxzZSwibWF4X2NvbnRlbnRfcmF0aW5nIjoiIiwibWF4X2Fkdmlzb3J5X2FnZSI6bnVsbCwicmVxdWlyZV9hZHZpc29yeV9hZ2UiOmZhbHNlLCJyZXF1ZXN0c19ibG9ja2VkIjpmYWxzZSwic2V0dGluZ3MiOnsicGxheWJhY2suYXV0b3BsYXlfbmV4dCI6dHJ1ZX19LHsic3luY19pZCI6IjhhNGI2YzJkLTFlM2YtNGE1Yi04YzdkLTllMGYxYTJiM2M0ZCIsIm5hbWUiOiJSb2JpbiIsInBpY3R1cmUiOiJwcmVzZXQ6b3dsIiwicGluIjp7ImNsZWFyIjp0cnVlfSwiaXNfY2hpbGQiOnRydWUsIm1heF9jb250ZW50X3JhdGluZyI6IlBHIiwibWF4X2Fkdmlzb3J5X2FnZSI6MTAsInJlcXVpcmVfYWR2aXNvcnlfYWdlIjp0cnVlLCJyZXF1ZXN0c19ibG9ja2VkIjp0cnVlLCJzZXR0aW5ncyI6eyJwbGF5YmFjay5hdXRvcGxheV9uZXh0IjpmYWxzZX19XX19",
+      "signing_input": "silo-sync-v1.profile-set.eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOjcuMCwiaXRlbXMiOlt7InN5bmNfaWQiOiIyZjBjMGU0Yy0zYjhhLTRkN2UtOWE1MS02ZjhlMmIxYzlkNDAiLCJuYW1lIjoiU2FtIiwicGljdHVyZSI6InByZXNldDpmb3giLCJwaW4iOnsia2VlcCI6dHJ1ZX0sImlzX2NoaWxkIjpmYWxzZSwibWF4X2NvbnRlbnRfcmF0aW5nIjoiIiwibWF4X2Fkdmlzb3J5X2FnZSI6bnVsbCwicmVxdWlyZV9hZHZpc29yeV9hZ2UiOmZhbHNlLCJyZXF1ZXN0c19ibG9ja2VkIjpmYWxzZSwic2V0dGluZ3MiOnsicGxheWJhY2suYXV0b3BsYXlfbmV4dCI6dHJ1ZX19LHsic3luY19pZCI6IjhhNGI2YzJkLTFlM2YtNGE1Yi04YzdkLTllMGYxYTJiM2M0ZCIsIm5hbWUiOiJSb2JpbiIsInBpY3R1cmUiOiJwcmVzZXQ6b3dsIiwicGluIjp7ImNsZWFyIjp0cnVlfSwiaXNfY2hpbGQiOnRydWUsIm1heF9jb250ZW50X3JhdGluZyI6IlBHIiwibWF4X2Fkdmlzb3J5X2FnZSI6MTAsInJlcXVpcmVfYWR2aXNvcnlfYWdlIjp0cnVlLCJyZXF1ZXN0c19ibG9ja2VkIjp0cnVlLCJzZXR0aW5ncyI6eyJwbGF5YmFjay5hdXRvcGxheV9uZXh0IjpmYWxzZX19XX19",
+      "sig": "2NwG8OqXh9-fofZqj-Gz7H3WBOcfkeWb_SKzL_wr_JE92b4h7l8yw0Xe4g_DY5BcBLkfgUrMr1T_ZrjUIAtREg",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOjcuMCwiaXRlbXMiOlt7InN5bmNfaWQiOiIyZjBjMGU0Yy0zYjhhLTRkN2UtOWE1MS02ZjhlMmIxYzlkNDAiLCJuYW1lIjoiU2FtIiwicGljdHVyZSI6InByZXNldDpmb3giLCJwaW4iOnsia2VlcCI6dHJ1ZX0sImlzX2NoaWxkIjpmYWxzZSwibWF4X2NvbnRlbnRfcmF0aW5nIjoiIiwibWF4X2Fkdmlzb3J5X2FnZSI6bnVsbCwicmVxdWlyZV9hZHZpc29yeV9hZ2UiOmZhbHNlLCJyZXF1ZXN0c19ibG9ja2VkIjpmYWxzZSwic2V0dGluZ3MiOnsicGxheWJhY2suYXV0b3BsYXlfbmV4dCI6dHJ1ZX19LHsic3luY19pZCI6IjhhNGI2YzJkLTFlM2YtNGE1Yi04YzdkLTllMGYxYTJiM2M0ZCIsIm5hbWUiOiJSb2JpbiIsInBpY3R1cmUiOiJwcmVzZXQ6b3dsIiwicGluIjp7ImNsZWFyIjp0cnVlfSwiaXNfY2hpbGQiOnRydWUsIm1heF9jb250ZW50X3JhdGluZyI6IlBHIiwibWF4X2Fkdmlzb3J5X2FnZSI6MTAsInJlcXVpcmVfYWR2aXNvcnlfYWdlIjp0cnVlLCJyZXF1ZXN0c19ibG9ja2VkIjp0cnVlLCJzZXR0aW5ncyI6eyJwbGF5YmFjay5hdXRvcGxheV9uZXh0IjpmYWxzZX19XX19",
+        "sig": "2NwG8OqXh9-fofZqj-Gz7H3WBOcfkeWb_SKzL_wr_JE92b4h7l8yw0Xe4g_DY5BcBLkfgUrMr1T_ZrjUIAtREg"
+      },
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q"
+    },
+    {
+      "type": "signed-message",
+      "name": "sign-in with iat written 1795578600.0000000000000001",
+      "valid": true,
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "VOZvj59xTdi0j_cOA-RlcuSVIuWv-cnjHaE234xbacY",
+      "signer_public_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "payload_json": "{\"purpose\":\"sign-in\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600.0000000000000001,\"exp\":1795578720,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"origin\":\"https://media.example.com\",\"reply_key\":\"BAD8iSHf-ocjKsV2IqLe0SuchTz5IWIJi89djqWwHuz9vFAJ-PQUFlJtztNCQUYhN4S2xVVXozSgChuBleUi1N4\"}",
+      "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMC4wMDAwMDAwMDAwMDAwMDAxLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40In0",
+      "signing_input": "silo-sync-v1.sign-in.eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMC4wMDAwMDAwMDAwMDAwMDAxLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40In0",
+      "sig": "hP7rSwOe6LnwHkOtYo8ZNNl-Q7O8s9KMl7ScE7zyuUMsJ7AIgxT_mMaGYc-aZ56rDV8xExVYyu2z69cUIYnkww",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMC4wMDAwMDAwMDAwMDAwMDAxLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40In0",
+        "sig": "hP7rSwOe6LnwHkOtYo8ZNNl-Q7O8s9KMl7ScE7zyuUMsJ7AIgxT_mMaGYc-aZ56rDV8xExVYyu2z69cUIYnkww"
+      },
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM"
+    },
+    {
+      "type": "signed-message",
+      "name": "profile-set with set.version written 9007199254740990.6, which rounds to 2^53 - 1",
+      "valid": true,
+      "purpose": "profile-set",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "PDwBBNG4ubcNYSjc2TuoCagsFpSeTwUsoAECTeqw9p8",
+      "signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "payload_json": "{\"purpose\":\"profile-set\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600,\"exp\":1795578720,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"account_id\":\"4\",\"set\":{\"version\":9007199254740990.6,\"items\":[{\"sync_id\":\"2f0c0e4c-3b8a-4d7e-9a51-6f8e2b1c9d40\",\"name\":\"Sam\",\"picture\":\"preset:fox\",\"pin\":{\"keep\":true},\"is_child\":false,\"max_content_rating\":\"\",\"max_advisory_age\":null,\"require_advisory_age\":false,\"requests_blocked\":false,\"settings\":{\"playback.autoplay_next\":true}},{\"sync_id\":\"8a4b6c2d-1e3f-4a5b-8c7d-9e0f1a2b3c4d\",\"name\":\"Robin\",\"picture\":\"preset:owl\",\"pin\":{\"clear\":true},\"is_child\":true,\"max_content_rating\":\"PG\",\"max_advisory_age\":10,\"require_advisory_age\":true,\"requests_blocked\":true,\"settings\":{\"playback.autoplay_next\":false}}]}}",
+      "payload": "eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOjkwMDcxOTkyNTQ3NDA5OTAuNiwiaXRlbXMiOlt7InN5bmNfaWQiOiIyZjBjMGU0Yy0zYjhhLTRkN2UtOWE1MS02ZjhlMmIxYzlkNDAiLCJuYW1lIjoiU2FtIiwicGljdHVyZSI6InByZXNldDpmb3giLCJwaW4iOnsia2VlcCI6dHJ1ZX0sImlzX2NoaWxkIjpmYWxzZSwibWF4X2NvbnRlbnRfcmF0aW5nIjoiIiwibWF4X2Fkdmlzb3J5X2FnZSI6bnVsbCwicmVxdWlyZV9hZHZpc29yeV9hZ2UiOmZhbHNlLCJyZXF1ZXN0c19ibG9ja2VkIjpmYWxzZSwic2V0dGluZ3MiOnsicGxheWJhY2suYXV0b3BsYXlfbmV4dCI6dHJ1ZX19LHsic3luY19pZCI6IjhhNGI2YzJkLTFlM2YtNGE1Yi04YzdkLTllMGYxYTJiM2M0ZCIsIm5hbWUiOiJSb2JpbiIsInBpY3R1cmUiOiJwcmVzZXQ6b3dsIiwicGluIjp7ImNsZWFyIjp0cnVlfSwiaXNfY2hpbGQiOnRydWUsIm1heF9jb250ZW50X3JhdGluZyI6IlBHIiwibWF4X2Fkdmlzb3J5X2FnZSI6MTAsInJlcXVpcmVfYWR2aXNvcnlfYWdlIjp0cnVlLCJyZXF1ZXN0c19ibG9ja2VkIjp0cnVlLCJzZXR0aW5ncyI6eyJwbGF5YmFjay5hdXRvcGxheV9uZXh0IjpmYWxzZX19XX19",
+      "signing_input": "silo-sync-v1.profile-set.eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOjkwMDcxOTkyNTQ3NDA5OTAuNiwiaXRlbXMiOlt7InN5bmNfaWQiOiIyZjBjMGU0Yy0zYjhhLTRkN2UtOWE1MS02ZjhlMmIxYzlkNDAiLCJuYW1lIjoiU2FtIiwicGljdHVyZSI6InByZXNldDpmb3giLCJwaW4iOnsia2VlcCI6dHJ1ZX0sImlzX2NoaWxkIjpmYWxzZSwibWF4X2NvbnRlbnRfcmF0aW5nIjoiIiwibWF4X2Fkdmlzb3J5X2FnZSI6bnVsbCwicmVxdWlyZV9hZHZpc29yeV9hZ2UiOmZhbHNlLCJyZXF1ZXN0c19ibG9ja2VkIjpmYWxzZSwic2V0dGluZ3MiOnsicGxheWJhY2suYXV0b3BsYXlfbmV4dCI6dHJ1ZX19LHsic3luY19pZCI6IjhhNGI2YzJkLTFlM2YtNGE1Yi04YzdkLTllMGYxYTJiM2M0ZCIsIm5hbWUiOiJSb2JpbiIsInBpY3R1cmUiOiJwcmVzZXQ6b3dsIiwicGluIjp7ImNsZWFyIjp0cnVlfSwiaXNfY2hpbGQiOnRydWUsIm1heF9jb250ZW50X3JhdGluZyI6IlBHIiwibWF4X2Fkdmlzb3J5X2FnZSI6MTAsInJlcXVpcmVfYWR2aXNvcnlfYWdlIjp0cnVlLCJyZXF1ZXN0c19ibG9ja2VkIjp0cnVlLCJzZXR0aW5ncyI6eyJwbGF5YmFjay5hdXRvcGxheV9uZXh0IjpmYWxzZX19XX19",
+      "sig": "q_McxxoNaKHQJ--_xic4cdIH-cs27PdoQkP27WL0howkVcZMFE_ruxNlP8sdBtjIr-ywq8-VKu4ZMAE_95Dgdw",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOjkwMDcxOTkyNTQ3NDA5OTAuNiwiaXRlbXMiOlt7InN5bmNfaWQiOiIyZjBjMGU0Yy0zYjhhLTRkN2UtOWE1MS02ZjhlMmIxYzlkNDAiLCJuYW1lIjoiU2FtIiwicGljdHVyZSI6InByZXNldDpmb3giLCJwaW4iOnsia2VlcCI6dHJ1ZX0sImlzX2NoaWxkIjpmYWxzZSwibWF4X2NvbnRlbnRfcmF0aW5nIjoiIiwibWF4X2Fkdmlzb3J5X2FnZSI6bnVsbCwicmVxdWlyZV9hZHZpc29yeV9hZ2UiOmZhbHNlLCJyZXF1ZXN0c19ibG9ja2VkIjpmYWxzZSwic2V0dGluZ3MiOnsicGxheWJhY2suYXV0b3BsYXlfbmV4dCI6dHJ1ZX19LHsic3luY19pZCI6IjhhNGI2YzJkLTFlM2YtNGE1Yi04YzdkLTllMGYxYTJiM2M0ZCIsIm5hbWUiOiJSb2JpbiIsInBpY3R1cmUiOiJwcmVzZXQ6b3dsIiwicGluIjp7ImNsZWFyIjp0cnVlfSwiaXNfY2hpbGQiOnRydWUsIm1heF9jb250ZW50X3JhdGluZyI6IlBHIiwibWF4X2Fkdmlzb3J5X2FnZSI6MTAsInJlcXVpcmVfYWR2aXNvcnlfYWdlIjp0cnVlLCJyZXF1ZXN0c19ibG9ja2VkIjp0cnVlLCJzZXR0aW5ncyI6eyJwbGF5YmFjay5hdXRvcGxheV9uZXh0IjpmYWxzZX19XX19",
+        "sig": "q_McxxoNaKHQJ--_xic4cdIH-cs27PdoQkP27WL0howkVcZMFE_ruxNlP8sdBtjIr-ywq8-VKu4ZMAE_95Dgdw"
+      },
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q"
+    },
+    {
+      "type": "signed-message",
+      "name": "profile-set with set.version written -0, which is the double 0",
+      "valid": true,
+      "purpose": "profile-set",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "signer_private_key": "PDwBBNG4ubcNYSjc2TuoCagsFpSeTwUsoAECTeqw9p8",
+      "signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "payload_json": "{\"purpose\":\"profile-set\",\"server_id\":\"96c1bd08-b839-4d47-980e-57d4e7a44cfa\",\"iat\":1795578600,\"exp\":1795578720,\"challenge\":\"8bqRFq-gVv5Dxjb61BaVfnDB3-F24muoSMMiatX49VA\",\"account_id\":\"4\",\"set\":{\"version\":-0,\"items\":[{\"sync_id\":\"2f0c0e4c-3b8a-4d7e-9a51-6f8e2b1c9d40\",\"name\":\"Sam\",\"picture\":\"preset:fox\",\"pin\":{\"keep\":true},\"is_child\":false,\"max_content_rating\":\"\",\"max_advisory_age\":null,\"require_advisory_age\":false,\"requests_blocked\":false,\"settings\":{\"playback.autoplay_next\":true}},{\"sync_id\":\"8a4b6c2d-1e3f-4a5b-8c7d-9e0f1a2b3c4d\",\"name\":\"Robin\",\"picture\":\"preset:owl\",\"pin\":{\"clear\":true},\"is_child\":true,\"max_content_rating\":\"PG\",\"max_advisory_age\":10,\"require_advisory_age\":true,\"requests_blocked\":true,\"settings\":{\"playback.autoplay_next\":false}}]}}",
+      "payload": "eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOi0wLCJpdGVtcyI6W3sic3luY19pZCI6IjJmMGMwZTRjLTNiOGEtNGQ3ZS05YTUxLTZmOGUyYjFjOWQ0MCIsIm5hbWUiOiJTYW0iLCJwaWN0dXJlIjoicHJlc2V0OmZveCIsInBpbiI6eyJrZWVwIjp0cnVlfSwiaXNfY2hpbGQiOmZhbHNlLCJtYXhfY29udGVudF9yYXRpbmciOiIiLCJtYXhfYWR2aXNvcnlfYWdlIjpudWxsLCJyZXF1aXJlX2Fkdmlzb3J5X2FnZSI6ZmFsc2UsInJlcXVlc3RzX2Jsb2NrZWQiOmZhbHNlLCJzZXR0aW5ncyI6eyJwbGF5YmFjay5hdXRvcGxheV9uZXh0Ijp0cnVlfX0seyJzeW5jX2lkIjoiOGE0YjZjMmQtMWUzZi00YTViLThjN2QtOWUwZjFhMmIzYzRkIiwibmFtZSI6IlJvYmluIiwicGljdHVyZSI6InByZXNldDpvd2wiLCJwaW4iOnsiY2xlYXIiOnRydWV9LCJpc19jaGlsZCI6dHJ1ZSwibWF4X2NvbnRlbnRfcmF0aW5nIjoiUEciLCJtYXhfYWR2aXNvcnlfYWdlIjoxMCwicmVxdWlyZV9hZHZpc29yeV9hZ2UiOnRydWUsInJlcXVlc3RzX2Jsb2NrZWQiOnRydWUsInNldHRpbmdzIjp7InBsYXliYWNrLmF1dG9wbGF5X25leHQiOmZhbHNlfX1dfX0",
+      "signing_input": "silo-sync-v1.profile-set.eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOi0wLCJpdGVtcyI6W3sic3luY19pZCI6IjJmMGMwZTRjLTNiOGEtNGQ3ZS05YTUxLTZmOGUyYjFjOWQ0MCIsIm5hbWUiOiJTYW0iLCJwaWN0dXJlIjoicHJlc2V0OmZveCIsInBpbiI6eyJrZWVwIjp0cnVlfSwiaXNfY2hpbGQiOmZhbHNlLCJtYXhfY29udGVudF9yYXRpbmciOiIiLCJtYXhfYWR2aXNvcnlfYWdlIjpudWxsLCJyZXF1aXJlX2Fkdmlzb3J5X2FnZSI6ZmFsc2UsInJlcXVlc3RzX2Jsb2NrZWQiOmZhbHNlLCJzZXR0aW5ncyI6eyJwbGF5YmFjay5hdXRvcGxheV9uZXh0Ijp0cnVlfX0seyJzeW5jX2lkIjoiOGE0YjZjMmQtMWUzZi00YTViLThjN2QtOWUwZjFhMmIzYzRkIiwibmFtZSI6IlJvYmluIiwicGljdHVyZSI6InByZXNldDpvd2wiLCJwaW4iOnsiY2xlYXIiOnRydWV9LCJpc19jaGlsZCI6dHJ1ZSwibWF4X2NvbnRlbnRfcmF0aW5nIjoiUEciLCJtYXhfYWR2aXNvcnlfYWdlIjoxMCwicmVxdWlyZV9hZHZpc29yeV9hZ2UiOnRydWUsInJlcXVlc3RzX2Jsb2NrZWQiOnRydWUsInNldHRpbmdzIjp7InBsYXliYWNrLmF1dG9wbGF5X25leHQiOmZhbHNlfX1dfX0",
+      "sig": "pH7cFScix-F7a_ZycecCrYJUeNn1Qx0dudq7sZsIPtvfkxbclXWBgu8wUz06a9Z0284-WcHNupyw4MA90G0sMA",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOi0wLCJpdGVtcyI6W3sic3luY19pZCI6IjJmMGMwZTRjLTNiOGEtNGQ3ZS05YTUxLTZmOGUyYjFjOWQ0MCIsIm5hbWUiOiJTYW0iLCJwaWN0dXJlIjoicHJlc2V0OmZveCIsInBpbiI6eyJrZWVwIjp0cnVlfSwiaXNfY2hpbGQiOmZhbHNlLCJtYXhfY29udGVudF9yYXRpbmciOiIiLCJtYXhfYWR2aXNvcnlfYWdlIjpudWxsLCJyZXF1aXJlX2Fkdmlzb3J5X2FnZSI6ZmFsc2UsInJlcXVlc3RzX2Jsb2NrZWQiOmZhbHNlLCJzZXR0aW5ncyI6eyJwbGF5YmFjay5hdXRvcGxheV9uZXh0Ijp0cnVlfX0seyJzeW5jX2lkIjoiOGE0YjZjMmQtMWUzZi00YTViLThjN2QtOWUwZjFhMmIzYzRkIiwibmFtZSI6IlJvYmluIiwicGljdHVyZSI6InByZXNldDpvd2wiLCJwaW4iOnsiY2xlYXIiOnRydWV9LCJpc19jaGlsZCI6dHJ1ZSwibWF4X2NvbnRlbnRfcmF0aW5nIjoiUEciLCJtYXhfYWR2aXNvcnlfYWdlIjoxMCwicmVxdWlyZV9hZHZpc29yeV9hZ2UiOnRydWUsInJlcXVlc3RzX2Jsb2NrZWQiOnRydWUsInNldHRpbmdzIjp7InBsYXliYWNrLmF1dG9wbGF5X25leHQiOmZhbHNlfX1dfX0",
+        "sig": "pH7cFScix-F7a_ZycecCrYJUeNn1Qx0dudq7sZsIPtvfkxbclXWBgu8wUz06a9Z0284-WcHNupyw4MA90G0sMA"
+      },
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q"
+    },
+    {
+      "type": "signed-message",
+      "name": "payload altered after signing",
+      "valid": false,
+      "reason": "sig covers the payload string",
+      "error": "signature_invalid",
+      "purpose": "introduce",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoiaW50cm9kdWNlIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25mIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+        "sig": "nnyAt7pV-XsUSmpX0IAk1d0QmUrO4z9CZ5Oeoy9QlVSyCq2EED4Ns_Aakhd5DgOmSqWWrT5xs8an1Ye0a4smgg",
+        "device_sig": "fMNUAuxbYE4rOU1dn5PqgBmxSoSu8GmnvtS_M3syK8N-uOt2jcfwhFX5z3BbCfmGy8V3ToHIzxZ8ySiNfdXqOw"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "signed under another purpose prefix",
+      "valid": false,
+      "reason": "signed as silo-sync-v1.grant-redeem.<payload>",
+      "error": "signature_invalid",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "NU-w9bEyC0uCRoktsuhA1OtolF8m4q5gECkPhuqiwTGGv-ejr4SeZZrv4O82RSb_Y4CrmeqEdyxvkYYtn2o3Ow"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "kid of a different key",
+      "valid": false,
+      "reason": "kid names another key",
+      "error": "kid_mismatch",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "8D4MxPIBmIIAJ4WCllsWdg",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "ZE6qBdDxRz6g7JvynE2oZCrMB5wKn9AD5ib7D8batJb7QIbq2wIbSAKyev79M1kA8-ySObjosGkii7Zf1nfWUg"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "payload purpose not the expected purpose",
+      "valid": false,
+      "reason": "signed under sign-in, payload says profile-set",
+      "error": "purpose_mismatch",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsIm9yaWdpbiI6Imh0dHBzOi8vbWVkaWEuZXhhbXBsZS5jb20iLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQifQ",
+        "sig": "bvXe-lAdAn8Pthe_X7SQsTEdmSdq8-7Rl1fvBRUknq9uHbp3thLT4Pk4mXYYplbKSGyQV-MAgVywDV9drUqldg"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "exp passed",
+      "valid": false,
+      "reason": "now is exp",
+      "error": "expired",
+      "purpose": "sign-in",
+      "now": 1795578720,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "ZE6qBdDxRz6g7JvynE2oZCrMB5wKn9AD5ib7D8batJb7QIbq2wIbSAKyev79M1kA8-ySObjosGkii7Zf1nfWUg"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "iat too far ahead",
+      "valid": false,
+      "reason": "iat is 61 seconds after now",
+      "error": "not_yet_valid",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODY3MSwiZXhwIjoxNzk1NTc4NzkxLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "I-gjpKWgHL8_nzhuZQPXK_o5DFvMJrEB7V9cv69HM-H3AoyLO8kpER9RRYzb9OupbnZzDRnvicFqcSKLa7pDBg"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "exp - iat over 300",
+      "valid": false,
+      "reason": "exp - iat is 301",
+      "error": "lifetime_too_long",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4OTAxLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "wmhgy-gApiAJ8X-YIGyT3SRtq2Ba51so7TtoGFQK8cXdi-rl3wo_VuFOYJlQflxn8KHrXOzYcQonHXDt8pYWBg"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "an envelope with an extra field",
+      "valid": false,
+      "reason": "an envelope has exactly its fields",
+      "error": "envelope_malformed",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "ZE6qBdDxRz6g7JvynE2oZCrMB5wKn9AD5ib7D8batJb7QIbq2wIbSAKyev79M1kA8-ySObjosGkii7Zf1nfWUg",
+        "alg": "ES256"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "a signature of the wrong length",
+      "valid": false,
+      "reason": "sig is 63 bytes",
+      "error": "signature_invalid",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "ZE6qBdDxRz6g7JvynE2oZCrMB5wKn9AD5ib7D8batJb7QIbq2wIbSAKyev79M1kA8-ySObjosGkii7Zf1nfW"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "introduce without device_sig",
+      "valid": false,
+      "reason": "introduce needs device_sig",
+      "error": "envelope_malformed",
+      "purpose": "introduce",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoiaW50cm9kdWNlIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+        "sig": "nnyAt7pV-XsUSmpX0IAk1d0QmUrO4z9CZ5Oeoy9QlVSyCq2EED4Ns_Aakhd5DgOmSqWWrT5xs8an1Ye0a4smgg"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "sign-in with a device_sig",
+      "valid": false,
+      "reason": "sign-in has no device_sig",
+      "error": "envelope_malformed",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "ZE6qBdDxRz6g7JvynE2oZCrMB5wKn9AD5ib7D8batJb7QIbq2wIbSAKyev79M1kA8-ySObjosGkii7Zf1nfWUg",
+        "device_sig": "ZE6qBdDxRz6g7JvynE2oZCrMB5wKn9AD5ib7D8batJb7QIbq2wIbSAKyev79M1kA8-ySObjosGkii7Zf1nfWUg"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "device_sig by a key other than device_key",
+      "valid": false,
+      "reason": "device_sig must verify by the payload's device_key",
+      "error": "device_signature_invalid",
+      "purpose": "introduce",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoiaW50cm9kdWNlIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+        "sig": "nnyAt7pV-XsUSmpX0IAk1d0QmUrO4z9CZ5Oeoy9QlVSyCq2EED4Ns_Aakhd5DgOmSqWWrT5xs8an1Ye0a4smgg",
+        "device_sig": "_zHRe3gPNutXWsSqzrN477-STvCuyuGU78ObkVqudxAg9J_ly4iQoFgA1XQ9fERfKdueepdq3EB6DN7iC9twRw"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "grant-redeem with an origin outside the grant's origins",
+      "valid": false,
+      "reason": "origin must be one of the grant's origins",
+      "error": "origin_not_granted",
+      "purpose": "grant-redeem",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "grant_signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "iX--ofJySUkUOsEpPo17PQ",
+        "payload": "eyJwdXJwb3NlIjoiZ3JhbnQtcmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQiLCJvcmlnaW4iOiJodHRwczovL290aGVyLmV4YW1wbGUuY29tIiwiZ3JhbnQiOnsia2lkIjoiUGd1amRTZkJiTk55WG5nTFdDc09ndyIsInBheWxvYWQiOiJleUp3ZFhKd2IzTmxJam9pWjNKaGJuUWlMQ0p6WlhKMlpYSmZhV1FpT2lJNU5tTXhZbVF3T0MxaU9ETTVMVFJrTkRjdE9UZ3daUzAxTjJRMFpUZGhORFJqWm1FaUxDSnBZWFFpT2pFM09UVTFOemcyTURBc0ltVjRjQ0k2TVRjNU5UVTNPRGt3TUN3aVozSmhiblJmYVdRaU9pSkRSbTU1WlhGNlMycEVaVkE1UWpOSVUwdGxORmRuSWl3aVlXTmpiM1Z1ZEY5cFpDSTZJalFpTENKdmNtbG5hVzV6SWpwYkltaDBkSEJ6T2k4dmJXVmthV0V1WlhoaGJYQnNaUzVqYjIwaUxDSm9kSFJ3T2k4dk1Ua3lMakUyT0M0eExqSXdPamd3T0RBaVhTd2lZWEJ3WDJ0bGVTSTZJa0pGVG04eGFFUlRaMXB4ZUVGNWJXTkJka1pyWWxOWU9FRkhXRFpwTUcxbWRtaDVUM28zTkRsRWR6Z3dSUzF1VEU1QlpVaG1TWFJEUlhGMGFuQndPVUZUUldSQ1gwNVlXbVF5TUZCeWJXaFNOazVuVDJKaE9DSXNJbUZ3Y0Y5dVlXMWxJam9pUlhoaGJYQnNaU0JRYkdGNVpYSWlmUSIsInNpZyI6IlFmWTNwajc2SXYxVWFVSjRCX05jTEhkR1Y3TnRMYWNzb3NGQTBWczItUzVEbjN0MUNIYVJMSDJVVFhGamVZRF9QMnBNTksyZVlHTVFMandKOVE5OUxRIn0sImRldmljZV9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIgb24gU2FtJ3MgaVBhZCIsImRldmljZV9wbGF0Zm9ybSI6ImlwYWRvcyJ9",
+        "sig": "X__Tcx8bj--WSTfFlCZZs5ysscqMmZTAWx7CkslDFoSyQaYlLBxS9dpTNtNv91aDgjA0hdtE5iMHsj1JWaQC6A"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "enroll whose kid is not person_key's ID",
+      "valid": false,
+      "reason": "kid must be the ID of the person_key beside the envelope",
+      "error": "kid_mismatch",
+      "purpose": "enroll",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "body": {
+        "person_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+        "message": {
+          "kid": "8D4MxPIBmIIAJ4WCllsWdg",
+          "payload": "eyJwdXJwb3NlIjoiZW5yb2xsIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+          "sig": "zzmwOjhNCqRxdJABg7dV3QArFuyHE6HAPinDMBYu2fshu1HSKxRQtEBcIG7xqKvB3MyRCUBWoQIH_J5okCWJrQ",
+          "device_sig": "iC0n7--le4mgDblNwtTZbSQEVPv8THyLx8Gj2j9tZ2T3WAqUx1XUVZW2Qg_eUg9HD3e8yZJ-Ugy2BAVX7Z1aDw"
+        }
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "redeem signed by a key other than person_key",
+      "valid": false,
+      "reason": "sig must verify by person_key",
+      "error": "signature_invalid",
+      "purpose": "redeem",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "body": {
+        "person_key": "BI4UgxHqSGsehfIRSE9mE4bjOtteQZPKdaUFO3ZvjOPSR89ddO-phJvLZCdMCRYH99RHw9SvuVyl04sqitrdOwI",
+        "message": {
+          "kid": "PgujdSfBbNNyXngLWCsOgw",
+          "payload": "eyJwdXJwb3NlIjoicmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIiwiY29kZSI6IjJ0NW9OdzVUSHgwdHlDYzNTbmhYMGt6MlBZSnVwN01JZHIwTW14OXBzMG8ifQ",
+          "sig": "oILiTVoquhUVLJ7HeLP74LjwEEjKhCQuAw9_LVNjvFc0mAZf1DZztrMcqxnuVWq8Hsz56XKzI88DqwdzJljjUA",
+          "device_sig": "6tp8dRcy0TkkF2OlkWpK5QSM76-6g1whYfGFycOyhAN9aL6SWxPifoNThVzpILiQGPMQFYhhNdZh6L2osMJAMw"
+        }
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "a key body with an extra field",
+      "valid": false,
+      "reason": "the body is exactly person_key and message",
+      "error": "body_malformed",
+      "purpose": "enroll",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "body": {
+        "person_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+        "message": {
+          "kid": "PgujdSfBbNNyXngLWCsOgw",
+          "payload": "eyJwdXJwb3NlIjoiZW5yb2xsIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+          "sig": "zzmwOjhNCqRxdJABg7dV3QArFuyHE6HAPinDMBYu2fshu1HSKxRQtEBcIG7xqKvB3MyRCUBWoQIH_J5okCWJrQ",
+          "device_sig": "iC0n7--le4mgDblNwtTZbSQEVPv8THyLx8Gj2j9tZ2T3WAqUx1XUVZW2Qg_eUg9HD3e8yZJ-Ugy2BAVX7Z1aDw"
+        },
+        "code": "2t5oNw5THx0tyCc3SnhX0kz2PYJup7MIdr0Mmx9ps0o"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "iat written with a fraction",
+      "valid": false,
+      "reason": "iat and exp are whole numbers",
+      "error": "field_invalid",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMC41LCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40In0",
+        "sig": "qLH3VvWwAmCYeEtAAIouHQza0dF7XyZNHQKsZv5CYfvnYuRUVXq1CQO1ptWhJglu0hFxnxDVay2R889gOFYFYw"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "set.version of 2^53",
+      "valid": false,
+      "reason": "a whole number is at most 2^53 - 1",
+      "error": "field_invalid",
+      "purpose": "profile-set",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOjkwMDcxOTkyNTQ3NDA5OTIsIml0ZW1zIjpbeyJzeW5jX2lkIjoiMmYwYzBlNGMtM2I4YS00ZDdlLTlhNTEtNmY4ZTJiMWM5ZDQwIiwibmFtZSI6IlNhbSIsInBpY3R1cmUiOiJwcmVzZXQ6Zm94IiwicGluIjp7ImtlZXAiOnRydWV9LCJpc19jaGlsZCI6ZmFsc2UsIm1heF9jb250ZW50X3JhdGluZyI6IiIsIm1heF9hZHZpc29yeV9hZ2UiOm51bGwsInJlcXVpcmVfYWR2aXNvcnlfYWdlIjpmYWxzZSwicmVxdWVzdHNfYmxvY2tlZCI6ZmFsc2UsInNldHRpbmdzIjp7InBsYXliYWNrLmF1dG9wbGF5X25leHQiOnRydWV9fSx7InN5bmNfaWQiOiI4YTRiNmMyZC0xZTNmLTRhNWItOGM3ZC05ZTBmMWEyYjNjNGQiLCJuYW1lIjoiUm9iaW4iLCJwaWN0dXJlIjoicHJlc2V0Om93bCIsInBpbiI6eyJjbGVhciI6dHJ1ZX0sImlzX2NoaWxkIjp0cnVlLCJtYXhfY29udGVudF9yYXRpbmciOiJQRyIsIm1heF9hZHZpc29yeV9hZ2UiOjEwLCJyZXF1aXJlX2Fkdmlzb3J5X2FnZSI6dHJ1ZSwicmVxdWVzdHNfYmxvY2tlZCI6dHJ1ZSwic2V0dGluZ3MiOnsicGxheWJhY2suYXV0b3BsYXlfbmV4dCI6ZmFsc2V9fV19fQ",
+        "sig": "vbN7AUEe8cidlrpvGUj28qYZG5Y6RATJdet_aspOVBnTjMlE4RuI4TBW2LloxtjXb9C_zsA9Avp1Wai92VbVlg"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "set.version written 7.5",
+      "valid": false,
+      "reason": "a whole number has no fraction",
+      "error": "field_invalid",
+      "purpose": "profile-set",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoicHJvZmlsZS1zZXQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODcyMCwiY2hhbGxlbmdlIjoiOGJxUkZxLWdWdjVEeGpiNjFCYVZmbkRCMy1GMjRtdW9TTU1pYXRYNDlWQSIsImFjY291bnRfaWQiOiI0Iiwic2V0Ijp7InZlcnNpb24iOjcuNSwiaXRlbXMiOlt7InN5bmNfaWQiOiIyZjBjMGU0Yy0zYjhhLTRkN2UtOWE1MS02ZjhlMmIxYzlkNDAiLCJuYW1lIjoiU2FtIiwicGljdHVyZSI6InByZXNldDpmb3giLCJwaW4iOnsia2VlcCI6dHJ1ZX0sImlzX2NoaWxkIjpmYWxzZSwibWF4X2NvbnRlbnRfcmF0aW5nIjoiIiwibWF4X2Fkdmlzb3J5X2FnZSI6bnVsbCwicmVxdWlyZV9hZHZpc29yeV9hZ2UiOmZhbHNlLCJyZXF1ZXN0c19ibG9ja2VkIjpmYWxzZSwic2V0dGluZ3MiOnsicGxheWJhY2suYXV0b3BsYXlfbmV4dCI6dHJ1ZX19LHsic3luY19pZCI6IjhhNGI2YzJkLTFlM2YtNGE1Yi04YzdkLTllMGYxYTJiM2M0ZCIsIm5hbWUiOiJSb2JpbiIsInBpY3R1cmUiOiJwcmVzZXQ6b3dsIiwicGluIjp7ImNsZWFyIjp0cnVlfSwiaXNfY2hpbGQiOnRydWUsIm1heF9jb250ZW50X3JhdGluZyI6IlBHIiwibWF4X2Fkdmlzb3J5X2FnZSI6MTAsInJlcXVpcmVfYWR2aXNvcnlfYWdlIjp0cnVlLCJyZXF1ZXN0c19ibG9ja2VkIjp0cnVlLCJzZXR0aW5ncyI6eyJwbGF5YmFjay5hdXRvcGxheV9uZXh0IjpmYWxzZX19XX19",
+        "sig": "7f75uyvlCfX4zdse_NIhWJpIWXSxSG3zF9H1hr2vvhgsm_SucKS6jUXHzANkslaCTZlLvBEeFJoJkQQB4bXh3w"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "exp equal to iat",
+      "valid": false,
+      "reason": "exp must be after iat",
+      "error": "lifetime_too_long",
+      "purpose": "sign-in",
+      "now": 1795578599,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NjAwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "B_gbv485CvryU-FD-y5Hka9j2_PfrTStBRPpDdqRurgMqATACWS94DYiGL8mpWAm40XwBuZLa1jQ1qGssEAKGg"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "a 31-byte challenge",
+      "valid": false,
+      "reason": "a challenge is 32 bytes",
+      "error": "field_invalid",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40In0",
+        "sig": "3rXlCn3RVtys6IxZxqFZAySYUMBj3vtWJp3dmxiROmtK_NsDyKKgHggCp1adAIIQh4qebmuicUcNXbHaqdyn9Q"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "a reply_key not on the curve",
+      "valid": false,
+      "reason": "every key is a valid point",
+      "error": "field_invalid",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFOOCJ9",
+        "sig": "6wxeKlI9Hua6vLPhbMm-8wTzjuZ88f8WH8bLCI9HMVeRFQv_Dv9fBDmYci_5AG6cO3n5zuC6W9AjsiH6B-XnKA"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "an origin written http://[2001:0db8:0000::1]",
+      "valid": false,
+      "reason": "origin must already be in the origin form",
+      "error": "field_invalid",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cDovL1syMDAxOjBkYjg6MDAwMDo6MV0iLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQifQ",
+        "sig": "sVNVIms9DxhuNBokPkGpCPyNeajW-aX_3_KO_FsafXv3C4zL4R4Ip_tpURXt4Bz1pCVvEkBAd33gGlGvShIa-w"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "an origin written http://0x7f.0.0.1",
+      "valid": false,
+      "reason": "origin must already be in the origin form",
+      "error": "field_invalid",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cDovLzB4N2YuMC4wLjEiLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQifQ",
+        "sig": "WCZfpmz0a2TQu5Y1rL3i5KO-Y4oSsV4lv_K27FCc-zfs_tfWqWbuSMmHBxjAfKxqlIWUVK-ceEzkX6R3ufkSqg"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "an origin written http://127.1",
+      "valid": false,
+      "reason": "origin must already be in the origin form",
+      "error": "field_invalid",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cDovLzEyNy4xIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40In0",
+        "sig": "LmQ5aSQrBgmaptVPmylrnbrv7g5b29uUYMqhq7hHEveF_2xOyXUQcY0acwqGXf99QOyfhr_l_sGkK47GI527tA"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "an origin written https://bücher.example",
+      "valid": false,
+      "reason": "origin must already be in the origin form",
+      "error": "field_invalid",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9iw7xjaGVyLmV4YW1wbGUiLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQifQ",
+        "sig": "gD2YXpLKlt4hw_OJDvaUb0-zEbJ5A70s__K2YvwriTlIcBi_aZKa34NBM2aU4aTbr4rPlg7HBGBnVLpcRvXaPQ"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "an origin written https://a.com:0443",
+      "valid": false,
+      "reason": "origin must already be in the origin form",
+      "error": "field_invalid",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9hLmNvbTowNDQzIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40In0",
+        "sig": "TPbR03rSIVsaXGWFoZQQ5-Kj-3-QMH9J7E3SEYnn_QjmivazShW0kl35OZ66ZoOCF8rWGLaq7NCmsWwWtZt57g"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "an origin written https://Media.example.com",
+      "valid": false,
+      "reason": "origin must already be in the origin form",
+      "error": "field_invalid",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9NZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "1jCLYwmRrUhUXwycqmed1QXj_VIbFKt1h3A7dxL5FmeJS49rDtW_EOG3Ri3P8BbRJjGE4IeC3uxQURBSGozo3w"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "a 15-byte grant_id",
+      "valid": false,
+      "reason": "a grant_id is 16 bytes",
+      "error": "field_invalid",
+      "purpose": "grant",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoiZ3JhbnQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODkwMCwiZ3JhbnRfaWQiOiJDRm55ZXF6S2pEZVA5QjNIU0tlNCIsImFjY291bnRfaWQiOiI0Iiwib3JpZ2lucyI6WyJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwiaHR0cDovLzE5Mi4xNjguMS4yMDo4MDgwIl0sImFwcF9rZXkiOiJCRU5vMWhEU2dacXhBeW1jQXZGa2JTWDhBR1g2aTBtZnZoeU96NzQ5RHc4MEUtbkxOQWVIZkl0Q0VxdGpwcDlBU0VkQl9OWFpkMjBQcm1oUjZOZ09iYTgiLCJhcHBfbmFtZSI6IkV4YW1wbGUgUGxheWVyIn0",
+        "sig": "F_TkhbMsrtoB1VwUHjW1pLd2IPDj1ibCByqe1bWx0sCTl6Mkt8cRApG5kyCPGG_SCJgwGToBCyFmgg_ANb4-aQ"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "an empty origins",
+      "valid": false,
+      "reason": "a grant names at least one origin",
+      "error": "field_invalid",
+      "purpose": "grant",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoiZ3JhbnQiLCJzZXJ2ZXJfaWQiOiI5NmMxYmQwOC1iODM5LTRkNDctOTgwZS01N2Q0ZTdhNDRjZmEiLCJpYXQiOjE3OTU1Nzg2MDAsImV4cCI6MTc5NTU3ODkwMCwiZ3JhbnRfaWQiOiJDRm55ZXF6S2pEZVA5QjNIU0tlNFdnIiwiYWNjb3VudF9pZCI6IjQiLCJvcmlnaW5zIjpbXSwiYXBwX2tleSI6IkJFTm8xaERTZ1pxeEF5bWNBdkZrYlNYOEFHWDZpMG1mdmh5T3o3NDlEdzgwRS1uTE5BZUhmSXRDRXF0anBwOUFTRWRCX05YWmQyMFBybWhSNk5nT2JhOCIsImFwcF9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIifQ",
+        "sig": "wZ-y7yaHALijHSi3xSPiNvdvnVyYkk5-NTNcc8_UQ1eijyCixwN8lWp1a5E-6sBxPSFcWHzTJOskzf-SAejSFA"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "server_id of another server",
+      "valid": false,
+      "reason": "a server refuses a payload naming another",
+      "error": "server_mismatch",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6IjRkMGE1ZTdjLTAwMDAtNDAwMC04MDAwLTAwMDAwMDAwMDAwMCIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9",
+        "sig": "EKSclevTSXx3wVYDPcdeiMUNQbF5pJCNswnA-KSWujwLwZGViszfZQUwIn5GSIzt7S9gFX3Pz6E7lbRDK4TfaQ"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "a payload with a trailing brace",
+      "valid": false,
+      "reason": "the payload is exactly one JSON object",
+      "error": "payload_malformed",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "eyJwdXJwb3NlIjoic2lnbi1pbiIsInNlcnZlcl9pZCI6Ijk2YzFiZDA4LWI4MzktNGQ0Ny05ODBlLTU3ZDRlN2E0NGNmYSIsImlhdCI6MTc5NTU3ODYwMCwiZXhwIjoxNzk1NTc4NzIwLCJjaGFsbGVuZ2UiOiI4YnFSRnEtZ1Z2NUR4amI2MUJhVmZuREIzLUYyNG11b1NNTWlhdFg0OVZBIiwib3JpZ2luIjoiaHR0cHM6Ly9tZWRpYS5leGFtcGxlLmNvbSIsInJlcGx5X2tleSI6IkJBRDhpU0hmLW9jaktzVjJJcUxlMFN1Y2hUejVJV0lKaTg5ZGpxV3dIdXo5dkZBSi1QUVVGbEp0enROQ1FVWWhONFMyeFZWWG96U2dDaHVCbGVVaTFONCJ9fQ",
+        "sig": "i0E3iOLKQaOkVvKBDcfvuq-P_kIwJx_WlGG8kHOt-piW5H0cQJcJ1UK7MWG4QVouGbZiHXKFM5_r6VbCzLQOVw"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "a payload that is not JSON",
+      "valid": false,
+      "reason": "the payload is UTF-8 JSON",
+      "error": "payload_malformed",
+      "purpose": "sign-in",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BCWr1DSwcw56SFkQa258XrQnjaC8a10CWAwmFmpAa1hYOr9RBakyYtGUO-g7UwtUIu-4j4kxUosV8pa7a-jQreM",
+      "envelope": {
+        "kid": "zT321tSgcB7emUH9k0B0oA",
+        "payload": "cHVycG9zZT1zaWduLWlu",
+        "sig": "IeicWXOYksBNzTixreiM0G-UkjQCdglbh4hUT3saS-AsG5dYqGg9mBP6U7yFAbtB8cup28NUlHx5QkdJUAWsrA"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "grant-redeem whose grant is signed by a key other than the person key",
+      "valid": false,
+      "reason": "the grant must verify by the account's person key",
+      "error": "grant_invalid",
+      "purpose": "grant-redeem",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "grant_signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "iX--ofJySUkUOsEpPo17PQ",
+        "payload": "eyJwdXJwb3NlIjoiZ3JhbnQtcmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwiZ3JhbnQiOnsia2lkIjoiOEQ0TXhQSUJtSUlBSjRXQ2xsc1dkZyIsInBheWxvYWQiOiJleUp3ZFhKd2IzTmxJam9pWjNKaGJuUWlMQ0p6WlhKMlpYSmZhV1FpT2lJNU5tTXhZbVF3T0MxaU9ETTVMVFJrTkRjdE9UZ3daUzAxTjJRMFpUZGhORFJqWm1FaUxDSnBZWFFpT2pFM09UVTFOemcyTURBc0ltVjRjQ0k2TVRjNU5UVTNPRGt3TUN3aVozSmhiblJmYVdRaU9pSkRSbTU1WlhGNlMycEVaVkE1UWpOSVUwdGxORmRuSWl3aVlXTmpiM1Z1ZEY5cFpDSTZJalFpTENKdmNtbG5hVzV6SWpwYkltaDBkSEJ6T2k4dmJXVmthV0V1WlhoaGJYQnNaUzVqYjIwaUxDSm9kSFJ3T2k4dk1Ua3lMakUyT0M0eExqSXdPamd3T0RBaVhTd2lZWEJ3WDJ0bGVTSTZJa0pGVG04eGFFUlRaMXB4ZUVGNWJXTkJka1pyWWxOWU9FRkhXRFpwTUcxbWRtaDVUM28zTkRsRWR6Z3dSUzF1VEU1QlpVaG1TWFJEUlhGMGFuQndPVUZUUldSQ1gwNVlXbVF5TUZCeWJXaFNOazVuVDJKaE9DSXNJbUZ3Y0Y5dVlXMWxJam9pUlhoaGJYQnNaU0JRYkdGNVpYSWlmUSIsInNpZyI6Imt4elQ5TzhvemFpT0g3T01HcHA4Wm1ZeWtlVkNJY1lJd3VBMXdxUmhuT3dIX09IOFRhbGlHeXlsRFVGMTFHUDdwTjBWU0s3VUxNUzZkU1JEZU02dEt3In0sImRldmljZV9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIgb24gU2FtJ3MgaVBhZCIsImRldmljZV9wbGF0Zm9ybSI6ImlwYWRvcyJ9",
+        "sig": "BI7CtxwN78AJjXKAGWkhtfbDTReJmqtDyayGTLboZs9fnIfadZfTe-_t6ghwdd2L_ASa4OzQmRVvrqfRohnTXA"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "grant-redeem whose grant is past its own exp",
+      "valid": false,
+      "reason": "a grant past its exp is grant_expired",
+      "error": "grant_expired",
+      "purpose": "grant-redeem",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "grant_signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "iX--ofJySUkUOsEpPo17PQ",
+        "payload": "eyJwdXJwb3NlIjoiZ3JhbnQtcmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwiZ3JhbnQiOnsia2lkIjoiUGd1amRTZkJiTk55WG5nTFdDc09ndyIsInBheWxvYWQiOiJleUp3ZFhKd2IzTmxJam9pWjNKaGJuUWlMQ0p6WlhKMlpYSmZhV1FpT2lJNU5tTXhZbVF3T0MxaU9ETTVMVFJrTkRjdE9UZ3daUzAxTjJRMFpUZGhORFJqWm1FaUxDSnBZWFFpT2pFM09UVTFOemd5TURBc0ltVjRjQ0k2TVRjNU5UVTNPRFV3TUN3aVozSmhiblJmYVdRaU9pSkRSbTU1WlhGNlMycEVaVkE1UWpOSVUwdGxORmRuSWl3aVlXTmpiM1Z1ZEY5cFpDSTZJalFpTENKdmNtbG5hVzV6SWpwYkltaDBkSEJ6T2k4dmJXVmthV0V1WlhoaGJYQnNaUzVqYjIwaUxDSm9kSFJ3T2k4dk1Ua3lMakUyT0M0eExqSXdPamd3T0RBaVhTd2lZWEJ3WDJ0bGVTSTZJa0pGVG04eGFFUlRaMXB4ZUVGNWJXTkJka1pyWWxOWU9FRkhXRFpwTUcxbWRtaDVUM28zTkRsRWR6Z3dSUzF1VEU1QlpVaG1TWFJEUlhGMGFuQndPVUZUUldSQ1gwNVlXbVF5TUZCeWJXaFNOazVuVDJKaE9DSXNJbUZ3Y0Y5dVlXMWxJam9pUlhoaGJYQnNaU0JRYkdGNVpYSWlmUSIsInNpZyI6Ik9YQk9DbVE2RGFDcW42OERSSzFyd2RPRDViZnQ5TzNCUnFkaTI0X3ZKUnpCX2RsZUZkRHRTZVZ1VjFFcnc2alNweDBTaEhQc3hIQm11aFpZY3BENklBIn0sImRldmljZV9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIgb24gU2FtJ3MgaVBhZCIsImRldmljZV9wbGF0Zm9ybSI6ImlwYWRvcyJ9",
+        "sig": "_-VLREKLXHIMiBAncP7G3qSnGJxHhymfq-GDNI7VspkZyeEWtPShX2o_CILjD2RZmdv6VM0Uzh3i7tyhpSJ0BA"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "grant-redeem whose grant is for another server",
+      "valid": false,
+      "reason": "server_id must match in both",
+      "error": "grant_invalid",
+      "purpose": "grant-redeem",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "grant_signer_public_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "iX--ofJySUkUOsEpPo17PQ",
+        "payload": "eyJwdXJwb3NlIjoiZ3JhbnQtcmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJyZXBseV9rZXkiOiJCQUQ4aVNIZi1vY2pLc1YySXFMZTBTdWNoVHo1SVdJSmk4OWRqcVd3SHV6OXZGQUotUFFVRmxKdHp0TkNRVVloTjRTMnhWVlhvelNnQ2h1QmxlVWkxTjQiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwiZ3JhbnQiOnsia2lkIjoiUGd1amRTZkJiTk55WG5nTFdDc09ndyIsInBheWxvYWQiOiJleUp3ZFhKd2IzTmxJam9pWjNKaGJuUWlMQ0p6WlhKMlpYSmZhV1FpT2lJMFpEQmhOV1UzWXkwd01EQXdMVFF3TURBdE9EQXdNQzB3TURBd01EQXdNREF3TURBaUxDSnBZWFFpT2pFM09UVTFOemcyTURBc0ltVjRjQ0k2TVRjNU5UVTNPRGt3TUN3aVozSmhiblJmYVdRaU9pSkRSbTU1WlhGNlMycEVaVkE1UWpOSVUwdGxORmRuSWl3aVlXTmpiM1Z1ZEY5cFpDSTZJalFpTENKdmNtbG5hVzV6SWpwYkltaDBkSEJ6T2k4dmJXVmthV0V1WlhoaGJYQnNaUzVqYjIwaUxDSm9kSFJ3T2k4dk1Ua3lMakUyT0M0eExqSXdPamd3T0RBaVhTd2lZWEJ3WDJ0bGVTSTZJa0pGVG04eGFFUlRaMXB4ZUVGNWJXTkJka1pyWWxOWU9FRkhXRFpwTUcxbWRtaDVUM28zTkRsRWR6Z3dSUzF1VEU1QlpVaG1TWFJEUlhGMGFuQndPVUZUUldSQ1gwNVlXbVF5TUZCeWJXaFNOazVuVDJKaE9DSXNJbUZ3Y0Y5dVlXMWxJam9pUlhoaGJYQnNaU0JRYkdGNVpYSWlmUSIsInNpZyI6Ims5N1ozTkVJZng3WDVmSWxDcGFFWnNGemliRUwyVDNIRWVKeVR5R1pNYlhXSmUzemk0VnBaRmh6SF9SOVROeFVmTFNMYVd0c0tNbWhfWldVbUhFWTNnIn0sImRldmljZV9uYW1lIjoiRXhhbXBsZSBQbGF5ZXIgb24gU2FtJ3MgaVBhZCIsImRldmljZV9wbGF0Zm9ybSI6ImlwYWRvcyJ9",
+        "sig": "XuJnDyXfWvHBySGC17zaLe03MVkfwzpNs1KuM-iQA9THIaCGld7szDvZxCrVe7KJTZRxTXBmCMbfvb-3u05W1Q"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "introduce envelope checked as enroll",
+      "valid": false,
+      "reason": "the purpose prefix differs, so sig does not verify",
+      "error": "signature_invalid",
+      "purpose": "enroll",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "body": {
+        "person_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+        "message": {
+          "kid": "PgujdSfBbNNyXngLWCsOgw",
+          "payload": "eyJwdXJwb3NlIjoiaW50cm9kdWNlIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+          "sig": "nnyAt7pV-XsUSmpX0IAk1d0QmUrO4z9CZ5Oeoy9QlVSyCq2EED4Ns_Aakhd5DgOmSqWWrT5xs8an1Ye0a4smgg",
+          "device_sig": "fMNUAuxbYE4rOU1dn5PqgBmxSoSu8GmnvtS_M3syK8N-uOt2jcfwhFX5z3BbCfmGy8V3ToHIzxZ8ySiNfdXqOw"
+        }
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "introduce envelope checked as redeem",
+      "valid": false,
+      "reason": "the purpose prefix differs, so sig does not verify",
+      "error": "signature_invalid",
+      "purpose": "redeem",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "body": {
+        "person_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+        "message": {
+          "kid": "PgujdSfBbNNyXngLWCsOgw",
+          "payload": "eyJwdXJwb3NlIjoiaW50cm9kdWNlIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+          "sig": "nnyAt7pV-XsUSmpX0IAk1d0QmUrO4z9CZ5Oeoy9QlVSyCq2EED4Ns_Aakhd5DgOmSqWWrT5xs8an1Ye0a4smgg",
+          "device_sig": "fMNUAuxbYE4rOU1dn5PqgBmxSoSu8GmnvtS_M3syK8N-uOt2jcfwhFX5z3BbCfmGy8V3ToHIzxZ8ySiNfdXqOw"
+        }
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "enroll envelope checked as introduce",
+      "valid": false,
+      "reason": "the purpose prefix differs, so sig does not verify",
+      "error": "signature_invalid",
+      "purpose": "introduce",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoiZW5yb2xsIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+        "sig": "zzmwOjhNCqRxdJABg7dV3QArFuyHE6HAPinDMBYu2fshu1HSKxRQtEBcIG7xqKvB3MyRCUBWoQIH_J5okCWJrQ",
+        "device_sig": "iC0n7--le4mgDblNwtTZbSQEVPv8THyLx8Gj2j9tZ2T3WAqUx1XUVZW2Qg_eUg9HD3e8yZJ-Ugy2BAVX7Z1aDw"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "redeem envelope checked as introduce",
+      "valid": false,
+      "reason": "the purpose prefix differs, so sig does not verify",
+      "error": "signature_invalid",
+      "purpose": "introduce",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "verify_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+      "envelope": {
+        "kid": "PgujdSfBbNNyXngLWCsOgw",
+        "payload": "eyJwdXJwb3NlIjoicmVkZWVtIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIiwiY29kZSI6IjJ0NW9OdzVUSHgwdHlDYzNTbmhYMGt6MlBZSnVwN01JZHIwTW14OXBzMG8ifQ",
+        "sig": "oILiTVoquhUVLJ7HeLP74LjwEEjKhCQuAw9_LVNjvFc0mAZf1DZztrMcqxnuVWq8Hsz56XKzI88DqwdzJljjUA",
+        "device_sig": "6tp8dRcy0TkkF2OlkWpK5QSM76-6g1whYfGFycOyhAN9aL6SWxPifoNThVzpILiQGPMQFYhhNdZh6L2osMJAMw"
+      }
+    },
+    {
+      "type": "signed-message",
+      "name": "enroll envelope checked as redeem",
+      "valid": false,
+      "reason": "the purpose prefix differs, so sig does not verify",
+      "error": "signature_invalid",
+      "purpose": "redeem",
+      "now": 1795578610,
+      "server_id": "96c1bd08-b839-4d47-980e-57d4e7a44cfa",
+      "body": {
+        "person_key": "BIXPevG2yxPrIkwoRlSuZ0c0DldsVX_3OET3S0YeP0uDN7Lj-SQMccAMdvNimX-OvE62RqjlO_Fll-F9MU_kw5Q",
+        "message": {
+          "kid": "PgujdSfBbNNyXngLWCsOgw",
+          "payload": "eyJwdXJwb3NlIjoiZW5yb2xsIiwic2VydmVyX2lkIjoiOTZjMWJkMDgtYjgzOS00ZDQ3LTk4MGUtNTdkNGU3YTQ0Y2ZhIiwiaWF0IjoxNzk1NTc4NjAwLCJleHAiOjE3OTU1Nzg3MjAsImNoYWxsZW5nZSI6IjhicVJGcS1nVnY1RHhqYjYxQmFWZm5EQjMtRjI0bXVvU01NaWF0WDQ5VkEiLCJvcmlnaW4iOiJodHRwczovL21lZGlhLmV4YW1wbGUuY29tIiwicmVwbHlfa2V5IjoiQkFEOGlTSGYtb2NqS3NWMklxTGUwU3VjaFR6NUlXSUppODlkanFXd0h1ejl2RkFKLVBRVUZsSnR6dE5DUVVZaE40UzJ4VlZYb3pTZ0NodUJsZVVpMU40IiwiZGV2aWNlX2tleSI6IkJDV3IxRFN3Y3c1NlNGa1FhMjU4WHJRbmphQzhhMTBDV0F3bUZtcEFhMWhZT3I5UkJha3lZdEdVTy1nN1V3dFVJdS00ajRreFVvc1Y4cGE3YS1qUXJlTSIsImRldmljZV9uYW1lIjoiU2FtJ3MgaVBob25lIiwiZGV2aWNlX3BsYXRmb3JtIjoiaW9zIn0",
+          "sig": "zzmwOjhNCqRxdJABg7dV3QArFuyHE6HAPinDMBYu2fshu1HSKxRQtEBcIG7xqKvB3MyRCUBWoQIH_J5okCWJrQ",
+          "device_sig": "iC0n7--le4mgDblNwtTZbSQEVPv8THyLx8Gj2j9tZ2T3WAqUx1XUVZW2Qg_eUg9HD3e8yZJ-Ugy2BAVX7Z1aDw"
+        }
+      }
+    }
+  ]
+}

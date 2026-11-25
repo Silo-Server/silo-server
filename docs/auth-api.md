@@ -8,10 +8,13 @@ server's `/api/v2` base URL.
 
 The public auth operations that decode a JSON body before any credential is checked
 (`login`, `setupServer`, `signup`, `refreshSession`, `startDeviceLogin`, `pollDeviceLogin`,
-`completeOAuthLogin` and `acceptInvitation`) follow the shared body rules: a body over the
+`completeOAuthLogin`, `acceptInvitation`, `createAppKeyChallenge`, `introduceAppKey` and
+`signInWithAppKey`) follow the shared body rules: a body over the
 1 MiB structured-body cap answers `413 payload_too_large`, and a non-blank body that is not
 `application/json` (optionally with `charset=utf-8`), including one with no `Content-Type`,
-answers `415 unsupported_media_type` before the operation runs.
+answers `415 unsupported_media_type` before the operation runs. The app key routes set lower
+caps: `createAppKeyChallenge` refuses a body over 1 KiB, and `introduceAppKey`,
+`signInWithAppKey` and `enrollAppKeys` one over 16 KiB, with the same `413`.
 
 For `setupServer` the media-type rule is what stops a cross-site browser form or `no-cors`
 fetch from claiming the first administrator. A cross-origin JSON fetch requires a preflight,
@@ -714,13 +717,115 @@ has the full rules; what a client sees:
 ## App key sign-in
 
 App keys let an app sign in to an account with a key it holds instead of a
-password. Storage, revocation and the server switch are described in
-[app-keys.md](architecture/app-keys.md). This server serves the capability
-only; each feature field turns `true` when its operation is served.
+password. The rules (who decides, the origin rule, revocation, multi-node
+behaviour) are in [app-keys.md](architecture/app-keys.md); this section is the
+operation contract.
 
 | Operation | Credential | Notes |
 | --- | --- | --- |
-| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `introduce`, `sign_in`, `enroll`, `app_codes`, `grants`, `sign_in_links` and `profile_set` each report one operation and are all `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
+| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `protocol` is `silo-sync-v1` and `server_id` is the identity every signed payload names. `introduce`, `sign_in` and `enroll` are `true`; `app_codes`, `grants`, `sign_in_links` and `profile_set` are `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
+| `POST /auth/keys/challenge` (`createAppKeyChallenge`) | none | Body `{}`. Answers `challenge` (base64url of 32 bytes), `expires_in` (120), `server_id` and `server_time` (Unix seconds). A challenge works for one signed request within two minutes, on any API process. |
+| `POST /auth/keys/introduce` (`introduceAppKey`) | an `introduce` envelope signed by the account's person key, with `device_sig` | Enrolls the payload's `device_key` and opens a session. For an administrator's account the key is stored waiting and the sealed answer is `approval_required`. |
+| `POST /auth/keys/sign-in` (`signInWithAppKey`) | a `sign-in` envelope signed by an enrolled device key, without `device_sig` | Opens a session. A waiting key answers `approval_required`; see below. |
+| `POST /auth/keys/enroll` (`enrollAppKeys`) | the account's own login session, and `{ "person_key", "message" }` where `message` is an `enroll` envelope signed with that person key, with `device_sig` | Registers the person key when the account has none, taking the session's provider binding; when `person_key` is already the account's person key it is reused as it is, binding unchanged. Enrolls the device key, which takes the session's provider binding, then opens a session bound to it. A different person key on the account, or a device key already enrolled on this server, is 409 `conflict`. The sealed plaintext adds `person_key_id` (the person key's `kid`); the client drops the session it called with. A malformed payload field is 422 at `body.message.payload`. |
+| `GET /auth/keys` (`listAppKeys`) | the account's own login session | `person_key` (`kid`, `enrolled_at`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `last_used_at`), newest first. Revoked and denied keys are left out. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
+| `DELETE /auth/keys/devices/{id}` (`revokeAppDeviceKey`) | the account's own login session | 204. Revokes the key and ends every session it opened. A device may revoke its own key, which ends the session making the request. 404 for a key that isn't the account's. |
+| `PUT /auth/keys/person` (`replacePersonKey`) | the account's own login session | Body `{ "person_key" }`, unsigned. Answers `{ "person_key_id": "<kid>" }`. The old person key is revoked; devices already enrolled keep their keys. Sending the current key again changes nothing. |
+
+**Signed messages.** An envelope is exactly `{ "kid", "payload", "sig" }`, plus
+`device_sig` on `introduce` and `enroll`. `payload` is base64url (no padding) of
+the UTF-8 JSON payload. `sig` is the 64-byte `r || s` ECDSA P-256 signature, with
+SHA-256, over the ASCII bytes `silo-sync-v1.<purpose>.<payload>`, the payload
+string exactly as sent; `device_sig` is the device key's signature over the same
+bytes. Each route takes only its own purpose. Every payload carries `purpose`,
+`server_id`, `iat` and `exp` (Unix seconds, read as doubles and accepted when
+whole, 0 to 2^53 - 1), plus `challenge`, `origin` and `reply_key`; `introduce`
+and `enroll` add `device_key`, `device_name` (up to 128 characters) and
+`device_platform` (up to 64). Public keys are base64url of the 65-byte
+uncompressed point, and `kid` is base64url of the first 16 bytes of its
+SHA-256. `origin` must already be in its canonical form: lower-case `http` or
+`https`, a lower-case ASCII host (an IPv6 host in brackets in its RFC 5952
+form), the port only when it is not the scheme's default, nothing after. A
+device stamps `iat` and `exp` from the challenge's `server_time`.
+
+**Sealed reply.** The routes that open a session answer
+`{ "epk", "nonce", "ciphertext" }`, the plaintext sealed to the payload's
+`reply_key`:
+
+1. `Z` is the X coordinate of ECDH between the device's `reply_key` private key
+   and `epk` (65 bytes; refuse a point not on P-256).
+2. The key is HKDF-SHA256 with input `Z || epk || reply_key` (the 65-byte
+   points), salt the challenge's 32 raw bytes, info `silo-sync-v1.reply`, 32
+   bytes.
+3. The plaintext is AES-256-GCM of `ciphertext` (tag appended) with the 12-byte
+   `nonce` and no additional data.
+
+The plaintext is UTF-8 JSON: `{ "status": "signed_in", "device_id",
+"account_id", "tokens" }`, where `tokens` is the token pair a password login
+returns (`access_token`, `refresh_token`, `expires_in`, `user`) and
+`account_id` equals `tokens.user.id`; or, for an administrator's device waiting
+for approval, `{ "status": "approval_required", "device_id", "account_id" }`
+with no tokens. `device_id` is the device key's `id`. A `signed_in` plaintext
+also carries `local_route` (`spki_sha256`, and `url` when `server.local_url` is
+set), the shape `getServerConnections` gives it, when the API listener has a
+TLS identity; see
+[The pinned route](architecture/app-keys.md#the-pinned-route) for the rules a
+device follows with it. Refusals are not sealed.
+
+**Waiting keys.** Every key an administrator's `introduce` enrolls waits for
+approval; keys from `enroll` start active. A waiting device repeats `sign-in`
+with its own key and gets `approval_required` until it is approved. Each
+attempt needs a fresh challenge and a newly signed envelope: resending the same
+envelope after a 429 answers 401 `challenge_invalid`, because its challenge was
+spent. Sooner than five seconds after its last try it is 429 `rate_limited`
+with `Retry-After`; a key that has waited 24 hours, or was denied, is 403
+`key_denied` and is left out of `GET /auth/keys`. A key whose provider binding
+changed during the request also answers 429, with a one-second `Retry-After`;
+asking again succeeds.
+
+**Problems.** A refusal at or before the signature (a bad signature, a key this
+server doesn't hold or holds revoked, the wrong purpose or `server_id`, outside
+`iat` and `exp`, a `device_sig` that doesn't verify) is 401 `signature_invalid`.
+An unknown, used or expired challenge is 401 `challenge_invalid`; a challenge is
+spent once the signature verifies, even when a later check refuses. A signed
+`origin` the server knows is wrong is 403 `origin_mismatch`. A malformed
+envelope, or a payload field in the wrong form once the signature verifies, is
+422 `validation_failed`; a body that isn't JSON is 400 `malformed_request`. A
+public key already enrolled on this server, or a different person key already
+on the account, is 409 `conflict`. While `auth.local_password_login` is off, a
+key not enrolled through the sign-in provider is 403 `local_login_disabled`
+except for a break-glass account. A key enrolled through the provider is 409
+`provider_sign_in_required` when the provider can't re-check its identity and
+last vouched longer ago than `auth.refresh_token_expiry`: the person signs in
+through the provider once and the key works again. It is 403 `not_permitted`
+when the provider refused the person, 503 `provider_unavailable` while its
+provider is disabled or, under the fail-closed outage policy, unreachable, and
+503 `dependency_unavailable` with `Retry-After` when the check could not be
+made, as at refresh. Unlinking an identity revokes the keys bound to it and
+ends the sessions they opened, at once. Uninstalling its plugin leaves those
+keys dead instead: the key list leaves them out, their next use revokes them,
+and a session one opened earlier lasts until the provider age limit, as any
+provider session whose identity is gone. Either way such a key answers
+`signature_invalid`. A `device_name` or
+`device_platform` holding a control character is 422. A disabled
+account is 403 `permission_denied`.
+
+`enroll`, `PUT /auth/keys/person` and `DELETE /auth/keys/devices/{id}` refuse an
+API key and an administrator acting as the account with 403
+`permission_denied`. `enroll` and `PUT /auth/keys/person` also refuse a session
+opened by device sign-in or by another app's key, and one older than the record
+of how sessions are opened; `DELETE` refuses a device sign-in session, and lets
+another app's session revoke only its own key.
+
+**Switch.** While `auth.app_key_sign_in` is off the challenge, `introduce`,
+`sign-in`, `enroll` and `PUT /auth/keys/person` answer 409
+`capability_disabled`. The capability, `GET /auth/keys` and its deletes stay
+open.
+
+**Rate limits.** `createAppKeyChallenge` spends the per-address
+`key_challenge` budget and `introduce`, `sign-in` and `enroll` the
+`key_sign_in` budget, each 60 a minute with a burst of 20 by default
+(`ratelimit.auth.key_challenge.*`, `ratelimit.auth.key_sign_in.*`).
 
 Server setting: `auth.app_key_sign_in` (default `true`). It is read on each
 request, so a change applies on every node at once.
