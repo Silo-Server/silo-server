@@ -5,12 +5,20 @@
 -- row; client_purpose stays device_login so the existing poll redeems it.
 -- The existing index on approved_by_user_id serves the per-account list and
 -- cap.
+-- preapproved_session_id is the login session that approved it. Ending that
+-- one session withdraws the sign-ins it approved in advance and has not yet
+-- been redeemed, so a session someone else was using cannot leave a sign-in
+-- behind.
 ALTER TABLE device_login_requests
     ADD COLUMN preapproved_at TIMESTAMPTZ,
+    ADD COLUMN preapproved_session_id TEXT REFERENCES auth_sessions(id) ON DELETE SET NULL,
     ADD CONSTRAINT device_login_requests_preapproved_bound CHECK (
         preapproved_at IS NULL
         OR (client_purpose = 'device_login' AND temporary = FALSE AND binding_hash IS NOT NULL)
     );
+
+CREATE INDEX idx_device_login_requests_preapproved_session_id
+    ON device_login_requests (preapproved_session_id) WHERE preapproved_session_id IS NOT NULL;
 
 -- +goose Down
 -- A pre-approved row left behind would read as an ordinary approval good for
@@ -18,4 +26,5 @@ ALTER TABLE device_login_requests
 DELETE FROM device_login_requests WHERE preapproved_at IS NOT NULL;
 ALTER TABLE device_login_requests
     DROP CONSTRAINT IF EXISTS device_login_requests_preapproved_bound,
+    DROP COLUMN IF EXISTS preapproved_session_id,
     DROP COLUMN IF EXISTS preapproved_at;

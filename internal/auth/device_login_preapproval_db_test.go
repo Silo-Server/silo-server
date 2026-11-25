@@ -9,8 +9,10 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/clientip"
 	"github.com/Silo-Server/silo-server/internal/models"
 )
@@ -181,10 +183,28 @@ func TestDevicePreapprovalRefusedDB(t *testing.T) {
 		t.Fatalf("list after revoke = %+v, %v", list, err)
 	}
 
+	// Ending the one session that approved a sign-in withdraws it, and leaves
+	// what the account approved from another session.
+	otherPhone := preapprovalApprover(t, svc, userID, nil, nil)
+	endedSecret, endedBinding := preapprovalSecret(t)
+	ended, err := svc.Preapprove(otherPhone, DevicePreapprovalInput{DeviceName: name("ended"), Binding: endedBinding}, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endedSession := ClaimsFromContext(otherPhone).SessionID
+	if err := svc.sessions.revokeChecked(t.Context(), endedSession, func(*models.AuthSession) error { return nil },
+		func(pgx.Tx, *models.AuthSession) (*auditmutation.Entry, error) { return nil, nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got := preapprovalStatus(t, pool, keptID); got != DeviceLoginStatusApproved {
+		t.Fatalf("ending another session left the kept pre-approval %s", got)
+	}
+
 	_, oldCode, oldSecret := preapprove("old", -(DevicePreapprovalTTL + time.Hour))
 	for label, tc := range map[string]struct{ code, secret, want string }{
-		"revoked": {revokedCode, revokedSecret, DeviceLoginStatusDenied},
-		"expired": {oldCode, oldSecret, DeviceLoginStatusExpired},
+		"revoked":       {revokedCode, revokedSecret, DeviceLoginStatusDenied},
+		"session ended": {ended.DeviceCode, endedSecret, DeviceLoginStatusDenied},
+		"expired":       {oldCode, oldSecret, DeviceLoginStatusExpired},
 	} {
 		poll, err := svc.Poll(t.Context(), tc.code, tc.secret)
 		if err != nil || poll.TokenPair != nil || poll.Status != tc.want {

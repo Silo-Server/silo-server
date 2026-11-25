@@ -262,6 +262,9 @@ func (r *SessionRepository) revokeChecked(ctx context.Context, id string, check 
 		RETURNING expires_at > NOW()`, id).Scan(&unexpired); err != nil {
 		return fmt.Errorf("revoking session: %w", err)
 	}
+	if err := withdrawSessionPreapprovalsInTransaction(ctx, tx, []string{id}); err != nil {
+		return err
+	}
 	var entry *auditmutation.Entry
 	if session.RevokedAt == nil && unexpired {
 		if entry, err = audit(tx, session); err != nil {
@@ -454,6 +457,11 @@ func (r *SessionRepository) RevokeAsAdmin(ctx context.Context, actorID, userID i
 	}
 	if sessionID != nil && tag.RowsAffected() == 0 {
 		return 0, ErrSessionNotFound
+	}
+	if sessionID != nil {
+		if err := withdrawSessionPreapprovalsInTransaction(ctx, tx, []string{*sessionID}); err != nil {
+			return 0, err
+		}
 	}
 	// Sign out everywhere also ends the account's other sign-ins; ending any
 	// of them is worth a domain row, even with no login session left.
