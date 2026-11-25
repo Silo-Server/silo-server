@@ -128,13 +128,21 @@ func RecordFields(ctx context.Context, db Executor, account int, profileID strin
 	return nil
 }
 
-// RecordSetting records a write or reset of a profile-scope setting, with
-// or without a change of value. Keys a set does not carry record nothing.
+// RecordSetting records a change of a profile-scope setting. Keys a set
+// does not carry record nothing. A key the settings contract mirrors to
+// another (settingscontract.MirrorKey: two spellings of one preference) is
+// recorded with its mirror: they are one preference, and a set leaves the
+// pair alone while either is the owner's, so a change of either moves both
+// to the one who made it, even when the other's value stays the same.
 func RecordSetting(ctx context.Context, db Executor, account int, profileID, key string) error {
 	if !RecordedSetting(key) {
 		return nil
 	}
-	return RecordFields(ctx, db, account, profileID, []string{FieldSettingsPrefix + key})
+	fields := []string{FieldSettingsPrefix + key}
+	if mirror, ok := settingscontract.MirrorKey(key); ok && RecordedSetting(mirror) {
+		fields = append(fields, FieldSettingsPrefix+mirror)
+	}
+	return RecordFields(ctx, db, account, profileID, fields)
 }
 
 // RecordRemoval records that the profile with syncID, named name, was
