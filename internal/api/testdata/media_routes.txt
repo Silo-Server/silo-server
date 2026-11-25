@@ -563,6 +563,7 @@ POST /api/v2/auth/device/poll	non-media
 POST /api/v2/auth/device/start	non-media
 GET /api/v2/auth/external-sign-in/capabilities	non-media
 POST /api/v2/auth/impersonation/end	non-media
+GET /api/v2/auth/keys/capability	non-media
 POST /api/v2/auth/login	non-media
 POST /api/v2/auth/logout	non-media
 POST /api/v2/auth/network/{id}/sign-in	non-media
@@ -1648,6 +1649,7 @@ POST /api/v2/auth/device/poll	non-media
 POST /api/v2/auth/device/start	non-media
 GET /api/v2/auth/external-sign-in/capabilities	non-media
 POST /api/v2/auth/impersonation/end	non-media
+GET /api/v2/auth/keys/capability	non-media
 POST /api/v2/auth/login	non-media
 POST /api/v2/auth/logout	non-media
 POST /api/v2/auth/network/{id}/sign-in	non-media
