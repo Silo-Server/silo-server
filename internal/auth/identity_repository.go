@@ -102,6 +102,18 @@ func listIdentitiesForUser(ctx context.Context, db dbQuerier, userID int) ([]Lin
 	return identities, nil
 }
 
+// lockIdentitiesBeforeSessions locks the account's provider identities, in id
+// order, for a transaction that deletes them and also writes the account's
+// login sessions. Identities come before sessions: uninstalling a plugin
+// deletes its identities and then clears auth_sessions.identity_id, so a
+// transaction that locked the sessions first would deadlock against it.
+func lockIdentitiesBeforeSessions(ctx context.Context, db dbQuerier, userID int) error {
+	if _, err := db.Exec(ctx, `SELECT id FROM plugin_auth_identities WHERE user_id = $1 ORDER BY id FOR UPDATE`, userID); err != nil {
+		return fmt.Errorf("locking provider identities: %w", err)
+	}
+	return nil
+}
+
 // usableIdentityCount counts links whose installation and sign-in binding
 // are enabled. A disabled provider cannot be a fallback after unlinking.
 func usableIdentityCount(ctx context.Context, db rowQuerier, userID int, excludeID int64) (int, error) {
@@ -149,18 +161,6 @@ func recordIdentitySignIn(ctx context.Context, db dbQuerier, id int64, identity 
 		WHERE id = $1`,
 		id, identity.Issuer, identity.Username, identity.Email, identity.DisplayName, CheckStatusActive); err != nil {
 		return fmt.Errorf("recording external sign-in: %w", err)
-	}
-	return nil
-}
-
-// lockIdentitiesBeforeSessions locks the account's provider identities, in id
-// order, for a transaction that deletes them and also writes the account's
-// login sessions. Identities come before sessions: uninstalling a plugin
-// deletes its identities and then clears auth_sessions.identity_id, so a
-// transaction that locked the sessions first would deadlock against it.
-func lockIdentitiesBeforeSessions(ctx context.Context, db dbQuerier, userID int) error {
-	if _, err := db.Exec(ctx, `SELECT id FROM plugin_auth_identities WHERE user_id = $1 ORDER BY id FOR UPDATE`, userID); err != nil {
-		return fmt.Errorf("locking provider identities: %w", err)
 	}
 	return nil
 }
