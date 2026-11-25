@@ -216,6 +216,26 @@ func TestGrantRedeemRefusalsDB(t *testing.T) {
 	}
 }
 
+// The redeemer must hold the grant's app key. An envelope that key did sign
+// but that carries another kid is refused like a failed signature, with the
+// same answer, and uses nothing up: the same grant then redeems.
+func TestGrantRedeemUnderAnotherKidDB(t *testing.T) {
+	env := newKeyEnv(t, "grantkid")
+	ctx := t.Context()
+	user := env.localAccount(t, "grantkid-user", models.RoleUser)
+	person, _, _ := env.enroll(t, user)
+	app := newTestKey(t)
+	grant := env.grantEnvelope(t, person, user.ID, app, nil)
+	req := env.request(t, message{purpose: appkeys.PurposeGrantRedeem, signer: app, fields: map[string]any{"grant": grant}})
+	req.Envelope.KeyID = newTestKey(t).pub.KeyID()
+	if result, err := env.signIn.RedeemGrant(ctx, req); result != nil || appkeys.CodeOf(err) != appkeys.CodeSignatureInvalid {
+		t.Fatalf("redeem under another kid = %+v, %v", result, err)
+	}
+	if _, err := env.redeem(t, app, grant); err != nil {
+		t.Fatalf("the same grant from its own app afterwards = %v", err)
+	}
+}
+
 // A grant's ID is the signer's choice, so its one use is counted per
 // account: a grant of one account that reuses the ID of another account's
 // grant, before or after that one is redeemed, uses up only its own.

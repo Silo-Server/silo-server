@@ -350,6 +350,7 @@
 ./internal/auth TestGrantRedeemDB
 ./internal/auth TestGrantRedeemRefusalsDB
 ./internal/auth TestGrantRedeemConcurrentDB
+./internal/auth TestGrantRedeemUnderAnotherKidDB
 ./internal/auth TestGrantUseIsPerAccountDB
 ./internal/auth TestGrantFromADeadPersonKeyDB
 ./internal/auth TestGrantSessionCannotManageKeysDB
