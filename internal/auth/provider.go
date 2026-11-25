@@ -147,8 +147,9 @@ func localPasswordPolicy(ctx context.Context, db rowQuerier, user *models.User) 
 // checkLocalPassword resolves the sign-in name (see LookupLogin) and checks
 // the password against the account's local password. Every rejection costs
 // one bcrypt comparison: a name with no account, or an account without local
-// password sign-in, is checked against placeholderPasswordHash, so the
-// response time does not tell a stranger which names have accounts. When the
+// password sign-in or with no stored password (models.User.HasLocalPassword),
+// is checked against placeholderPasswordHash, so the response time does not
+// tell a stranger which names have accounts or which have a password. When the
 // server is too busy to compare, every name gets the same
 // passwordhash.ErrBusy, for the same reason.
 func checkLocalPassword(ctx context.Context, users LoginDirectory, creds Credentials) (*models.User, error) {
@@ -156,7 +157,7 @@ func checkLocalPassword(ctx context.Context, users LoginDirectory, creds Credent
 	if err != nil && !IsNotFound(err) {
 		return nil, fmt.Errorf("looking up user: %w", err)
 	}
-	if err != nil || !user.LocalPasswordLoginEnabled {
+	if err != nil || !user.HasLocalPassword() {
 		if err := comparePasswordHash(ctx, placeholderPasswordHash(), []byte(creds.Password)); errors.Is(err, passwordhash.ErrBusy) {
 			return nil, err
 		}

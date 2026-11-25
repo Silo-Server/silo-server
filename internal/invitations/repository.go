@@ -252,47 +252,104 @@ func (r *Repository) AcceptAs(ctx context.Context, tokenHash string, linkAddress
 	if err != nil {
 		return nil, err
 	}
-	var eligible bool
-	if err := tx.QueryRow(ctx, `SELECT accepted_at IS NULL AND revoked_at IS NULL AND expires_at > clock_timestamp() FROM invitations WHERE id=$1`, inv.ID).Scan(&eligible); err != nil {
+	if linkAddress == nil {
+		linkAddress = func() (string, error) { return "", ErrEmailRequired }
+	}
+	user, err := claimTx(ctx, tx, inv, linkAddress, provision)
+	if err != nil {
 		return nil, err
 	}
-	if !eligible {
-		return nil, ErrNotFound
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit accept invitation: %w", err)
 	}
-	if err := auth.EnsureLocalPasswordLoginAllowedInTransaction(ctx, tx); err != nil {
+	return user, nil
+}
+
+// ClaimByIDTx claims the invitation with this ID in the caller's
+// transaction, as AcceptAs claims one by token: an app code's join, which
+// creates its account in the same transaction as the app's keys.
+func (r *Repository) ClaimByIDTx(ctx context.Context, tx pgx.Tx, id int64, linkAddress func() (string, error), provision func(*models.Invitation, pgx.Tx) (*models.User, error)) (*models.User, error) {
+	inv, err := scanInvitation(tx.QueryRow(ctx, `SELECT `+invitationColumns+invitationFrom+`WHERE i.id=$1 FOR UPDATE OF i`, id))
+	if err != nil {
+		return nil, err
+	}
+	return claimTx(ctx, tx, inv, linkAddress, provision)
+}
+
+// LockClaimableByTokenTx locks a claimable invitation by token hash in the
+// caller's transaction and refuses one that can't be claimed (ErrNotFound)
+// or a server with local password sign-in off (auth.ErrLocalLoginDisabled,
+// under the settings lock): the checks claimTx starts with, for issuing an
+// app code.
+func (r *Repository) LockClaimableByTokenTx(ctx context.Context, tx pgx.Tx, tokenHash string) (*models.Invitation, error) {
+	inv, err := scanInvitation(tx.QueryRow(ctx, `SELECT `+invitationColumns+invitationFrom+`WHERE i.token_hash=$1 FOR UPDATE OF i`, tokenHash))
+	if err != nil {
+		return nil, err
+	}
+	if err := checkClaimableTx(ctx, tx, inv); err != nil {
+		return nil, err
+	}
+	return inv, nil
+}
+
+// InTx runs fn in one transaction.
+func (r *Repository) InTx(ctx context.Context, fn func(pgx.Tx) error) error {
+	return pgx.BeginFunc(ctx, r.pool, fn)
+}
+
+// checkClaimableTx refuses an invitation that is no longer pending at the
+// database's wall clock, and every claim while local password sign-in is
+// off. inv's row is locked.
+func checkClaimableTx(ctx context.Context, tx pgx.Tx, inv *models.Invitation) error {
+	var eligible bool
+	if err := tx.QueryRow(ctx, `SELECT accepted_at IS NULL AND revoked_at IS NULL AND expires_at > clock_timestamp() FROM invitations WHERE id=$1`, inv.ID).Scan(&eligible); err != nil {
+		return err
+	}
+	if !eligible {
+		return ErrNotFound
+	}
+	return auth.EnsureLocalPasswordLoginAllowedInTransaction(ctx, tx)
+}
+
+// claimTx is the claim both accept and an app code's join make, inv's row
+// locked: it re-checks the invitation, provisions the account and marks the
+// invitation accepted. For a link invitation linkAddress supplies the
+// address the account takes, and every other live invitation for that
+// address is revoked before provision runs; an empty address (a join with no
+// email) supersedes nothing. Taking those row locks before the account
+// insert keeps the lock order of emailed acceptance (invitation row, then
+// account), so a concurrent claim of both cannot deadlock.
+func claimTx(ctx context.Context, tx pgx.Tx, inv *models.Invitation, linkAddress func() (string, error), provision func(*models.Invitation, pgx.Tx) (*models.User, error)) (*models.User, error) {
+	if err := checkClaimableTx(ctx, tx, inv); err != nil {
 		return nil, err
 	}
 	// A link invitation's account takes the entered address. Any other live
 	// invitation for it could no longer be accepted, so revoke it as creating
 	// one would.
 	if inv.Email == "" {
-		if linkAddress == nil {
-			return nil, ErrEmailRequired
-		}
 		address, err := linkAddress()
 		if err != nil {
 			return nil, err
 		}
-		if _, err := tx.Exec(ctx, `UPDATE invitations SET revoked_at=clock_timestamp(), updated_at=clock_timestamp()
+		if address != "" {
+			if _, err := tx.Exec(ctx, `UPDATE invitations SET revoked_at=clock_timestamp(), updated_at=clock_timestamp()
  WHERE email=$1 AND id<>$2 AND accepted_at IS NULL AND revoked_at IS NULL`, address, inv.ID); err != nil {
-			return nil, fmt.Errorf("superseding invitations for accepted address: %w", err)
+				return nil, fmt.Errorf("superseding invitations for accepted address: %w", err)
+			}
 		}
 	}
 	user, err := provision(inv, tx)
 	if err != nil {
 		return nil, err
 	}
-	// A link invitation records the address its account took.
-	tag, err := tx.Exec(ctx, `UPDATE invitations SET accepted_at=clock_timestamp(), accepted_user_id=$2, email=COALESCE(email, $3), updated_at=clock_timestamp()
+	// A link invitation records the address its account took, if any.
+	tag, err := tx.Exec(ctx, `UPDATE invitations SET accepted_at=clock_timestamp(), accepted_user_id=$2, email=COALESCE(email, NULLIF($3, '')), updated_at=clock_timestamp()
  WHERE id=$1 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > clock_timestamp()`, inv.ID, user.ID, user.Email)
 	if err != nil {
 		return nil, fmt.Errorf("accepting invitation: %w", err)
 	}
 	if tag.RowsAffected() != 1 {
 		return nil, ErrNotClaimable
-	}
-	if err := tx.Commit(ctx); err != nil {
-		return nil, fmt.Errorf("commit accept invitation: %w", err)
 	}
 	return user, nil
 }

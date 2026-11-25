@@ -22,6 +22,9 @@ import (
 var (
 	ErrNotFound  = errors.New("user not found")
 	ErrDuplicate = errors.New("duplicate user")
+	// ErrNoPasswordConflict refuses a request for an account with no
+	// password that also names a password or turns local sign-in on.
+	ErrNoPasswordConflict = errors.New("an account with no password takes no password and no local sign-in")
 )
 
 // IsNotFound returns true if the error is a "not found" error.
@@ -201,15 +204,25 @@ func NewUserPermissions(input models.CreateUserInput) ([]string, error) {
 func createUser(ctx context.Context, db interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, input models.CreateUserInput) (*models.User, error) {
-	hash, err := passwordhash.Generate(ctx, []byte(input.Password), passwordHashCost)
-	if err != nil {
-		return nil, fmt.Errorf("hashing password: %w", err)
-	}
-
 	// Base columns that are always included.
 	localPasswordLoginEnabled := true
 	if input.LocalPasswordLoginEnabled != nil {
 		localPasswordLoginEnabled = *input.LocalPasswordLoginEnabled
+	}
+	// An account with no password stores NULL and local sign-in off, never
+	// a hash of the empty string.
+	var hash *string
+	if input.NoPassword {
+		if input.Password != "" || localPasswordLoginEnabled && input.LocalPasswordLoginEnabled != nil {
+			return nil, ErrNoPasswordConflict
+		}
+		localPasswordLoginEnabled = false
+	} else {
+		generated, err := passwordhash.Generate(ctx, []byte(input.Password), passwordHashCost)
+		if err != nil {
+			return nil, fmt.Errorf("hashing password: %w", err)
+		}
+		hash = new(string(generated))
 	}
 
 	permissions, err := NewUserPermissions(input)
@@ -226,9 +239,11 @@ func createUser(ctx context.Context, db interface {
 		"requests_allowed",
 	}
 	args := []any{
-		NormalizeEmail(input.Email),
-		NormalizeUsername(input.Username),
-		string(hash),
+		// A blank email or username is NULL: two accounts without one must
+		// not collide on the empty sign-in identifier.
+		nullIfBlank(NormalizeEmail(input.Email)),
+		nullIfBlank(NormalizeUsername(input.Username)),
+		hash,
 		localPasswordLoginEnabled,
 		input.PasswordChangeRequired,
 		input.Role,
@@ -983,7 +998,7 @@ func CreateRestoredAccountInTx(ctx context.Context, tx pgx.Tx, in RestoredAccoun
 			transcode_allowed, audio_transcode_allowed, max_profiles, download_allowed, download_transcode_allowed, requests_allowed, access_group_id)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
 		RETURNING `+allColumns,
-		nullIfBlank(NormalizeEmail(in.Email)), nullIfBlank(NormalizeUsername(in.Username)), in.PasswordHash, in.LocalPasswordLoginEnabled, in.PasswordChangeRequired,
+		nullIfBlank(NormalizeEmail(in.Email)), nullIfBlank(NormalizeUsername(in.Username)), nullIfBlank(in.PasswordHash), in.LocalPasswordLoginEnabled, in.PasswordChangeRequired,
 		in.Enabled, in.Role, permissions, in.LibraryIDs, normalizeQualityOverride(in.MaxPlaybackQuality), in.MaxStreams, in.MaxTranscodes,
 		in.MaxRemoteStreamBitrateKbps, in.MaxLocalStreamBitrateKbps, in.TranscodeAllowed, in.AudioTranscodeAllowed, in.MaxProfiles,
 		in.DownloadAllowed, in.DownloadTranscodeAllowed, in.RequestsAllowed, group)

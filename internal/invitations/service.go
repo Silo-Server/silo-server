@@ -100,6 +100,7 @@ type settingReader interface {
 // Service orchestrates the invitation lifecycle.
 type Service struct {
 	repo      repository
+	claims    claimStore
 	users     userDirectory
 	accounts  accountCreator
 	sessions  sessionStarter
@@ -127,6 +128,7 @@ func NewService(
 ) *Service {
 	return &Service{
 		repo:      repo,
+		claims:    repo,
 		users:     users,
 		accounts:  accounts,
 		sessions:  sessions,
