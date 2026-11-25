@@ -48,6 +48,9 @@ type Payload struct {
 	SetVersion int64
 	// Pairs is a profile-set's optional pairs, verbatim.
 	Pairs json.RawMessage
+	// EditsSeen is a profile-set's optional edits_seen: the edits token the
+	// device read from the server before building the set, "" when absent.
+	EditsSeen string
 
 	fields map[string]json.RawMessage
 }
@@ -215,7 +218,7 @@ func (p *Payload) parseProfileSet() error {
 	if err := json.Unmarshal(p.fields["set"], &set); err != nil || set == nil {
 		return fail(CodeFieldInvalid)
 	}
-	if p.SetVersion, err = wholeNumber(set["version"]); err != nil {
+	if p.SetVersion, err = WholeNumber(set["version"]); err != nil {
 		return err
 	}
 	var items []json.RawMessage
@@ -230,17 +233,18 @@ func (p *Payload) parseProfileSet() error {
 		}
 		p.Pairs = raw
 	}
-	return nil
+	p.EditsSeen, _, err = p.textField("edits_seen", MaxEditsSeenLength, false)
+	return err
 }
 
 func (p *Payload) wholeNumberField(name string) (int64, error) {
-	return wholeNumber(p.fields[name])
+	return WholeNumber(p.fields[name])
 }
 
-// wholeNumber reads a JSON number as an IEEE 754 double, as a browser does,
+// WholeNumber reads a JSON number as an IEEE 754 double, as a browser does,
 // and accepts it when that double is a whole number from 0 to 2^53 - 1.
 // 1795578600.0 and 1.7955786e9 pass; 1795578600.5 does not.
-func wholeNumber(raw json.RawMessage) (int64, error) {
+func WholeNumber(raw json.RawMessage) (int64, error) {
 	raw = bytes.TrimSpace(raw)
 	var n json.Number
 	if len(raw) == 0 || raw[0] == '"' || json.Unmarshal(raw, &n) != nil {

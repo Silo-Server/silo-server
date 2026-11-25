@@ -601,7 +601,169 @@ alike on several servers, send the SHA-256 of the file as it was first
 uploaded, not of a re-encoded copy. The hash is a label the server keeps
 with the picture:
 it never fetches, compares or deduplicates files by it, and choosing a preset
-or deleting the avatar clears it. No response returns it.
+or deleting the avatar clears it. `GET /api/v2/profiles/set` reports it as the
+profile's `picture`, `sha256:<hex>`. Only the PostgreSQL user store keeps the
+label; the SQLite user store accepts `source_sha256` and drops it.
+
+### The profile set
+
+A profile set is the account's household as one versioned document that the
+person's app keeps and sends to each server the person uses. The design (who
+may send it, the version rule, what it changes and what it leaves alone) is in
+[app-keys.md](architecture/app-keys.md#the-profile-set). Both operations need
+the PostgreSQL user store: elsewhere they answer 501
+`capability_unsupported`, and `getAppKeyCapability` reports `profile_set`
+`false`.
+
+| Operation | Caller | Notes |
+| --- | --- | --- |
+| `PUT /api/v2/profiles/set` (`putProfileSet`) | a signed `profile-set` envelope, or the account's own login session acting as its main profile | Makes the household match the set. 200 with the answer below. |
+| `GET /api/v2/profiles/set` (`getProfileSet`) | the account's own login session | The set as this server holds it. Strong `ETag`; `If-None-Match` answers 304. |
+
+**Request.** The body is one of two forms; anything else, both or neither, is
+422 `validation_failed` at `body`.
+
+- Signed: `{ "kid", "payload", "sig" }`, a `profile-set` envelope signed by the
+  account's person key, on a challenge from `createAppKeyChallenge`. The
+  payload carries `purpose`, `server_id`, `iat`, `exp`, `challenge`,
+  `account_id` (the account on this server, as a string), `set`, and
+  optionally `pairs` and `edits_seen`. It has no `origin` or `reply_key`; the
+  answer is not sealed. A login session sent with it is not consulted.
+- Session: `{ "set", "pairs"?, "edits_seen"? }` over the account's own login
+  session, with `X-Profile-Id` naming the household's main profile and
+  `X-Profile-Token` when that profile has a PIN.
+
+`set` is `{ "version", "items" }`. `version` is a whole number from 0 to
+2^53 - 1 (`7.0` is 7). `items` holds 1 to 64 items, the main profile first:
+
+| Member | Type | Meaning |
+| --- | --- | --- |
+| `sync_id` | string | The profile's ID on every server: a lower-case UUID, unique in the set. |
+| `name` | string | 1 to 64 characters after trimming; unique in the set, compared trimmed and without case. |
+| `picture` | string | `preset:<id>` (`avatar-1` to `avatar-8`, or `dicebear:<style>:<seed>`), `sha256:<64 lower-case hex>` naming an upload, or `""`. |
+| `pin` | object | Exactly one of `{"set": "1234"}` (four digits), `{"keep": true}`, `{"clear": true}`. |
+| `is_child`, `require_advisory_age`, `requests_blocked` | boolean | |
+| `max_content_rating` | string | Up to 32 characters; `""` for none. |
+| `max_advisory_age` | integer or null | 1 to 21; `null` for none. |
+| `settings` | object | Optional. Settings-contract keys stored per profile, each to its value. |
+| `settings_reset` | array | Optional. Up to 256 keys whose profile value is removed. A key in both `settings` and `settings_reset` is 422. |
+
+Item members the server does not know are ignored. `pairs` is
+`[{ "sync_id", "local_id" }]`, for the first use on an account that already has
+profiles: each names an item and the existing profile it becomes. `edits_seen`
+is the `edits_token` the app read from `getProfileSet` when it built the set,
+at most 64 characters; absent means `""`.
+
+A malformed member is 422 `validation_failed` at the member
+(`body.set.items[2].name`, `body.pairs[0].local_id`), or at `body.payload` in
+the signed form. A new item named like a profile outside the set is 422 at its
+name with code `name_conflict`.
+
+**Answer.**
+
+```json
+{
+  "version": 7,
+  "profiles": [{ "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e", "id": "12" }],
+  "left_off": [],
+  "awaiting_libraries": [],
+  "awaiting_pictures": [],
+  "awaiting_pins": [],
+  "hidden_by_owner": [],
+  "overrides": [],
+  "skipped_settings": [{ "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e", "key": "playback.subtitle_mode" }]
+}
+```
+
+- `profiles`: this server's ID for each profile it holds from the set, in set
+  order.
+- `left_off`: items not applied because of the household's profile limit, in
+  set order.
+- `awaiting_libraries`: child profiles with library limits on and no
+  libraries, waiting for someone to pick them on this server.
+- `awaiting_pictures`: items whose picture this server doesn't have, a
+  `sha256:` picture not uploaded here or a preset it doesn't know. The profile
+  keeps its old picture. The app uploads the picture with
+  `uploadProfileAvatar` and `source_sha256`.
+- `awaiting_pins`: profiles created from `keep` that still have no PIN.
+- `skipped_settings`: known settings whose value this server refused; it kept
+  its own. Unknown keys and `server_local` keys are not listed.
+- `hidden_by_owner` and `overrides` are always empty today.
+- `jellyfin_bare_name_sign_in`: whether a Jellyfin-compatible app that signs
+  in with the bare account name (no `#profile`) gets a profile, as the
+  account's profiles stand after the set. It is `true` when exactly one
+  profile is named like the account (compared without case), or else exactly
+  one profile has no PIN; otherwise the person must sign in as
+  `account#Profile`. Sessions already open are not affected either way. The
+  member is absent while the Jellyfin-compatible surface is off. It answers
+  for the account's username. A person who types their email address instead
+  is matched by the second rule only (exactly one profile with no PIN),
+  because no profile is named like an email address.
+
+The answer describes the account as it stands after the call, so a repeat of
+the same set answers the same lists.
+
+**Refusals.**
+
+| Problem | When |
+| --- | --- |
+| 409 `profile_set_stale` | The version is older than the one the server holds; the same version with other content; the same version whose `set` PIN differs from the stored PIN, or whose `clear` finds a PIN; or the server holds the person's own edits and `edits_seen` is not its current `edits_token`. Nothing is written. |
+| 409 `capability_disabled` | The signed form while `auth.app_key_sign_in` is off. The session form works with app keys off. |
+| 409 `conflict` | The household kept changing while the set was applied; or the account has profiles but no main profile, which a set can't apply to. Send the set again a few times, waiting longer each time, then stop and report it: the second case doesn't clear by itself. |
+| 401 `signature_invalid`, `challenge_invalid` | The signed form, as on the other signed routes. A payload naming another account is `signature_invalid`. A replayed envelope is `challenge_invalid`. |
+| 401 `authentication_required` | The session form without a login session. An API key carries no login session, so it gets this too. |
+| 401 `session_expired` | The account was deleted while the set was applied. |
+| 403 `permission_denied` | The signed form for an administrator's account; a session opened by device sign-in, by another app's key, or by an administrator acting as the account, a remote-playback handoff, a session older than the record of how sessions open; a session form not acting as the main profile; either form from a non-administrator in demo mode. |
+| 403 `profile_verification_required` | The main profile has a PIN and the request did not prove it. |
+| 429 `rate_limited` | The per-address `profile_set` budget, 20 a minute with a burst of 10 by default (`ratelimit.auth.profile_set.*`). Also, on a repeat of the held version, a profile whose PIN is locked after too many wrong PINs, with `Retry-After`, as `verifyProfilePIN` answers it. |
+
+A repeat of the held version with a `set` PIN tells whether that PIN is the
+stored one (200 or `profile_set_stale`), so each such comparison counts as a
+PIN attempt on that profile, exactly as on `verifyProfilePIN`: a wrong PIN
+counts, a right one clears the count, and the fifth wrong one locks the
+profile for five minutes, during which the repeat answers 429 without
+comparing.
+
+After `profile_set_stale`, read `GET /profiles/set` before sending anything:
+it says which version the server holds and its `edits_token`. Sending the held
+version again without that read spends PIN attempts and can lock a profile.
+
+A set that changes the main profile's PIN ends every `X-Profile-Token` minted
+for the old PIN, the caller's included: the next household call needs
+`verifyProfilePIN` with the new PIN.
+
+**`GET /api/v2/profiles/set`.** The same sessions as the session form may read
+it, with or without a profile header; it needs no PIN.
+
+```json
+{
+  "version": 7,
+  "items": [{
+    "sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e", "id": "12", "position": 0,
+    "name": "Sam", "picture": "preset:avatar-3", "has_pin": true, "is_child": false,
+    "max_content_rating": "", "max_advisory_age": null, "require_advisory_age": false,
+    "requests_blocked": false, "settings": { "playback.audio_language": "en" },
+    "changed_here": []
+  }],
+  "deleted_here": [],
+  "overrides": [],
+  "local_only": [{ "id": "15", "name": "Guest", "has_pin": false }],
+  "jellyfin_bare_name_sign_in": true,
+  "edits_token": ""
+}
+```
+
+`items` are the profiles holding a `sync_id`, in set order. `settings` is the
+profile's own stored values for the keys a set carries; a key not set on the
+profile is absent. `local_only` lists the profiles outside the set, in
+creation order, with `has_pin`, so an app can work out
+`jellyfin_bare_name_sign_in` for a set before it sends it.
+`jellyfin_bare_name_sign_in` is as in the `PUT` answer, for the profiles as
+they stand now. `edits_token` names the person's own edits on this server that
+no set has settled yet; it is `""` when there are none, which is always today.
+`changed_here`, `deleted_here` and `overrides` are always empty today. An
+account that never took a set answers `version` 0, no items, and every profile
+in `local_only`.
 
 ## Profile PINs
 
@@ -723,7 +885,7 @@ operation contract.
 
 | Operation | Credential | Notes |
 | --- | --- | --- |
-| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `protocol` is `silo-sync-v1` and `server_id` is the identity every signed payload names. `introduce`, `sign_in`, `enroll`, `app_codes` and `grants` are `true`; `sign_in_links` and `profile_set` are `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
+| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `protocol` is `silo-sync-v1` and `server_id` is the identity every signed payload names. `introduce`, `sign_in`, `enroll`, `app_codes` and `grants` are `true`; `profile_set` is `true` where profiles are kept in PostgreSQL ([The profile set](#the-profile-set)); `sign_in_links` is `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
 | `POST /auth/keys/challenge` (`createAppKeyChallenge`) | none | Body `{}`. Answers `challenge` (base64url of 32 bytes), `expires_in` (120), `server_id` and `server_time` (Unix seconds). A challenge works for one signed request within two minutes, on any API process. |
 | `POST /auth/keys/introduce` (`introduceAppKey`) | an `introduce` envelope signed by the account's person key, with `device_sig` | Enrolls the payload's `device_key` and opens a session. For an administrator's account the key is stored waiting and the sealed answer is `approval_required`. An account holds at most 10 waiting keys inside their 24 hours: one more is 409 `conflict`, after the challenge is spent. A waiting key past its 24 hours doesn't count, and a retention task later revokes it. |
 | `POST /auth/keys/sign-in` (`signInWithAppKey`) | a `sign-in` envelope signed by an enrolled device key, without `device_sig` | Opens a session. A waiting key answers `approval_required`; see below. |
@@ -934,8 +1096,9 @@ on), so the page offers only what works.
 
 **Switch.** While `auth.app_key_sign_in` is off the challenge, `introduce`,
 `sign-in`, `enroll`, `POST /auth/grants/redeem`, both app code issues, app
-code redemption, `PUT /auth/keys/person` and `pending/{id}/approve` answer 409
-`capability_disabled`, and the invitation lookup reports `app_join: false`. The capability,
+code redemption, `PUT /auth/keys/person`, `pending/{id}/approve` and the signed
+form of `PUT /api/v2/profiles/set` answer 409 `capability_disabled`, and the
+invitation lookup reports `app_join: false`. The capability,
 `GET /auth/keys` and its deletes, `GET /auth/keys/pending` and
 `pending/{id}/deny` stay open. A server in demo
 mode (`demo.enabled`) behaves as if the switch were off, for administrators

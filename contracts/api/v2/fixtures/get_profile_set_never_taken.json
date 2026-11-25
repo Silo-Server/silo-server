@@ -1,0 +1,14 @@
+{
+  "version": 0,
+  "items": [],
+  "deleted_here": [],
+  "overrides": [],
+  "local_only": [
+    {
+      "id": "p-admin",
+      "name": "Ada",
+      "has_pin": false
+    }
+  ],
+  "edits_token": ""
+}

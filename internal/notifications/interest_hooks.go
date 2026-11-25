@@ -722,6 +722,52 @@ func (s *interestTrackingStore) RecordProfileAvatarSourceSHA256(ctx context.Cont
 	return recorder.RecordProfileAvatarSourceSHA256(ctx, id, avatar, sha)
 }
 
+// ReadProfileSet forwards to the wrapped store; a backend that cannot apply
+// a profile set answers userstore.ErrProfileSetUnsupported.
+func (s *interestTrackingStore) ReadProfileSet(ctx context.Context) (userstore.ProfileSetSnapshot, error) {
+	inner, ok := s.UserStore.(userstore.ProfileSetStore)
+	if !ok {
+		return userstore.ProfileSetSnapshot{}, userstore.ErrProfileSetUnsupported
+	}
+	return inner.ReadProfileSet(ctx)
+}
+
+// WithProfileSetTransaction forwards to the wrapped store and, once the set
+// commits, purges the notification state of every profile it removed, as
+// DeleteProfile does for one.
+func (s *interestTrackingStore) WithProfileSetTransaction(ctx context.Context, inSet []string, fn func(userstore.ProfileSetWriter) error) error {
+	inner, ok := s.UserStore.(userstore.ProfileSetStore)
+	if !ok {
+		return userstore.ErrProfileSetUnsupported
+	}
+	var deleted []string
+	err := inner.WithProfileSetTransaction(ctx, inSet, func(w userstore.ProfileSetWriter) error {
+		deleted = nil
+		return fn(&deletionRecordingWriter{ProfileSetWriter: w, deleted: &deleted})
+	})
+	if err != nil {
+		return err
+	}
+	for _, id := range deleted {
+		s.purgeProfile(ctx, id)
+	}
+	return nil
+}
+
+// deletionRecordingWriter records the profiles a profile set deletes.
+type deletionRecordingWriter struct {
+	userstore.ProfileSetWriter
+	deleted *[]string
+}
+
+func (w *deletionRecordingWriter) DeleteProfile(ctx context.Context, id string) ([]string, error) {
+	collections, err := w.ProfileSetWriter.DeleteProfile(ctx, id)
+	if err == nil {
+		*w.deleted = append(*w.deleted, id)
+	}
+	return collections, err
+}
+
 // Preserve the optional device settings capability without claiming support
 // on backends that cannot page or atomically clear devices. Keep the existing
 // concrete decorator so its other optional capabilities survive as well.

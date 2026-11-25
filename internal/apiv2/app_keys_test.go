@@ -478,3 +478,9 @@ func TestAppKeyPayloadErrorLocation(t *testing.T) {
 		}
 	}
 }
+
+func (f *fakeAppKeys) VerifyProfileSet(context.Context, auth.KeyRequest) (*auth.ProfileSetAuthority, error) {
+	return nil, f.err
+}
+
+func (f *fakeAppKeys) ProfileSetSessionAllowed(context.Context, *auth.Claims) error { return nil }

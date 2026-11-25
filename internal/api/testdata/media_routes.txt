@@ -928,6 +928,8 @@ GET /api/v2/profile/sections/settings	non-media
 GET /api/v2/profiles	non-media
 POST /api/v2/profiles	non-media
 GET /api/v2/profiles/household/sessions	non-media
+GET /api/v2/profiles/set	non-media
+PUT /api/v2/profiles/set	non-media
 DELETE /api/v2/profiles/{id}	non-media
 PATCH /api/v2/profiles/{id}	non-media
 GET /api/v2/profiles/{id}/allowed-collections	non-media
@@ -2034,6 +2036,8 @@ GET /api/v2/profile/sections/settings	non-media
 GET /api/v2/profiles	non-media
 POST /api/v2/profiles	non-media
 GET /api/v2/profiles/household/sessions	non-media
+GET /api/v2/profiles/set	non-media
+PUT /api/v2/profiles/set	non-media
 DELETE /api/v2/profiles/{id}	non-media
 PATCH /api/v2/profiles/{id}	non-media
 GET /api/v2/profiles/{id}/allowed-collections	non-media

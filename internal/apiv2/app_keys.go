@@ -38,6 +38,12 @@ type AppKeyService interface {
 	// keys (getAppKeySessionAccess).
 	AppKeySessionAccess(context.Context, *auth.Claims) (auth.SessionKeyAccess, error)
 	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, auth.ActingProfile, error)
+	// VerifyProfileSet verifies a signed profile set and spends its
+	// challenge.
+	VerifyProfileSet(context.Context, auth.KeyRequest) (*auth.ProfileSetAuthority, error)
+	// ProfileSetSessionAllowed refuses a login session that may not read or
+	// send the account's profile set.
+	ProfileSetSessionAllowed(context.Context, *auth.Claims) error
 	// SessionMayIssueCredential answers auth.ErrSessionNotAllowed for a
 	// session another app opened with a grant, which must not be handed a
 	// personal API key or a linked sign-in.
@@ -139,6 +145,7 @@ func (reg *Registry) getAppKeyCapability(ctx context.Context, _ *CapabilityInput
 			Enroll:            true,
 			AppCodes:          true,
 			Grants:            true,
+			ProfileSet:        reg.deps.ProfileSet != nil && reg.deps.ProfileSet.ProfileSetSupported(),
 			SignatureSuites:   []string{appKeySignatureSuite},
 			SealedReplySuites: []string{appKeySealedReplySuite},
 		},
