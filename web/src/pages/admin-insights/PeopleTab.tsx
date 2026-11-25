@@ -1,6 +1,14 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router";
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronDown, ChevronRight, Search } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Search,
+} from "lucide-react";
 
 import { formatWatchTime } from "@/components/admin/dashboard/format";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +38,7 @@ import {
   formatShortTimestamp,
   insightsHrefWith,
   type InsightsFilterState,
+  insightRefreshProps,
 } from "./insightsHelpers";
 import { InsightKpiCard, InsightNoticeBanner, InsightSectionError } from "./insightsShared";
 
@@ -105,6 +114,9 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
     );
   }
 
+  // A new sort, search, or filter keeps the previous rows on screen, dimmed,
+  // until its first page arrives.
+  const refreshing = query.isPlaceholderData;
   const coverage = data?.coverage;
   const showMeasuredBanner = Boolean(
     coverage && coverage.total_sessions > 0 && coverage.measured_sessions < coverage.total_sessions,
@@ -123,7 +135,7 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
       ) : null}
 
       {data ? (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <div {...insightRefreshProps(refreshing, "grid grid-cols-1 gap-3 sm:grid-cols-3")}>
           <InsightKpiCard
             label={t("web.admin.insights.people.kpi.activeAccounts")}
             value={data.active_accounts.toLocaleString(formatLocale())}
@@ -154,8 +166,14 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               placeholder={t("web.admin.insights.people.searchPlaceholder")}
-              className="h-8 ps-8 text-xs"
+              className="h-8 ps-8 pe-8 text-xs"
             />
+            {refreshing ? (
+              <Loader2
+                aria-hidden="true"
+                className="text-muted-foreground pointer-events-none absolute end-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 animate-spin"
+              />
+            ) : null}
           </div>
           <AddToDashboardButton
             widgetId="top-profiles"
@@ -163,7 +181,7 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
             chartName={t("web.admin.dashboard.widgetCatalog.topProfiles.title")}
           />
         </CardHeader>
-        <CardContent>
+        <CardContent {...insightRefreshProps(refreshing)}>
           {query.isLoading ? (
             <div className="space-y-3">
               <Skeleton className="h-9 w-full rounded-lg" />
@@ -458,7 +476,7 @@ export function PeopleTab({ filters }: { filters: InsightsFilterState }) {
                 </Table>
               </div>
 
-              {query.hasNextPage ? (
+              {query.hasNextPage && !refreshing ? (
                 <div className="flex justify-center pt-4">
                   <Button
                     variant="outline"

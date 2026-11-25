@@ -2,6 +2,7 @@ import type { WidgetRange } from "@/components/admin/dashboard/types";
 import type { Translate } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
 import { formatDateTime, preferredDateLocale } from "@/lib/datetime";
+import { cn } from "@/lib/utils";
 import type { MessageKey } from "@/locales/keys";
 
 export const INSIGHTS_TABS = [
@@ -402,4 +403,22 @@ export function formatHwAccelLabel(
     default:
       return key.toUpperCase();
   }
+}
+
+/**
+ * Props for a region that shows the previous result while a new sort, search,
+ * or filter loads. The dim waits 150 ms so a quick response never flickers,
+ * and lifts at once when the new data lands. Links in the region stop working
+ * until then: they mix the new filters with the old result's window. Buttons
+ * stay live, so a second sort or toggle still works.
+ */
+export function insightRefreshProps(refreshing: boolean, className?: string) {
+  return {
+    "aria-busy": refreshing || undefined,
+    className: cn(
+      "transition-opacity duration-200",
+      refreshing && "opacity-50 delay-150 [&_a]:pointer-events-none",
+      className,
+    ),
+  };
 }
