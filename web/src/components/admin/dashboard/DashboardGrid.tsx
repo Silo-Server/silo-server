@@ -27,6 +27,7 @@ import { getDashboardWidget } from "./registry";
 import type { WidgetId } from "./types";
 import type { DashboardLayout } from "./useDashboardLayout";
 import { WidgetChromeProvider } from "./widgetChrome";
+import { containWheel } from "./wheelContainment";
 import { isRightToLeft, readingArrowKey } from "@/lib/direction";
 import { Direction } from "radix-ui";
 
@@ -732,12 +733,18 @@ export function DashboardGrid({
             addDragId !== null && "pointer-events-none opacity-30",
           )}
           onInteractOutside={(event) => event.preventDefault()}
+          // Non-modal, so nothing locks page scroll: wheel input over the
+          // panel would otherwise scroll the dashboard behind it.
+          ref={containWheel}
         >
           <SheetHeader className="pb-0">
             <SheetTitle>{t("web.admin.dashboard.addSheet.title")}</SheetTitle>
             <SheetDescription>{t("web.admin.dashboard.addSheet.description")}</SheetDescription>
           </SheetHeader>
-          <div className="overlay-scroll flex flex-col gap-2 overflow-y-auto p-4 pt-2">
+          <div
+            data-wheel-scroller
+            className="overlay-scroll flex flex-col gap-2 overflow-y-auto overscroll-contain p-4 pt-2"
+          >
             {hiddenWidgets.length === 0 ? (
               <p className="text-muted-foreground py-4 text-sm">
                 {t("web.admin.dashboard.addSheet.empty")}
