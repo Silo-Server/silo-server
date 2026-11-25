@@ -34,6 +34,9 @@ import { useSignInProviderDrafts } from "./useSignInProviderDrafts";
 export const LOCAL_LOGIN_KEY = "auth.local_password_login";
 export const EMAIL_MATCH_KEY = "auth.email_auto_match";
 export const USER_API_KEYS_KEY = "auth.user_api_keys";
+// The demo's shared account, by account ID: while demo mode is on, the
+// per-name limit on failed sign-ins skips that account's names.
+export const DEMO_ACCOUNT_KEY = "demo.account_id";
 // Both only work for Silo-password accounts: the server refuses a signup while
 // password sign-in is off, and a reset needs a local password to replace.
 const PASSWORD_ACCOUNT_KEYS = ["signup.enabled", "password_reset.self_service_enabled"];
@@ -47,6 +50,7 @@ const KEYS = [
   ...PASSWORD_ACCOUNT_KEYS,
   EMAIL_MATCH_KEY,
   USER_API_KEYS_KEY,
+  DEMO_ACCOUNT_KEY,
   "server.public_url",
 ];
 
@@ -162,6 +166,11 @@ export default function SignInSettings() {
     emailMatchOn ||
     form.getPersistedValue(EMAIL_MATCH_KEY).trim() === "true";
   const showEmailMatch = !providerKnown || primaryInstalled || emailMatchSet;
+  const demoAccountId = form.getValue(DEMO_ACCOUNT_KEY).trim();
+  const demoAccount =
+    demoAccountId === ""
+      ? undefined
+      : users.data?.find((user) => String(user.id) === demoAccountId);
 
   return (
     <div className="flex h-full flex-col">
@@ -307,6 +316,30 @@ export default function SignInSettings() {
             description={t("web.admin.settings.signIn.page.userApiKeysDescription")}
             value={form.getValue(USER_API_KEYS_KEY) === "true" ? "true" : "false"}
             onChange={(value) => form.setValue(USER_API_KEYS_KEY, value)}
+          />
+        </FieldGroup>
+
+        <FieldGroup
+          label={t("web.admin.settings.signIn.page.demoGroup")}
+          dirty={form.isDirty(DEMO_ACCOUNT_KEY)}
+        >
+          <SettingField
+            label={t("web.admin.settings.signIn.page.demoAccountLabel")}
+            dirty={form.isDirty(DEMO_ACCOUNT_KEY)}
+            type="number"
+            description={t("web.admin.settings.signIn.page.demoAccountDescription")}
+            value={form.getValue(DEMO_ACCOUNT_KEY)}
+            onChange={(value) => form.setValue(DEMO_ACCOUNT_KEY, value)}
+            managedByEnv={form.envVar(DEMO_ACCOUNT_KEY)}
+            status={
+              demoAccount ? (
+                <SettingFieldStatus tone="muted">
+                  {t("web.admin.settings.signIn.page.demoAccountNames", {
+                    name: demoAccount.username,
+                  })}
+                </SettingFieldStatus>
+              ) : null
+            }
           />
         </FieldGroup>
       </div>
