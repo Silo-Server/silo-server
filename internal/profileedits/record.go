@@ -84,12 +84,22 @@ func RecordedSetting(key string) bool {
 // replaces the row whoever made it, with a new revision. The person's edit
 // over the owner's row, or over their own open edit that replaced one, keeps
 // replaced_owner.
+//
+// It key-share locks the profile row it reads. A write that took no lock of
+// its own (a reset that found nothing to delete) would otherwise read the
+// profile from its snapshot while an account deletion or a set that removes
+// the profile is deleting it, and insert a row for a profile and account
+// that are gone. The lock waits for such a delete to commit and then finds
+// no profile; a delete that comes second waits for this one, and clears the
+// row it inserted. A key-share lock does not conflict with the no-key-update
+// and update locks profile saves and the set take before recording.
 const recordFieldsSQL = `
 	INSERT INTO profile_set_edits AS e (user_id, sync_id, field, by, actor_user_id)
 	SELECT $1, p.sync_id, f.field, $4, $5
 	FROM user_profiles p CROSS JOIN unnest($3::text[]) WITH ORDINALITY AS f(field, n)
 	WHERE p.user_id = $1 AND p.id = $2 AND p.sync_id IS NOT NULL
 	ORDER BY f.n
+	FOR KEY SHARE OF p
 	ON CONFLICT (user_id, sync_id, field) DO UPDATE SET
 		by = excluded.by, actor_user_id = excluded.actor_user_id, at = excluded.at,
 		revision = excluded.revision, profile_name = NULL, settled_at = NULL,
@@ -127,7 +137,10 @@ func RecordSetting(ctx context.Context, db Executor, account int, profileID, key
 }
 
 // RecordRemoval records that the profile with syncID, named name, was
-// deleted: its field rows go, and one removal row stays. An owner's removal
+// deleted: its field rows go, and one removal row stays. The caller has just
+// deleted the profile in its transaction, so it holds the profile row's lock:
+// an account deletion's cascade waits for it to commit and then clears this
+// row, and one that went first leaves no profile for the caller to delete. An owner's removal
 // keeps the set from bringing the profile back on this server.
 func RecordRemoval(ctx context.Context, db Executor, account int, syncID, name string) error {
 	actor, ok := ActorFor(ctx, account)
@@ -208,6 +221,24 @@ func Settle(ctx context.Context, db Executor, account int, seen []Edit, removed 
 			account, removed); err != nil {
 			return fmt.Errorf("clearing edits of removed profiles: %w", err)
 		}
+	}
+	return nil
+}
+
+// Move moves the edit rows of the profile with sync ID from to sync ID to,
+// when a set gives the profile a new ID: an owner's override and the
+// person's marks follow the profile. Rows already under to name a profile
+// that no longer exists (to was free to take) and give way.
+func Move(ctx context.Context, db Executor, account int, from, to string) error {
+	if from == to {
+		return nil
+	}
+	if _, err := db.Exec(ctx, `DELETE FROM profile_set_edits WHERE user_id = $1 AND sync_id = $2::uuid`, account, to); err != nil {
+		return fmt.Errorf("moving profile edits: %w", err)
+	}
+	if _, err := db.Exec(ctx, `UPDATE profile_set_edits SET sync_id = $3::uuid WHERE user_id = $1 AND sync_id = $2::uuid`,
+		account, from, to); err != nil {
+		return fmt.Errorf("moving profile edits: %w", err)
 	}
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"maps"
 	"slices"
 	"sort"
 	"time"
@@ -43,9 +44,13 @@ type profileSetRun struct {
 	// pinOverrides is the items whose PIN the owner set, on that read.
 	pinOverrides []int
 
-	// edits is the account's edits on this server: from the unlocked read,
-	// then from the read under the transaction's locks.
-	edits profileSetEdits
+	// edits is the account's edits on this server as the set's items see
+	// them: from the unlocked read, then from the read under the
+	// transaction's locks.
+	edits itemEdits
+	// moves maps a profile's sync ID to the one its item gives it, for each
+	// profile whose ID the set changes; its edit rows move with it.
+	moves map[string]string
 
 	// Done by the committed transaction.
 	noop      bool
@@ -102,12 +107,16 @@ func (r *profileSetRun) attempt(ctx context.Context) error {
 			return err
 		}
 	}
-	r.edits = newProfileSetEdits(snap.Edits)
-	plan, err := planProfileSet(r.doc, snap.Rows, r.limit, r.edits.hidden)
+	edits := newProfileSetEdits(snap.Edits)
+	plan, err := planProfileSet(r.doc, snap.Rows, r.limit, edits.hidden)
 	if err != nil {
 		return err
 	}
-	r.pinOverrides = r.edits.pinOverridden(r.doc)
+	r.edits = edits.forItems(r.doc, plan)
+	if err := r.edits.checkNames(r.doc, plan); err != nil {
+		return err
+	}
+	r.pinOverrides = r.edits.pinOverridden()
 	for i, row := range plan.rowOf {
 		// An upload stored before hashes were kept gets its label now, so a
 		// set built from this server's own answer matches it.
@@ -154,7 +163,7 @@ func (r *profileSetRun) comparePINs(ctx context.Context, plan *profileSetPlan, r
 	for i := range r.doc.Items {
 		row, mapped := plan.rowOf[i]
 		item := r.doc.Items[i]
-		if !mapped || item.PIN.kind != profileSetPINSet || row.PINHash == "" || r.edits.overridden(item.SyncID, profileedits.FieldPIN) {
+		if !mapped || item.PIN.kind != profileSetPINSet || row.PINHash == "" || r.edits.itemOverridden(i, profileedits.FieldPIN) {
 			continue
 		}
 		attemptKey := ratelimit.ProfilePINKey(r.cmd.UserID, row.ID)
@@ -189,7 +198,7 @@ func (r *profileSetRun) checkVersion(state userstore.ProfileSetState, plan *prof
 		return false, ErrProfileSetStale
 	}
 	for i, row := range plan.rowOf {
-		if r.edits.overridden(r.doc.Items[i].SyncID, profileedits.FieldPIN) {
+		if r.edits.itemOverridden(i, profileedits.FieldPIN) {
 			continue
 		}
 		switch r.doc.Items[i].PIN.kind {
@@ -216,7 +225,7 @@ func (r *profileSetRun) isRepeat(state userstore.ProfileSetState) bool {
 func (r *profileSetRun) hashPINs(ctx context.Context, plan *profileSetPlan) error {
 	r.newPINs = map[int]string{}
 	for i, item := range r.doc.Items {
-		if item.PIN.kind != profileSetPINSet || r.pinMatches[i] || r.edits.overridden(item.SyncID, profileedits.FieldPIN) {
+		if item.PIN.kind != profileSetPINSet || r.pinMatches[i] || r.edits.itemOverridden(i, profileedits.FieldPIN) {
 			continue
 		}
 		if _, mapped := plan.rowOf[i]; !mapped && !slices.Contains(plan.create, i) {
@@ -276,13 +285,17 @@ func (r *profileSetRun) apply(ctx context.Context, w userstore.ProfileSetWriter,
 	if err != nil {
 		return err
 	}
+	locked := edits.forItems(r.doc, plan)
+	if err := locked.checkNames(r.doc, plan); err != nil {
+		return err
+	}
 	// A set that became a repeat of the held version since the first read
 	// starts over, so its PIN comparisons count as guesses (comparePINs), and
 	// so does one whose PIN overrides changed, which decide what was hashed.
-	if !samePlanBasis(pre, plan) || (r.isRepeat(snap.State) && !r.repeat) || !slices.Equal(r.pinOverrides, edits.pinOverridden(r.doc)) {
+	if !samePlanBasis(pre, plan) || (r.isRepeat(snap.State) && !r.repeat) || !slices.Equal(r.pinOverrides, locked.pinOverridden()) {
 		return errProfileSetRetry
 	}
-	r.edits = edits
+	r.edits, r.moves = locked, map[string]string{}
 	if r.noop, err = r.checkVersion(snap.State, plan); err != nil || r.noop {
 		return err
 	}
@@ -327,7 +340,17 @@ func (r *profileSetRun) apply(ctx context.Context, w userstore.ProfileSetWriter,
 	for i, row := range plan.removed {
 		removed[i] = row.SyncID
 	}
-	return w.SettleEdits(ctx, snap.Edits, removed)
+	if err := w.SettleEdits(ctx, snap.Edits, removed); err != nil {
+		return err
+	}
+	// A profile whose sync ID the set changed keeps its edits, the owner's
+	// overrides included, under its new ID.
+	for _, from := range slices.Sorted(maps.Keys(r.moves)) {
+		if err := w.MoveEdits(ctx, from, r.moves[from]); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *profileSetRun) removeProfile(ctx context.Context, w userstore.ProfileSetWriter, audited userstore.AuditedProfileWriter, recording bool, row *userstore.ProfileSetRow) error {
@@ -358,7 +381,10 @@ func (r *profileSetRun) removeProfile(ctx context.Context, w userstore.ProfileSe
 // A field the owner set on this server is left as it is.
 func (r *profileSetRun) updateProfile(ctx context.Context, w userstore.ProfileSetWriter, audited userstore.AuditedProfileWriter, recording bool, i int, row *userstore.ProfileSetRow) error {
 	item := r.doc.Items[i]
-	owner := func(field string) bool { return r.edits.overridden(item.SyncID, field) }
+	owner := func(field string) bool { return r.edits.itemOverridden(i, field) }
+	if row.SyncID != "" && row.SyncID != item.SyncID {
+		r.moves[row.SyncID] = item.SyncID
+	}
 	var input userstore.UpdateProfileInput
 	changed, access := false, false
 	if row.Name != item.Name && !owner(profileedits.FieldName) {
@@ -404,7 +430,7 @@ func (r *profileSetRun) updateProfile(ctx context.Context, w userstore.ProfileSe
 		r.pinResets = append(r.pinResets, row.ID)
 	}
 	before := input
-	applyColumnPreferences(r.contract, r.edits.withoutOverrides(item.SyncID, r.settings[i]), &row.Profile, &input)
+	applyColumnPreferences(r.contract, r.edits.withoutOverrides(r.edits.ids[i], r.settings[i]), &row.Profile, &input)
 	changed = changed || input != before
 	if changed {
 		if err := r.writeProfile(ctx, w, audited, recording, row, input); err != nil {
@@ -516,7 +542,7 @@ func (r *profileSetRun) createProfile(ctx context.Context, w userstore.ProfileSe
 // the owner overrides here included, as if it had been written: it is what
 // the set asks of the profile, not what this server stores.
 func (r *profileSetRun) finishProfile(ctx context.Context, w userstore.ProfileSetWriter, i int, profileID string, awaitingPin bool) error {
-	item, plan := r.doc.Items[i], r.edits.withoutOverrides(r.doc.Items[i].SyncID, r.settings[i])
+	item, plan := r.doc.Items[i], r.edits.withoutOverrides(r.edits.ids[i], r.settings[i])
 	base := userstore.SettingIdentity{Scope: settingscontract.ScopeProfile, ProfileID: profileID}
 	keys := make([]string, 0, len(plan.write))
 	for key := range plan.write {

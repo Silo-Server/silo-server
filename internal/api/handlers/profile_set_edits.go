@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -76,15 +77,70 @@ func (e profileSetEdits) settingOverridden(syncID, key string) bool {
 	return ok && e.overridden(syncID, profileedits.FieldSettingsPrefix+mirror)
 }
 
-// pinOverridden lists the items whose profile has its PIN set by the owner.
-func (e profileSetEdits) pinOverridden(doc *profileSetDoc) []int {
-	var out []int
+// itemEdits is the edits as each item of a set sees them. An item that
+// lands on an existing profile reads the edits recorded under that profile's
+// sync ID, not the one the item names: the main profile takes item 0's
+// sync_id whatever it is, and an owner's override follows the profile, not
+// an ID a set claims for it.
+type itemEdits struct {
+	profileSetEdits
+	// ids holds, per item, the sync ID its profile's edits are under.
+	ids []string
+}
+
+func (e profileSetEdits) forItems(doc *profileSetDoc, plan *profileSetPlan) itemEdits {
+	out := itemEdits{profileSetEdits: e, ids: make([]string, len(doc.Items))}
 	for i, item := range doc.Items {
-		if e.overridden(item.SyncID, profileedits.FieldPIN) {
+		out.ids[i] = item.SyncID
+		if row, mapped := plan.rowOf[i]; mapped && row.SyncID != "" {
+			out.ids[i] = row.SyncID
+		}
+	}
+	return out
+}
+
+// itemOverridden reports whether the owner set field on item i's profile.
+func (e itemEdits) itemOverridden(i int, field string) bool {
+	return e.overridden(e.ids[i], field)
+}
+
+// pinOverridden lists the items whose profile has its PIN set by the owner.
+func (e itemEdits) pinOverridden() []int {
+	var out []int
+	for i := range e.ids {
+		if e.itemOverridden(i, profileedits.FieldPIN) {
 			out = append(out, i)
 		}
 	}
 	return out
+}
+
+// checkNames refuses a set that would leave two of its profiles with one
+// name once the names the owner set here are kept: an item's own name is
+// unique in the set, but a profile keeps an overridden name whatever its
+// item says. The later item of a clash is refused at its name.
+func (e itemEdits) checkNames(doc *profileSetDoc, plan *profileSetPlan) error {
+	final := make([]string, len(doc.Items))
+	for i, item := range doc.Items {
+		final[i] = item.Name
+		if row, mapped := plan.rowOf[i]; mapped && e.itemOverridden(i, profileedits.FieldName) {
+			final[i] = row.Name
+		}
+	}
+	held := slices.Concat(slices.Collect(maps.Keys(plan.rowOf)), plan.create)
+	slices.Sort(held)
+	for n, i := range held {
+		for _, j := range held[:n] {
+			if sameProfileName(final[i], final[j]) {
+				return &ProfileSetFieldError{
+					Location: fmt.Sprintf("set.items[%d].name", i),
+					Code:     "name_conflict",
+					Message:  "The owner of this server gave another profile in the set this name; rename this one.",
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // withoutOverrides is an item's settings plan without the keys the owner

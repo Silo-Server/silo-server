@@ -2,8 +2,10 @@ package pgstore
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 
 	"github.com/jackc/pgx/v5"
 
@@ -98,7 +100,7 @@ func (before *recordedProfileFields) changedFields(u userstore.UpdateProfileInpu
 	return out
 }
 
-// recordSettingEdit records a write or reset of a profile-scope setting.
+// recordSettingEdit records a change of a profile-scope setting.
 func recordSettingEdit(ctx context.Context, exec preferenceSettingsExecutor, userID int, id userstore.SettingIdentity) error {
 	if id.Scope != settingscontract.ScopeProfile {
 		return nil
@@ -106,9 +108,10 @@ func recordSettingEdit(ctx context.Context, exec preferenceSettingsExecutor, use
 	return profileedits.RecordSetting(ctx, exec, userID, id.ProfileID, id.Key)
 }
 
-// recordsSettingEdit reports whether a pool-level write of id records an
-// edit, and so runs in a transaction of its own with its record.
-func recordsSettingEdit(ctx context.Context, userID int, id userstore.SettingIdentity) bool {
+// settingRecordable reports whether ctx records a change of id: a
+// profile-scope key a set carries, written by an actor recorded for the
+// account. It reads nothing.
+func settingRecordable(ctx context.Context, userID int, id userstore.SettingIdentity) bool {
 	if id.Scope != settingscontract.ScopeProfile || !profileedits.RecordedSetting(id.Key) {
 		return false
 	}
@@ -116,14 +119,66 @@ func recordsSettingEdit(ctx context.Context, userID int, id userstore.SettingIde
 	return ok
 }
 
-// inRecordingTx runs fn on the pool, or in a transaction when record says
-// the write records an edit, so the write and its record commit together.
-func inRecordingTx[T any](ctx context.Context, s *PostgresUserStore, record bool, fn func(preferenceSettingsExecutor) (T, error)) (T, error) {
+// settingBefore reads, locking its row, the value a write of id replaces:
+// the stored value, or the contract default when nothing is stored. A write
+// that leaves it as it was is not an edit.
+func settingBefore(ctx context.Context, exec preferenceSettingsExecutor, userID int, id userstore.SettingIdentity) (json.RawMessage, error) {
+	clause, args := settingIdentityPredicate(userID, id)
+	var stored []byte
+	err := exec.QueryRow(ctx, "SELECT value FROM user_setting_values WHERE "+clause+" FOR UPDATE", args...).Scan(&stored)
+	if errors.Is(err, pgx.ErrNoRows) {
+		contract, err := settingscontract.Load()
+		if err != nil {
+			return nil, err
+		}
+		if def, ok := contract.Lookup(id.Key); ok {
+			return def.DefaultValue, nil
+		}
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("reading setting %q before a write: %w", id.Key, err)
+	}
+	return stored, nil
+}
+
+// sameSettingValue reports whether two JSON values are equal as values.
+func sameSettingValue(a, b json.RawMessage) bool {
+	var x, y any
+	if json.Unmarshal(a, &x) != nil || json.Unmarshal(b, &y) != nil {
+		return false
+	}
+	return reflect.DeepEqual(x, y)
+}
+
+// recordsSettingEdit reports whether a pool-level write of id may record an
+// edit, and so runs in a transaction of its own with its record. A profile
+// outside the set records nothing and needs none.
+func recordsSettingEdit(ctx context.Context, s *PostgresUserStore, id userstore.SettingIdentity) (bool, error) {
+	if !settingRecordable(ctx, s.userID, id) {
+		return false, nil
+	}
+	var synced bool
+	err := s.pool.QueryRow(ctx, `SELECT sync_id IS NOT NULL FROM user_profiles WHERE user_id = $1 AND id = $2`, s.userID, id.ProfileID).Scan(&synced)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return synced, err
+}
+
+// inRecordingTx runs fn, a pool-level write of id, on the pool, or in a
+// transaction when the write may record an edit, so the write and its record
+// commit together.
+func inRecordingTx[T any](ctx context.Context, s *PostgresUserStore, id userstore.SettingIdentity, fn func(preferenceSettingsExecutor) (T, error)) (T, error) {
+	var out T
+	record, err := recordsSettingEdit(ctx, s, id)
+	if err != nil {
+		return out, err
+	}
 	if !record {
 		return fn(s.pool)
 	}
-	var out T
-	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		var err error
 		out, err = fn(tx)
 		return err

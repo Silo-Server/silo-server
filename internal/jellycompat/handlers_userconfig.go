@@ -197,6 +197,7 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 	// auto with forced subtitles shown.
 	currentSubtitleMode := dto.Configuration.SubtitleMode
 	currentHidePlayed := dto.Configuration.HidePlayedInLatest
+	currentAutoPlay := dto.Configuration.EnableNextEpisodeAutoPlay
 	currentLanguages := map[string]string{
 		"audiolanguagepreference":    dto.Configuration.AudioLanguagePreference,
 		"subtitlelanguagepreference": dto.Configuration.SubtitleLanguagePreference,
@@ -232,15 +233,21 @@ func (h *AuthHandler) HandleUpdateConfiguration(w http.ResponseWriter, r *http.R
 				continue
 			}
 			value, _ = json.Marshal(dto.Configuration.HidePlayedInLatest)
-		} else if field != "enablenextepisodeautoplay" {
+		} else if field == "enablenextepisodeautoplay" {
+			// The effective value, stored or default, echoed back is no change.
+			if dto.Configuration.EnableNextEpisodeAutoPlay == currentAutoPlay {
+				continue
+			}
+		} else {
 			var tag string
 			if err := json.Unmarshal(value, &tag); err != nil {
 				writeError(w, 400, "BadRequest", "Invalid language")
 				return
 			}
 			// Echoing a base-language choice must not flatten a native region or
-			// script preference when Jellyfin Web saves an unrelated setting.
-			if tag != "" && tag == currentLanguages[field] {
+			// script preference when Jellyfin Web saves an unrelated setting,
+			// and an unset language echoed as empty is not a choice either.
+			if tag == currentLanguages[field] {
 				continue
 			}
 			if tag == "" {

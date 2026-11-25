@@ -33,6 +33,7 @@ type Request struct {
 	mu           sync.Mutex
 	actorKnown   bool
 	actorUserID  int
+	actorIsAdmin bool
 	impersonator int
 	accounts     []int
 }
@@ -54,15 +55,17 @@ func FromContext(ctx context.Context) *Request {
 	return req
 }
 
-// SetActor names the account the request acts as. impersonator is the
-// administrator signed in as that account, nil for none.
-func (r *Request) SetActor(userID int, impersonator *int) {
+// SetActor names the account the request acts as. admin is whether that
+// account acts as a server administrator, the fact the admin routes' gate
+// checks. impersonator is the administrator signed in as that account, nil
+// for none.
+func (r *Request) SetActor(userID int, admin bool, impersonator *int) {
 	if r == nil || userID <= 0 {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.actorKnown, r.actorUserID, r.impersonator = true, userID, 0
+	r.actorKnown, r.actorUserID, r.actorIsAdmin, r.impersonator = true, userID, admin, 0
 	if impersonator != nil {
 		r.impersonator = *impersonator
 	}
@@ -107,6 +110,12 @@ type Actor struct {
 
 // ActorFor reports how ctx's edits to account's profiles are recorded;
 // false when they are not recorded at all.
+//
+// The owner is an administrator: one signed in as the account, or one
+// acting on another account (the admin routes). An edit to another account's
+// profiles by an account that is not an administrator is not recorded: no
+// route makes one today, and recording it as either side would be wrong, a
+// mark the person never made or an override no administrator set.
 func ActorFor(ctx context.Context, account int) (Actor, bool) {
 	if off, _ := ctx.Value(withoutRecordingKey{}).(bool); off {
 		return Actor{}, false
@@ -122,10 +131,12 @@ func ActorFor(ctx context.Context, account int) (Actor, bool) {
 		return Actor{}, false
 	case req.impersonator != 0:
 		return Actor{By: ByOwner, UserID: req.impersonator}, true
-	case req.actorUserID != account:
+	case req.actorUserID == account:
+		return Actor{By: ByAccount, UserID: account}, true
+	case req.actorIsAdmin:
 		return Actor{By: ByOwner, UserID: req.actorUserID}, true
 	}
-	return Actor{By: ByAccount, UserID: account}, true
+	return Actor{}, false
 }
 
 // Waker tells an account's apps that its profiles changed on this server.
@@ -142,8 +153,9 @@ func (w Waker) Wake(ctx context.Context, userID int) bool {
 }
 
 // Middleware gives each request a holder, and after the handler returns
-// wakes every account that got an edit. A rolled-back write may still wake
-// its account; a wake only makes the app read the set again.
+// wakes every account that got an edit. It calls the waker for an edit whose
+// transaction rolled back too: the change that sends the push must wake
+// only for edits that committed.
 func Middleware(wake Waker) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

@@ -141,7 +141,8 @@ func (a *AdminAPIKeyAuthenticator) authenticate(r *http.Request) adminAPIKeyAuth
 	if !res.ok {
 		return res
 	}
-	profileedits.FromContext(r.Context()).SetActor(apiKey.UserID, nil)
+	// validate admitted only an administrator's key.
+	profileedits.FromContext(r.Context()).SetActor(apiKey.UserID, true, nil)
 	if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 		uid := apiKey.UserID
 		lc.UserID = &uid

@@ -240,7 +240,7 @@ func attributeActivity(r *http.Request, session *Session) {
 	if session == nil {
 		return
 	}
-	profileedits.FromContext(r.Context()).SetActor(session.StreamAppUserID, nil)
+	profileedits.FromContext(r.Context()).SetActor(session.StreamAppUserID, false, nil)
 	if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 		uid := session.StreamAppUserID
 		lc.UserID = &uid

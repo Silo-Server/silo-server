@@ -97,4 +97,8 @@ type ProfileSetWriter interface {
 	// by revision) and drops the field rows of the profiles it removed,
 	// by sync ID (profileedits.Settle). It locks edit rows, so it runs last.
 	SettleEdits(ctx context.Context, seen []profileedits.Edit, removed []string) error
+	// MoveEdits moves the edit rows of the profile with sync ID from to the
+	// ID to the set gave it (profileedits.Move). It locks edit rows, so it
+	// runs last.
+	MoveEdits(ctx context.Context, from, to string) error
 }

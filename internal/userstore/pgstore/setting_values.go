@@ -240,7 +240,7 @@ func (s *PostgresUserStore) UpsertSettingValue(
 	id userstore.SettingIdentity,
 	value json.RawMessage,
 ) (*userstore.SettingValue, error) {
-	return inRecordingTx(ctx, s, recordsSettingEdit(ctx, s.userID, id), func(exec preferenceSettingsExecutor) (*userstore.SettingValue, error) {
+	return inRecordingTx(ctx, s, id, func(exec preferenceSettingsExecutor) (*userstore.SettingValue, error) {
 		return upsertSettingValue(ctx, exec, s.userID, id, value)
 	})
 }
@@ -262,6 +262,14 @@ func upsertSettingValue(
 	if !ok {
 		return nil, fmt.Errorf("%w: %q has no storage identity", userstore.ErrInvalidSettingIdentity, id.Scope)
 	}
+	var before json.RawMessage
+	recordable := settingRecordable(ctx, userID, id)
+	if recordable {
+		var err error
+		if before, err = settingBefore(ctx, exec, userID, id); err != nil {
+			return nil, err
+		}
+	}
 
 	row := exec.QueryRow(ctx, fmt.Sprintf(`
 		INSERT INTO user_setting_values
@@ -281,8 +289,11 @@ func upsertSettingValue(
 	if err != nil {
 		return nil, fmt.Errorf("upserting setting value %q at %s: %w", id.Key, id.Scope, err)
 	}
-	if err := recordSettingEdit(ctx, exec, userID, id); err != nil {
-		return nil, err
+	// A write that leaves the value as it was is not an edit.
+	if recordable && !sameSettingValue(before, value) {
+		if err := recordSettingEdit(ctx, exec, userID, id); err != nil {
+			return nil, err
+		}
 	}
 	return &stored, nil
 }
@@ -343,7 +354,7 @@ func (s *PostgresUserStore) CompareAndSetSettingValue(
 	value json.RawMessage,
 	expectedRevision int64,
 ) (*userstore.SettingValue, error) {
-	return inRecordingTx(ctx, s, recordsSettingEdit(ctx, s.userID, id), func(exec preferenceSettingsExecutor) (*userstore.SettingValue, error) {
+	return inRecordingTx(ctx, s, id, func(exec preferenceSettingsExecutor) (*userstore.SettingValue, error) {
 		return compareAndSetSettingValue(ctx, exec, s.userID, id, value, expectedRevision)
 	})
 }
@@ -364,6 +375,14 @@ func compareAndSetSettingValue(
 	}
 	if expectedRevision < 0 {
 		return nil, fmt.Errorf("%w: expected revision must be non-negative", userstore.ErrInvalidSettingIdentity)
+	}
+	var before json.RawMessage
+	recordable := settingRecordable(ctx, userID, id)
+	if recordable {
+		var err error
+		if before, err = settingBefore(ctx, exec, userID, id); err != nil {
+			return nil, err
+		}
 	}
 
 	var row pgx.Row
@@ -401,14 +420,16 @@ func compareAndSetSettingValue(
 	if err != nil {
 		return nil, fmt.Errorf("compare-and-setting value %q at %s: %w", id.Key, id.Scope, err)
 	}
-	if err := recordSettingEdit(ctx, exec, userID, id); err != nil {
-		return nil, err
+	if recordable && !sameSettingValue(before, value) {
+		if err := recordSettingEdit(ctx, exec, userID, id); err != nil {
+			return nil, err
+		}
 	}
 	return &stored, nil
 }
 
 func (s *PostgresUserStore) DeleteSettingValue(ctx context.Context, id userstore.SettingIdentity) (bool, error) {
-	return inRecordingTx(ctx, s, recordsSettingEdit(ctx, s.userID, id), func(exec preferenceSettingsExecutor) (bool, error) {
+	return inRecordingTx(ctx, s, id, func(exec preferenceSettingsExecutor) (bool, error) {
 		return deleteSettingValue(ctx, exec, s.userID, id)
 	})
 }
@@ -427,11 +448,14 @@ func deleteSettingValue(
 	if err != nil {
 		return false, fmt.Errorf("deleting setting value %q at %s: %w", id.Key, id.Scope, err)
 	}
-	// A reset is an edit even when nothing was stored.
+	// A reset that removed nothing changed nothing.
+	if tag.RowsAffected() == 0 {
+		return false, nil
+	}
 	if err := recordSettingEdit(ctx, exec, userID, id); err != nil {
 		return false, err
 	}
-	return tag.RowsAffected() > 0, nil
+	return true, nil
 }
 
 // DeleteSettingValuesForProfile removes every profile-anchored value for one

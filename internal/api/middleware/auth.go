@@ -212,7 +212,7 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 
 		// Edits this request makes to profiles from a profile set are
 		// recorded as this account's, or the administrator's acting as it.
-		profileedits.FromContext(r.Context()).SetActor(claims.UserID, claims.ImpersonatorUserID)
+		profileedits.FromContext(r.Context()).SetActor(claims.UserID, claims.Role == models.RoleAdmin, claims.ImpersonatorUserID)
 
 		// Populate activity log context if present (set by activitylog middleware upstream)
 		if lc := activitylog.GetLogContext(r.Context()); lc != nil {
@@ -244,7 +244,7 @@ func (am *AuthMiddleware) RequireAuth(next http.Handler) http.Handler {
 func (am *AuthMiddleware) AttachSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if claims := am.sessionClaims(r); claims != nil {
-			profileedits.FromContext(r.Context()).SetActor(claims.UserID, claims.ImpersonatorUserID)
+			profileedits.FromContext(r.Context()).SetActor(claims.UserID, claims.Role == models.RoleAdmin, claims.ImpersonatorUserID)
 			if lc := activitylog.GetLogContext(r.Context()); lc != nil {
 				uid := claims.UserID
 				lc.UserID = &uid

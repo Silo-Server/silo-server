@@ -11,11 +11,13 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgconn"
 	"golang.org/x/crypto/bcrypt"
 
 	apimw "github.com/Silo-Server/silo-server/internal/api/middleware"
 	"github.com/Silo-Server/silo-server/internal/auth"
+	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/profileedits"
 	"github.com/Silo-Server/silo-server/internal/settingskeys"
 	"github.com/Silo-Server/silo-server/internal/userstore"
@@ -45,18 +47,23 @@ func newEditsFixture(t *testing.T) *editsFixture {
 	return f
 }
 
-// actingAs is a request context whose auth named userID, with impersonator
-// the administrator signed in as it (nil for none).
-func actingAs(userID int, impersonator *int) context.Context {
+// actingAs is a request context whose auth named userID, acting as an
+// administrator or not, with impersonator the administrator signed in as it
+// (nil for none).
+func actingAs(userID int, admin bool, impersonator *int) context.Context {
+	role := models.RoleUser
+	if admin {
+		role = models.RoleAdmin
+	}
 	ctx, req := profileedits.WithRequest(apimw.SetClaims(context.Background(), &auth.Claims{
-		UserID: userID, Role: "user", TokenType: auth.TokenTypeAccess, ImpersonatorUserID: impersonator,
+		UserID: userID, Role: role, TokenType: auth.TokenTypeAccess, ImpersonatorUserID: impersonator,
 	}))
-	req.SetActor(userID, impersonator)
+	req.SetActor(userID, admin, impersonator)
 	return ctx
 }
 
-func (f *editsFixture) account() context.Context { return actingAs(f.userID, nil) }
-func (f *editsFixture) admin() context.Context   { return actingAs(f.adminID, nil) }
+func (f *editsFixture) account() context.Context { return actingAs(f.userID, false, nil) }
+func (f *editsFixture) admin() context.Context   { return actingAs(f.adminID, true, nil) }
 
 // update saves a profile through the profile service: as the account's main
 // profile, or through the admin route.
@@ -226,8 +233,13 @@ func recorderCases(f *editsFixture, main, kid setItem, kidID, localID string) []
 			f.update(t, f.admin(), kidID, ProfileUpdateRequest{MaxContentRating: new("G")}, true)
 		}, []string{fmt.Sprintf("owner:max_content_rating:%d", f.adminID)}},
 		{"an administrator signed in as the account is the owner", func(t *testing.T) {
-			f.update(t, actingAs(f.userID, &impersonated), kidID, ProfileUpdateRequest{Name: new("Kid 3")}, false)
+			f.update(t, actingAs(f.userID, false, &impersonated), kidID, ProfileUpdateRequest{Name: new("Kid 3")}, false)
 		}, []string{fmt.Sprintf("owner:name:%d", f.adminID)}},
+		{"another account that is not an administrator records nothing", func(t *testing.T) {
+			if err := f.store.UpdateProfile(actingAs(f.adminID, false, nil), kidID, userstore.UpdateProfileInput{Name: new("Kid 3b")}); err != nil {
+				t.Fatal(err)
+			}
+		}, nil},
 		{"a write no request attributes records nothing", func(t *testing.T) {
 			if err := f.store.UpdateProfile(t.Context(), kidID, userstore.UpdateProfileInput{Name: new("Kid 4")}); err != nil {
 				t.Fatal(err)
@@ -253,11 +265,30 @@ func recorderCases(f *editsFixture, main, kid setItem, kidID, localID string) []
 				t.Fatal(err)
 			}
 		}, nil},
-		{"resetting a setting with no stored value is an edit", func(t *testing.T) {
+		{"resetting a setting with no stored value records nothing", func(t *testing.T) {
+			if _, err := f.store.DeleteSettingValue(f.account(), setting(settingskeys.PlaybackAudioLanguage)); err != nil {
+				t.Fatal(err)
+			}
+		}, nil},
+		{"writing a setting's stored value again records nothing", func(t *testing.T) {
+			if _, err := f.store.UpsertSettingValue(profileedits.WithoutRecording(f.account()), setting(settingskeys.PlaybackAudioLanguage), json.RawMessage(`"fr"`)); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := f.store.UpsertSettingValue(f.account(), setting(settingskeys.PlaybackAudioLanguage), json.RawMessage(`"fr"`)); err != nil {
+				t.Fatal(err)
+			}
+		}, nil},
+		{"resetting a stored setting is an edit", func(t *testing.T) {
 			if _, err := f.store.DeleteSettingValue(f.account(), setting(settingskeys.PlaybackAudioLanguage)); err != nil {
 				t.Fatal(err)
 			}
 		}, []string{fmt.Sprintf("account:settings.%s:%d", settingskeys.PlaybackAudioLanguage, f.userID)}},
+		{"a save carrying unchanged preference members records nothing, as the account", func(t *testing.T) {
+			f.update(t, f.account(), kidID, ProfileUpdateRequest{AutoSkipIntro: new(false), Language: new("")}, false)
+		}, nil},
+		{"a save carrying unchanged preference members records nothing, as an administrator", func(t *testing.T) {
+			f.update(t, f.admin(), kidID, ProfileUpdateRequest{AutoSkipIntro: new(false), Language: new("")}, true)
+		}, nil},
 		{"a new upload behind the same avatar reference is a picture edit", func(t *testing.T) {
 			ref := testAvatarRef(f.userID, kidID)
 			if err := f.store.UpdateProfile(profileedits.WithoutRecording(f.account()), kidID, userstore.UpdateProfileInput{Avatar: &ref, AvatarSourceSHA256: new(strings.Repeat("a", 64))}); err != nil {
@@ -359,6 +390,45 @@ func TestProfileSetOwnerOverridesDB(t *testing.T) {
 		}
 		if p := f.profileBySyncID(t, kid.syncID()); p.MaxContentRating != "PG" {
 			t.Fatalf("the set did not apply the field the person took back: %q", p.MaxContentRating)
+		}
+	})
+	t.Run("a name the owner gave one profile refuses another item with that name", func(t *testing.T) {
+		f.update(t, f.admin(), kidID, ProfileUpdateRequest{Name: new("Buddy")}, true)
+		before := f.state(t)
+		_, err := f.applySeen(t, setDoc(t, 5, main, kid, guest, newSetItem("Buddy")), f.held(t).EditsToken)
+		var field *ProfileSetFieldError
+		if !errors.As(err, &field) || field.Location != "set.items[3].name" || field.Code != "name_conflict" {
+			t.Fatalf("err = %v, want name_conflict at set.items[3].name", err)
+		}
+		if f.state(t) != before {
+			t.Fatal("a refused set wrote")
+		}
+	})
+	t.Run("a new sync_id on the main profile keeps the owner's values", func(t *testing.T) {
+		f.update(t, f.admin(), f.primary, ProfileUpdateRequest{PIN: new("4321"), MaxContentRating: new("PG")}, true)
+		renamed := main.with("sync_id", uuid.NewString()).with("pin", map[string]any{"clear": true})
+		res, err := f.applySeen(t, setDoc(t, 6, renamed, kid, guest), f.held(t).EditsToken)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p, err := f.store.GetProfile(t.Context(), f.primary)
+		if err != nil || p.SyncID != renamed.syncID() || !pinMatches(p.PINHash, "4321") || p.MaxContentRating != "PG" {
+			t.Fatalf("main profile after the set = %+v, %v", p, err)
+		}
+		want := []ProfileSetOverride{
+			{SyncID: renamed.syncID(), Field: "max_content_rating", Value: json.RawMessage(`"PG"`)},
+			{SyncID: renamed.syncID(), Field: "pin", Value: json.RawMessage(`"set"`)},
+		}
+		mine := func(all []ProfileSetOverride) []ProfileSetOverride {
+			return slices.DeleteFunc(slices.Clone(all), func(o ProfileSetOverride) bool { return o.SyncID != renamed.syncID() })
+		}
+		if !sameOverrides(mine(res.Overrides), want) || !sameOverrides(mine(f.held(t).Overrides), want) {
+			t.Fatalf("overrides: PUT %+v, GET %+v", res.Overrides, f.held(t).Overrides)
+		}
+		for _, e := range f.edits(t) {
+			if e.SyncID == main.syncID() {
+				t.Fatalf("an edit row stayed under the old sync_id: %+v", e)
+			}
 		}
 	})
 }
