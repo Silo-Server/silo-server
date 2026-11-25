@@ -718,6 +718,26 @@ minute with a burst of 20, enough for a few waiting devices behind one address
 the signature verifies; the challenge is what makes each signed request single
 use.
 
+Both of those are counted per client address, and stay so: a sign-in is
+untrusted until its signature verifies, so there is no account to count it
+against. What that means in practice:
+
+- A device signs in with its key when its refresh token has run out, not on
+  every start. One sign-in costs one challenge and one signed request.
+- From one address, 20 devices can sign in at once and then one a second.
+  A device over the budget gets 429 with `Retry-After` and tries again.
+- The signed routes share one budget: an `introduce`, a `sign-in`, an
+  `enroll` and a grant redemption from one address all draw on the same 60 a
+  minute.
+- Behind a reverse proxy that passes the client address on, each client has
+  its own budget, and the proxy's own address has one ten times as large that
+  all of them share. Behind a proxy that doesn't pass it on, every person's
+  devices count as one client and share one 60 a minute, as they already do
+  for password sign-in.
+- An owner whose household or proxy needs more raises
+  `ratelimit.auth.key_challenge.*` and `ratelimit.auth.key_sign_in.*`
+  (requests per minute and burst).
+
 `PUT /profiles/set` is limited per account, not per address: `profile_set`,
 20 a minute with a burst of 10, is spent by the session's account, or by the
 account a signed set names once its signature has verified
