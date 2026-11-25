@@ -214,7 +214,8 @@ func printAppKeys(out io.Writer, keys SettledAppKeys, liveURL string, carry AppK
 		_, _ = fmt.Fprintln(out, "Left out the backup's app keys: each app signs in another way and enrolls a new key.")
 		return
 	case keys.OtherServer > 0:
-		_, _ = fmt.Fprintf(out, "Revoked the backup's %d app keys: they name the server the backup came from, and this server keeps its own identity.\n", keys.OtherServer)
+		_, _ = fmt.Fprintf(out, "Revoked the backup's %s: they name the server the backup came from, and this server keeps its own identity.\n",
+			counted(keys.OtherServer, "app key", "app keys"))
 	case keys.Live+keys.Restored+len(keys.Dropped) == 0:
 		return
 	case liveURL == "":
@@ -223,11 +224,11 @@ func printAppKeys(out io.Writer, keys SettledAppKeys, liveURL string, carry AppK
 		_, _ = fmt.Fprintf(out, "App keys: kept this server's where it has them (%d) and the backup's otherwise (%d).\n", keys.Live, keys.Restored)
 	}
 	if len(keys.Dropped) > 0 {
-		_, _ = fmt.Fprintf(out, "Left out %d of the backup's app keys whose public key another account holds here: %s.\n",
-			len(keys.Dropped), strings.Join(keys.Dropped, ", "))
+		_, _ = fmt.Fprintf(out, "Left out %s of the backup's whose public key another account holds here: %s.\n",
+			counted(len(keys.Dropped), "app key", "app keys"), strings.Join(keys.Dropped, ", "))
 	}
 	if len(keys.Revoked) > 0 {
-		_, _ = fmt.Fprintf(out, "Revoked %d app keys; their devices sign in another way and enroll a new key: %s.\n",
-			len(keys.Revoked), strings.Join(keys.Revoked, "; "))
+		_, _ = fmt.Fprintf(out, "Revoked %s; their devices sign in another way and enroll a new key: %s.\n",
+			counted(len(keys.Revoked), "app key", "app keys"), strings.Join(keys.Revoked, "; "))
 	}
 }
