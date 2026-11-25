@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"errors"
 	"fmt"
 	"slices"
 	"strconv"
@@ -225,13 +226,26 @@ func Settle(ctx context.Context, db Executor, account int, seen []Edit, removed 
 	return nil
 }
 
+// ErrOwnerRowsInTheWay refuses to move a profile's edits onto a sync ID that
+// carries an owner's rows: a removal the owner made there must keep hiding it.
+var ErrOwnerRowsInTheWay = errors.New("the owner's edits are recorded under that sync ID")
+
 // Move moves the edit rows of the profile with sync ID from to sync ID to,
 // when a set gives the profile a new ID: an owner's override and the
-// person's marks follow the profile. Rows already under to name a profile
-// that no longer exists (to was free to take) and give way.
+// person's marks follow the profile. Rows of the person's own already under
+// to name a profile that no longer exists (to was free to take) and give
+// way; an owner's row there refuses the move.
 func Move(ctx context.Context, db Executor, account int, from, to string) error {
 	if from == to {
 		return nil
+	}
+	var owner bool
+	if err := db.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM profile_set_edits WHERE user_id = $1 AND sync_id = $2::uuid AND by = 'owner')`,
+		account, to).Scan(&owner); err != nil {
+		return fmt.Errorf("moving profile edits: %w", err)
+	}
+	if owner {
+		return ErrOwnerRowsInTheWay
 	}
 	if _, err := db.Exec(ctx, `DELETE FROM profile_set_edits WHERE user_id = $1 AND sync_id = $2::uuid`, account, to); err != nil {
 		return fmt.Errorf("moving profile edits: %w", err)

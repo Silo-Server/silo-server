@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"slices"
 	"strings"
 	"sync"
@@ -431,6 +432,14 @@ func TestProfileSetOwnerOverridesDB(t *testing.T) {
 			}
 		}
 	})
+	t.Run("the main profile can't take a sync_id the owner removed", func(t *testing.T) {
+		before := f.state(t)
+		_, err := f.applySeen(t, setDoc(t, 7, main.with("sync_id", guest.syncID()), kid), f.held(t).EditsToken)
+		assertSetField(t, err, "set.items[0].sync_id")
+		if f.state(t) != before || !slices.Equal(f.held(t).HiddenByOwner, []string{guest.syncID()}) {
+			t.Fatal("the refused set wrote, or the profile is no longer hidden")
+		}
+	})
 }
 
 func pinMatches(hash, pin string) bool {
@@ -448,67 +457,220 @@ func sameOverrides(got, want []ProfileSetOverride) bool {
 	})
 }
 
-// TestProfileSetEditsRaceSetDB: writes that record edits, racing a set,
-// finish without a deadlock. It catches a lock-order mistake in the edit
-// rows, which every such transaction locks last.
+// TestProfileSetEditsRaceSetDB: writes that record edits, racing sets and
+// then an account delete, finish with only the outcomes such a race allows,
+// lose no edit, and leave no row of a deleted account. It catches a
+// lock-order mistake in the edit rows (a deadlock, which the set retries but
+// an edit does not), a mark a set settled without seeing it, and an edit row
+// that outlives its account.
 func TestProfileSetEditsRaceSetDB(t *testing.T) {
 	f := newEditsFixture(t)
-	main, kid, extra := newSetItem("Parent"), newSetItem("Kid"), newSetItem("Extra")
+	language := settingskeys.PlaybackAudioLanguage
+	main, extra := newSetItem("Parent"), newSetItem("Extra")
+	kid := newSetItem("Kid").with("settings", map[string]any{language: "en"})
 	f.mustApply(t, setDoc(t, 1, main, kid, extra))
 	kidID := f.profileBySyncID(t, kid.syncID()).ID
 	extraID := f.profileBySyncID(t, extra.syncID()).ID
 	ref := testAvatarRef(f.userID, kidID)
-
-	const rounds = 15
-	var wg sync.WaitGroup
-	errs := make(chan error, 5*rounds)
-	run := func(fn func(i int) error) {
-		wg.Go(func() {
-			for i := range rounds {
-				errs <- fn(i)
-			}
-		})
+	version := 1
+	var versionMu sync.Mutex
+	nextVersion := func() int {
+		versionMu.Lock()
+		defer versionMu.Unlock()
+		version++
+		return version
 	}
-	run(func(i int) error { // the set, with the token it read
-		held, err := f.handler.HeldProfileSet(t.Context(), f.userID)
-		if err != nil {
+	setting := userstore.SettingIdentity{Key: language, Scope: "profile", ProfileID: kidID}
+
+	racers := map[string]func(i int) error{
+		"set": func(int) error {
+			held, err := f.handler.HeldProfileSet(t.Context(), f.userID)
+			if err != nil {
+				return err
+			}
+			_, err = f.applySeen(t, setDoc(t, nextVersion(), main, kid), held.EditsToken)
 			return err
+		},
+		"web edit": func(i int) error {
+			_, err := f.handler.UpdateProfile(f.account(), ProfileUpdateCommand{UserID: f.userID, ProfileID: kidID,
+				ActiveProfileID: f.primary, VerifyProfile: noProfileVerification, Request: ProfileUpdateRequest{Name: new(fmt.Sprintf("Kid %d", i))}})
+			return err
+		},
+		"admin edit": func(i int) error {
+			_, err := f.handler.UpdateProfile(f.admin(), ProfileUpdateCommand{UserID: f.userID, ProfileID: kidID, AccountAdmin: true,
+				Request: ProfileUpdateRequest{RequestsBlocked: new(i%2 == 0)}})
+			return err
+		},
+		"avatar upload": func(i int) error {
+			return f.store.UpdateProfile(f.account(), kidID, userstore.UpdateProfileInput{Avatar: &ref, AvatarSourceSHA256: new(fmt.Sprintf("%064d", i))})
+		},
+		"pool setting write": func(i int) error {
+			_, err := f.store.UpsertSettingValue(f.account(), setting, json.RawMessage([]string{`"fr"`, `"de"`}[i%2]))
+			return err
+		},
+		"profile delete": func(i int) error {
+			if i > 0 {
+				return nil
+			}
+			return f.handler.DeleteProfile(f.account(), ProfileDeleteCommand{UserID: f.userID, ProfileID: extraID,
+				ActiveProfileID: f.primary, VerifyProfile: noProfileVerification})
+		},
+	}
+	race := func(t *testing.T, rounds int, also func() error, allowed func(racer string, err error) bool) {
+		t.Helper()
+		var wg sync.WaitGroup
+		var mu sync.Mutex
+		var unexpected []string
+		check := func(name string, err error) {
+			if err != nil && !allowed(name, err) {
+				mu.Lock()
+				unexpected = append(unexpected, name+": "+err.Error())
+				mu.Unlock()
+			}
 		}
-		_, err = f.applySeen(t, setDoc(t, 2+i, main, kid), held.EditsToken)
-		if isStale(err) {
-			return nil
+		for name, fn := range racers {
+			wg.Go(func() {
+				for i := range rounds {
+					check(name, fn(i))
+				}
+			})
 		}
-		return err
-	})
-	run(func(i int) error { // the person's web edit
-		_, err := f.handler.UpdateProfile(f.account(), ProfileUpdateCommand{UserID: f.userID, ProfileID: kidID,
-			ActiveProfileID: f.primary, VerifyProfile: noProfileVerification, Request: ProfileUpdateRequest{Name: new(fmt.Sprintf("Kid %d", i))}})
-		return err
-	})
-	run(func(i int) error { // an admin edit
-		_, err := f.handler.UpdateProfile(f.admin(), ProfileUpdateCommand{UserID: f.userID, ProfileID: kidID, AccountAdmin: true,
-			Request: ProfileUpdateRequest{IsChild: new(i%2 == 0)}})
-		return err
-	})
-	run(func(i int) error { // an avatar upload
-		return f.store.UpdateProfile(f.account(), kidID, userstore.UpdateProfileInput{Avatar: &ref, AvatarSourceSHA256: new(fmt.Sprintf("%064d", i))})
-	})
-	run(func(i int) error { // a profile delete, once
-		if i > 0 {
-			return nil
+		if also != nil {
+			wg.Go(func() { check("account delete", also()) })
 		}
-		return f.handler.DeleteProfile(f.account(), ProfileDeleteCommand{UserID: f.userID, ProfileID: extraID,
-			ActiveProfileID: f.primary, VerifyProfile: noProfileVerification})
+		wg.Wait()
+		if len(unexpected) > 0 {
+			t.Fatalf("unexpected outcomes: %v", unexpected)
+		}
+	}
+
+	t.Run("no edit is lost to a set racing it", func(t *testing.T) {
+		race(t, 15, nil, func(racer string, err error) bool {
+			// A set built before an edit is stale; one whose household kept
+			// changing gives up after its retries. The set removes Extra, so
+			// deleting it can find it gone.
+			var apiErr *APIError
+			return isStale(err) || (errors.As(err, &apiErr) && (apiErr.Code == "conflict" ||
+				(racer == "profile delete" && apiErr.Status == http.StatusNotFound)))
+		})
+		// The set gives the kid profile its item's values. A value it does
+		// not hold now was edited after the last set accepted, so its edit
+		// is recorded: a mark the set never saw, or an override.
+		p := f.profileBySyncID(t, kid.syncID())
+		var stored string
+		if err := f.pool.QueryRow(t.Context(), `SELECT value::text FROM user_setting_values WHERE user_id = $1 AND profile_id = $2 AND key = $3 AND scope = 'profile'`,
+			f.userID, kidID, language).Scan(&stored); err != nil {
+			t.Fatal(err)
+		}
+		recorded := map[string]bool{}
+		for _, e := range f.edits(t) {
+			if e.SyncID == kid.syncID() && e.Open() {
+				recorded[e.Field] = true
+			}
+		}
+		for field, differs := range map[string]bool{
+			profileedits.FieldName:            p.Name != "Kid",
+			profileedits.FieldPicture:         p.Avatar != "",
+			profileedits.FieldRequestsBlocked: p.RequestsBlocked,
+			"settings." + language:            stored != `"en"`,
+		} {
+			if differs && !recorded[field] {
+				t.Errorf("%s differs from the set's value with no edit recorded", field)
+			}
+		}
 	})
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == sqlstateDeadlockDetected {
-			t.Fatalf("deadlock: %v", err)
+	t.Run("an account deleted during the race leaves no edit row", func(t *testing.T) {
+		race(t, 10, func() error { return auth.NewUserRepository(f.pool).Delete(t.Context(), f.userID) }, func(racer string, err error) bool {
+			// Once the account is gone: the set finds no account; the
+			// profile service finds no account or profile (404), no main
+			// profile to manage the household as (403 profile_management),
+			// or a profile gone between its read and its write (500); the
+			// store finds no profile; a setting insert has no account.
+			var apiErr *APIError
+			var pgErr *pgconn.PgError
+			if errors.As(err, &apiErr) {
+				switch {
+				case apiErr.Status == http.StatusNotFound, apiErr.Code == "conflict",
+					racer == "web edit" && apiErr.Code == "profile_management",
+					racer == "admin edit" && apiErr.Code == "internal_error":
+					return true
+				}
+				return false
+			}
+			return isStale(err) || errors.Is(err, userstore.ErrProfileSetAccountGone) ||
+				(errors.As(err, &pgErr) && pgErr.Code == "23503") || strings.Contains(err.Error(), "not found")
+		})
+		var left int
+		if err := f.pool.QueryRow(t.Context(), `SELECT count(*) FROM profile_set_edits WHERE user_id = $1`, f.userID).Scan(&left); err != nil {
+			t.Fatal(err)
 		}
-		if err != nil && !errors.Is(err, context.Canceled) {
-			t.Logf("non-deadlock error: %v", err)
+		if left != 0 {
+			t.Fatalf("%d edit rows outlived the deleted account", left)
 		}
+	})
+}
+
+// TestProfileEditAccountDeleteRaceDB: an edit recorded while the account is
+// being deleted leaves no row once both commit. The account delete runs
+// first and stays open; the recorder, with no lock of its own taken yet,
+// must wait for it and then find no profile. It catches an edit row that
+// outlives its account for good, as the table has no foreign key.
+func TestProfileEditAccountDeleteRaceDB(t *testing.T) {
+	f := newEditsFixture(t)
+	main, kid := newSetItem("Parent"), newSetItem("Kid")
+	f.mustApply(t, setDoc(t, 1, main, kid))
+	kidID := f.profileBySyncID(t, kid.syncID()).ID
+	ctx := t.Context()
+
+	deleting, err := f.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = deleting.Rollback(context.Background()) }()
+	if _, err := deleting.Exec(ctx, `DELETE FROM users WHERE id = $1`, f.userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := profileedits.DeleteAccount(ctx, deleting, f.userID); err != nil {
+		t.Fatal(err)
+	}
+
+	recorded := make(chan error, 1)
+	go func() {
+		recorded <- profileedits.RecordFields(f.account(), f.pool, f.userID, kidID, []string{profileedits.FieldName})
+	}()
+	// The recorder must be waiting on the delete's lock; one that is not
+	// has already inserted from its snapshot.
+	ticker := time.NewTicker(20 * time.Millisecond)
+	defer ticker.Stop()
+	deadline := time.After(10 * time.Second)
+	waiting := false
+	for !waiting {
+		select {
+		case err := <-recorded:
+			recorded <- err
+			waiting = true // finished without waiting; the check below fails
+		case <-deadline:
+			t.Fatal("the recorder neither finished nor waited")
+		case <-ticker.C:
+			var n int
+			if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+				WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%INSERT INTO profile_set_edits%'`).Scan(&n); err != nil {
+				t.Fatal(err)
+			}
+			waiting = n > 0
+		}
+	}
+	if err := deleting.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := <-recorded; err != nil {
+		t.Fatal(err)
+	}
+	var left int
+	if err := f.pool.QueryRow(ctx, `SELECT count(*) FROM profile_set_edits WHERE user_id = $1`, f.userID).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 0 {
+		t.Fatalf("%d edit rows outlived the deleted account", left)
 	}
 }

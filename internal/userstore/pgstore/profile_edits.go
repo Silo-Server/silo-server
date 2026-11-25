@@ -179,6 +179,11 @@ func inRecordingTx[T any](ctx context.Context, s *PostgresUserStore, id userstor
 		return fn(s.pool)
 	}
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		// The account's lock first, as every recording writer and an
+		// account deletion take it (UpdateProfile).
+		if err := lockPreferenceSettings(ctx, tx, s.userID); err != nil {
+			return err
+		}
 		var err error
 		out, err = fn(tx)
 		return err

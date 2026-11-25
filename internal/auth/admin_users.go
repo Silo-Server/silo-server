@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/Silo-Server/silo-server/internal/auditmutation"
 	"github.com/Silo-Server/silo-server/internal/models"
 	"github.com/Silo-Server/silo-server/internal/profileedits"
-	"github.com/jackc/pgx/v5"
+	"github.com/Silo-Server/silo-server/internal/userstore/pgstore"
 )
 
 var ErrAdminUserRevision = errors.New("administrator account revision changed")
@@ -47,6 +49,14 @@ func (r *UserRepository) MutateAdminAccount(ctx context.Context, id int, revisio
 	defer func() { _ = tx.Rollback(context.WithoutCancel(ctx)) }()
 	if _, err = tx.Exec(ctx, `LOCK TABLE access_groups IN SHARE MODE`); err != nil {
 		return AdminUserSnapshot{}, err
+	}
+	// A deletion takes the account's profile locks before its row, as every
+	// profile writer and the profile set take them first, so it runs before
+	// or after them, never between a write and the edit it records.
+	if input == nil {
+		if err = pgstore.LockAccountForImport(ctx, tx, id); err != nil {
+			return AdminUserSnapshot{}, err
+		}
 	}
 	current, err := adminUserSnapshot(tx.QueryRow(ctx, `SELECT `+allColumns+`, admin_revision FROM users WHERE id=$1 FOR UPDATE`, id))
 	if err != nil {

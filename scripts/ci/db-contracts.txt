@@ -1261,6 +1261,7 @@
 ./internal/api/handlers TestProfileEditRecorderDB
 ./internal/api/handlers TestProfileSetOwnerOverridesDB
 ./internal/api/handlers TestProfileSetEditsRaceSetDB
+./internal/api/handlers TestProfileEditAccountDeleteRaceDB
 
 # A scan request for a scope with an active run joins that run without a
 # duplicate-key ERROR, and queues a new run if that one finished meanwhile

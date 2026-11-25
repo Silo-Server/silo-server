@@ -68,6 +68,11 @@ func planProfileSet(doc *profileSetDoc, rows []userstore.ProfileSetRow, limit in
 	}
 	claimed := map[string]bool{}
 	isHidden := func(i int) bool { return i > 0 && hidden[doc.Items[i].SyncID] && bySyncID[doc.Items[i].SyncID] == nil }
+	// The main profile can't take a sync ID the owner removed here: the
+	// removal would stop hiding it, and a later set could bring it back.
+	if first := doc.Items[0].SyncID; hidden[first] && bySyncID[first] == nil {
+		return nil, profileSetFieldError("set.items[0].sync_id", "The owner of this server removed the profile with this sync_id here; the main profile can't take it.")
+	}
 	for i, item := range doc.Items {
 		if isHidden(i) {
 			plan.hidden = append(plan.hidden, i)
