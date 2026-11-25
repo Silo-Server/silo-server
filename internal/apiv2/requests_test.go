@@ -19,6 +19,8 @@ type fakeRequests struct {
 	err      error
 	// detailDownload is the download progress GetDetail reports.
 	detailDownload *mediarequests.DownloadProgress
+	// options is what RequesterOptions offers.
+	options []mediarequests.RequesterOption
 
 	lastViewer mediarequests.Viewer
 	lastFilter mediarequests.ListFilter
@@ -95,6 +97,13 @@ func (f *fakeRequests) GetDetail(_ context.Context, viewer mediarequests.Viewer,
 		Recommendations: []mediarequests.MediaResult{fixtureResult(950)}, Availability: mediarequests.AvailabilityAvailable,
 		LibraryContentID: "movie:heat-1995", Request: mediarequests.RequestState{Reason: "already_available", Download: f.detailDownload},
 	}, nil
+}
+
+func (f *fakeRequests) RequesterOptions(_ context.Context, viewer mediarequests.Viewer, mediaType mediarequests.MediaType, tmdbID int) (mediarequests.RequesterOffer, error) {
+	if err := f.record(viewer, "options", mediaType, tmdbID); err != nil {
+		return mediarequests.RequesterOffer{}, err
+	}
+	return mediarequests.RequesterOffer{Token: "offer-1", Options: f.options}, nil
 }
 
 func (f *fakeRequests) CreateRequest(_ context.Context, viewer mediarequests.Viewer, input mediarequests.CreateRequestInput) (*mediarequests.Request, error) {

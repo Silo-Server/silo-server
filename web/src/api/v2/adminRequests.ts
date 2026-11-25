@@ -8,6 +8,8 @@ import type {
   LoadRequestIntegrationOptionsRequest,
   MediaRequest,
   RequestIntegration,
+  RequestOptionOffer,
+  RequestOptionsToSend,
   RequestMediaType,
   RequestSettings,
   RequestUserLimit,
@@ -400,10 +402,16 @@ export function cancelAdminRequestV2(id: string, reason?: string) {
     mediaRequestFromV2,
   );
 }
-export function approveAdminRequestV2(id: string) {
-  return v2("POST /api/v2/admin/requests/{id}/approve", { path: { id }, body: {} }).then(
-    mediaRequestFromV2,
-  );
+/** Approves a request, with the admin's picks from listAdminRequestOptionsV2 when there are any. */
+export function approveAdminRequestV2(id: string, chosen?: RequestOptionsToSend) {
+  return v2("POST /api/v2/admin/requests/{id}/approve", {
+    path: { id },
+    body: chosen ?? {},
+  }).then(mediaRequestFromV2);
+}
+/** The download server settings an admin may choose when approving a request. */
+export function listAdminRequestOptionsV2(id: string): Promise<RequestOptionOffer> {
+  return v2("GET /api/v2/admin/requests/{id}/options", { path: { id } });
 }
 export function retryAdminRequestV2(id: string) {
   return v2("POST /api/v2/admin/requests/{id}/retry", { path: { id }, body: {} }).then(
