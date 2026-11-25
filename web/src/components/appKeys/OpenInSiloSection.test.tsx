@@ -38,6 +38,7 @@ function problem(type: string, status: number) {
     title: type,
     status,
     detail: type,
+    instance: "urn:silo:request:test",
   });
 }
 
