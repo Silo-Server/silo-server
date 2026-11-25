@@ -544,7 +544,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 			pd.VideoTracks = append(pd.VideoTracks, track)
 			if pd.CodecVideo == "" {
 				pd.CodecVideo = s.CodecName
-				pd.Resolution = mapResolution(s.Width, s.Height)
+				pd.Resolution = ResolutionLabel(s.Width, s.Height)
 				pd.HDR = isHDR(s.ColorTransfer) || normalized.DVProfile > 0 || track.HDR10Plus
 			}
 		case "audio":
@@ -579,7 +579,7 @@ func convertProbeData(raw *ffprobeOutput) *ProbeData {
 				Resolution:       subtitleResolutionLabel(s),
 				Forced:           s.Disposition.Forced == 1,
 				Default:          s.Disposition.Default == 1,
-				HearingImpaired:  dispositionFlag(s.Tags, "hearing_impaired"),
+				HearingImpaired:  s.Disposition.HearingImpaired == 1,
 			}
 			pd.SubtitleTracks = append(pd.SubtitleTracks, track)
 		}
@@ -1418,14 +1418,6 @@ func subtitleResolutionLabel(s ffprobeStream) string {
 	return fmt.Sprintf("%dx%d", s.Width, s.Height)
 }
 
-func dispositionFlag(tags map[string]string, key string) bool {
-	if tags == nil {
-		return false
-	}
-	value := strings.TrimSpace(strings.ToLower(tags[key]))
-	return value == "1" || value == "true" || value == "yes"
-}
-
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {
@@ -1435,10 +1427,12 @@ func firstNonEmpty(values ...string) string {
 	return ""
 }
 
-// mapResolution converts video dimensions to a standard resolution string.
-// Uses upper-bound bucketing (similar to Jellyfin) checking both width and
-// height, which correctly handles ultra-wide and non-standard aspect ratios.
-func mapResolution(width, height int) string {
+// ResolutionLabel converts video dimensions to the standard resolution label
+// stored on media_files.resolution. Uses upper-bound bucketing (similar to
+// Jellyfin) checking both width and height, which correctly handles
+// ultra-wide and non-standard aspect ratios. Admin Insights classifies
+// delivered frames with it so source and output share one scale.
+func ResolutionLabel(width, height int) string {
 	switch {
 	case width <= 0 && height <= 0:
 		return ""

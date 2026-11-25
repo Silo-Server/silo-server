@@ -179,6 +179,7 @@ type AdminHandler struct {
 	TopActivitySource            AdminTopActivitySource
 	TimeseriesSource             AdminTimeseriesSource
 	DownloadsStatsSource         AdminDownloadsStatsSource
+	InsightsSource               AdminInsightsSource
 	RedisClient                  *redis.Client // health reporting only; nil means this deployment runs without Redis
 	Config                       *config.Config
 	ArtworkBackend               string          // resolved artwork backend for the settings status; empty when unopened

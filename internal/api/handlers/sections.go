@@ -345,10 +345,14 @@ type sectionItemResponse struct {
 	// AdvisoryAge and AdvisorySource carry the item's advisory to the
 	// v2 card renderer. json:"-" because /api/v1 is frozen: the fields exist on
 	// the Go struct only, and apiv2 emits them under its own names.
-	AdvisoryAge            *int                   `json:"-"`
-	AdvisorySource         string                 `json:"-"`
-	Status                 string                 `json:"status"`
-	ShowStatus             string                 `json:"show_status,omitempty"`
+	AdvisoryAge    *int   `json:"-"`
+	AdvisorySource string `json:"-"`
+	Status         string `json:"status"`
+	ShowStatus     string `json:"show_status,omitempty"`
+	// EpisodeLabels and AirDate tell a v2 card to label a date-labeled
+	// series' episode by its air date. json:"-" because /api/v1 is frozen.
+	EpisodeLabels          string                 `json:"-"`
+	AirDate                string                 `json:"-"`
 	RatingIMDB             *float64               `json:"rating_imdb,omitempty"`
 	RatingTMDB             *float64               `json:"rating_tmdb,omitempty"`
 	RatingRTCritic         *int                   `json:"rating_rt_critic,omitempty"`
@@ -394,6 +398,9 @@ func (r *sectionItemResponse) applyEpisodeCardMeta(meta *sections.SectionItemMet
 	}
 	if r.ReleaseDate == nil {
 		r.ReleaseDate = meta.EpisodeAirDate
+	}
+	if r.EpisodeLabels != "" && r.AirDate == "" && meta.EpisodeAirDate != nil {
+		r.AirDate = *meta.EpisodeAirDate
 	}
 	r.EpisodeRatingTMDB = meta.RatingTMDB
 }
@@ -1616,6 +1623,7 @@ func sectionItemFromMediaItem(item *models.MediaItem) sectionItemResponse {
 		AdvisorySource:         item.AdvisorySource,
 		Status:                 item.Status,
 		ShowStatus:             item.ShowStatus,
+		EpisodeLabels:          item.EpisodeLabels,
 		RatingIMDB:             item.RatingIMDB,
 		RatingTMDB:             item.RatingTMDB,
 		RatingRTCritic:         item.RatingRTCritic,
@@ -1636,6 +1644,12 @@ func sectionItemFromMediaItem(item *models.MediaItem) sectionItemResponse {
 	}
 	if resp.Keywords == nil {
 		resp.Keywords = []string{}
+	}
+	if item.Type == itemTypeEpisode && item.EpisodeLabels != "" && item.ReleaseDate != nil {
+		// An episode catalog row's release date is its air date. Rows from
+		// the episode-target query carry it in their meta instead
+		// (applyEpisodeCardMeta).
+		resp.AirDate = *item.ReleaseDate
 	}
 	return resp
 }

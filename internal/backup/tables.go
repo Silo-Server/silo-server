@@ -52,7 +52,8 @@ const tableIntroFingerprints = "media_intro_fingerprints"
 // metadata, accounts and profiles with their data, and configuration.
 var restoredDataTables = strings.Fields(`
 	abs_bookmarks access_groups admin_dashboard_layouts admin_playback_history anime_ids
-	audiobook_series autoscan_settings autoscan_sources client_diagnostic_reports download_artifacts
+	audiobook_series autoscan_settings autoscan_sources client_diagnostic_reports dashboard_metric_daily
+	dashboard_node_egress_daily download_artifacts
 	download_subscriptions downloaded_subtitles downloads ebook_reader_annotations ebook_reader_config
 	ebook_reader_progress ebook_series embedded_subtitle_tracks episode_availability
 	episode_catalog_entries episode_libraries episode_localizations episodes external_subtitle_timings

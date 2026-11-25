@@ -249,6 +249,14 @@ POST /api/v2/admin/history-imports/sources/{id}/bulk-run	non-media
 DELETE /api/v2/admin/history-imports/sources/{id}/token	non-media
 PUT /api/v2/admin/history-imports/sources/{id}/token	non-media
 GET /api/v2/admin/history-imports/sources/{id}/users	non-media
+GET /api/v2/admin/insights/activity	non-media
+GET /api/v2/admin/insights/bandwidth	non-media
+GET /api/v2/admin/insights/capabilities	non-media
+GET /api/v2/admin/insights/devices	non-media
+GET /api/v2/admin/insights/library	non-media
+GET /api/v2/admin/insights/people	non-media
+GET /api/v2/admin/insights/titles	non-media
+GET /api/v2/admin/insights/titles/{content_id}	non-media
 GET /api/v2/admin/invitations	non-media
 POST /api/v2/admin/invitations	non-media
 GET /api/v2/admin/invitations/capabilities	non-media
@@ -348,6 +356,7 @@ PATCH /api/v2/admin/people/{id}	non-media
 POST /api/v2/admin/people/{id}/refresh	non-media
 GET /api/v2/admin/playback-history	non-media
 GET /api/v2/admin/playback-history/capabilities	non-media
+GET /api/v2/admin/playback-history/{session_id}	non-media
 GET /api/v2/admin/playback-routing/capabilities	non-media
 GET /api/v2/admin/plugins/capabilities	non-media
 GET /api/v2/admin/plugins/catalog	non-media
@@ -1327,6 +1336,14 @@ POST /api/v2/admin/history-imports/sources/{id}/bulk-run	non-media
 DELETE /api/v2/admin/history-imports/sources/{id}/token	non-media
 PUT /api/v2/admin/history-imports/sources/{id}/token	non-media
 GET /api/v2/admin/history-imports/sources/{id}/users	non-media
+GET /api/v2/admin/insights/activity	non-media
+GET /api/v2/admin/insights/bandwidth	non-media
+GET /api/v2/admin/insights/capabilities	non-media
+GET /api/v2/admin/insights/devices	non-media
+GET /api/v2/admin/insights/library	non-media
+GET /api/v2/admin/insights/people	non-media
+GET /api/v2/admin/insights/titles	non-media
+GET /api/v2/admin/insights/titles/{content_id}	non-media
 GET /api/v2/admin/invitations	non-media
 POST /api/v2/admin/invitations	non-media
 GET /api/v2/admin/invitations/capabilities	non-media
@@ -1426,6 +1443,7 @@ PATCH /api/v2/admin/people/{id}	non-media
 POST /api/v2/admin/people/{id}/refresh	non-media
 GET /api/v2/admin/playback-history	non-media
 GET /api/v2/admin/playback-history/capabilities	non-media
+GET /api/v2/admin/playback-history/{session_id}	non-media
 GET /api/v2/admin/playback-routing/capabilities	non-media
 GET /api/v2/admin/plugins/capabilities	non-media
 GET /api/v2/admin/plugins/catalog	non-media

@@ -245,6 +245,21 @@ listings here and on series and season parents apply the item-query predicates,
 `IsFavorite=true` included; studios, official ratings and genres are the
 series', and premiere dates are the episodes' air dates.
 
+A recursive `/Items` browse that lists `Episode` beside other types (such as
+`IncludeItemTypes=Episode,Movie&Recursive=true`) returns the other types first,
+then the episodes, each part in the requested sort, and `TotalRecordCount`
+counts both. Jellyfin interleaves the types by the sort key instead; listing
+the parts one after the other keeps paging stable at any `StartIndex`. Episodes
+keep their season as `ParentId`. As in Jellyfin, a type filter at the user root
+and an `IncludeItemTypes` that names `Episode` under a library `ParentId` search
+recursively even without `Recursive`. A non-recursive library browse whose
+`Episode` comes only from `ExcludeItemTypes` returns the library's direct
+children, which are never episodes. `IsFavorite=true` and an `Ids` list
+narrow both parts the same way, so `Ids` with a type filter that names
+`Episode` returns the named episodes. On such a lookup a series or season
+`ParentId` keeps only its own episodes, and a collection `ParentId` lists
+none of the named episodes.
+
 `/Shows/{id}/Episodes` accepts numeric `Season`, `SeasonId`, `StartItemId`,
 `StartIndex`, and `Limit`. As in Jellyfin 12.1, an explicit `SeasonId` selects
 its owning series and takes precedence over the path series and numeric season.

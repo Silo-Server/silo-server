@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Link } from "react-router";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { useAdminTimeseries } from "@/hooks/queries/admin/dashboardInsights";
@@ -18,6 +19,7 @@ import { buildEgressBands } from "./egressBands";
 import { TimeseriesChartBody } from "./timeseriesChart";
 import { buildTimeseriesPoints } from "./timeseriesSeries";
 import { useAppLanguage, useT } from "@/i18n";
+import { widgetRangeToInsightsRange } from "@/pages/admin-insights/insightsHelpers";
 
 /**
  * Egress the deployment served over the chosen window, in Mbps.
@@ -103,6 +105,12 @@ export function EgressWidget() {
             onChange={setView}
           />
         ) : null}
+        <Link
+          to={`/admin/insights?tab=bandwidth&range=${widgetRangeToInsightsRange(range)}`}
+          className="text-muted-foreground hover:text-primary hidden text-[0.6875rem] whitespace-nowrap transition-colors @lg/card-header:inline"
+        >
+          {t("web.admin.dashboard.widgets.openInsights")}
+        </Link>
         <WidgetRangePicker />
       </WidgetHeader>
       <CardContent className="flex min-h-0 flex-1 flex-col">

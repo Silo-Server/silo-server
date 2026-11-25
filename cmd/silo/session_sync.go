@@ -35,6 +35,7 @@ func buildLiveSessionSync(s *playback.Session, reportingNode string) worker.Sess
 		MediaFileID:             s.MediaFileID,
 		RequestedMediaFileID:    s.RequestedMediaFileID,
 		PlayMethod:              string(s.PlayMethod),
+		PlanID:                  s.PlanID,
 		ReportingNode:           reportingNode,
 		ClientIP:                s.ClientIP,
 		StreamLocation:          s.StreamLocation,

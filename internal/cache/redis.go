@@ -75,6 +75,9 @@ const (
 	EventAuditLogAppended            = "audit_log_appended"
 	EventEventsNotification          = "events_notification"
 	EventPlaybackControlRelay        = "playback_control_relay"
+	// EventItemUpdated is published on ChannelAdmin after an admin edits an
+	// item's metadata.
+	EventItemUpdated = "item:updated"
 	// EventPluginsChanged is published on ChannelAdmin by the API server after
 	// every plugin lifecycle change (install, enable, disable, config save,
 	// auto-update, uninstall) so proxy nodes running resident plugins from the

@@ -136,7 +136,7 @@ func TestLoginAccountNameWithHashDB(t *testing.T) {
 	missing := fmt.Sprintf("jfnohash-%d#1234", suffix)
 	defer svc.SetSignInAttempts(nil)
 	for _, part := range []string{"whole", "prefix"} {
-		svc.SetSignInAttempts(ratelimit.NewMemoryAttemptLimiter(ratelimit.AttemptPolicy{MaxAttempts: 1, Window: time.Minute}))
+		svc.SetSignInAttempts(ratelimit.NewMemorySignInLimiter(ratelimit.AttemptPolicy{MaxAttempts: 1, Window: time.Minute}, ratelimit.SignInSourcePolicy))
 		var throttled []bool
 		for _, name := range []string{single.Username, missing} {
 			lock := name
@@ -152,7 +152,7 @@ func TestLoginAccountNameWithHashDB(t *testing.T) {
 		}
 	}
 
-	svc.SetSignInAttempts(ratelimit.NewMemoryAttemptLimiter(ratelimit.AttemptPolicy{MaxAttempts: 2, Window: time.Minute}))
+	svc.SetSignInAttempts(ratelimit.NewMemorySignInLimiter(ratelimit.AttemptPolicy{MaxAttempts: 2, Window: time.Minute}, ratelimit.SignInSourcePolicy))
 	// Successful profile sign-ins clear what they spend, so they never lock.
 	for range 3 {
 		signIn(plain.Username+"#Kid", plain, "Kid")

@@ -12,27 +12,51 @@ import (
 )
 
 // AdminPlaybackHistoryService is the slice of *handlers.AdminHandler
-// listAdminPlaybackHistory uses.
+// listAdminPlaybackHistory and getAdminPlaybackHistoryEntry use.
 type AdminPlaybackHistoryService interface {
 	ListAdminPlaybackHistoryPage(context.Context, handlers.AdminPlaybackHistoryFilter, *handlers.AdminPlaybackHistoryPageKey, int) (handlers.AdminPlaybackHistoryPage, error)
+	ReadAdminPlaybackHistoryEntry(context.Context, string) (*handlers.AdminPlaybackHistoryRow, error)
 }
 
-// AdminPlaybackHistoryListInput is the listAdminPlaybackHistory query: the v1
-// filters plus cursor paging in place of offset.
+// AdminPlaybackHistoryListInput is the listAdminPlaybackHistory query: the
+// original filters plus rich analytics facets and cursor paging.
 type AdminPlaybackHistoryListInput struct {
 	LimitParam
-	Cursor      string `query:"cursor" maxLength:"8192" doc:"Opaque cursor from page.next_cursor"`
-	UserID      ID     `query:"user_id" doc:"Only attempts by this login account"`
-	ProfileID   string `query:"profile_id" maxLength:"1024" doc:"Only attempts by this household profile"`
-	MediaItemID string `query:"media_item_id" maxLength:"1024" doc:"Only attempts of this catalog item"`
-	Completed   string `query:"completed" enum:"all,true,false" default:"all" doc:"Completion filter; all returns every finalized attempt"`
-	EndedAfter  string `query:"ended_after" format:"date-time" doc:"Only attempts that ended at or after this instant (inclusive)"`
-	EndedBefore string `query:"ended_before" format:"date-time" doc:"Only attempts that ended strictly before this instant (exclusive), so windows that share a bound never list an attempt twice"`
+	Cursor           string `query:"cursor" maxLength:"8192" doc:"Opaque cursor from page.next_cursor"`
+	UserID           ID     `query:"user_id" doc:"Only attempts by this login account"`
+	ProfileID        string `query:"profile_id" maxLength:"1024" doc:"Only attempts by this household profile"`
+	MediaItemID      string `query:"media_item_id" maxLength:"1024" doc:"Only attempts of this catalog item"`
+	SeriesID         string `query:"series_id" maxLength:"1024" doc:"Only attempts of episodes of this series"`
+	LibraryID        ID     `query:"library_id" doc:"Only attempts of media belonging to this library"`
+	Completed        string `query:"completed" enum:"all,true,false" default:"all" doc:"Completion filter; all returns every finalized attempt"`
+	EndedAfter       string `query:"ended_after" format:"date-time" doc:"Only attempts that ended at or after this instant (inclusive)"`
+	EndedBefore      string `query:"ended_before" format:"date-time" doc:"Only attempts that ended strictly before this instant (exclusive), so windows that share a bound never list an attempt twice"`
+	StartedAfter     string `query:"started_after" format:"date-time" doc:"Only attempts that started at or after this instant (inclusive)"`
+	StartedBefore    string `query:"started_before" format:"date-time" doc:"Only attempts that started strictly before this instant (exclusive)"`
+	Search           string `query:"search" maxLength:"256" doc:"Case-insensitive search across media title, series title, account, profile, client, platform, client IP, or session ID"`
+	PlayMethod       string `query:"play_method" enum:"all,direct,remux,transcode" default:"all" doc:"Filter by finalized play method"`
+	DevicePlatform   string `query:"device_platform" maxLength:"128" doc:"Filter by reported device platform (case-insensitive; 'unknown' matches rows without a platform)"`
+	ClientName       string `query:"client_name" maxLength:"256" doc:"Filter by reported client name (case-insensitive; 'unknown' matches rows without a client name)"`
+	SourceVideoCodec string `query:"source_video_codec" maxLength:"64" doc:"Filter by source media file video codec (case-insensitive; 'unknown' matches rows without a probed video codec)"`
+	SubtitleBurnIn   string `query:"subtitle_burn_in" enum:"all,true,false" default:"all" doc:"Filter by whether the finalized session used subtitle burn-in"`
+	StreamLocation   string `query:"stream_location" enum:"all,local,remote" default:"all" doc:"Filter by negotiated stream policy location"`
+	AdaptationReason string `query:"adaptation_reason" maxLength:"128" doc:"Filter to attempts carrying this canonical adaptation reason code"`
+}
+
+// AdminPlaybackHistoryEntryInput identifies one finalized playback attempt.
+type AdminPlaybackHistoryEntryInput struct {
+	SessionID string `path:"session_id" maxLength:"256" doc:"Playback session identifier"`
+}
+
+// AdminPlaybackHistoryEntryOutput wraps one finalized playback attempt.
+type AdminPlaybackHistoryEntryOutput struct {
+	Body AdminPlaybackHistoryEntry
 }
 
 // AdminPlaybackHistoryEntry is one finalized playback attempt as an
 // administrator sees it: the account and profile that played, the item and
-// file, the recorded timing, and the client and device that played it.
+// file, the recorded timing, the delivered route facts, and the client and
+// device that played it.
 type AdminPlaybackHistoryEntry struct {
 	SessionID          string   `json:"session_id" doc:"Playback session identifier; unique per attempt"`
 	UserID             ID       `json:"user_id"`
@@ -69,6 +93,39 @@ type AdminPlaybackHistoryEntry struct {
 	EndReason            *string                                 `json:"end_reason" nullable:"true" enum:"stopped,terminated,expired,aborted,replaced" doc:"Why the attempt ended: stopped by the viewer's client, terminated by an administrator, expired after the client went quiet, aborted by the server, or replaced by a new session for the same play (a Jellyfin client switched play method or version). Null when unknown, which includes every attempt recorded before it existed and a server teardown the client never recovered from"`
 	Subtitle             NullableObject[PlaybackSessionSubtitle] `json:"subtitle" doc:"The subtitle the play's plan delivered when it ended, in the live session row's shape; null when it showed none, for a Jellyfin-protocol or Audiobookshelf play, and on rows recorded before the server kept it"`
 	LifecycleSeq         *int64                                  `json:"lifecycle_seq" nullable:"true" doc:"Sequence number of the end this row records on the sessions channel: higher than every earlier number for the session, so the row supersedes any live row or session.* event with a lower one. Null on rows recorded before lifecycle numbers existed"`
+
+	RouteFactsRecorded       bool     `json:"route_facts_recorded" doc:"True when delivered route facts were captured at finalization; false on pre-upgrade rows"`
+	TargetVideoCodec         *string  `json:"target_video_codec" nullable:"true" doc:"Delivered output video codec when transcoded; null otherwise or on pre-upgrade rows"`
+	TargetResolution         *string  `json:"target_resolution" nullable:"true" doc:"Delivered output resolution when transcoded; null otherwise or on pre-upgrade rows"`
+	TargetAudioCodec         *string  `json:"target_audio_codec" nullable:"true" doc:"Delivered output audio codec when audio was transcoded; null otherwise or on pre-upgrade rows"`
+	TargetAudioChannels      *int     `json:"target_audio_channels" nullable:"true" doc:"Delivered output audio channel count when known; null otherwise"`
+	OutputContainer          *string  `json:"output_container" nullable:"true" doc:"Delivered muxer/container (e.g. fmp4, mpegts); null when unreported"`
+	OutputProtocol           *string  `json:"output_protocol" nullable:"true" doc:"Delivered streaming protocol (e.g. hls, http); null when unreported"`
+	TargetBitrateKbps        *int     `json:"target_bitrate_kbps" nullable:"true" doc:"Target bitrate cap in kbps when transcoded; null otherwise"`
+	TranscodeHWAccel         *string  `json:"transcode_hw_accel" nullable:"true" doc:"Effective hardware acceleration backend (vaapi, qsv, nvenc, videotoolbox, none); null when not transcoded or unknown"`
+	ToneMapMode              *string  `json:"tone_map_mode" nullable:"true" doc:"Effective HDR-to-SDR tone-mapping executor (hardware, software); null when not tone-mapped"`
+	AdaptationReasons        []string `json:"adaptation_reasons" doc:"Canonical reasons why playback adapted away from direct play; empty for direct play or pre-upgrade rows"`
+	ReportingNode            *string  `json:"reporting_node" nullable:"true" doc:"API node identity that finalized or synced the session; null on pre-upgrade rows"`
+	StreamLocation           *string  `json:"stream_location" nullable:"true" enum:"local,remote" doc:"Negotiated bitrate-policy network classification (local or remote); null when unknown"`
+	CompatOrigin             *bool    `json:"compat_origin" nullable:"true" doc:"True when the play originated on the Jellyfin compatibility surface; null on pre-upgrade rows"`
+	IsJellyfinClient         bool     `json:"is_jellyfin_client" doc:"True when compat_origin is true or client_name identifies a Jellyfin-ecosystem client"`
+	RoutingExecution         *string  `json:"routing_execution" nullable:"true" doc:"Committed execution placement (e.g. local, remote_transcode); null when unreported"`
+	RoutingExecutionNodeID   *ID      `json:"routing_execution_node_id" nullable:"true" doc:"Stream node ID that executed transcoding when offloaded; null otherwise"`
+	RoutingExecutionNodeName *string  `json:"routing_execution_node_name" nullable:"true" doc:"Display name of the execution stream node when still registered; null otherwise"`
+	RoutingEgress            *string  `json:"routing_egress" nullable:"true" doc:"Committed egress placement (e.g. api, proxy, transcode); null when unreported"`
+	RoutingEgressNodeID      *ID      `json:"routing_egress_node_id" nullable:"true" doc:"Stream node ID that served media bytes when offloaded; null otherwise"`
+	RoutingEgressNodeName    *string  `json:"routing_egress_node_name" nullable:"true" doc:"Display name of the egress stream node when still registered; null otherwise"`
+
+	SourceVideoCodec     *string `json:"source_video_codec" nullable:"true" doc:"Source media file video codec from catalog probe; null if file was removed or unprobed"`
+	SourceResolution     *string `json:"source_resolution" nullable:"true" doc:"Source media file resolution label from catalog probe; null if unavailable"`
+	SourceAudioCodec     *string `json:"source_audio_codec" nullable:"true" doc:"Source media file primary audio codec from catalog probe; null if unavailable"`
+	SourceAudioChannels  *int    `json:"source_audio_channels" nullable:"true" doc:"Source media file primary audio channel count; null if unavailable"`
+	SourceContainer      *string `json:"source_container" nullable:"true" doc:"Source media file container format; null if unavailable"`
+	SourceBitrateKbps    *int    `json:"source_bitrate_kbps" nullable:"true" doc:"Source media file overall bitrate in kbps; null if unavailable"`
+	SourceHDR            *bool   `json:"source_hdr" nullable:"true" doc:"Whether the source media file is HDR; null if unavailable"`
+	SourceVideoRangeType *string `json:"source_video_range_type" nullable:"true" doc:"Detailed source video range (e.g. HDR10, DOVI, HLG, SDR); null if unavailable"`
+	LibraryID            *ID     `json:"library_id" nullable:"true" doc:"Library ID owning the media file; null if file was removed"`
+	LibraryName          *string `json:"library_name" nullable:"true" doc:"Library display name owning the media file; null if file was removed"`
 }
 
 // AdminPlaybackHistoryCollection is the named envelope the contract carries.
@@ -101,9 +158,14 @@ type AdminPlaybackHistoryCapabilities struct {
 	EndReason        bool     `json:"end_reason" doc:"Entries carry end_reason"`
 	EndReasonValues  []string `json:"end_reason_values" doc:"Values end_reason may take"`
 	LifecycleSeq     bool     `json:"lifecycle_seq" doc:"Entries carry lifecycle_seq"`
+	RouteFacts       bool     `json:"route_facts" doc:"Entries carry delivered route facts, adaptation reasons, and joined source file specs"`
+	RichFilters      bool     `json:"rich_filters" doc:"The list accepts search, play_method, device_platform, client_name, source_video_codec, subtitle_burn_in, stream_location, adaptation_reason, library_id, started_after and started_before"`
+	SessionDetail    bool     `json:"session_detail" doc:"GET /api/v2/admin/playback-history/{session_id} reads one finalized session entry"`
+	SeriesFilter     bool     `json:"series_filter" doc:"The list accepts series_id"`
 }
 
 const opListAdminPlaybackHistory = "listAdminPlaybackHistory"
+const opGetAdminPlaybackHistoryEntry = "getAdminPlaybackHistoryEntry"
 
 // adminPlaybackHistoryCompletedAll is the completed filter value that lists every attempt.
 const adminPlaybackHistoryCompletedAll = "all"
@@ -127,18 +189,49 @@ func registerAdminPlaybackHistory(reg *Registry) {
 		out.Body.StreamDecisions = available
 		out.Body.EndReason = available
 		out.Body.LifecycleSeq = available
+		out.Body.RouteFacts = available
+		out.Body.RichFilters = available
+		out.Body.SessionDetail = available
+		out.Body.SeriesFilter = available
 		out.Body.EndReasonValues = make([]string, len(handlers.PlaybackEndReasons))
 		for i, reason := range handlers.PlaybackEndReasons {
 			out.Body.EndReasonValues[i] = string(reason)
 		}
 		return out, nil
 	})
+	detailOp := Operation{Operation: humaOp(http.MethodGet, Prefix+"/admin/playback-history/{session_id}", opGetAdminPlaybackHistoryEntry, "admin", "Read one finalized playback attempt with its delivered route facts and source file specs."), Class: ClassActingAdmin, ServiceBacked: true}
+	Register(reg, detailOp, func(ctx context.Context, in *AdminPlaybackHistoryEntryInput) (*AdminPlaybackHistoryEntryOutput, error) {
+		if reg.deps.AdminPlaybackHistory == nil {
+			return nil, unavailable("administration")
+		}
+		sessionID := strings.TrimSpace(in.SessionID)
+		if sessionID == "" {
+			return nil, NewProblem(TypeValidationFailed, "Session ID is required.")
+		}
+		row, err := reg.deps.AdminPlaybackHistory.ReadAdminPlaybackHistoryEntry(ctx, sessionID)
+		if err != nil {
+			return nil, NewProblem(TypeInternalError, "Unable to read playback history entry.")
+		}
+		if row == nil {
+			return nil, NewProblem(TypeNotFound, "Playback history entry not found.")
+		}
+		return &AdminPlaybackHistoryEntryOutput{Body: adminPlaybackHistoryEntryOf(*row)}, nil
+	})
 	op := Operation{Operation: humaOp(http.MethodGet, Prefix+"/admin/playback-history", opListAdminPlaybackHistory, "admin", "List finalized playback attempts across every account and profile, newest ended first. Each page is one consistent read; later pages read the live log."), Class: ClassActingAdmin, ServiceBacked: true}
 	Register(reg, op, func(ctx context.Context, in *AdminPlaybackHistoryListInput) (*AdminPlaybackHistoryCollectionOutput, error) {
 		if reg.deps.AdminPlaybackHistory == nil {
 			return nil, unavailable("administration")
 		}
-		filter := handlers.AdminPlaybackHistoryFilter{ProfileID: strings.TrimSpace(in.ProfileID), MediaItemID: strings.TrimSpace(in.MediaItemID)}
+		filter := handlers.AdminPlaybackHistoryFilter{
+			ProfileID:        strings.TrimSpace(in.ProfileID),
+			MediaItemID:      strings.TrimSpace(in.MediaItemID),
+			SeriesID:         strings.TrimSpace(in.SeriesID),
+			Search:           strings.TrimSpace(in.Search),
+			DevicePlatform:   strings.TrimSpace(in.DevicePlatform),
+			ClientName:       strings.TrimSpace(in.ClientName),
+			SourceVideoCodec: strings.TrimSpace(in.SourceVideoCodec),
+			AdaptationReason: strings.TrimSpace(in.AdaptationReason),
+		}
 		if in.UserID != "" {
 			n, err := intOfID(in.UserID)
 			if err != nil || n <= 0 {
@@ -146,15 +239,37 @@ func registerAdminPlaybackHistory(reg *Registry) {
 			}
 			filter.UserID = n
 		}
+		if in.LibraryID != "" {
+			n, err := intOfID(in.LibraryID)
+			if err != nil || n <= 0 {
+				return nil, NewProblem(TypeValidationFailed, "Invalid playback history library filter.")
+			}
+			filter.LibraryID = n
+		}
 		if in.Completed != "" && in.Completed != adminPlaybackHistoryCompletedAll {
 			// Huma already restricted the value to the enum.
 			filter.Completed = new(in.Completed == strconv.FormatBool(true))
+		}
+		if in.PlayMethod != "" && in.PlayMethod != adminPlaybackHistoryCompletedAll {
+			filter.PlayMethod = in.PlayMethod
+		}
+		if in.SubtitleBurnIn != "" && in.SubtitleBurnIn != adminPlaybackHistoryCompletedAll {
+			filter.SubtitleBurnIn = new(in.SubtitleBurnIn == strconv.FormatBool(true))
+		}
+		if in.StreamLocation != "" && in.StreamLocation != adminPlaybackHistoryCompletedAll {
+			filter.StreamLocation = in.StreamLocation
 		}
 		var p *Problem
 		if filter.EndedAfter, p = adminPlaybackHistoryInstant(in.EndedAfter, "ended_after"); p != nil {
 			return nil, p
 		}
 		if filter.EndedBefore, p = adminPlaybackHistoryInstant(in.EndedBefore, "ended_before"); p != nil {
+			return nil, p
+		}
+		if filter.StartedAfter, p = adminPlaybackHistoryInstant(in.StartedAfter, "started_after"); p != nil {
+			return nil, p
+		}
+		if filter.StartedBefore, p = adminPlaybackHistoryInstant(in.StartedBefore, "started_before"); p != nil {
 			return nil, p
 		}
 		filterJSON, _ := json.Marshal(struct {
@@ -209,7 +324,18 @@ func adminPlaybackHistoryInstant(raw, name string) (*time.Time, *Problem) {
 	return new(at.UTC()), nil
 }
 
+func nullableIDFromIntPtr(v *int) *ID {
+	if v == nil || *v <= 0 {
+		return nil
+	}
+	return new(IDFromInt(int64(*v)))
+}
+
 func adminPlaybackHistoryEntryOf(row handlers.AdminPlaybackHistoryRow) AdminPlaybackHistoryEntry {
+	reasons := row.AdaptationReasons
+	if reasons == nil {
+		reasons = []string{}
+	}
 	return AdminPlaybackHistoryEntry{
 		SessionID: row.SessionID, UserID: IDFromInt(int64(row.UserID)), Username: row.Username,
 		ProfileID: row.ProfileID, ProfileName: row.ProfileName, MediaItemID: row.MediaItemID,
@@ -223,5 +349,21 @@ func adminPlaybackHistoryEntryOf(row handlers.AdminPlaybackHistoryRow) AdminPlay
 		ClientName: row.ClientName, ClientVersion: row.ClientVersion,
 		VideoDecision: row.VideoDecision, AudioDecision: row.AudioDecision, EndReason: row.EndReason,
 		LifecycleSeq: row.LifecycleSeq, Subtitle: playbackSessionSubtitleOf(row.Subtitle),
+		RouteFactsRecorded: row.RouteFactsRecorded, TargetVideoCodec: row.TargetVideoCodec,
+		TargetResolution: row.TargetResolution, TargetAudioCodec: row.TargetAudioCodec,
+		TargetAudioChannels: row.TargetAudioChannels, OutputContainer: row.OutputContainer,
+		OutputProtocol: row.OutputProtocol, TargetBitrateKbps: row.TargetBitrateKbps,
+		TranscodeHWAccel: row.TranscodeHWAccel, ToneMapMode: row.ToneMapMode,
+		AdaptationReasons: reasons, ReportingNode: row.ReportingNode,
+		StreamLocation: row.StreamLocation, CompatOrigin: row.CompatOrigin,
+		IsJellyfinClient: row.IsJellyfinClient, RoutingExecution: row.RoutingExecution,
+		RoutingExecutionNodeID: nullableIDFromIntPtr(row.RoutingExecutionNodeID), RoutingExecutionNodeName: row.RoutingExecutionNodeName,
+		RoutingEgress: row.RoutingEgress, RoutingEgressNodeID: nullableIDFromIntPtr(row.RoutingEgressNodeID),
+		RoutingEgressNodeName: row.RoutingEgressNodeName,
+		SourceVideoCodec:      row.SourceVideoCodec, SourceResolution: row.SourceResolution,
+		SourceAudioCodec: row.SourceAudioCodec, SourceAudioChannels: row.SourceAudioChannels,
+		SourceContainer: row.SourceContainer, SourceBitrateKbps: row.SourceBitrateKbps,
+		SourceHDR: row.SourceHDR, SourceVideoRangeType: row.SourceVideoRangeType,
+		LibraryID: nullableIDFromIntPtr(row.LibraryID), LibraryName: row.LibraryName,
 	}
 }

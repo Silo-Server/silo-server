@@ -4,7 +4,7 @@ import { ChevronRight } from "lucide-react";
 
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   type AdminApiClient,
   MAX_ENDPOINT_HOURS,
@@ -19,6 +19,7 @@ import { chartSeriesColor } from "../charts/chartMath";
 import { SectionError } from "../feedback";
 import { rangeHours, rangePhrase, rangeTitle } from "../range";
 import { useWidgetRange } from "../widgetChrome";
+import { WidgetHeader } from "../WidgetHeader";
 import { WidgetRangePicker } from "../WidgetRangePicker";
 import { formatLocale } from "@/lib/appLocale";
 import { useT, type Translate } from "@/i18n";
@@ -63,22 +64,17 @@ export function ApiClientsWidget() {
 
   return (
     <Card className="h-full">
-      <CardHeader className="flex shrink-0 flex-row items-center justify-between gap-2 space-y-0 pb-3">
-        <CardTitle className="text-sm font-bold">
-          {rangeTitle(t("web.admin.dashboard.widgets.apiClients.title"), range)}
-        </CardTitle>
-        <div className="flex min-w-0 items-center gap-2">
-          {data && data.total_requests > 0 ? (
-            <span className="text-muted-foreground hidden text-[0.6875rem] whitespace-nowrap tabular-nums sm:inline">
-              {t("web.admin.dashboard.widgets.apiClients.totalRequests", {
-                count: data.total_requests,
-                count_text: data.total_requests.toLocaleString(formatLocale()),
-              })}
-            </span>
-          ) : null}
-          <WidgetRangePicker />
-        </div>
-      </CardHeader>
+      <WidgetHeader title={rangeTitle(t("web.admin.dashboard.widgets.apiClients.title"), range)}>
+        {data && data.total_requests > 0 ? (
+          <span className="text-muted-foreground hidden text-[0.6875rem] whitespace-nowrap tabular-nums sm:inline">
+            {t("web.admin.dashboard.widgets.apiClients.totalRequests", {
+              count: data.total_requests,
+              count_text: data.total_requests.toLocaleString(formatLocale()),
+            })}
+          </span>
+        ) : null}
+        <WidgetRangePicker />
+      </WidgetHeader>
       <CardContent className="min-h-0 flex-1 overflow-y-auto">
         {query.isLoading ? (
           <BarListSkeleton />

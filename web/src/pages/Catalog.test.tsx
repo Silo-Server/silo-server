@@ -147,7 +147,6 @@ vi.mock("@/pages/ItemDetail/index", () => stubPage("Item detail"));
 vi.mock("@/pages/Collections", () => stubPage("Collections"));
 vi.mock("@/pages/CollectionEditorPage", () => stubPage("Collection editor"));
 vi.mock("@/pages/AdminDashboard", () => stubPage("Admin dashboard"));
-vi.mock("@/pages/AdminActivity", () => stubPage("Admin activity"));
 vi.mock("@/pages/AdminLogs", () => stubPage("Admin logs"));
 vi.mock("@/pages/AdminUsers", () => stubPage("Admin users"));
 vi.mock("@/pages/AdminLibraries", () => stubPage("Admin libraries"));

@@ -277,7 +277,9 @@ The envelope's `event_id` is `playback-lifecycle:<seq>`.
 session's numbers rise in the order its transitions were accepted, whichever API
 server published them; numbers are not contiguous and are only comparable within one
 session. A native session's pause and resume follow the client's progress
-sequence: a progress sample that arrives after a newer one changes nothing.
+sequence: a progress sample that arrives after a newer one changes nothing. A
+pause or resume the player confirms over its control socket is a transition too,
+unless progress accepted after the confirmation arrived already decided the state.
 Jellyfin and Audiobookshelf reports carry no sequence and follow arrival
 order. A session starts once and ends once; its id never starts again.
 

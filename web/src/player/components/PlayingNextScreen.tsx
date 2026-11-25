@@ -1,4 +1,9 @@
 import "@/styles/player-hud.css";
+import {
+  AIR_DATE_TITLE_SEPARATOR,
+  airDateWithTitle,
+  episodeAirDateLabel,
+} from "@/lib/episodeCardLabels";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { MotionConfig, motion } from "framer-motion";
 import { ChevronLeft, ChevronRight, Play, Shuffle, X } from "lucide-react";
@@ -27,6 +32,8 @@ const SEPARATOR = "\u00b7";
 interface PlayingNextScreenProps {
   seriesId?: string;
   seriesTitle?: string;
+  /** The series' episode labels: "air_date" names episodes by their air date. */
+  episodeLabels?: string;
   nextEpisode?: EpisodeRef;
   continueWatchingItems: ContinueWatchingItem[];
   videoEnded: boolean;
@@ -61,6 +68,7 @@ export function PlayingNextScreen(props: PlayingNextScreenProps) {
 function PlayingNextContent({
   seriesId,
   seriesTitle,
+  episodeLabels,
   nextEpisode,
   continueWatchingItems,
   videoEnded,
@@ -290,10 +298,11 @@ function PlayingNextContent({
                 {nextEpisode.episodeNumber > 0 && (
                   <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-0.5 lg:justify-start">
                     <span className="text-sm font-medium text-[var(--hud-ash)] tabular-nums">
-                      {t("web.player.episode.code", {
-                        season: codeNumber(nextEpisode.seasonNumber),
-                        episode: codeNumber(nextEpisode.episodeNumber),
-                      })}
+                      {episodeAirDateLabel(episodeLabels, nextEpisode.airDate) ??
+                        t("web.player.episode.code", {
+                          season: codeNumber(nextEpisode.seasonNumber),
+                          episode: codeNumber(nextEpisode.episodeNumber),
+                        })}
                     </span>
                     <span
                       aria-hidden="true"
@@ -525,20 +534,30 @@ function OnDeckCarousel({
               episode: String(detail.episode_number),
             };
             const titledEpisode = detail.series_title && detail.title ? detail.title : null;
+            const airDateLabel = episodeAirDateLabel(detail.episode_labels, detail.air_date);
             const episodeMeta = !hasEpisodeNumber
               ? null
-              : titledEpisode
-                ? t("web.player.episode.codeWithTitle", { ...episodeCode, title: titledEpisode })
-                : t("web.player.episode.code", episodeCode);
+              : airDateLabel
+                ? airDateWithTitle(airDateLabel, titledEpisode)
+                : titledEpisode
+                  ? t("web.player.episode.codeWithTitle", { ...episodeCode, title: titledEpisode })
+                  : t("web.player.episode.code", episodeCode);
             // The same line with the title in its own box; `episodeMeta` stays
             // the plain text for the tooltip.
             const episodeLine =
-              hasEpisodeNumber && titledEpisode
-                ? t("web.player.episode.codeWithTitle", {
-                    ...episodeCode,
-                    title: <LineTitle>{titledEpisode}</LineTitle>,
-                  })
-                : episodeMeta;
+              // An array, not a fragment: TitleLineParts doesn't look inside
+              // a fragment, so the date would lose its own non-shrinking box.
+              hasEpisodeNumber && titledEpisode && airDateLabel
+                ? [
+                    `${airDateLabel}${AIR_DATE_TITLE_SEPARATOR}`,
+                    <LineTitle key="title">{titledEpisode}</LineTitle>,
+                  ]
+                : hasEpisodeNumber && titledEpisode
+                  ? t("web.player.episode.codeWithTitle", {
+                      ...episodeCode,
+                      title: <LineTitle>{titledEpisode}</LineTitle>,
+                    })
+                  : episodeMeta;
             const thumbnailUrl = detail.backdrop_url ?? detail.poster_url;
             const progressPercent =
               item.progress.duration_seconds > 0

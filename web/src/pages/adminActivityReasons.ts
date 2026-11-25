@@ -86,16 +86,29 @@ export interface AdaptationReason {
   description: string;
 }
 
+/** Resolve a single canonical adaptation reason code to localized copy, or null if unknown. */
+export function getAdaptationReasonByCode(code: string): AdaptationReason | null {
+  const text = Object.hasOwn(ADAPTATION_REASON_TEXT, code)
+    ? ADAPTATION_REASON_TEXT[code]
+    : undefined;
+  return text ? { code, label: t(text.label), description: t(text.description) } : null;
+}
+
+/** Resolve an ordered list of canonical adaptation reason codes to localized entries. */
+export function getAdaptationReasonsFromCodes(
+  codes?: readonly string[] | null,
+): AdaptationReason[] {
+  return (codes ?? []).flatMap((code) => {
+    const resolved = getAdaptationReasonByCode(code);
+    return resolved ? [resolved] : [];
+  });
+}
+
 /**
  * Why a session converts or repackages the file instead of playing it as it
  * is, in the server's order (video causes first). Empty for direct play and
  * for sessions the server reported no reasons for.
  */
 export function getAdaptationReasons(session: AdminSession): AdaptationReason[] {
-  return (session.adaptation_reasons ?? []).flatMap((code) => {
-    const text = Object.hasOwn(ADAPTATION_REASON_TEXT, code)
-      ? ADAPTATION_REASON_TEXT[code]
-      : undefined;
-    return text ? [{ code, label: t(text.label), description: t(text.description) }] : [];
-  });
+  return getAdaptationReasonsFromCodes(session.adaptation_reasons);
 }

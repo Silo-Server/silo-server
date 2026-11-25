@@ -237,7 +237,7 @@ type Dependencies struct {
 	// SignInAttempts bounds password sign-ins per sign-in name, shared with
 	// the Jellyfin and Audiobookshelf sign-ins so every surface counts against
 	// one budget. Nil gets a process-local limiter.
-	SignInAttempts   *ratelimit.AttemptLimiter
+	SignInAttempts   *ratelimit.SignInLimiter
 	ClientIPResolver *clientip.Resolver
 	// NetworkAccess is the ingress-token registry and provider status cache
 	// for network access provider plugins on this host. The token middleware
@@ -374,6 +374,7 @@ type Dependencies struct {
 	AdminTopActivityProvider      handlers.AdminTopActivitySource
 	AdminTimeseriesProvider       handlers.AdminTimeseriesSource
 	AdminDownloadsStatsProvider   handlers.AdminDownloadsStatsSource
+	AdminInsightsProvider         handlers.AdminInsightsSource
 
 	// ABSHandler is the Audiobookshelf-compatible HTTP handler. When non-nil
 	// it is mounted at the root router level (not under /api/v1/) so that ABS
@@ -720,7 +721,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		}
 		signInAttempts := deps.SignInAttempts
 		if signInAttempts == nil {
-			signInAttempts = ratelimit.NewMemoryAttemptLimiter(ratelimit.SignInNamePolicy)
+			signInAttempts = ratelimit.NewMemorySignInLimiter(ratelimit.SignInNamePolicy, ratelimit.SignInSourcePolicy)
 		}
 		authService.SetSignInAttempts(signInAttempts)
 		if settingsRepo != nil {
@@ -1254,7 +1255,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	// this server issued, so a monitoring tool never needs a provider's host.
 	var itemPosters *artworkurl.ItemPosters
 	if cfg := deps.CurrentConfig(); detailSvc != nil && cfg != nil {
-		itemPosters = artworkurl.NewItemPosters(cfg.Auth.JWTSecret, cfg.S3.MetadataPresignExpiry, detailSvc)
+		itemPosters = artworkurl.NewItemPosters(cfg.Auth.JWTSecret, cfg.S3.MetadataPresignExpiry, detailSvc, deps.ArtworkSigner)
 	}
 	if deps.DB != nil {
 		playbackSessionsLoader = handlers.NewPlaybackSessionsLoader(deps.DB, deps.UserStoreProvider, detailSvc)
@@ -1472,6 +1473,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 			playbackHandler = handlers.NewPlaybackHandler(deps.SessionMgr)
 		}
 		playbackHandler.StreamTelemetry = deps.StreamTelemetry
+		playbackHandler.ReportingNode = deps.NodeID
 		playbackHandler.ItemAccess = itemRepo
 		if itemsHandler != nil {
 			playbackHandler.FileNamesVisible = itemsHandler.CanViewFilePaths
@@ -1819,6 +1821,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 		adminHandler.TopActivitySource = deps.AdminTopActivityProvider
 		adminHandler.TimeseriesSource = deps.AdminTimeseriesProvider
 		adminHandler.DownloadsStatsSource = deps.AdminDownloadsStatsProvider
+		adminHandler.InsightsSource = deps.AdminInsightsProvider
 		adminHandler.RedisClient = deps.RedisClient
 		adminHandler.RealtimeHub = deps.RealtimeHub
 		adminHandler.AccessGroups = accessGroupStore
@@ -3144,6 +3147,7 @@ func newChiRouter(deps Dependencies) chi.Router {
 	}
 	if adminHandler != nil {
 		v2deps.AdminDashboardInsights = adminHandler
+		v2deps.AdminInsights = adminHandler
 		v2deps.AdminDashboardStats = adminHandler
 		v2deps.AdminDashboardLayout = adminHandler
 		v2deps.AdminDashboardLayoutResets = adminHandler

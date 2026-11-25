@@ -110,8 +110,8 @@ export function FeaturesStep() {
   }
 
   // This step has no lazy playback row: the value only ever comes with a
-  // marker switch or the storage choice, and is taken back with them.
-  const markerDraft = useMarkerSourceDraft(form, { modeStagesLazyPlayback: true });
+  // marker switch, and is taken back with it.
+  const markerDraft = useMarkerSourceDraft(form);
 
   function setOnlineMarkers(enabled: boolean) {
     let nextMode = enabled ? "online" : "off";
@@ -176,7 +176,7 @@ export function FeaturesStep() {
               { value: "on_demand", label: t("web.setup.features.storageOnDemand") },
             ]}
             value={onlineMarkerStorage}
-            onChange={markerDraft.setOnlineStorage}
+            onChange={(value) => form.setValue("markers.online_storage", value)}
           />
         ) : null}
         <SettingField

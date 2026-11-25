@@ -69,9 +69,10 @@ episode has `series_id`, `series_title`, `season_number` and `episode_number`;
 its `year` is its air-date year.
 
 `poster_url` is the card-size poster of a movie or series, or of an episode's
-series, and is absent only when there is none. It is always a URL this server
-issued, never a metadata provider's, so a tool that cannot reach the
-providers' image hosts can load it; art not cached yet comes through a signed
+series, and is absent only when there is none. It is always a path on this
+server, never a metadata provider's or the artwork store's URL, so a tool that
+may contact only this server can load it: cached art comes through a signed
+`/api/v2/artwork/...` path and art not cached yet through a signed
 `getItemPoster` link (see "Admin poster URLs" in [images-api.md](images-api.md)).
 The URL expires: read it again from a later page rather than storing it.
 
@@ -200,6 +201,13 @@ The worker later opens the local path, downloads the remote URL, or reads the
 storage object. Source bytes are not frozen at submission. Local paths must be
 available on the worker that claims the job; remote content may change between
 submission and execution.
+
+An import job names its source in `source_label`: the remote URL, the local
+file name, the artifact key's file name, or the English text `Export job <id>`.
+An import queued with `export_job_id` also returns that ID as
+`source_export_job_id`; clients that show the source should build their own
+label from it, since `source_label` is not translated. Imports queued before the
+server recorded that ID have only `source_label`.
 
 The publish operation requires a completed export artifact. It saves a signed URL
 with a seven-day signature lifetime and returns `job_id`, `url`, and `expires_at`.

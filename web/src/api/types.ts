@@ -880,6 +880,10 @@ export interface BrowseItem {
   advisory_source?: string;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
+  /** "air_date" when the series labels episodes by date; see formatEpisodeLabel. */
+  episode_labels?: string;
+  /** An episode card's air date, sent when episode_labels is air_date. */
+  air_date?: string | null;
   rating_imdb: number | null;
   rating_tmdb?: number | null;
   rating_rt_critic?: number | null;
@@ -1292,6 +1296,8 @@ export interface ItemDetail {
   first_air_date: string | null;
   // Publication/airing status ("Ongoing", "Completed", "Continuing", "Ended").
   show_status?: string;
+  /** "air_date" when the series (or the series of this season or episode) labels episodes by date. */
+  episode_labels?: string;
   last_air_date: string | null;
   air_time?: string | null;
   air_timezone?: string | null;
@@ -1352,6 +1358,10 @@ export interface ItemDetail {
 
 export interface WatchDetail {
   content_id: string;
+  /** "air_date" when the episode's series labels episodes by date. */
+  episode_labels?: string;
+  /** The episode's air date, sent when episode_labels is air_date. */
+  air_date?: string | null;
   type: string;
   title: string;
   year?: number;
@@ -2826,6 +2836,8 @@ export interface AdminSession {
   updated_at: string;
   position_seconds: number;
   is_paused: boolean;
+  /** Number of the session's last lifecycle transition; absent before lifecycle numbers existed. */
+  lifecycle_seq?: number | null;
   has_playback_control?: boolean;
   client_ip?: string;
   /** Server classification used to select the local or remote stream bitrate policy. */
@@ -3390,6 +3402,17 @@ export type AdminLogStreamMessage =
   | AdminLogAppendMessage
   | AdminLogErrorMessage;
 
+export interface AdminPlaybackHistorySubtitle {
+  track_id: string;
+  language: string | null;
+  codec: string | null;
+  format: string | null;
+  source: "embedded" | "external" | "downloaded";
+  delivery: "burn_in" | "embedded" | "hls_rendition" | "sidecar";
+  forced: boolean;
+  hearing_impaired: boolean;
+}
+
 export interface AdminPlaybackHistoryItem {
   session_id: string;
   user_id: number;
@@ -3409,9 +3432,54 @@ export interface AdminPlaybackHistoryItem {
   completed: boolean;
   /** Measured watch time; null for a play recorded before it was measured. */
   played_seconds: number | null;
+  measured?: boolean;
+  start_position_seconds?: number | null;
+  paused_seconds?: number | null;
+  measured_since?: string | null;
+  measured_until?: string | null;
+  client_ip?: string | null;
+  device_id?: string | null;
+  device_platform?: string | null;
+  client_name?: string | null;
+  client_version?: string | null;
+  video_decision?: "direct" | "remux" | "transcode" | null;
+  audio_decision?: "direct" | "remux" | "transcode" | null;
+  end_reason?: "stopped" | "terminated" | "expired" | "aborted" | "replaced" | null;
   series_title: string;
   season_number: number | null;
   episode_number: number | null;
+  subtitle?: AdminPlaybackHistorySubtitle | null;
+  target_video_codec?: string | null;
+  target_resolution?: string | null;
+  target_audio_codec?: string | null;
+  target_audio_channels?: number | null;
+  output_container?: string | null;
+  output_protocol?: string | null;
+  target_bitrate_kbps?: number | null;
+  transcode_hw_accel?: string | null;
+  tone_map_mode?: string | null;
+  adaptation_reasons?: string[];
+  reporting_node?: string | null;
+  stream_location?: "local" | "remote" | null;
+  compat_origin?: boolean | null;
+  is_jellyfin_client?: boolean;
+  routing_execution?: string | null;
+  routing_execution_node_id?: number | null;
+  routing_execution_node_name?: string | null;
+  routing_egress?: string | null;
+  routing_egress_node_id?: number | null;
+  routing_egress_node_name?: string | null;
+  route_facts_recorded?: boolean;
+  source_video_codec?: string | null;
+  source_resolution?: string | null;
+  source_audio_codec?: string | null;
+  source_audio_channels?: number | null;
+  source_container?: string | null;
+  source_bitrate_kbps?: number | null;
+  source_hdr?: boolean | null;
+  source_video_range_type?: string | null;
+  library_id?: number | null;
+  library_name?: string | null;
 }
 
 export interface AdminUserProfile {
@@ -4627,6 +4695,10 @@ export interface SectionItem {
   advisory_source?: string;
   status: "pending" | "matched" | "unmatched" | "ambiguous";
   show_status?: string;
+  /** "air_date" when the series labels episodes by date; see formatEpisodeLabel. */
+  episode_labels?: string;
+  /** An episode card's air date, sent when episode_labels is air_date. */
+  air_date?: string | null;
   rating_imdb: number | null;
   rating_tmdb?: number | null;
   rating_rt_critic?: number | null;
@@ -5204,32 +5276,6 @@ export interface AdminPlaybackActivity {
   buckets: AdminPlaybackActivityBucket[];
   reliability: AdminPlaybackReliability;
   profiles_active_24h: number;
-}
-
-// GET /admin/stats/top-activity. Episodes are rolled up to their series, so a
-// title's media_item_id is a series content id for TV.
-export interface AdminTopTitle {
-  media_item_id: string;
-  title: string;
-  media_type: string;
-  plays: number;
-  total_seconds: number;
-}
-
-export interface AdminTopProfile {
-  user_id: string | number; // v2 IDs are opaque strings; bridge fixtures retain numbers.
-  username: string;
-  profile_id: string;
-  profile_name: string;
-  plays: number;
-  total_seconds: number;
-}
-
-export interface AdminTopActivity {
-  days: number;
-  limit: number;
-  titles: AdminTopTitle[];
-  profiles: AdminTopProfile[];
 }
 
 // GET /admin/stats/timeseries. One point per sampled minute; minutes the

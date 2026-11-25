@@ -118,6 +118,7 @@ func (h *CatalogSeedHandler) CreateCatalogImportJob(ctx context.Context, userID 
 			return nil, catalogImportSourceProblem(err)
 		}
 		req.SourceBucket, req.SourceKey, req.SourceLabel = bucket, key, "Export job "+source.ExportJobID
+		req.SourceExportJobID = source.ExportJobID
 	}
 	job, err := h.jobRepo.Create(ctx, adminjob.CreateJobInput{JobType: adminjob.JobTypeCatalogImport, CreatedByUserID: userID, RequestPayload: req, Message: "Queued catalog import"})
 	if err == nil && h.RealtimeHub != nil {

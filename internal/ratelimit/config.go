@@ -108,6 +108,8 @@ func DefaultSettings() map[string]string {
 		"ratelimit.auth.device_lookup.burst":                 "20",
 		"ratelimit.auth.device_poll.requests_per_minute":     "120",
 		"ratelimit.auth.device_poll.burst":                   "30",
+		"ratelimit.auth.oauth_start.requests_per_minute":     "40",
+		"ratelimit.auth.oauth_start.burst":                   "20",
 		"ratelimit.auth.item_poster.requests_per_minute":     "600",
 		"ratelimit.auth.item_poster.burst":                   "400",
 		sessionModeSetting:                                   SessionQuotaLog,
