@@ -38,7 +38,11 @@ the private bucket ([Destinations](#destinations), [Encryption](#encryption)).
 
 - `server-id` is `server.identity_id` (`internal/serveridentity`). Every server
   writes and rotates only its own prefix; other prefixes at the destination
-  are listed by id and otherwise left alone. `backups/uploads/` holds
+  are listed by id and otherwise left alone. A server that took another's
+  identity in a full restore ([Server identity on a full
+  restore](#server-identity-on-a-full-restore)) uses that server's prefix, so
+  two such servers running at once on one destination rotate away each
+  other's backups. `backups/uploads/` holds
   [uploaded restore sets](#uploads) and is never a server id.
 - The folder name is the backup id: `20261031T040000.123Z-nightly`. The time
   is the start of the run in UTC, to the millisecond; ids written to the
@@ -1364,7 +1368,8 @@ nothing.
 | `preferences` | `userstore/pgstore` | `user_setting_values` (profile, client-family, library, and series scopes), `user_audio_preferences`, `user_subtitle_preferences`, `user_library_playback_preferences`, `user_series_playback_preferences`, `user_collection_sort_preferences`, the home and library page layout (`user_settings` section overrides), and the preference columns of `user_profiles` | each differing value overwritten, under the account's preference-settings lock; setting keys, scopes, and values checked against this server's settings contract, others left out. A page layout replaces the profile's overrides of that page: the library is mapped, an admin section found by id (on another server only one of the same type, as a restore creates a section with its backup id) or else by type and title with one candidate, and library ids in section configuration remapped, and so are the collections it names (`library_collection_id`, `user_collection_id`, in `config` and `user_config`) through `Target.Collection`: an admin collection as the restore's collections and sections match it (a carried or template collection, a section-managed one through its section, and on the server that wrote the backup any collection still here by its id), a personal one as the account's personal collection import matches it (on the same server the account's collection by its id, else the one native collection with its name of its creator's profile here); an override with no counterpart is left out and counted, never written with a dangling id. Overrides are JSON no schema constrains, so an export leaves out one the reader would refuse, and one naming a section or collection that is gone, rather than make the document unreadable; a comparison leaves the same ones out of the layout here |
 | `notifications` | `notifications` | `notification_preferences`, `profile_series_notification_mutes` | preferences (`enabled`, `notify_next_up`) overwritten; mutes added. An older backup's `notify_favorites`, `notify_watchlist` and `notify_continue_watching` are accepted and ignored, and an export does not write them |
 
-Never carried: login sessions, API keys, push and device registrations,
+Never carried: login sessions, API keys, app keys (an account a restore set
+creates has none, and signs in another way to enroll), push and device registrations,
 device-scoped settings, watch-provider and history-import credentials,
 external sign-in links (OAuth, plugin identities, Discord), email delivery
 addresses (they must be verified here), webhooks, downloads, logs, derived
@@ -1913,8 +1918,51 @@ live server has it, deleting one the live server lacks so its default
 applies, whichever deployment the backup came from: they describe this
 server, as a selective restore never writes them
 (`CarryServerSpecificSettings`). The signing keys a restore rotates keep
-their new values. `TestServerSpecificSettingsComeFromTheLiveServerDB`
-checks every classified one.
+their new values. The one exception is the server identity on a server
+with no accounts ([Server identity on a full
+restore](#server-identity-on-a-full-restore)).
+`TestServerSpecificSettingsComeFromTheLiveServerDB` checks every classified
+one.
+
+### Server identity on a full restore
+
+Every signed app key request names the server identity
+(`server.identity_id`), and the server refuses one that names another
+([app-keys.md](app-keys.md)). So which identity a full restore leaves
+decides whether the backup's app keys work. `checkDeployment` decides it
+once, when it reads the live server's identity, and the restore passes the
+decision (`deployment`) to the step that carries server-specific settings:
+
+- **The deployment the backup came from**: the identities are the same.
+  Nothing is said about it.
+- **Another deployment's backup, onto a server with no accounts** (the live
+  `users` table has no rows, or does not exist): the restored server keeps
+  the backup's identity, with the backup's app keys
+  (`deployment.takesBackupIdentity`). This is the move to new hardware:
+  install Silo with the same `SECRET_KEY`, start it, create no account, and
+  run the full restore with `--accept-lost-credentials`. It does not depend
+  on `setup.completed`, on whether the live server has minted an identity,
+  or on whether the manifest authenticates. The restore reads `users` again
+  once the live database is idle and stops (`ErrLiveInUse`) if an account
+  appeared since.
+- **Another deployment's backup, onto a server with an account**: the
+  restored server keeps the live identity, as for every other
+  server-specific setting. The backup's app keys are restored as rows, so
+  each public key stays enrolled once, but revoked (`AppKeysRevoked`): they
+  name the other server.
+
+Everything else about another deployment's backup is unchanged: it needs
+`--accept-lost-credentials` and carries no live credential. The restore
+says which identity the restored server will answer with before anything
+changes (with the reason the backup is not this deployment's, and in the
+`ErrOtherDeployment` refusal) and again when it carries the settings. When
+it takes the backup's identity it leads with the action, before anything
+changes and again at the end: shut down the server the backup came from
+and keep it off. Two servers that answer as one confuse the apps
+([server-identity.md](server-identity.md#identity)), share a backup prefix,
+and accept each other's app keys, so a key revoked on one keeps working on
+the other. The server cannot detect a twin, so it warns and never refuses.
+`TestFullRestoreOntoAnotherServerDB` covers both cases through the swap.
 
 ### Interrupted work
 
@@ -2034,6 +2082,60 @@ that holds a bearer secret or a public capability, each one way:
   same decision as accounts (see Accounts roll back): their switches are
   kept at the stricter value (`stricterFlags`) and grants made from them
   are compared, but their limits roll back with the accounts.
+- App keys (`auth_person_keys`, `auth_device_keys`) are carried with the
+  backup's rows kept (`restoredStay`): on a full restore the live server's
+  row wins wherever it has one, and a row only the backup has stays. Key
+  rows are never deleted while their account exists, so on the deployment
+  the backup came from a key revoked since stays revoked, a key enrolled
+  since keeps working, and a person key replaced since stays replaced. On a
+  server that never held these keys the backup's keys come back as the
+  backup has them, so a key revoked after the backup works again there, and
+  so does a person key replaced after it, as a password changed after the
+  backup does: after such a restore people check their devices list in
+  their account. `appKeySettle` then keeps the rules the tables rely on,
+  revoking rather than deleting, so a revoked public key can never be
+  enrolled again:
+  - A public key is enrolled once: a restored row whose public key or key
+    id a live row of another id holds (its account deleted since, and the
+    key enrolled again on another) is left out and listed. Restored person
+    keys are staged as revoked before the live rows are written, so a
+    person key replaced since doesn't break the one-live-key index.
+  - A key enrolled since the backup on an account the backup gives more
+    authority (not in `carried_owners`) is revoked, as a promotion revokes
+    keys; the keys the backup holds keep their live state.
+  - A provider-bound key whose `(identity_id, user_id)` has no sign-in link
+    once the links are carried is revoked. A restore can move the identity
+    sequence back, so a later link could reuse the number.
+  - A waiting device key only the backup has is revoked; the device enrolls
+    again. The live server's waiting keys stay waiting, their 24 hours
+    counted from when they were made.
+
+  Login sessions stay left out, so each device signs in again with its key
+  and opens a new session. Another deployment's backup has no live rows to
+  carry and no sign-in links, so its keys come back with the provider-bound
+  ones revoked, and stay usable only where the restored server takes the
+  backup's identity ([Server identity on a full
+  restore](#server-identity-on-a-full-restore)). A separate restore, and the
+  fallback that leaves out every credential when the backup's older schema
+  can't be carried, keep none (`AppKeysLeftOut`), and an account a restore
+  set creates has none. A backup taken before the key tables existed
+  restores with no keys. Once the keys and the access settings are settled,
+  a full restore lists by name and id each enabled account that holds an
+  app key and has no way to sign in while `auth.app_key_sign_in` or
+  `auth.local_password_login` is off in the restored database: no sign-in
+  link, no password that signs in, and no key that does
+  (`StrandedAccounts`, which mirrors `keySignInPolicy` and
+  `localPasswordPolicy`), and says to give each a password or link a
+  sign-in provider account for it. It changes nothing and never fails the
+  restore. What a person sees for what is left out:
+  - Login sessions: every app signs in again; one with a working key does
+    so by itself.
+  - Waiting keys: the device asks to enroll again and waits for an admin's
+    approval again.
+  - Sign-in challenges: a sign-in in progress fails once and the app asks
+    for a new challenge.
+  - Device sign-ins, including ones approved in advance: a TV waiting to be
+    signed in shows a new code, approved again.
 - Restored with live credentials (`secretScrubbed`): connections to outside
   services that other restored data refers to (history import sources,
   subtitle provider accounts, autoscan targets, request integrations). The
@@ -2129,8 +2231,9 @@ neither list.
   anything changes and needs `--accept-lost-credentials`; it then carries
   none of them, deleting the backup's own, so everyone signs in again and
   admins create keys, invitations, and links again
-  (`ErrOtherDeployment`, `checkDeployment`). Stricter-of server settings,
-  which are not tied to ids, still apply.
+  (`ErrOtherDeployment`, `checkDeployment`). The backup's app keys are the
+  exception, above. Stricter-of server settings, which are not tied to ids,
+  still apply.
 - In the same transaction, a full restore keeps each security, access,
   sharing, or outbound switch inside an otherwise restored table at the
   stricter of the backup's and the live server's value (`stricterFlags`),
@@ -2213,7 +2316,7 @@ neither list.
   key name; values are compared decrypted, and one that does not decrypt
   counts as wider. The command lists each setting it kept.
 - Separate mode (`--into`) restores a copy, not the live server: it deletes
-  the backup's carried credentials and carries none.
+  the backup's carried credentials, app keys included, and carries none.
 
 ### Separate mode
 
@@ -2238,8 +2341,14 @@ It deletes the backup destination settings too (`backup.destination` and
 `backup.s3.*`): the copy keeps the backed-up server's id, so backing up to
 that bucket would rotate away the original's backups. The copy backs up to
 its own storage until an admin names a destination. The copy
-gets none of the backup's long-lived credentials
+gets none of the backup's long-lived credentials, app keys included
 ([Credentials](#credentials)).
+
+The server's local network TLS key is derived from `SECRET_KEY`
+(`internal/lantls`), not stored in the database. A restore of either kind
+under the same `SECRET_KEY` keeps every device's pin; under another
+`SECRET_KEY` the server presents a new key, and every device reports that
+the server's key changed.
 The target stays open for the operator to point `DATABASE_URL` and the
 artwork storage settings at. `--database-only` replaces `--blobs-into` and warns that uploaded
 artwork, avatars, and branding will be missing. Separate mode clears no

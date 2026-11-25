@@ -1841,7 +1841,7 @@ func TestCarryMovesAnswerSequencePastCarriedLinksDB(t *testing.T) {
 	dbExec(t, live, `INSERT INTO plugin_auth_identities (plugin_installation_id, external_subject, user_id, answer_seq)
 		VALUES ($1, 'subject', $2, nextval('plugin_auth_identity_answer_seq'))`, installation, account)
 
-	if _, err := (PGLoader{}).CarryCredentials(ctx, restoredURL, liveURL); err != nil {
+	if _, err := (PGLoader{}).CarryCredentials(ctx, restoredURL, liveURL, AppKeysKept); err != nil {
 		t.Fatal(err)
 	}
 	var carried, next int64

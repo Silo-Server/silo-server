@@ -15,6 +15,7 @@ import (
 	"github.com/Silo-Server/silo-server/internal/mail"
 	"github.com/Silo-Server/silo-server/internal/plugins"
 	"github.com/Silo-Server/silo-server/internal/secret"
+	"github.com/Silo-Server/silo-server/internal/serveridentity"
 	"github.com/Silo-Server/silo-server/internal/serversettings"
 )
 
@@ -198,12 +199,15 @@ func carryOutboundSettings(ctx context.Context, loader DatabaseLoader, dbURL, li
 // so its default applies: they describe this server, whichever deployment
 // the backup came from, as a selective restore never writes them. Signing
 // keys a restore rotates (rotatedSettings) and the plugin provisioning hold
-// keep their new values. It returns how many settings it changed.
-func (l PGLoader) CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string) (int, error) {
+// keep their new values, and so does the server identity with
+// keepBackupIdentity (deployment.takesBackupIdentity). It returns how many
+// settings it changed.
+func (l PGLoader) CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string, keepBackupIdentity bool) (int, error) {
 	serverSpecific := func(key string) bool {
 		kind, ok := SettingKindOf(key)
 		_, rotated := rotatedSettings[key]
-		return ok && kind == SettingKindServerSpecific && !rotated && key != plugins.ProvisionRestoreHoldKey
+		kept := key == plugins.ProvisionRestoreHoldKey || (keepBackupIdentity && key == serveridentity.Key)
+		return ok && kind == SettingKindServerSpecific && !rotated && !kept
 	}
 	live, err := allSettingsAt(ctx, liveURL, serverSpecific)
 	if err != nil {
@@ -274,14 +278,23 @@ func allSettings(ctx context.Context, q queryer, keep func(string) bool) (map[st
 }
 
 // carryServerSpecificSettings gives the restored database the live
-// server's own settings and says how many changed.
-func carryServerSpecificSettings(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, out io.Writer) error {
-	changed, err := loader.CarryServerSpecificSettings(ctx, dbURL, liveURL)
+// server's own settings, less the server identity where dep takes the
+// backup's, and says how many changed and whose identity the restored
+// server answers with.
+func carryServerSpecificSettings(ctx context.Context, loader DatabaseLoader, dbURL, liveURL string, dep deployment, out io.Writer) error {
+	changed, err := loader.CarryServerSpecificSettings(ctx, dbURL, liveURL, dep.takesBackupIdentity)
 	if err != nil {
 		return fmt.Errorf("keeping this server's own settings: %w", err)
 	}
 	if changed > 0 {
 		_, _ = fmt.Fprintf(out, "Kept this server's own settings (its address, storage, keys, and infrastructure) in place of the backup's: %d changed.\n", changed)
+	}
+	switch {
+	case dep.same:
+	case dep.takesBackupIdentity:
+		_, _ = fmt.Fprintln(out, identityTaken)
+	default:
+		_, _ = fmt.Fprintln(out, identityKept)
 	}
 	return nil
 }

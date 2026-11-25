@@ -273,7 +273,7 @@ func (l fakeLoader) DisablePlugins(context.Context, string) ([]string, error) {
 func (l fakeLoader) FinishPluginProvisionRestore(context.Context, string, string, bool, bool) (string, error) {
 	return "", nil
 }
-func (l fakeLoader) CarryServerSpecificSettings(context.Context, string, string) (int, error) {
+func (l fakeLoader) CarryServerSpecificSettings(context.Context, string, string, bool) (int, error) {
 	return 0, nil
 }
 func (l fakeLoader) CarryOutboundSettings(context.Context, string, string, *secret.Cipher) ([]string, []string, error) {
@@ -290,7 +290,11 @@ func (l fakeLoader) ServerID(context.Context, string) (string, error) {
 	}
 	return l.m.ServerID, nil
 }
-func (l fakeLoader) CarryCredentials(_ context.Context, _, liveURL string) (CarriedCredentials, error) {
+func (l fakeLoader) HasAccounts(context.Context, string) (bool, error) { return true, nil }
+func (l fakeLoader) StrandedAccounts(context.Context, string) ([]string, error) {
+	return nil, nil
+}
+func (l fakeLoader) CarryCredentials(_ context.Context, _, liveURL string, _ AppKeyCarry) (CarriedCredentials, error) {
 	l.ctl.carriedFrom = append(l.ctl.carriedFrom, liveURL)
 	if l.ctl.joinOnCarry {
 		l.ctl.dbs[liveDB].sessions++

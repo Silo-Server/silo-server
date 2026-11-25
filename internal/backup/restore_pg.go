@@ -196,6 +196,21 @@ func (l PGLoader) ServerID(ctx context.Context, dbURL string) (string, error) {
 	return rows[serveridentity.Key], nil
 }
 
+func (l PGLoader) HasAccounts(ctx context.Context, dbURL string) (bool, error) {
+	conn, err := pgx.Connect(ctx, dbURL)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
+	var table bool
+	if err := conn.QueryRow(ctx, `SELECT to_regclass('public.users') IS NOT NULL`).Scan(&table); err != nil || !table {
+		return false, err
+	}
+	var has bool
+	err = conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM public.users)`).Scan(&has)
+	return has, err
+}
+
 func (l PGLoader) Inspect(ctx context.Context, dbURL string) (Inspection, error) {
 	conn, err := pgx.Connect(ctx, dbURL)
 	if err != nil {

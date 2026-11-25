@@ -360,14 +360,17 @@ const (
 // carry replaces the restored database's credentials, outbound settings,
 // plugin releases, and policies with those of carryFrom, or with none when
 // carryFrom is empty. destination is the live database that will be replaced,
-// even if the backup came from another deployment. cipher is this server's
-// SECRET_KEY, or nil.
-func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, carryFrom, destination string, cipher *secret.Cipher) error {
-	authorityRestricted, err := carryCredentials(ctx, loader, dbURL, carryFrom, p.out)
+// even if the backup came from another deployment. keys says what happens to
+// the backup's app keys. cipher is this server's SECRET_KEY, or nil.
+func (p postLoad) carry(ctx context.Context, loader DatabaseLoader, dbURL, carryFrom, destination string, keys AppKeyCarry, cipher *secret.Cipher) error {
+	authorityRestricted, err := carryCredentials(ctx, loader, dbURL, carryFrom, keys, p.out)
+	// The fallback carries nothing from the live server, so it keeps no
+	// backup app key either: one revoked here since the backup would work
+	// again.
 	if err := p.strictStep("replacing the backup's credentials", err,
-		"leaving out all of the backup's "+carriedKinds, func() error {
+		"leaving out all of the backup's "+carriedKinds+", and app keys", func() error {
 			authorityRestricted = true
-			_, err := carryCredentials(ctx, loader, dbURL, "", p.out)
+			_, err := carryCredentials(ctx, loader, dbURL, "", AppKeysLeftOut, p.out)
 			return err
 		}); err != nil {
 		return err
@@ -589,8 +592,8 @@ type DatabaseLoader interface {
 	RotateSigningSecrets(ctx context.Context, dbURL string, cipher *secret.Cipher) (bool, error)
 	// CarryCredentials replaces the restored database's long-lived
 	// credentials (secretTables, secretCarried) with liveURL's, or deletes them when
-	// liveURL is "".
-	CarryCredentials(ctx context.Context, dbURL, liveURL string) (CarriedCredentials, error)
+	// liveURL is "". keys says what happens to the backup's app keys.
+	CarryCredentials(ctx context.Context, dbURL, liveURL string, keys AppKeyCarry) (CarriedCredentials, error)
 	// KeepStricterSettings writes into dbURL the live server's (liveURL)
 	// value of each access setting the restored data would widen, and
 	// returns those keys.
@@ -598,6 +601,12 @@ type DatabaseLoader interface {
 	// ServerID reads the server identity (serveridentity.Key) dbURL's
 	// settings hold, or "" when they hold none.
 	ServerID(ctx context.Context, dbURL string) (string, error)
+	// HasAccounts reports whether dbURL holds an account: a users row. A
+	// database without the table holds none.
+	HasAccounts(ctx context.Context, dbURL string) (bool, error)
+	// StrandedAccounts lists the enabled accounts of dbURL that hold an app
+	// key and have no way to sign in under its switches.
+	StrandedAccounts(ctx context.Context, dbURL string) ([]string, error)
 	// CarryPolicies gives dbURL liveURL's custom access policies ("" for
 	// none), returning the backup's it turned off.
 	CarryPolicies(ctx context.Context, dbURL, liveURL string) ([]string, error)
@@ -612,8 +621,9 @@ type DatabaseLoader interface {
 	// provisioning hold when the restore restricted plugin state.
 	FinishPluginProvisionRestore(ctx context.Context, dbURL, liveURL string, foreign, restricted bool) (string, error)
 	// CarryServerSpecificSettings gives dbURL liveURL's server-specific
-	// settings and returns how many it changed.
-	CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string) (int, error)
+	// settings and returns how many it changed. With keepBackupIdentity
+	// dbURL keeps its own server identity (serveridentity.Key).
+	CarryServerSpecificSettings(ctx context.Context, dbURL, liveURL string, keepBackupIdentity bool) (int, error)
 	// CarryOutboundSettings gives dbURL liveURL's outbound settings, each
 	// bundle as a unit, clearing the secrets of one liveURL lacks ("" for
 	// none), and returns the bundles carried and cleared. cipher (nil for
@@ -799,7 +809,7 @@ func RestoreSeparate(ctx context.Context, src *Source, loader DatabaseLoader, op
 	}
 	// A copy is not the live server: it gets none of the backup's
 	// credentials and none of the live ones.
-	if err := post.carry(ctx, loader, opts.Into, "", "", opts.Cipher); err != nil {
+	if err := post.carry(ctx, loader, opts.Into, "", "", AppKeysLeftOut, opts.Cipher); err != nil {
 		return RestoreReport{}, err
 	}
 	if err := post.step(stepInterrupt, interruptWork(ctx, loader, opts.Into, "", out)); err != nil {
