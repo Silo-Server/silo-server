@@ -1,0 +1,16 @@
+{
+  "items": [
+    {
+      "id": "5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10",
+      "kid": "iX--ofJySUkUOsEpPo17PQ",
+      "kind": "device",
+      "name": "Sam's iPad",
+      "platform": "ipados",
+      "status": "pending",
+      "enrolled_by": "introduce",
+      "allowed_by": null,
+      "enrolled_at": "2026-01-02T03:04:05.678Z",
+      "last_used_at": null
+    }
+  ]
+}

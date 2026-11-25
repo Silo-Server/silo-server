@@ -99,6 +99,8 @@ func devicePreapprovalError(err error) error {
 		out = apiError(http.StatusForbidden, "not_permitted", "This sign-in's provider identity is gone; sign in again to approve a device")
 	case errors.Is(err, auth.ErrNotFound):
 		out = apiError(http.StatusNotFound, "not_found", "Account not found")
+	case errors.Is(err, auth.ErrActingProfileChanged):
+		out = apiError(http.StatusForbidden, "profile_verification_required", "The main profile changed; verify it again")
 	case errors.Is(err, auth.ErrOwnerProtected), errors.Is(err, auth.ErrAdminProtected):
 		return ownerError(err)
 	default:

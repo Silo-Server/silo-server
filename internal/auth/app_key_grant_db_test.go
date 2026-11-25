@@ -131,7 +131,7 @@ func TestGrantRedeemRefusalsDB(t *testing.T) {
 	adminPerson, _, _ := env.enroll(t, admin)
 	replaced := env.localAccount(t, "grantno-replaced", models.RoleUser)
 	oldPerson, _, _ := env.enroll(t, replaced)
-	if err := env.signIn.ReplacePersonKey(ctx, env.loginSession(t, replaced, models.SessionOpenedPassword, nil), newTestKey(t).pub); err != nil {
+	if err := env.signIn.ReplacePersonKey(ctx, env.loginSession(t, replaced, models.SessionOpenedPassword, nil), newTestKey(t).pub, ActingProfile{}); err != nil {
 		t.Fatal(err)
 	}
 	disabled := env.localAccount(t, "grantno-disabled", models.RoleUser)
@@ -337,7 +337,7 @@ func TestGrantSessionCannotManageKeysDB(t *testing.T) {
 	}); !errors.Is(err, ErrSessionNotAllowed) {
 		t.Fatalf("enroll = %v", err)
 	}
-	if err := env.signIn.ReplacePersonKey(ctx, session, newPerson.pub); !errors.Is(err, ErrSessionNotAllowed) {
+	if err := env.signIn.ReplacePersonKey(ctx, session, newPerson.pub, ActingProfile{}); !errors.Is(err, ErrSessionNotAllowed) {
 		t.Fatalf("replace person key = %v", err)
 	}
 	// Device sign-in approval and approving one in advance call this rule.

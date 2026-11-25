@@ -279,7 +279,7 @@ func registerProfileSet(reg *Registry) {
 	putOp := Operation{Operation: put, Class: ClassPublic, RetrySafety: RetrySafetyNonRetryable, ServiceBacked: true, Audited: true,
 		RateLimitBucket: bucketProfileSet, MaxBodyBytes: maxProfileSetBodyBytes}
 	Register(reg, putOp, reg.putProfileSet)
-	declareRetryAfter(reg, putOp)
+	declareRetryAfter(reg, "Seconds to wait before sending the set again.", putOp)
 
 	get := humaOp(http.MethodGet, Prefix+"/profiles/set", "getProfileSet", "profiles",
 		"Read the account's profile set as this server holds it.")

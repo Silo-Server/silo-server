@@ -838,7 +838,7 @@ it where they are signed in. Rules for codes, links and lifetimes are in
 | `POST /auth/device/cancel` (`cancelDeviceLogin`) | device code | Withdraws a live pending, or approved but uncollected, request and answers `canceled`; any other request answers its unchanged state (`denied`, `consumed`, `canceled`) or `expired`. Repeating converges. A request approved in advance is left unchanged and answers 404. |
 | `GET /auth/device?code=` or `?token=` (`getDeviceLogin`) | none; a login session's bearer token when sent | Adds `requested_at`, `server_name`, `binding` for a bound request and, when known, `server_id`. A lookup of a pending request marks it opened and holds its code for at least five more minutes, never past 30 minutes after start. A six-digit Jellyfin Quick Connect code is looked up only with the account's own login session: without a valid token it answers 401 and from an impersonation session 403, for every six-digit code. |
 | `POST /auth/device/approve`, `/approve-handoff`, `/deny` | the account's own login session | A canceled request is refused with 409, and so is approving a request another account (for `approve-handoff`, another profile) already approved, or denying one another account approved (`conflict`). An API key, an impersonation session or a remote-playback handoff session is refused with 403 `permission_denied`, because an approval gives the device a login session. `approve-handoff` approves a remote-playback or Jellyfin Quick Connect request for the verified profile in `X-Profile-Id` (with `X-Profile-Token` for a PIN profile); `approve` refuses both with 409. |
-| `POST /auth/device/preapprove` (`preapproveDeviceLogin`) | the account's own login session | Body `device_name` (1 to 128 characters), optional `device_platform` (at most 64), required `binding` (43 characters of unpadded base64url). Answers 201 with `id`, `device_code` and `expires_at`, 30 days on: an approved, single-use sign-in that only a poll with that `device_code` and the secret behind `binding` redeems. An API key, an impersonation session or a remote-playback handoff session is 403 `permission_denied`; a session whose provider identity is gone is 403 `not_permitted`; an account already holding 20 waiting is 409 `conflict`. Spends the `device_start` bucket. |
+| `POST /auth/device/preapprove` (`preapproveDeviceLogin`) | the account's own login session acting as the household's main profile (see "The household's main profile" under app keys) | Body `device_name` (1 to 128 characters), optional `device_platform` (at most 64), required `binding` (43 characters of unpadded base64url). Answers 201 with `id`, `device_code` and `expires_at`, 30 days on: an approved, single-use sign-in that only a poll with that `device_code` and the secret behind `binding` redeems. An API key, an impersonation session or a remote-playback handoff session is 403 `permission_denied`; a session whose provider identity is gone is 403 `not_permitted`; an account already holding 20 waiting is 409 `conflict`. Spends the `device_start` bucket. |
 | `GET /auth/device/preapprovals` (`listDevicePreapprovals`) | the account's own login session | The account's waiting sign-ins approved in advance, newest first: `items` of `id`, `device_name`, `device_platform`, `created_at`, `expires_at`. Never the device code or the binding. Not paged; the cap bounds it. |
 | `DELETE /auth/device/preapprovals/{id}` (`revokeDevicePreapproval`) | the account's own login session | 204; the request moves to `denied` and the device's next poll answers `denied`. Revoking one already withdrawn is 204; a redeemed, expired, unknown or other account's id is 404. |
 | `GET /admin/users/{user_id}/device-preapprovals`, `DELETE .../{id}` (`listAdminUserDevicePreapprovals`, `revokeAdminUserDevicePreapproval`) | administrator | The same list and revoke for any account; revoking follows the owner protection of revoking login sessions (403 `permission_denied`). |
@@ -887,13 +887,16 @@ operation contract.
 | --- | --- | --- |
 | `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `protocol` is `silo-sync-v1` and `server_id` is the identity every signed payload names. `introduce`, `sign_in`, `enroll` and `grants` are `true`; `profile_set` is `true` where profiles are kept in PostgreSQL ([The profile set](#the-profile-set)); `app_codes` and `sign_in_links` are `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
 | `POST /auth/keys/challenge` (`createAppKeyChallenge`) | none | Body `{}`. Answers `challenge` (base64url of 32 bytes), `expires_in` (120), `server_id` and `server_time` (Unix seconds). A challenge works for one signed request within two minutes, on any API process. |
-| `POST /auth/keys/introduce` (`introduceAppKey`) | an `introduce` envelope signed by the account's person key, with `device_sig` | Enrolls the payload's `device_key` and opens a session. For an administrator's account the key is stored waiting and the sealed answer is `approval_required`. |
+| `POST /auth/keys/introduce` (`introduceAppKey`) | an `introduce` envelope signed by the account's person key, with `device_sig` | Enrolls the payload's `device_key` and opens a session. For an administrator's account the key is stored waiting and the sealed answer is `approval_required`. An account holds at most 10 waiting keys inside their 24 hours: one more is 409 `conflict`, after the challenge is spent. A waiting key past its 24 hours doesn't count, and a retention task later revokes it. |
 | `POST /auth/keys/sign-in` (`signInWithAppKey`) | a `sign-in` envelope signed by an enrolled device key, without `device_sig` | Opens a session. A waiting key answers `approval_required`; see below. |
-| `POST /auth/keys/enroll` (`enrollAppKeys`) | the account's own login session, and `{ "person_key", "message" }` where `message` is an `enroll` envelope signed with that person key, with `device_sig` | Registers the person key when the account has none, taking the session's provider binding; when `person_key` is already the account's person key it is reused as it is, binding unchanged. Enrolls the device key, which takes the session's provider binding, then opens a session bound to it. A different person key on the account, or a device key already enrolled on this server, is 409 `conflict`. The sealed plaintext adds `person_key_id` (the person key's `kid`); the client drops the session it called with. A malformed payload field is 422 at `body.message.payload`. |
+| `POST /auth/keys/enroll` (`enrollAppKeys`) | the account's own login session acting as the household's main profile (see below), and `{ "person_key", "message" }` where `message` is an `enroll` envelope signed with that person key, with `device_sig` | Registers the person key when the account has none, taking the session's provider binding; when `person_key` is already the account's person key it is reused as it is, binding unchanged. Enrolls the device key, which takes the session's provider binding, then opens a session bound to it. A different person key on the account, or a device key already enrolled on this server, is 409 `conflict`. The sealed plaintext adds `person_key_id` (the person key's `kid`); the client drops the session it called with. A malformed payload field is 422 at `body.message.payload`. |
 | `POST /auth/grants/redeem` (`redeemAppKeyGrant`) | a `grant-redeem` envelope signed by the app's own key (the grant's `app_key`), without `device_sig` | Enrolls another app's key with a grant the account's person key signed, and opens the app's session. The key is listed with `kind` `app`, `enrolled_by` `grant` and `allowed_by`. Refused for an administrator's account. See "Grants" below. |
-| `GET /auth/keys` (`listAppKeys`) | the account's own login session | `person_key` (`kid`, `enrolled_at`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `last_used_at`), newest first. Revoked and denied keys are left out. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
+| `GET /auth/keys` (`listAppKeys`) | the account's own login session, opened by password, provider or the person's own device key | `person_key` (`kid`, `enrolled_at`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `last_used_at`), newest first. Revoked and denied keys are left out, and so is a waiting key older than 24 hours, without anyone denying or revoking it. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
 | `DELETE /auth/keys/devices/{id}` (`revokeAppDeviceKey`) | the account's own login session | 204. Revokes the key and ends every session it opened. A device may revoke its own key, which ends the session making the request. 404 for a key that isn't the account's. |
-| `PUT /auth/keys/person` (`replacePersonKey`) | the account's own login session | Body `{ "person_key" }`, unsigned. Answers `{ "person_key_id": "<kid>" }`. The old person key is revoked; devices already enrolled keep their keys. Sending the current key again changes nothing. |
+| `PUT /auth/keys/person` (`replacePersonKey`) | the account's own login session acting as the household's main profile | Body `{ "person_key" }`, unsigned. Answers `{ "person_key_id": "<kid>" }`. The old person key is revoked; devices already enrolled keep their keys, and a device the old key introduced that is still waiting for approval is denied with it. Sending the current key again changes nothing. |
+| `GET /auth/keys/pending` (`listPendingAppKeys`) | as `GET /auth/keys` | `{ "items": [ ... ] }`, each a device object as in `GET /auth/keys` with `status` `pending`: the account's waiting keys inside their 24 hours, oldest first. |
+| `POST /auth/keys/pending/{id}/approve` (`approvePendingAppKey`) | the account's own login session acting as the household's main profile | Body `{}`, 204. The key becomes active and the device's next `sign-in` opens a session. The account must still be an enabled administrator (403 `permission_denied`). Approving an active key changes nothing, except that the session that key itself opened is refused (403 `permission_denied`); an unknown, denied, revoked or expired key is 404 `not_found`. A session opened by one of the administrator's own device keys may approve. Audited as `user.device_key_approved`. |
+| `POST /auth/keys/pending/{id}/deny` (`denyPendingAppKey`) | as `GET /auth/keys` | Body `{}`, 204. The key's next `sign-in` answers 403 `key_denied`, and neither list shows it. Denying a denied key changes nothing; an active, revoked or unknown key is 404 `not_found`. Audited as `user.device_key_denied`. |
 
 **Signed messages.** An envelope is exactly `{ "kid", "payload", "sig" }`, plus
 `device_sig` on `introduce` and `enroll`. `payload` is base64url (no padding) of
@@ -974,8 +977,11 @@ envelope after a 429 answers 401 `challenge_invalid`, because its challenge was
 spent. Sooner than five seconds after its last try it is 429 `rate_limited`
 with `Retry-After`; a key that has waited 24 hours, or was denied, is 403
 `key_denied` and is left out of `GET /auth/keys`. A key whose provider binding
-changed during the request also answers 429, with a one-second `Retry-After`;
-asking again succeeds.
+changed during the request also answers 429, with a one-second `Retry-After`:
+wait, get a fresh challenge and sign a new envelope. That attempt goes through
+every sign-in check again, so it can still be refused (for example 409
+`provider_sign_in_required` or 503). The `Retry-After` on the challenge route's
+own 429 means: wait that many seconds, then repeat the empty POST.
 
 **Problems.** A refusal at or before the signature (a bad signature, a key this
 server doesn't hold or holds revoked, the wrong purpose or `server_id`, outside
@@ -1004,18 +1010,53 @@ provider session whose identity is gone. Either way such a key answers
 `device_platform` holding a control character is 422. A disabled
 account is 403 `permission_denied`.
 
-`enroll`, `PUT /auth/keys/person` and `DELETE /auth/keys/devices/{id}` refuse an
-API key and an administrator acting as the account with 403
-`permission_denied`. `enroll` and `PUT /auth/keys/person` also refuse a session
-opened by device sign-in or by another app's key, and one older than the record
-of how sessions are opened; `DELETE` refuses a device sign-in session, and lets
-another app's session revoke only its own key.
+**Sessions that can't manage keys.** Every route below refuses with 403
+`permission_denied`:
+
+| Route | Password, provider, own device key | Device sign-in (a TV) | Another app's key (grant) | No record of how it opened | Admin acting as the account, API key, remote playback |
+| --- | --- | --- | --- | --- | --- |
+| `GET /auth/keys`, `GET /auth/keys/pending`, `POST /auth/keys/pending/{id}/deny` | allowed | refused | refused | refused | refused |
+| `POST /auth/keys/enroll`, `PUT /auth/keys/person`, `POST /auth/keys/pending/{id}/approve`, `POST /auth/device/preapprove` | main profile only | refused | refused | refused | refused |
+| `DELETE /auth/keys/devices/{id}` | allowed | refused | its own key only | refused | refused |
+
+**The household's main profile.** `enroll`, `PUT /auth/keys/person`,
+`pending/{id}/approve` and `POST /auth/device/preapprove` create lasting access
+to the account every profile shares, so only the household's main profile may
+call them. Approving a device sign-in that is waiting now keeps no profile
+rule. `X-Profile-Id` must
+name the account's primary profile, with `X-Profile-Token` when it has a PIN
+(without it, 403 `profile_verification_required`); naming any other profile is
+403 `permission_denied`, on an administrator's account too, and an
+`X-Profile-Id` that names no profile of the account is 404 `not_found`. A request without
+`X-Profile-Id` is accepted only from an administrator account that has at most
+one profile, with no PIN, maturity or library limit. An administrator's account
+with several profiles, or a PIN, names its main profile and sends its token
+like any other account. Otherwise the request is 403 `permission_denied`, also
+for a one-profile account that isn't an administrator. The other key routes have no profile rule.
+
+Each of the four checks the named profile a second time once it holds the
+account, and answers 403 `profile_verification_required` if the profile's PIN
+changed in between, the profile is no longer the main one, or another write to
+the profile is in progress. Nothing was changed, and the request can be made
+again. For `enroll` that means a new challenge and a newly signed envelope:
+the first challenge is spent once its signature verifies. The other three are
+sent again as they were. If the second try gets `profile_verification_required`
+too, verify the profile's PIN again for a new `X-Profile-Token`; if it gets
+`permission_denied`, the profile is no longer the main one. A profile without
+a PIN can get the first answer too, when a PIN was added or the profile was
+being written at that moment.
 
 **Switch.** While `auth.app_key_sign_in` is off the challenge, `introduce`,
-`sign-in`, `enroll`, `POST /auth/grants/redeem`, `PUT /auth/keys/person` and the
-signed form of `PUT /api/v2/profiles/set` answer 409
-`capability_disabled`. The capability, `GET /auth/keys` and its deletes stay
-open.
+`sign-in`, `enroll`, `POST /auth/grants/redeem`, `PUT /auth/keys/person`,
+`pending/{id}/approve` and the signed form of `PUT /api/v2/profiles/set` answer
+409 `capability_disabled`. The capability,
+`GET /auth/keys` and its deletes, `GET /auth/keys/pending` and
+`pending/{id}/deny` stay open. A server in demo
+mode (`demo.enabled`) behaves as if the switch were off, for administrators
+too, and its capability reports `disabled`: every visitor shares one account
+there, so no key is enrolled on it and none signs in. For the same reason
+`POST /auth/device/preapprove` is refused in demo mode for a caller who is not
+an administrator, and the device login capability reports `preapprove: false`.
 
 **Rate limits.** `createAppKeyChallenge` spends the per-address
 `key_challenge` budget and `introduce`, `sign-in`, `enroll` and grant redemption the

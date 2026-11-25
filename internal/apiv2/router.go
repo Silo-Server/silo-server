@@ -1350,6 +1350,9 @@ type DeviceLoginService interface {
 	DenyDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)
 	CancelDeviceLogin(ctx context.Context, deviceCode string) (string, error)
 	PreapproveDeviceLogin(ctx context.Context, input auth.DevicePreapprovalInput, userID int) (*auth.DevicePreapprovalResult, error)
+	// ActsAsVerifiedMainProfile is the main-profile rule approving in
+	// advance applies (requireVerifiedMainProfile).
+	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, auth.ActingProfile, error)
 	ListDevicePreapprovals(ctx context.Context, userID int) ([]auth.DevicePreapproval, error)
 	RevokeDevicePreapproval(ctx context.Context, userID int, id string) error
 	AdminListDevicePreapprovals(ctx context.Context, userID int) ([]auth.DevicePreapproval, error)

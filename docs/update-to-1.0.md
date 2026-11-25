@@ -138,6 +138,9 @@ unavailable.
    builds.
 6. Existing login sessions, refresh tokens, profile security state, and API keys remain valid
    until normal expiry or revocation. Sign in again only when the normal session flow requires it.
+   One exception: a login session opened before this version has no record of how it was opened,
+   so managing the account's app keys and devices from it is refused (`403 permission_denied`)
+   until the person signs in once more. Refreshing the session does not change that.
    Opening plugin content through 1.0 reissues its separate five-minute access cookie on the v2
    path.
 Steps 7 to 11 are the v1-retirement steps. A deployment that completed them when it updated to

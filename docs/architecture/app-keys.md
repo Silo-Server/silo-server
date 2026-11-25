@@ -244,9 +244,38 @@ copied person key alone can't open an admin session. Keys from `enroll` start
 active: the enrolling session already proves the admin. A waiting device asks
 again with `sign-in` on a fresh challenge, no sooner than five seconds after
 its last try (`last_attempt_at`; sooner is 429 with `Retry-After`), and a key that
-has waited 24 hours, or was denied, answers `key_denied`. The routes that
-approve and deny waiting keys are not served yet; until then a waiting key
-stays out.
+has waited 24 hours, or was denied, answers `key_denied`.
+
+**Approving a waiting device.** `GET /auth/keys/pending` lists the account's
+waiting keys inside their 24 hours, oldest first. `POST
+/auth/keys/pending/{id}/approve` makes one active: in one transaction it
+locks the account, then the key, then the approving session, and re-checks
+under those locks that the account is still an enabled administrator, the key
+is still waiting, unrevoked, inside its 24 hours and on this account, and the
+approving session is still live. The device's next `sign-in` opens a session
+and runs the provider checks then. Approving an active key changes nothing
+(except from the session that key itself opened, which is refused: a device
+does not approve itself); an unknown, denied, revoked or expired one is 404. `POST
+/auth/keys/pending/{id}/deny` marks the key `denied`: its next `sign-in`
+answers `key_denied`, and neither list shows it. Both decisions are recorded
+as domain audit actions on the account (`user.device_key_approved`,
+`user.device_key_denied`, with the key's ID). A session opened by one of the
+administrator's own active device keys may approve, which is how a new device
+is approved from a device already signed in; a session may never decide on the
+key that opened it.
+
+**A cap on waiting keys.** Whoever holds an administrator's person key can call
+`introduce` again and again, and each call leaves a waiting row. An account
+holds at most 10 waiting keys inside their 24 hours (`auth.MaxPendingKeys`); an
+`introduce` that would add an eleventh is refused with 409 `conflict`, the
+answer the cap on device sign-ins approved in advance gives. The count runs
+under the account lock in the transaction that inserts the key; the challenge
+is already spent by then, as for every refusal after the signature. The
+retention task that deletes expired challenges (`cleanup_app_key_challenges`,
+hourly) also revokes waiting keys past their 24 hours. It sets `revoked_at` and
+never deletes the row, so the public key stays enrolled once, and it takes
+each account's lock in turn. A swept key's `sign-in` still verifies its
+signature and answers `key_denied`, as it did before the sweep.
 
 ## Grants
 
@@ -316,30 +345,94 @@ refuses the grant by its `exp`.
 
 ## Who decides
 
-The operations that hand out lasting access check how the calling session was
-opened (`auth_sessions.opened_via`, written at every session creation:
-`password`, `provider`, `device_login`, `app_key` or `impersonation`). The rule
-is one function, `auth.SessionAllows`:
+The operations on keys check how the calling session was opened
+(`auth_sessions.opened_via`, written at every session creation: `password`,
+`provider`, `device_login`, `app_key` or `impersonation`). The rule is one
+function, `auth.SessionAllows`, with one action per kind of change:
 
-- `enroll` and `PUT /auth/keys/person` need the account's own login session
+- Every action needs the account's own login session
   (`Claims.IsOwnLoginSession`: no API key, no administrator acting as the
-  account, no remote-playback handoff), opened by a password, a provider or the
-  person's own app key. A session opened by device sign-in (a TV, a shared
-  tablet, a browser approved by QR code) is refused: whoever holds it isn't
-  necessarily the person, and through a key it could reach lasting access. A
-  session with no record, older than the column, is refused the same way.
-- A session opened by a key enrolled through a grant (another app) is refused
-  every such change, and also approving a device sign-in: the app's access ends
-  when its key is revoked, so it must not mint access that outlives that.
-- `POST /auth/device/preapprove` (a device sign-in approved in advance, see
-  [device-login.md](device-login.md#approval-in-advance)) follows the same rule
-  as `enroll`: a sign-in approved in advance outlives the session that made it.
-- `DELETE /auth/keys/devices/{id}` follows the same rule, except that a
+  account, no remote-playback handoff), and refuses a session opened by a key
+  enrolled through a grant (another app): the app's access ends when its key
+  is revoked, so it must not mint access that outlives that, nor read the
+  person's devices.
+- `ActionManageKeys` (`enroll`, `PUT /auth/keys/person`,
+  `pending/{id}/approve`, `POST /auth/device/preapprove`) and `ActionReadKeys`
+  (`GET /auth/keys`, `GET /auth/keys/pending`, `pending/{id}/deny`) also need a
+  session opened by a password, a provider or the person's own device key. A
+  session opened by device sign-in (a TV, a shared tablet, a browser approved
+  by QR code) is refused: whoever holds it isn't necessarily the person, the
+  device list is exactly what such a device is kept away from, and a TV must
+  not refuse the administrator's new phone. A session with no record, older
+  than the column, is refused the same way.
+- `ActionApproveDeviceSignIn` (approving a device sign-in that is waiting now)
+  refuses only the grant-enrolled app's session.
+- `DELETE /auth/keys/devices/{id}` follows `ActionManageKeys`, except that a
   grant-enrolled app may revoke its own key. A device may revoke its own key,
   which ends the session asking.
 - `GET /profiles/set` and the session form of `PUT /profiles/set` follow the
   same rule as `enroll` (see [The profile set](#the-profile-set)): a set can
   delete profiles and change their PINs and limits.
+
+The key routes against each kind of session:
+
+| Route | Password, provider, own device key | Device sign-in (a TV) | Grant-enrolled app | No `opened_via` | Admin acting as the account, API key, remote playback |
+|---|---|---|---|---|---|
+| `GET /auth/keys`, `GET /auth/keys/pending`, `pending/{id}/deny` | allowed | refused | refused | refused | refused |
+| `enroll`, `PUT /auth/keys/person`, `pending/{id}/approve`, `POST /auth/device/preapprove` | main profile only | refused | refused | refused | refused |
+| `DELETE /auth/keys/devices/{id}` | allowed | refused | its own key only | refused | refused |
+
+**The household's main profile.** Every profile of a household shares the
+account and its login session, so a change that creates lasting access to the
+account is limited to the household's main profile, the one that manages the
+household: `enroll`, `PUT /auth/keys/person`, `pending/{id}/approve` and
+approving a device sign-in in advance (`POST /auth/device/preapprove`, a
+sign-in that lasts 30 days). Approving a device sign-in that is waiting now
+keeps no profile rule. The
+check is one function, `handlers.AuthHandler.ActsAsVerifiedMainProfile`,
+called through `requireVerifiedMainProfile` in the v2 handler of each, which is
+registered with `mainProfileOnly` (profile-scoped, `X-Profile-Id` optional). It
+is the household manager rule that disconnecting a sign-in and creating a
+personal API key apply (`canManageHouseholdAs`):
+
+- `X-Profile-Id` naming the primary profile passes; one with a PIN needs
+  `X-Profile-Token` (403 `profile_verification_required` from the viewer gate,
+  or from the handler if the PIN changed since the token). Naming any other
+  profile is 403 `permission_denied`, on an administrator's account too.
+- A request with no `X-Profile-Id` passes only from an administrator account
+  that has at most one profile, with no PIN and no maturity or library limit:
+  there the request can only mean that profile. This is not "administrators
+  may leave the header out": an administrator's account with several
+  profiles, or a PIN, names its main profile and sends its token like any
+  other account. Anyone else, including a one-profile account that is not an
+  administrator, must name the main profile; without it the request is 403
+  `permission_denied`. This is stricter than `changePassword`, which lets an
+  administrator leave the header out even when the main profile has a PIN;
+  approving a waiting device is only ever done by an administrator, so that
+  rule would let any profile on the device skip the PIN.
+
+The handler checks the profile before the operation's transaction starts, and
+that transaction may wait for the account's row. So the handler passes the
+profile it checked and its PIN revision (`auth.ActingProfile`) to the
+operation, and each of the four checks it again right after it locks the
+account (`recheckActingProfile`): the row must still exist, still be the
+primary profile, and still be at that PIN revision, or the operation ends with
+`ErrActingProfileChanged` (403 `profile_verification_required`) and changes
+nothing. The check holds a share lock on the profile row until the transaction
+ends, so a PIN change waits for it.
+
+The check never waits for the profile row (`FOR SHARE NOWAIT`); a row another
+write holds counts as changed. A profile write can hold its row and then touch
+the account row (a foreign key insert, the access policy revision), which this
+transaction has locked, so waiting could deadlock. Creating a personal API key
+waits instead, and can, because it takes only a key-share lock on the account.
+
+Two cases have nothing to check again: a request that named no profile (the
+administrator with one unprotected profile), and a server whose profiles are
+stored outside Postgres, where this transaction can't read them.
+
+The key list, its deletes, the pending list and deny keep no profile rule:
+any profile of the account may review and remove devices.
 
 ## The origin rule and the sealed reply
 
@@ -418,7 +511,10 @@ TLS connection covers all of it.
 - **Revoking a device key** (the person's devices list) ends its sessions at
   once, as above.
 - **Replacing the person key** revokes the old one: new devices need the new
-  key, devices already enrolled keep theirs.
+  key, devices already enrolled keep theirs. A device the old key introduced
+  that is still waiting for approval is refused with it (`denied`): replacing
+  the key is how a person cuts off a copy of it, and a waiting device may be
+  the copy's work. That device is introduced again with the new key.
 - **A provider refusing the person** (`applyAnswer`), **an email match taking
   over the account** (`account_resolution.go`), **a promotion to admin or a
   move of ownership** (`revokeCredentialsIssuedToNonAdmin`) revoke every key of
@@ -611,11 +707,26 @@ rate limiter's backend (cluster-wide with Redis).
 server-wide. It is read from `server_settings` on each request, so a change on
 any node applies at once. While it is off, `getAppKeyCapability` reports
 `disabled`, and the challenge, `introduce`, `sign-in`, `enroll`, grant
-redemption, `PUT /auth/keys/person` and the signed form of `PUT /profiles/set`
-answer `capability_disabled`. A person's own key list
-and its deletes stay open, so keys can be reviewed and revoked; sessions keys
+redemption, `PUT /auth/keys/person`, `pending/{id}/approve` and the signed
+form of `PUT /profiles/set` answer
+`capability_disabled`. A person's own key list and its deletes, the pending
+list and `deny` stay open, so keys can be reviewed, revoked and refused; sessions keys
 opened before are not ended by the switch. Backups classify it as an access setting: a restore keeps the
 stricter of the live and the backed-up value.
+
+**Demo mode.** On a demo server (`demo.enabled`) every visitor signs in to
+one shared account. A key a visitor enrolled would be a lasting credential of
+theirs on an account that isn't theirs, able to replace the person key or
+approve devices after they left. So in demo mode app key sign-in is off for
+everyone, administrators included, whatever the setting says
+(`appKeySwitch`): the capability reports `disabled` and the same routes
+answer `capability_disabled`, so a demo account never holds a key and one
+enrolled before demo mode was turned on does not sign in. It is one
+condition where the switch is read, so every route the switch closes
+inherits it. A `demo.enabled` that can't be read fails those routes; it is
+never taken as "not a demo". Approving a device sign-in in advance is not behind the switch;
+it carries the ordinary demo restriction (refused for a caller who is not an
+administrator) and the device login capability reports `preapprove: false`.
 
 ## Backups
 

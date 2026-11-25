@@ -393,10 +393,11 @@ func TestKeySignInAdminWaitsForApprovalDB(t *testing.T) {
 	}
 }
 
-// The session rule: changes that hand out lasting access are refused from a
-// session a device sign-in opened, from one another app's key opened, and
-// from one older than the record; approving a device sign-in refuses only
-// the app's.
+// The session rule: changes that hand out lasting access, and reading the
+// key list, are refused from a session a device sign-in opened, from one
+// another app's key opened, and from one older than the record; approving a
+// device sign-in refuses only the app's. An API key, an administrator acting
+// as the account and a remote-playback session are refused everything.
 func TestSessionAllowsDB(t *testing.T) {
 	env := newKeyEnv(t, "keyrule")
 	ctx := t.Context()
@@ -412,16 +413,25 @@ func TestSessionAllowsDB(t *testing.T) {
 		t.Fatal(err)
 	}
 	keySession := &Claims{UserID: user.ID, SessionID: enrolled.Pair.SessionID, TokenType: TokenTypeAccess}
+	impersonated := *env.loginSession(t, user, models.SessionOpenedPassword, nil)
+	impersonator := user.ID + 1
+	impersonated.ImpersonatorUserID = &impersonator
+	remote := *env.loginSession(t, user, models.SessionOpenedPassword, nil)
+	remote.SessionPurpose = models.SessionPurposeRemotePlayback
 	for _, tc := range []struct {
-		name            string
-		claims          *Claims
-		manage, approve bool
+		name                  string
+		claims                *Claims
+		manage, approve, read bool
 	}{
-		{name: "password", claims: env.loginSession(t, user, models.SessionOpenedPassword, nil), manage: true, approve: true},
-		{name: "own app key", claims: keySession, manage: true, approve: true},
+		{name: "password", claims: env.loginSession(t, user, models.SessionOpenedPassword, nil), manage: true, approve: true, read: true},
+		{name: "provider", claims: env.loginSession(t, user, models.SessionOpenedProvider, nil), manage: true, approve: true, read: true},
+		{name: "own app key", claims: keySession, manage: true, approve: true, read: true},
 		{name: "device sign-in", claims: env.loginSession(t, user, models.SessionOpenedDeviceLogin, nil), approve: true},
 		{name: "older than the record", claims: env.loginSession(t, user, "", nil), approve: true},
 		{name: "another app's key", claims: grantSession},
+		{name: "administrator acting as the account", claims: &impersonated},
+		{name: "API key", claims: &Claims{UserID: user.ID, TokenType: TokenTypeAPIKey}},
+		{name: "remote playback", claims: &remote},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			allowed := func(action SessionAction, want bool) {
@@ -433,11 +443,14 @@ func TestSessionAllowsDB(t *testing.T) {
 			}
 			allowed(ActionManageKeys, tc.manage)
 			allowed(ActionApproveDeviceSignIn, tc.approve)
+			allowed(ActionReadKeys, tc.read)
 			// A personal API key or a linked sign-in is refused only to
-			// another app's session; the operations' own rules decide
-			// the rest, as before app keys.
-			if err := SessionMayIssueCredential(ctx, env.pool, tc.claims); tc.approve && err != nil || !tc.approve && !errors.Is(err, ErrSessionNotAllowed) {
-				t.Fatalf("issuing a credential: err = %v, want allowed %v", err, tc.approve)
+			// another app's session. The operations' own rules decide the
+			// rest, as before app keys: they already keep out an API key,
+			// an administrator acting as the account and remote playback.
+			refused := tc.claims == grantSession
+			if err := SessionMayIssueCredential(ctx, env.pool, tc.claims); !refused && err != nil || refused && !errors.Is(err, ErrSessionNotAllowed) {
+				t.Fatalf("issuing a credential: err = %v, want refused %v", err, refused)
 			}
 		})
 	}
@@ -461,7 +474,7 @@ func TestKeyEnrollRulesDB(t *testing.T) {
 	}); !errors.Is(err, ErrSessionNotAllowed) {
 		t.Fatalf("enroll from device sign-in = %v", err)
 	}
-	if err := env.signIn.ReplacePersonKey(ctx, tv, newTestKey(t).pub); !errors.Is(err, ErrSessionNotAllowed) {
+	if err := env.signIn.ReplacePersonKey(ctx, tv, newTestKey(t).pub, ActingProfile{}); !errors.Is(err, ErrSessionNotAllowed) {
 		t.Fatalf("replace from device sign-in = %v", err)
 	}
 	browser := env.loginSession(t, user, models.SessionOpenedPassword, nil)
@@ -482,7 +495,7 @@ func TestKeyEnrollRulesDB(t *testing.T) {
 		t.Fatalf("an introduce envelope at enroll = %v", err)
 	}
 	replacement := newTestKey(t)
-	if err := env.signIn.ReplacePersonKey(ctx, browser, replacement.pub); err != nil {
+	if err := env.signIn.ReplacePersonKey(ctx, browser, replacement.pub, ActingProfile{}); err != nil {
 		t.Fatal(err)
 	}
 	keys, err := env.signIn.ListOwnKeys(ctx, browser)
@@ -502,7 +515,7 @@ func TestKeyEnrollRulesDB(t *testing.T) {
 	if _, err := env.pool.Exec(ctx, `UPDATE auth_sessions SET provider_since = NOW() WHERE id = $1`, gone.SessionID); err != nil {
 		t.Fatal(err)
 	}
-	if err := env.signIn.ReplacePersonKey(ctx, gone, newTestKey(t).pub); !errors.Is(err, ErrProviderSignInRequired) {
+	if err := env.signIn.ReplacePersonKey(ctx, gone, newTestKey(t).pub, ActingProfile{}); !errors.Is(err, ErrProviderSignInRequired) {
 		t.Fatalf("replace from a session whose identity is gone = %v", err)
 	}
 }

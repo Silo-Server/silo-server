@@ -4274,6 +4274,27 @@
       "body_file": "approve_device_login_ok.json"
     },
     {
+      "name": "approve_pending_app_key_secondary_profile",
+      "operation_id": "approvePendingAppKey",
+      "scenario": "A secondary profile of the household can't approve a waiting device: only the main profile, verified with its PIN when it has one, creates lasting access.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/keys/pending/5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10/approve",
+        "headers": {
+          "Authorization": "Bearer tok-household",
+          "X-Profile-Id": "p-kid"
+        },
+        "body": "{}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "approve_pending_app_key_secondary_profile.json"
+    },
+    {
       "name": "authentication_required",
       "operation_id": null,
       "scenario": "An authenticated operation called without a credential.",
@@ -5766,6 +5787,26 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/DeviceLoginDecision",
       "body_file": "deny_device_login_ok.json"
+    },
+    {
+      "name": "deny_pending_app_key_ok",
+      "operation_id": "denyPendingAppKey",
+      "scenario": "An administrator refuses a waiting device; its next sign-in answers key_denied.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/keys/pending/5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10/deny",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        },
+        "body": "{}"
+      },
+      "expected_status": 204,
+      "response_headers": {
+        "Cache-Control": "no-store"
+      },
+      "response_media_type": null,
+      "schema": null,
+      "body_file": null
     },
     {
       "name": "deprecated_ok",
@@ -11376,6 +11417,25 @@
       "body_file": "list_not_interested_ok.json"
     },
     {
+      "name": "list_pending_app_keys_ok",
+      "operation_id": "listPendingAppKeys",
+      "scenario": "An administrator lists the devices waiting for approval: one introduced with the person key, oldest first.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/keys/pending",
+        "headers": {
+          "Authorization": "Bearer tok-admin"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/PendingAppKeyList",
+      "body_file": "list_pending_app_keys_ok.json"
+    },
+    {
       "name": "list_people_limit_out_of_range",
       "operation_id": "listPeople",
       "scenario": "A limit below the minimum.",
@@ -14115,7 +14175,8 @@
         "method": "POST",
         "path": "/api/v2/auth/device/preapprove",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
         },
         "body": "{\"device_name\":\"Twenty-first TV\",\"binding\":\"Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU\"}"
       },
@@ -14136,7 +14197,8 @@
         "method": "POST",
         "path": "/api/v2/auth/device/preapprove",
         "headers": {
-          "Authorization": "Bearer tok-member"
+          "Authorization": "Bearer tok-member",
+          "X-Profile-Id": "p-owner"
         },
         "body": "{\"device_name\":\"Living room TV\",\"device_platform\":\"tvos\",\"binding\":\"Zmh6rfhivXdsj8GLjp-OIAiXFIVu4jOzkCpZHQ1fKSU\"}"
       },
