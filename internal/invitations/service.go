@@ -403,6 +403,10 @@ type LookupResult struct {
 	ExpiresAt     time.Time
 	ShowTour      bool
 	CreateProfile bool
+	// LocalPasswords reports that the server accepts local passwords, so
+	// the invitation can be claimed: with a password, or through the Silo
+	// app when app keys are on. With them off it can't be claimed here.
+	LocalPasswords bool
 }
 
 // Lookup resolves a raw claim token for the claim screen. Unknown, expired,
@@ -413,15 +417,20 @@ func (s *Service) Lookup(ctx context.Context, token string) (*LookupResult, erro
 	if err != nil {
 		return nil, err
 	}
+	local, err := s.sessions.LocalPasswordLoginAllowed(ctx)
+	if err != nil {
+		return nil, err
+	}
 	return &LookupResult{
-		Email:         inv.Email,
-		EmailRequired: inv.Email == "",
-		Note:          inv.Note,
-		InviterName:   inv.InvitedByName,
-		ServerName:    s.serverName(ctx),
-		ExpiresAt:     inv.ExpiresAt,
-		ShowTour:      inv.ShowTour,
-		CreateProfile: inv.CreateProfile,
+		LocalPasswords: local,
+		Email:          inv.Email,
+		EmailRequired:  inv.Email == "",
+		Note:           inv.Note,
+		InviterName:    inv.InvitedByName,
+		ServerName:     s.serverName(ctx),
+		ExpiresAt:      inv.ExpiresAt,
+		ShowTour:       inv.ShowTour,
+		CreateProfile:  inv.CreateProfile,
 	}, nil
 }
 

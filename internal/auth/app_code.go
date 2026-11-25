@@ -434,3 +434,9 @@ func (a *AppKeySignIn) enrollRedeemedDevice(ctx context.Context, tx pgx.Tx, user
 	out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, session)
 	return err
 }
+
+// SessionKeyAccess answers what the claims' session may do with the
+// account's app keys (ReadSessionKeyAccess).
+func (a *AppKeySignIn) SessionKeyAccess(ctx context.Context, claims *Claims) (SessionKeyAccess, error) {
+	return ReadSessionKeyAccess(ctx, a.pool, claims)
+}

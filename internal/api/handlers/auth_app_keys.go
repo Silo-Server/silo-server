@@ -61,6 +61,22 @@ func (h *AuthHandler) EnrollAppKeys(ctx context.Context, req auth.KeyEnrollReque
 	return h.appKeyAnswer(ctx, result, err)
 }
 
+// IssueSessionAppCode issues an app code for the caller's own account.
+func (h *AuthHandler) IssueSessionAppCode(ctx context.Context, claims *auth.Claims, acting auth.ActingProfile) (auth.IssuedAppCode, error) {
+	return h.appKeys.IssueSessionAppCode(ctx, claims, acting)
+}
+
+// RedeemAppCode enrolls the keys of a signed redeem with its app code.
+func (h *AuthHandler) RedeemAppCode(ctx context.Context, req auth.KeyRedeemRequest) (*AppKeyAnswer, error) {
+	result, err := h.appKeys.RedeemAppCode(ctx, req)
+	return h.appKeyAnswer(ctx, result, err)
+}
+
+// AppKeySessionAccess answers what the caller's session may do with keys.
+func (h *AuthHandler) AppKeySessionAccess(ctx context.Context, claims *auth.Claims) (auth.SessionKeyAccess, error) {
+	return h.appKeys.SessionKeyAccess(ctx, claims)
+}
+
 // ListOwnAppKeys lists the caller's own keys.
 func (h *AuthHandler) ListOwnAppKeys(ctx context.Context, claims *auth.Claims) (auth.OwnAppKeys, error) {
 	return h.appKeys.ListOwnKeys(ctx, claims)

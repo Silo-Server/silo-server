@@ -47,6 +47,7 @@ func keyCreatingRoutes() []struct{ method, path, body string } {
 		{method: http.MethodPost, path: "/auth/keys/enroll", body: enrollBody},
 		{method: http.MethodPut, path: "/auth/keys/person", body: `{"person_key":"` + testPersonKey + `"}`},
 		{method: http.MethodPost, path: pendingKeyPath + "/approve", body: `{}`},
+		{method: http.MethodPost, path: "/auth/app-codes", body: `{}`},
 	}
 }
 

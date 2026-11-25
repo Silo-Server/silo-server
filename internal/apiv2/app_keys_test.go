@@ -42,6 +42,8 @@ type fakeAppKeys struct {
 	households userstore.UserStoreProvider
 	// acting is the checked profile the last key-creating call carried.
 	acting auth.ActingProfile
+	// sessionAccess answers AppKeySessionAccess.
+	sessionAccess auth.SessionKeyAccess
 }
 
 // ActsAsVerifiedMainProfile runs the production rule against the fake
@@ -123,6 +125,26 @@ func (f *fakeAppKeys) ReplacePersonKey(_ context.Context, _ *auth.Claims, _ appk
 	f.calls++
 	return f.err
 }
+
+func (f *fakeAppKeys) IssueSessionAppCode(_ context.Context, _ *auth.Claims, acting auth.ActingProfile) (auth.IssuedAppCode, error) {
+	f.acting = acting
+	f.calls++
+	if f.err != nil {
+		return auth.IssuedAppCode{}, f.err
+	}
+	return auth.IssuedAppCode{Code: testAppCode, ExpiresAt: time.Now().Add(auth.AppCodeLifetime)}, nil
+}
+
+func (f *fakeAppKeys) RedeemAppCode(context.Context, auth.KeyRedeemRequest) (*handlers.AppKeyAnswer, error) {
+	return f.signed()
+}
+
+func (f *fakeAppKeys) AppKeySessionAccess(context.Context, *auth.Claims) (auth.SessionKeyAccess, error) {
+	return f.sessionAccess, nil
+}
+
+// testAppCode is a well-formed app code.
+const testAppCode = "q0yR3lbxN7D5mE4pTH2n6Qv8sK1aWcJfUgXoYdZiBtM"
 
 func (f *fakeAppKeys) SessionMayIssueCredential(context.Context, *auth.Claims) error {
 	return f.credentialErr

@@ -266,6 +266,7 @@ var householdGateExemptOperations = map[string]string{
 	"beginNotificationDiscordLink":         exemptAccount,
 	"changePassword":                       exemptAccount,
 	"checkPlexPin":                         exemptAccount,
+	"createAppCode":                        exemptAccount,
 	"createEventsSocketTicket":             exemptAccount,
 	"createHistoryImportRun":               exemptAccount,
 	"createPlexPin":                        exemptAccount,
@@ -310,6 +311,7 @@ var householdGateExemptOperations = map[string]string{
 	"listUserLibraries": exemptProfiles,
 
 	"getAccountPasswordCapability":    exemptProbe,
+	"getAppKeySessionAccess":          exemptProbe,
 	"getImageCapabilities":            exemptProbe,
 	"getPolicyCapability":             exemptProbe,
 	"getSettingsContractCapabilities": exemptProbe,
