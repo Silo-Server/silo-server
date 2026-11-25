@@ -297,6 +297,8 @@ func profileSetFormCases() []profileSetFormCase {
 		{name: "a pair for no item", set: set(whole()), pairs: []any{map[string]any{"sync_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7", "local_id": "p-owner"}}},
 		{name: "a pair without local_id", set: set(whole()), pairs: []any{map[string]any{"sync_id": "0f8fad5b-d9cb-469f-a165-70867728950e"}}},
 		{name: "pairs not an array", set: set(whole()), pairs: "x"},
+		{name: "pairs null", set: set(whole()), pairs: json.RawMessage("null")},
+		{name: "edits_seen null", set: set(whole()), editsSeen: json.RawMessage("null")},
 		{name: "edits_seen too long", set: set(whole()), editsSeen: strings.Repeat("e", 65)},
 		{name: "edits_seen a number", set: set(whole()), editsSeen: 5},
 		{name: "edits_seen with a control character", set: set(whole()), editsSeen: "e1.\x00"},

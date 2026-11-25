@@ -66,10 +66,11 @@ func TestVerifyProfileSetDB(t *testing.T) {
 		if !spent(t, req) {
 			t.Fatal("the challenge was not spent")
 		}
-		// A payload with no set is the envelope's fault.
-		for _, fields := range []map[string]any{{"set": nil}} {
-			if _, err := env.signIn.VerifyProfileSet(ctx, request(person, user.ID, fields)); appkeys.CodeOf(err) != appkeys.CodeFieldInvalid {
-				t.Fatalf("a payload whose set is %v: err = %v, want field_invalid", fields["set"], err)
+		// A payload with no set, or a null one, is the envelope's fault.
+		noSet := env.request(t, message{purpose: appkeys.PurposeProfileSet, signer: person, fields: map[string]any{"account_id": strconv.Itoa(user.ID)}})
+		for name, req := range map[string]KeyRequest{"null": request(person, user.ID, map[string]any{"set": nil}), "absent": noSet} {
+			if _, err := env.signIn.VerifyProfileSet(ctx, req); appkeys.CodeOf(err) != appkeys.CodeFieldInvalid {
+				t.Fatalf("a payload whose set is %s: err = %v, want field_invalid", name, err)
 			}
 		}
 	})
