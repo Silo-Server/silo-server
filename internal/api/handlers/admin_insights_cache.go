@@ -167,7 +167,7 @@ func cachedInsightsRead[T comparable](ctx context.Context, p *AdminInsightsProvi
 				c.Set(key, v, p.ttl)
 			}
 			p.publishMu.Unlock()
-			return v, nil
+			return insightsFill[T]{v}, nil
 		})
 	}
 	call.waiters++
@@ -182,12 +182,17 @@ func cachedInsightsRead[T comparable](ctx context.Context, p *AdminInsightsProvi
 	if call.err != nil {
 		return zero, call.err
 	}
-	v, ok := call.val.(T)
+	filled, ok := call.val.(insightsFill[T])
 	if !ok {
 		return zero, fmt.Errorf("insights cache fill for %s returned %T", key, call.val)
 	}
-	return v, nil
+	return filled.v, nil
 }
+
+// insightsFill carries a fill's value through insightsFillCall's untyped
+// result. Asserting to this struct, not to T itself, keeps the route
+// inventory check from reading the assertion as a possible router recovery.
+type insightsFill[T any] struct{ v T }
 
 // runInsightsFill runs one shared fill, records its result, and retires it.
 func (p *AdminInsightsProvider) runInsightsFill(ctx context.Context, call *insightsFillCall, fillKey string, fill func(context.Context) (any, error)) {
