@@ -15,6 +15,11 @@ import (
 // account name: the invitation has no email to take one from.
 var ErrUsernameRequired = errors.New("a username is required to join with this invitation")
 
+// ErrUsernameIsAddress refuses a username that looks like an email address
+// other than the one the same request gives: it could be someone else's
+// address, and holding it would block that person's own invitation.
+var ErrUsernameIsAddress = errors.New("a username with @ must be the email address given with it")
+
 // claimStore is the part of the repository a join through the Silo app
 // uses: it claims in a transaction the caller owns. Satisfied by
 // *Repository.
@@ -56,6 +61,11 @@ func (s *Service) IssueAppCode(ctx context.Context, in AppCodeRequest) (auth.Iss
 		if err != nil {
 			return err
 		}
+		// What accept needs first (acceptance_available in the lookup): a
+		// code that could never be redeemed is not issued.
+		if inv.CreateProfile && !s.SupportsDefaultProfile() {
+			return auth.ErrTransactionalProfileUnavailable
+		}
 		username, email, err := joinAccountName(inv, in)
 		if err != nil {
 			return err
@@ -80,12 +90,16 @@ func joinAccountName(inv *models.Invitation, in AppCodeRequest) (string, string,
 	if username == "" {
 		return "", "", ErrUsernameRequired
 	}
-	if strings.TrimSpace(in.Email) == "" {
-		return username, "", nil
+	email := ""
+	if strings.TrimSpace(in.Email) != "" {
+		address, err := auth.ValidateEmail(in.Email)
+		if err != nil {
+			return "", "", ErrInvalidEmail
+		}
+		email = address
 	}
-	email, err := auth.ValidateEmail(in.Email)
-	if err != nil {
-		return "", "", ErrInvalidEmail
+	if strings.Contains(username, "@") && !strings.EqualFold(username, email) {
+		return "", "", ErrUsernameIsAddress
 	}
 	return username, email, nil
 }

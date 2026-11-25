@@ -128,6 +128,22 @@ func TestRedeemSessionAppCodeDB(t *testing.T) {
 		}
 	})
 
+	t.Run("a device key this server holds already", func(t *testing.T) {
+		other := env.localAccount(t, "appcode-otherdevice", models.RoleUser)
+		_, taken, _ := env.enroll(t, other)
+		user := env.localAccount(t, "appcode-keytaken", models.RoleUser)
+		code := issue(t, env.loginSession(t, user, models.SessionOpenedPassword, nil))
+		person := newTestKey(t)
+		_, err := env.signIn.RedeemAppCode(ctx, KeyRedeemRequest{
+			KeyRequest: env.request(t, message{purpose: appkeys.PurposeRedeem, signer: person, device: &taken, fields: map[string]any{"code": code}}),
+			PersonKey:  person.pub,
+		})
+		var enrolled *KeyEnrolledError
+		if !errors.As(err, &enrolled) || enrolled.Member != "device_key" {
+			t.Fatalf("redeem = %v, want the device key named as enrolled", err)
+		}
+	})
+
 	t.Run("expired", func(t *testing.T) {
 		user := env.localAccount(t, "appcode-expired", models.RoleUser)
 		code := issue(t, env.loginSession(t, user, models.SessionOpenedPassword, nil))
@@ -172,6 +188,8 @@ func TestIssueSessionAppCodeRefusalsDB(t *testing.T) {
 	impersonated.ImpersonatorUserID = new(user.ID + 1)
 	apiKey := *env.loginSession(t, user, models.SessionOpenedPassword, nil)
 	apiKey.TokenType = TokenTypeAPIKey
+	remotePlayback := *env.loginSession(t, user, models.SessionOpenedPassword, nil)
+	remotePlayback.SessionPurpose = models.SessionPurposeRemotePlayback
 	for _, tc := range []struct {
 		name   string
 		claims *Claims
@@ -185,6 +203,7 @@ func TestIssueSessionAppCodeRefusalsDB(t *testing.T) {
 		{"no record of how it opened", env.loginSession(t, user, "", nil), ErrSessionNotAllowed},
 		{"administrator acting as the account", &impersonated, ErrSessionNotAllowed},
 		{"API key", &apiKey, ErrSessionNotAllowed},
+		{"remote-playback session", &remotePlayback, ErrSessionNotAllowed},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := env.signIn.IssueSessionAppCode(t.Context(), tc.claims, ActingProfile{})

@@ -46,6 +46,30 @@ var (
 	ErrJoinNotAvailable = errors.New("this server adds accounts through its sign-in provider")
 )
 
+// NameTakenError is ErrAppCodeNameTaken with what clashed: Field is
+// "username" or "email" when the issue could tell, "" at redeem, where the
+// account insert refuses without saying which.
+type NameTakenError struct{ Field string }
+
+func (e *NameTakenError) Error() string { return ErrAppCodeNameTaken.Error() }
+func (e *NameTakenError) Unwrap() error { return ErrAppCodeNameTaken }
+
+// KeyEnrolledError is ErrAppKeyAlreadyEnrolled at a redeem, saying which key
+// is enrolled already: Member is "person_key" or "device_key". The app makes
+// that key again; a name taken (NameTakenError) needs the page instead.
+type KeyEnrolledError struct{ Member string }
+
+func (e *KeyEnrolledError) Error() string { return ErrAppKeyAlreadyEnrolled.Error() }
+func (e *KeyEnrolledError) Unwrap() error { return ErrAppKeyAlreadyEnrolled }
+
+// keyEnrolledAs names the key a redeem's enrollment found enrolled already.
+func keyEnrolledAs(member string, err error) error {
+	if errors.Is(err, ErrAppKeyAlreadyEnrolled) {
+		return &KeyEnrolledError{Member: member}
+	}
+	return err
+}
+
 // IssuedAppCode is an app code as its creator hands it to the page.
 type IssuedAppCode struct {
 	Code      string
@@ -108,16 +132,16 @@ func IssueJoinAppCodeTx(ctx context.Context, tx pgx.Tx, in JoinAppCode) (IssuedA
 		AND expires_at <= clock_timestamp()`, username); err != nil {
 		return IssuedAppCode{}, fmt.Errorf("clearing expired reservations: %w", err)
 	}
-	for _, name := range []string{username, email} {
-		if name == "" {
+	for _, check := range []struct{ field, name string }{{"username", username}, {"email", email}} {
+		if check.name == "" {
 			continue
 		}
-		taken, err := loginIdentifierTaken(ctx, tx, name)
+		taken, err := loginIdentifierTaken(ctx, tx, check.name)
 		if err != nil {
 			return IssuedAppCode{}, err
 		}
 		if taken {
-			return IssuedAppCode{}, ErrAppCodeNameTaken
+			return IssuedAppCode{}, &NameTakenError{Field: check.field}
 		}
 	}
 	code, hash, err := newAppCode()
@@ -130,7 +154,8 @@ func IssueJoinAppCodeTx(ctx context.Context, tx pgx.Tx, in JoinAppCode) (IssuedA
 		RETURNING expires_at`, hash, appCodeKindJoin, in.InvitationID, username, nullIfBlank(email),
 		AppCodeLifetime.Seconds(), in.InvitationExpiresAt).Scan(&out.ExpiresAt)
 	if pgErr, ok := errors.AsType[*pgconn.PgError](err); ok && pgErr.Code == "23505" {
-		return IssuedAppCode{}, ErrAppCodeNameTaken
+		// Only the reserved name is unique among unspent codes.
+		return IssuedAppCode{}, &NameTakenError{Field: "username"}
 	}
 	if err != nil {
 		return IssuedAppCode{}, fmt.Errorf("storing app code: %w", err)
@@ -311,8 +336,10 @@ func (a *AppKeySignIn) RedeemAppCode(ctx context.Context, req KeyRedeemRequest) 
 }
 
 // redeemJoin creates the account a join code describes and enrolls both
-// keys on it. Lock order: the invitation (before the code, as issuing a code
-// takes them), the code, the settings lock, then the new account's rows.
+// keys on it. Lock order: the invitation, the settings lock, the code, then
+// the new account's rows. Issuing a code takes the invitation, the settings
+// lock (the claim check) and then code rows, other invitations' expired
+// reservations included, so both take them in one order.
 func (a *AppKeySignIn) redeemJoin(ctx context.Context, req KeyRedeemRequest, payload *appkeys.Payload, hash []byte, code appCodeRow, out *KeySignInResult) error {
 	if a.joins == nil {
 		return ErrAppCodeInvalid
@@ -322,6 +349,9 @@ func (a *AppKeySignIn) redeemJoin(ctx context.Context, req KeyRedeemRequest, pay
 		if _, err := tx.Exec(ctx, `SELECT 1 FROM invitations WHERE id = $1 FOR UPDATE`, *code.invitationID); err != nil {
 			return fmt.Errorf("locking invitation: %w", err)
 		}
+		if err := lockServerSettings(ctx, tx); err != nil {
+			return err
+		}
 		if err := spendAppCode(ctx, tx, hash); err != nil {
 			return err
 		}
@@ -330,7 +360,7 @@ func (a *AppKeySignIn) redeemJoin(ctx context.Context, req KeyRedeemRequest, pay
 		case errors.Is(err, ErrLocalLoginDisabled):
 			return ErrJoinNotAvailable
 		case IsDuplicate(err):
-			return ErrAppCodeNameTaken
+			return &NameTakenError{}
 		case err != nil:
 			return err
 		}
@@ -342,7 +372,7 @@ func (a *AppKeySignIn) redeemJoin(ctx context.Context, req KeyRedeemRequest, pay
 			UserID: user.ID, PublicKey: req.PersonKey, EnrolledVia: models.AppKeyEnrolledAppCode,
 		})
 		if err != nil {
-			return err
+			return keyEnrolledAs("person_key", err)
 		}
 		return a.enrollRedeemedDevice(ctx, tx, user, person, KeyBinding{}, payload, chain.session(req.IP, expiry), PersonKeyEnrolled, out)
 	})
@@ -371,7 +401,7 @@ func (a *AppKeySignIn) redeemSession(ctx context.Context, req KeyRedeemRequest, 
 		}
 		person, status, err := redeemPersonKeyTx(ctx, tx, user.ID, req.PersonKey, binding)
 		if err != nil {
-			return err
+			return keyEnrolledAs("person_key", err)
 		}
 		if err := a.enrollRedeemedDevice(ctx, tx, user, person, binding, payload, chain.session(req.IP, expiry), status, out); err != nil {
 			return err
@@ -428,7 +458,7 @@ func (a *AppKeySignIn) enrollRedeemedDevice(ctx context.Context, tx pgx.Tx, user
 		IdentityID: binding.IdentityID, ProviderBound: binding.ProviderBound,
 	})
 	if err != nil {
-		return err
+		return keyEnrolledAs("device_key", err)
 	}
 	out.User, out.DeviceID, out.Status, out.PersonKeyStatus = user, key.ID, appkeys.ReplySignedIn, personStatus
 	out.Pair, err = a.service.openKeySessionTx(ctx, tx, user, key, session)

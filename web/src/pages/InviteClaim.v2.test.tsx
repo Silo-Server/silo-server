@@ -349,3 +349,34 @@ it("explains an invitation no path can claim instead of showing a form", async (
   expect(await screen.findByRole("alert")).toHaveTextContent("Password sign-in is turned off");
   expect(screen.queryByRole("button", { name: "Create account" })).toBeNull();
 });
+
+it("puts a taken email on the email field and moves focus there", async () => {
+  lookup = async () => json({ ...linkInvitation, app_join: true });
+  appCode = async () =>
+    problemResponse(409, "conflict", {
+      errors: [{ location: "body.email", code: "duplicate", detail: "taken" }],
+    });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  const username = screen.getByLabelText("Username");
+  expect(document.activeElement).toBe(username);
+  fireEvent.change(username, { target: { value: "sam" } });
+  fireEvent.change(screen.getByLabelText("Email (optional)"), {
+    target: { value: "sam@example.test" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  const email = screen.getByLabelText("Email (optional)");
+  await waitFor(() => expect(document.activeElement).toBe(email));
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "An account already uses this email address.",
+  );
+});
+
+it("moves focus to the Open Silo step when the code arrives", async () => {
+  lookup = async () => json({ ...invitation, app_join: true });
+  mount();
+  fireEvent.click(await screen.findByRole("button", { name: "Join with the Silo app" }));
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  const heading = await screen.findByRole("heading", { name: "Open Silo" });
+  await waitFor(() => expect(document.activeElement).toBe(heading));
+});

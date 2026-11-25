@@ -444,3 +444,31 @@ func TestPayloadRefusesCharactersOutsideBase64url(t *testing.T) {
 		})
 	}
 }
+
+// TestWebJoinLinkVectorsMatch: the web app's join link test reads a copy of
+// the valid join-link cases (its CI checkout has only web/). The copy is
+// derived from links.json; this fails when the two disagree, so a refreshed
+// vector file can't leave the web test checking old links.
+func TestWebJoinLinkVectorsMatch(t *testing.T) {
+	var want []map[string]any
+	for _, c := range loadVectors(t, "links.json").Cases {
+		if c["type"] == "join-link" && c["valid"] == true {
+			want = append(want, c)
+		}
+	}
+	data, err := os.ReadFile(filepath.Join("..", "..", "web", "src", "lib", "joinLink.vectors.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var web struct {
+		Cases []map[string]any `json:"cases"`
+	}
+	if err := json.Unmarshal(data, &web); err != nil {
+		t.Fatal(err)
+	}
+	gotJSON, _ := json.Marshal(web.Cases)
+	wantJSON, _ := json.Marshal(want)
+	if len(want) == 0 || !bytes.Equal(gotJSON, wantJSON) {
+		t.Fatalf("web/src/lib/joinLink.vectors.json does not hold the valid join-link cases of links.json; regenerate it")
+	}
+}

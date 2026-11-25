@@ -98,7 +98,7 @@ type InvitationLookup struct {
 	ShowTour            bool    `json:"show_tour"`
 	AcceptanceAvailable bool    `json:"acceptance_available"`
 	PasswordJoin        bool    `json:"password_join" doc:"Whether the invitation can be claimed with a password here (acceptInvitationLink): false while the server has local password sign-in off."`
-	AppJoin             bool    `json:"app_join" doc:"Whether the invitation can be claimed through the Silo app here (createInvitationAppCode): app key sign-in is on and the server has local password sign-in on."`
+	AppJoin             bool    `json:"app_join" doc:"Whether the invitation can be claimed through the Silo app here (createInvitationAppCode): app key sign-in is on, the server has local password sign-in on, and acceptance_available is true."`
 }
 type InvitationLookupOutput struct{ Body InvitationLookup }
 
@@ -299,13 +299,14 @@ func registerInvitations(reg *Registry) {
 		if err != nil {
 			return nil, invitationProblem(err, true)
 		}
+		acceptance := !view.CreateProfile || svc.SupportsDefaultProfile()
 		appJoin := false
-		if keys := reg.deps.AppKeys; keys != nil && view.LocalPasswords {
+		if keys := reg.deps.AppKeys; keys != nil && view.LocalPasswords && acceptance {
 			if appJoin, err = reg.appKeySwitch(ctx, keys); err != nil {
 				return nil, serviceProblem(err)
 			}
 		}
-		return &InvitationLookupOutput{Body: InvitationLookup{Email: view.Email, EmailRequired: view.EmailRequired, Note: view.Note, InviterName: view.InviterName, ServerName: view.ServerName, ExpiresAt: NewInstant(view.ExpiresAt), ShowTour: view.ShowTour, AcceptanceAvailable: !view.CreateProfile || svc.SupportsDefaultProfile(),
+		return &InvitationLookupOutput{Body: InvitationLookup{Email: view.Email, EmailRequired: view.EmailRequired, Note: view.Note, InviterName: view.InviterName, ServerName: view.ServerName, ExpiresAt: NewInstant(view.ExpiresAt), ShowTour: view.ShowTour, AcceptanceAvailable: acceptance,
 			PasswordJoin: view.LocalPasswords, AppJoin: appJoin}}, nil
 	}
 	accept := func(ctx context.Context, token, email, password, userAgent string) (*InvitationAcceptOutput, error) {

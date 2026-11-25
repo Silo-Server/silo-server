@@ -37,21 +37,44 @@ export function InviteAppJoin({
   const lifetime = useRef<AbortController | null>(null);
   // What the current code was issued for, sent again when it is renewed.
   const chosen = useRef<{ username: string; email: string } | undefined>(undefined);
+  const usernameInput = useRef<HTMLInputElement>(null);
+  const emailInput = useRef<HTMLInputElement>(null);
+  const refusalRef = useRef<HTMLParagraphElement>(null);
   useEffect(() => {
     const controller = new AbortController();
     lifetime.current = controller;
     return () => controller.abort();
   }, []);
+  // The field the answer is about gets focus once the form is usable again:
+  // the button that was pressed may be gone, and the inputs were disabled.
+  useEffect(() => {
+    if (pending) return;
+    if (fieldError?.field === "username") usernameInput.current?.focus();
+    else if (fieldError?.field === "email") emailInput.current?.focus();
+    else if (refusal) refusalRef.current?.focus();
+  }, [fieldError, refusal, pending]);
 
   // A refusal that belongs to a field sends the person back to the form.
+  // The server names the field: a taken name is `duplicate` at body.username
+  // or body.email, whichever clashed.
   function fieldRefusal(error: V2ProblemError): FieldError | null {
-    const at = error.problem.errors?.map((e) => e.location) ?? [];
-    if (error.problemType === "conflict" && invitation.email_required)
-      return { field: "username", message: t("web.auth.invite.usernameTaken") };
-    if (error.problemType === "validation_failed" && at.includes("body.email"))
-      return { field: "email", message: invalidEmailMessage() };
-    if (error.problemType === "validation_failed" && at.includes("body.username"))
-      return { field: "username", message: t("web.auth.invite.usernameRequired") };
+    const at = error.problem.errors?.[0];
+    if (!invitation.email_required || !at) return null;
+    if (error.problemType === "conflict" && at.code === "duplicate") {
+      return at.location === "body.email"
+        ? { field: "email", message: t("web.auth.invite.emailTaken") }
+        : { field: "username", message: t("web.auth.invite.usernameTaken") };
+    }
+    if (error.problemType !== "validation_failed") return null;
+    if (at.location === "body.email") return { field: "email", message: invalidEmailMessage() };
+    if (at.location === "body.username")
+      return {
+        field: "username",
+        message:
+          at.code === "required"
+            ? t("web.auth.invite.usernameRequired")
+            : t("web.auth.invite.usernameIsAddress"),
+      };
     return null;
   }
 
@@ -64,6 +87,8 @@ export function InviteAppJoin({
         return t("web.auth.invite.unavailable");
       case "rate_limited":
         return t("web.auth.forgotPassword.rateLimited");
+      case "capability_unsupported":
+        return t("web.auth.invite.profileUnavailable");
       default:
         return t("web.auth.appCode.failed");
     }
@@ -109,7 +134,7 @@ export function InviteAppJoin({
   }
 
   const refusalAlert = refusal && (
-    <p role="alert" className="mb-4">
+    <p ref={refusalRef} role="alert" tabIndex={-1} className="mb-4 outline-none">
       {refusal}
     </p>
   );
@@ -131,7 +156,13 @@ export function InviteAppJoin({
         <p className="text-muted-foreground text-sm">
           {t("web.auth.invite.appAccountEmail", { email: invitation.email })}
         </p>
-        <Button type="button" className="w-full" onClick={() => void issue()} disabled={pending}>
+        <Button
+          type="button"
+          className="w-full"
+          onClick={() => void issue()}
+          disabled={pending}
+          autoFocus
+        >
           {t("web.auth.invite.appContinue")}
         </Button>
       </div>
@@ -146,6 +177,7 @@ export function InviteAppJoin({
       <div className="space-y-2">
         <Label htmlFor="invite-app-username">{t("web.auth.username")}</Label>
         <Input
+          ref={usernameInput}
           id="invite-app-username"
           value={username}
           onChange={(e) => {
@@ -158,9 +190,10 @@ export function InviteAppJoin({
           aria-invalid={errorFor("username") ? true : undefined}
           aria-describedby={errorFor("username") ? "invite-app-username-error" : undefined}
           required
+          autoFocus
         />
         {errorFor("username") && (
-          <p id="invite-app-username-error" className="text-destructive text-xs">
+          <p id="invite-app-username-error" role="alert" className="text-destructive text-xs">
             {errorFor("username")}
           </p>
         )}
@@ -169,6 +202,7 @@ export function InviteAppJoin({
         <Label htmlFor="invite-app-email">{t("web.auth.invite.emailOptional")}</Label>
         <p className="text-muted-foreground text-xs">{t("web.auth.invite.appEmailHint")}</p>
         <Input
+          ref={emailInput}
           id="invite-app-email"
           type="email"
           value={email}
@@ -183,7 +217,7 @@ export function InviteAppJoin({
           aria-describedby={errorFor("email") ? "invite-app-email-error" : undefined}
         />
         {errorFor("email") && (
-          <p id="invite-app-email-error" className="text-destructive text-xs">
+          <p id="invite-app-email-error" role="alert" className="text-destructive text-xs">
             {errorFor("email")}
           </p>
         )}

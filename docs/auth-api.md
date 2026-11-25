@@ -1085,11 +1085,17 @@ request arrived on.
   invitation stays open, and a second code from it replaces the first. An
   emailed invitation's account takes its address as name and email; for one
   with no address `username` is required (422 at `body.username`) and `email`
-  optional (422 at `body.email` when malformed). A name or email already held,
-  or reserved by another unspent code, is 409 `conflict`. While local password
+  optional (422 at `body.email` when malformed). A username containing `@`
+  that isn't the email the same request gives is 422 at `body.username`. A
+  name or email already held, or reserved by another unspent code, is 409
+  `conflict` with `errors[0]` `{ "code": "duplicate", "location":
+  "body.username" }` or `"body.email"`, naming the field that clashed. An
+  invitation that creates a profile the store can't create in the same
+  transaction is 501 `capability_unsupported`, as accept answers. While local password
   sign-in is off it is 409 `provider_sign_in_required`: an invitation never
   creates an account whose only way in is its keys. Spends the `invitation`
-  budget.
+  budget (20 a minute with a burst of 10 by default), which the page shares
+  between the lookup, each code and each renewal.
 - `POST /auth/app-codes` is "Open in Silo". Refused (403 `permission_denied`)
   for an API key, an administrator acting as the account, a remote-playback
   session, a session opened by device sign-in or by another app's key, and a
@@ -1100,7 +1106,7 @@ request arrived on.
 - `POST /auth/app-codes/redeem`, for a join code, creates the account with no
   password (`password_hash` NULL, local password sign-in off for the account),
   enrolls both keys and marks the invitation accepted in one transaction;
-  409 `conflict` if the name was taken since, 409 `provider_sign_in_required`
+  409 `conflict` with `errors[0].code` `duplicate` if the name was taken since, 409 `provider_sign_in_required`
   if local password sign-in was turned off since, 404 `app_code_invalid` if the
   invitation was revoked, replaced or accepted since. For a session code it
   enrolls the device key on that account, enrolling `person_key` when the
@@ -1109,10 +1115,23 @@ request arrived on.
   also on an administrator's account. Of two redemptions of one code exactly
   one succeeds.
 
+Redeem's two 409 `conflict` answers have different remedies, so an app reads
+`errors[0].code`, never the detail:
+
+| `errors[0].code` | `errors[0].location` | Meaning | What the app does |
+| --- | --- | --- | --- |
+| `duplicate` | `body.message.payload` | The account name or email the join reserved was taken since the code was issued. | Send the person back to the server's page to choose another name and get a new code. |
+| `key_enrolled` | `body.person_key` or `body.message.payload` (the device key) | This server already holds that public key. | Make that key again and redeem a new code. |
+
+A session code is not checked against the main profile's PIN again at redeem:
+it was issued to the verified main profile and ends with the session that
+issued it. `server_address` is where the app connects, not proof of which
+server answers; the signed `server_id` and the origin rule are.
+
 The invitation lookup (`lookupInvitationLink`) reports `password_join` (a
 password claim works here: local password sign-in is on) and `app_join` (a
 Silo app claim works here: app key sign-in and local password sign-in are both
-on), so the page offers only what works.
+on, and `acceptance_available` is true), so the page offers only what works.
 
 **Switch.** While `auth.app_key_sign_in` is off the challenge, `introduce`,
 `sign-in`, `enroll`, `POST /auth/grants/redeem`, both app code issues, app

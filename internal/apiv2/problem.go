@@ -452,6 +452,9 @@ const (
 	codeMalformedForm    = "malformed_form"
 	// codeManagedByEnvironment refuses a change owned by an environment declaration.
 	codeManagedByEnvironment = "managed_by_environment"
+	// codeKeyEnrolled: the public key is already enrolled on this server, so
+	// the app makes a new one (docs/auth-api.md, "App codes").
+	codeKeyEnrolled = "key_enrolled"
 
 	locationBody     = "body"
 	locationBodyFile = "body.file"

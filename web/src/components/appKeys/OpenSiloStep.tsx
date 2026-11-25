@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Smartphone } from "lucide-react";
 import type { AppCode } from "@/api/v2/appCodes";
 import { Button } from "@/components/ui/button";
@@ -38,14 +38,34 @@ function OpenSiloStepFor({
 }) {
   const t = useT();
   const [expired, setExpired] = useState(false);
+  const section = useRef<HTMLElement>(null);
+  const heading = useRef<HTMLHeadingElement>(null);
+  const renew = useRef<HTMLButtonElement>(null);
+  // The control that led here is gone (or disabled), so the new step's
+  // heading takes focus, as a screen reader then announces the step.
+  useEffect(() => heading.current?.focus(), []);
+  // Expiry replaces the Open Silo link; whoever was on it moves to the
+  // renewal button rather than falling back to the page.
+  const focusRenew = useRef(false);
   useEffect(() => {
-    const timer = window.setTimeout(() => setExpired(true), appCode.expires_in * 1000);
+    const timer = window.setTimeout(() => {
+      focusRenew.current = section.current?.contains(document.activeElement) ?? false;
+      setExpired(true);
+    }, appCode.expires_in * 1000);
     return () => window.clearTimeout(timer);
   }, [appCode.expires_in]);
+  useEffect(() => {
+    if (expired && focusRenew.current) renew.current?.focus();
+  }, [expired]);
 
   return (
-    <section aria-labelledby="open-silo-title" className="space-y-3">
-      <h2 id="open-silo-title" className="text-lg font-semibold">
+    <section ref={section} aria-labelledby="open-silo-title" className="space-y-3">
+      <h2
+        id="open-silo-title"
+        ref={heading}
+        tabIndex={-1}
+        className="text-lg font-semibold outline-none"
+      >
         {t("web.auth.appCode.title")}
       </h2>
       <p className="text-muted-foreground text-sm leading-6">
@@ -54,7 +74,13 @@ function OpenSiloStepFor({
       {expired ? (
         <div role="status" className="space-y-3">
           <p>{t("web.auth.appCode.expired")}</p>
-          <Button type="button" className="w-full" onClick={onRenew} disabled={renewing}>
+          <Button
+            ref={renew}
+            type="button"
+            className="w-full"
+            onClick={onRenew}
+            disabled={renewing}
+          >
             {t("web.auth.appCode.renew")}
           </Button>
         </div>

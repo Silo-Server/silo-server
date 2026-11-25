@@ -385,7 +385,11 @@ There are two kinds:
   creates in between refuses the redeem with `conflict`. An emailed
   invitation's account takes its address as name and email, as accept gives
   it; for an invitation with no address the person chooses a username, and an
-  email is optional.
+  email is optional. A username containing `@` must be the email the same
+  request gives: otherwise someone could hold another person's address as a
+  name and block that person's own invitation. A code is refused where accept
+  would be (an invitation that creates a profile the store can't create in the
+  same transaction), so the page is never handed a code no redeem can use.
 - **Session** (`POST /auth/app-codes`): "Open in Silo" for a signed-in browser.
   It is a key-creating operation: only a session that may manage keys
   (`ActionManageKeys`), acting as the household's verified main profile,
@@ -398,8 +402,10 @@ body is `{ person_key, message }`, a `redeem` envelope signed with
 `person_key`'s private half, with `device_sig`, on a challenge, the code in
 its payload. The challenge is spent once the signature verifies. Then:
 
-- A join runs in one transaction, locking the invitation before the code
-  (issuing a code takes them in that order): it spends the code, claims the
+- A join runs in one transaction, locking the invitation, then the settings
+  lock, then the code, the order issuing a code takes them in (issuing also
+  deletes other invitations' expired reservations, after the settings lock):
+  it spends the code, claims the
   invitation through the same claim accept uses (re-checked: it may have been
   revoked, resent or expired since), creates the account with no password and
   the invitation's role, libraries, access group and first-profile choice,
@@ -414,7 +420,23 @@ its payload. The challenge is spent once the signature verifies. Then:
 
 Keys from a code start active, also on an administrator's account: the code
 came from the account's own session, or the invitation an administrator made
-(an invitation may grant the administrator role, as accept allows). The sealed
+(an invitation may grant the administrator role, as accept allows). A session
+code is not checked against the main profile's PIN again at redeem: it was
+issued to the verified main profile, and it ends with the session that issued
+it.
+
+`server_address` tells the app where to connect. It is not proof of which
+server answers there; the redeem's signed `server_id` and the origin rule are,
+as for every signed request.
+
+**Two conflicts.** A redeem answers 409 `conflict` for two causes with
+different remedies, told apart by `errors[0].code`, never by the detail:
+`duplicate` (at `body.message.payload`) is a reserved name or email taken
+since the code was issued, and the person gets a new code from the page with
+another name; `key_enrolled` is a public key this server already holds, at
+`body.person_key` for the person key and `body.message.payload` for the device
+key, and the app makes that key again. Issuing a join code answers a taken name
+with `duplicate` at `body.username` or `body.email`, whichever clashed. The sealed
 plaintext is the usual `signed_in` answer plus `username` and `person_key`
 (`enrolled` or `replaced`). An unknown, spent or expired code, and one whose
 invitation or session can no longer be used, is `app_code_invalid` (404). Of
@@ -821,10 +843,11 @@ answer `capability_unsupported`.
 
 `createAppKeyChallenge` spends the per-address `key_challenge` budget;
 `introduce`, `sign-in`, `enroll`, grant redemption, app code redemption and
-`createAppCode` spend `key_sign_in`. `createInvitationAppCode` spends the
-invitation lookup's `invitation` budget. Both default to 60 a
-minute with a burst of 20, enough for a few waiting devices behind one address
-(each asks every five seconds). `PUT /profiles/set` spends its own
+`createAppCode` spend `key_sign_in`. Both default to 60 a minute with a burst
+of 20, enough for a few waiting devices behind one address (each asks every
+five seconds). `createInvitationAppCode` spends the invitation routes'
+`invitation` budget, 20 a minute with a burst of 10: the invite page shares it
+between the lookup, each code and each renewal. `PUT /profiles/set` spends its own
 `profile_set` budget, 20 a minute with a burst of 10; its signed form also
 spends a challenge. Neither budget can be spent per key before the
 signature verifies; the challenge is what makes each signed request single
