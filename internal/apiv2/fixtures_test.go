@@ -1795,6 +1795,7 @@ func fixtureCases() []fixtureCase {
 		scenario: "App key sign-in support before login, with the server setting on.",
 		method:   http.MethodGet, path: "/api/v2/auth/keys/capability",
 		status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control", "ETag"}, schema: "#/components/schemas/AppKeyCapability"})
+	cases = append(cases, devicePreapprovalFixtureCases()...)
 	cases = append(cases, appKeyFixtureCases()...)
 	return cases
 }
@@ -2547,4 +2548,44 @@ func (f *fixtureAdminCollectionJobs) GetByID(ctx context.Context, id string) (*m
 		return f.fakeLibraryJobs.GetByID(ctx, id)
 	}
 	return &models.AdminJob{ID: id, JobType: adminjob.JobTypeTemplateBundleApply, Status: adminjob.StatusCompleted, RequestedAt: fixedTime(), StartedAt: new(fixedTime()), CompletedAt: new(fixedTime()), ResultPayload: json.RawMessage(`{"bundle_id":"bundle","created":[{"template_id":"recent","template_title":"Recently added","library_id":1,"library_name":"Movies","collection_id":"c1"}],"skipped":[{"template_id":"existing","template_title":"Existing","library_id":1,"library_name":"Movies","reason":"A collection from this template already exists"}]}`)}, nil
+}
+
+// devicePreapprovalFixtureCases are the shapes the phone and TV apps decode
+// for a device sign-in approved in advance.
+func devicePreapprovalFixtureCases() []fixtureCase {
+	problem := "#/components/schemas/Problem"
+	return []fixtureCase{
+		{name: "preapprove_device_login_ok", operationID: "preapproveDeviceLogin",
+			scenario: "A signed-in phone approves a sign-in in advance for a TV's fingerprint and gets the device code to hand the TV.",
+			method:   http.MethodPost, path: "/api/v2/auth/device/preapprove", body: `{"device_name":"Living room TV","device_platform":"tvos","binding":"` + fakeBinding + `"}`, headers: bearer(memberToken),
+			status: http.StatusCreated, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/DevicePreapprovalCreated"},
+		{name: "preapprove_device_login_limit", operationID: "preapproveDeviceLogin",
+			scenario: "An account already holding 20 waiting sign-ins approved in advance is refused another as a conflict.",
+			method:   http.MethodPost, path: "/api/v2/auth/device/preapprove", body: `{"device_name":"` + fakePreapprovalLimitName + `","binding":"` + fakeBinding + `"}`, headers: bearer(memberToken),
+			status: http.StatusConflict, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "preapprove_device_login_api_key_forbidden", operationID: "preapproveDeviceLogin",
+			scenario: "An API key cannot approve a device in advance: only the account's own signed-in session can.",
+			method:   http.MethodPost, path: "/api/v2/auth/device/preapprove", body: `{"device_name":"Living room TV","binding":"` + fakeBinding + `"}`, headers: with(bearer(apiKeyToken), "X-Profile-Id", "p-primary"),
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_device_preapprovals_ok", operationID: "listDevicePreapprovals",
+			scenario: "The account's waiting sign-ins approved in advance, without device codes or fingerprints.",
+			method:   http.MethodGet, path: "/api/v2/auth/device/preapprovals", headers: bearer(memberToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/CollectionDevicePreapproval"},
+		{name: "revoke_device_preapproval_ok", operationID: "revokeDevicePreapproval",
+			scenario: "The account revokes a waiting sign-in approved in advance; the device's next poll answers denied.",
+			method:   http.MethodDelete, path: "/api/v2/auth/device/preapprovals/" + fakePreapprovalID, headers: bearer(memberToken),
+			status: http.StatusNoContent},
+		{name: "revoke_device_preapproval_not_found", operationID: "revokeDevicePreapproval",
+			scenario: "Revoking a sign-in that is not waiting (redeemed, expired, or another account's) is not found.",
+			method:   http.MethodDelete, path: "/api/v2/auth/device/preapprovals/00000000-0000-4000-8000-000000000000", headers: bearer(memberToken),
+			status: http.StatusNotFound, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: problem},
+		{name: "list_admin_user_device_preapprovals_ok", operationID: "listAdminUserDevicePreapprovals",
+			scenario: "An administrator lists an account's waiting sign-ins approved in advance.",
+			method:   http.MethodGet, path: "/api/v2/admin/users/1/device-preapprovals", headers: bearer(adminToken),
+			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/CollectionDevicePreapproval"},
+		{name: "poll_device_login_preapproval_rate_limited", operationID: "pollDeviceLogin",
+			scenario: "A wrong secret for a sign-in approved in advance, after too many wrong secrets for its device code, waits out the lock. The right secret is never refused by it.",
+			method:   http.MethodPost, path: "/api/v2/auth/device/poll", body: `{"device_code":"dev-locked","binding_secret":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}`,
+			status: http.StatusTooManyRequests, assertHeaders: []string{"Content-Type", "Cache-Control", "Retry-After"}, schema: problem},
+	}
 }

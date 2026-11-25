@@ -98,6 +98,9 @@ func (h *AuthHandler) PollDeviceLogin(ctx context.Context, deviceCode, bindingSe
 		if errors.Is(err, auth.ErrDeviceLoginBindingMismatch) {
 			return nil, apiError(http.StatusForbidden, DeviceBindingMismatchCode, "The binding secret does not match the binding this request was started with")
 		}
+		if e := devicePollError(err); e != nil {
+			return nil, e
+		}
 		return nil, apiError(http.StatusInternalServerError, "internal_error", "Failed to poll device login")
 	}
 	view := &DeviceLoginPollView{Status: result.Status, PollAfter: result.PollAfter, Opened: result.Opened, ExpiresAt: result.ExpiresAt}

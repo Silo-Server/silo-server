@@ -1346,6 +1346,11 @@ type DeviceLoginService interface {
 	ApproveDeviceHandoff(ctx context.Context, input auth.DeviceLoginLookupInput, userID int, profileID string) (handlers.DeviceLoginDecision, error)
 	DenyDeviceLogin(ctx context.Context, input auth.DeviceLoginLookupInput, userID int) (handlers.DeviceLoginDecision, error)
 	CancelDeviceLogin(ctx context.Context, deviceCode string) (string, error)
+	PreapproveDeviceLogin(ctx context.Context, input auth.DevicePreapprovalInput, userID int) (*auth.DevicePreapprovalResult, error)
+	ListDevicePreapprovals(ctx context.Context, userID int) ([]auth.DevicePreapproval, error)
+	RevokeDevicePreapproval(ctx context.Context, userID int, id string) error
+	AdminListDevicePreapprovals(ctx context.Context, userID int) ([]auth.DevicePreapproval, error)
+	AdminRevokeDevicePreapproval(ctx context.Context, userID int, id string) error
 }
 
 // Record only after the actual adapter has mounted the handler. The observer

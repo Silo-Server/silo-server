@@ -375,4 +375,58 @@ func TestDecideDeviceLogin(t *testing.T) {
 	}
 }
 
+// TestDevicePreapprovalOperations: approving in advance, listing and
+// revoking act for the account holder, so each refuses an API key, a session
+// an administrator opened as the account, and a remote-playback handoff
+// (the middleware stops the handoff before the operation; the operation
+// refuses the others). A pre-approved request whose code spent its
+// wrong-secret budget polls as 429 with Retry-After.
+func TestDevicePreapprovalOperations(t *testing.T) {
+	h := newTestHandler(t, pilotDeps(nil, nil))
+	create := `{"device_name":"Living room TV","device_platform":"tvos","binding":"` + fakeBinding + `"}`
+	ops := []struct{ method, path, body string }{
+		{http.MethodPost, "/api/v2/auth/device/preapprove", create},
+		{http.MethodGet, "/api/v2/auth/device/preapprovals", ""},
+		{http.MethodDelete, "/api/v2/auth/device/preapprovals/" + fakePreapprovalID, ""},
+	}
+	for _, caller := range []struct {
+		name string
+		hdr  map[string]string
+	}{
+		{"api key", with(bearer(apiKeyToken), "X-Profile-Id", "p-primary")},
+		{"admin acting as the account", bearer(impersonatedToken)},
+		{"remote-playback session", bearer(remotePlaybackToken)},
+	} {
+		for _, op := range ops {
+			t.Run(caller.name+" "+op.method+" "+op.path, func(t *testing.T) {
+				requireProblem(t, do(t, h, op.method, op.path, op.body, caller.hdr), TypePermissionDenied)
+			})
+		}
+	}
+	// The account's own session: created, listed, revoked.
+	rec := do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove", create, bearer(memberToken))
+	if rec.Code != http.StatusCreated || !contains(rec.Body.String(), `"device_code":"dev-preapproved"`) {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	rec = do(t, h, http.MethodGet, "/api/v2/auth/device/preapprovals", "", bearer(memberToken))
+	if rec.Code != http.StatusOK || contains(rec.Body.String(), "device_code") || contains(rec.Body.String(), "binding") {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	if rec := do(t, h, http.MethodDelete, "/api/v2/auth/device/preapprovals/"+fakePreapprovalID, "", bearer(memberToken)); rec.Code != http.StatusNoContent {
+		t.Fatalf("%d %s", rec.Code, rec.Body.String())
+	}
+	// Over the per-account cap.
+	requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove",
+		`{"device_name":"`+fakePreapprovalLimitName+`","binding":"`+fakeBinding+`"}`, bearer(memberToken)), TypeConflict)
+	// No binding, no pre-approval.
+	p := requireProblem(t, do(t, h, http.MethodPost, "/api/v2/auth/device/preapprove", `{"device_name":"TV"}`, bearer(memberToken)), TypeValidationFailed)
+	if len(p.Errors) != 1 || p.Errors[0].Location != "body.binding" {
+		t.Fatalf("errors = %+v", p.Errors)
+	}
+	rec = do(t, h, http.MethodPost, "/api/v2/auth/device/poll", `{"device_code":"dev-locked","binding_secret":"BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"}`, nil)
+	if rec.Code != http.StatusTooManyRequests || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("%d %v %s", rec.Code, rec.Header(), rec.Body.String())
+	}
+}
+
 func contains(s, sub string) bool { return strings.Contains(s, sub) }

@@ -1042,6 +1042,9 @@ type fakeDeviceRequest struct {
 	// binding is the session binding it was started with; a poll must then
 	// carry fakeBindingSecret.
 	binding string
+	// locked marks a pre-approved request whose device code has spent its
+	// wrong-secret budget.
+	locked bool
 }
 
 // fakeBindingSecret is the binding secret of fakeBinding: 32 zero bytes, and
@@ -1112,6 +1115,11 @@ func (f fakeDevices) PollDeviceLogin(_ context.Context, deviceCode, bindingSecre
 		return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
 	}
 	if r.binding != "" && bindingSecret != fakeBindingSecret {
+		// As the service does: the budget answers a wrong secret only, and
+		// never refuses the right one.
+		if r.locked {
+			return nil, &handlers.APIError{Status: 429, Code: "rate_limited", Message: "Too many wrong binding secrets for this sign-in. Try again later.", RetryAfter: 900}
+		}
 		return nil, &handlers.APIError{Status: 403, Code: handlers.DeviceBindingMismatchCode, Message: "The binding secret does not match the binding this request was started with"}
 	}
 	view := &handlers.DeviceLoginPollView{Status: r.Status, PollAfter: 5, Opened: r.opened && r.Status == auth.DeviceLoginStatusPending}
@@ -1193,6 +1201,42 @@ func (f fakeDevices) DenyDeviceLogin(_ context.Context, in auth.DeviceLoginLooku
 	return f.decide(in, auth.DeviceLoginStatusDenied)
 }
 
+// fakePreapprovalID is the one waiting pre-approved sign-in the fake lists.
+const fakePreapprovalID = "6f1c2a1e-8d3b-4f0e-9a7c-2b5d8e1f3a4c"
+
+// fakePreapprovalLimitName is a device name the fake refuses as over the
+// per-account cap.
+const fakePreapprovalLimitName = "Twenty-first TV"
+
+func (f fakeDevices) PreapproveDeviceLogin(_ context.Context, in auth.DevicePreapprovalInput, _ int) (*auth.DevicePreapprovalResult, error) {
+	if in.DeviceName == fakePreapprovalLimitName {
+		return nil, &handlers.APIError{Status: 409, Code: "preapproval_limit", Message: "This account already has the most waiting sign-ins approved in advance; revoke one first"}
+	}
+	return &auth.DevicePreapprovalResult{ID: fakePreapprovalID, DeviceCode: "dev-preapproved", ExpiresAt: fixedTime().Add(auth.DevicePreapprovalTTL)}, nil
+}
+
+func (f fakeDevices) ListDevicePreapprovals(context.Context, int) ([]auth.DevicePreapproval, error) {
+	return []auth.DevicePreapproval{{ID: fakePreapprovalID, DeviceName: "Living room TV", DevicePlatform: "tvos", CreatedAt: fixedTime(), ExpiresAt: fixedTime().Add(auth.DevicePreapprovalTTL)}}, nil
+}
+
+func (f fakeDevices) RevokeDevicePreapproval(_ context.Context, _ int, id string) error {
+	if id != fakePreapprovalID {
+		return &handlers.APIError{Status: 404, Code: "not_found", Message: "Device login request not found"}
+	}
+	return nil
+}
+
+func (f fakeDevices) AdminListDevicePreapprovals(ctx context.Context, userID int) ([]auth.DevicePreapproval, error) {
+	if userID != 1 {
+		return nil, &handlers.APIError{Status: 404, Code: "not_found", Message: "Account not found"}
+	}
+	return f.ListDevicePreapprovals(ctx, userID)
+}
+
+func (f fakeDevices) AdminRevokeDevicePreapproval(ctx context.Context, userID int, id string) error {
+	return f.RevokeDevicePreapproval(ctx, userID, id)
+}
+
 // fixtureDevices is the device-pairing fake every device test starts from.
 func fixtureDevices() fakeDevices {
 	exp := fixedTime().Add(10 * time.Minute)
@@ -1209,6 +1253,7 @@ func fixtureDevices() fakeDevices {
 		"dev-canceled": canceled, "br-canceled": canceled,
 		"dev-approved": approved,
 		"dev-bound":    bound,
+		"dev-locked":   {Status: auth.DeviceLoginStatusApproved, Purpose: auth.DeviceLoginPurposeLogin, ExpiresAt: exp, approvedBy: 1, binding: fakeBinding, locked: true},
 		"1357-2468":    bound,
 		"dev-handoff":  handoff,
 		"br-remote":    remotePending,

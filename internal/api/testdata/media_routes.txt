@@ -541,6 +541,8 @@ DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
 POST /api/v2/admin/users/{id}/transfer-ownership	non-media
 GET /api/v2/admin/users/{id}/watch-summary	non-media
+GET /api/v2/admin/users/{user_id}/device-preapprovals	non-media
+DELETE /api/v2/admin/users/{user_id}/device-preapprovals/{id}	non-media
 DELETE /api/v2/admin/users/{user_id}/login-sessions	non-media
 GET /api/v2/admin/users/{user_id}/login-sessions	non-media
 DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}	non-media
@@ -560,6 +562,9 @@ POST /api/v2/auth/device/cancel	non-media
 GET /api/v2/auth/device/capability	non-media
 POST /api/v2/auth/device/deny	non-media
 POST /api/v2/auth/device/poll	non-media
+GET /api/v2/auth/device/preapprovals	non-media
+DELETE /api/v2/auth/device/preapprovals/{id}	non-media
+POST /api/v2/auth/device/preapprove	non-media
 POST /api/v2/auth/device/start	non-media
 GET /api/v2/auth/external-sign-in/capabilities	non-media
 POST /api/v2/auth/impersonation/end	non-media
@@ -1634,6 +1639,8 @@ DELETE /api/v2/admin/users/{id}/settings/values/{key}	non-media
 PUT /api/v2/admin/users/{id}/settings/values/{key}	non-media
 POST /api/v2/admin/users/{id}/transfer-ownership	non-media
 GET /api/v2/admin/users/{id}/watch-summary	non-media
+GET /api/v2/admin/users/{user_id}/device-preapprovals	non-media
+DELETE /api/v2/admin/users/{user_id}/device-preapprovals/{id}	non-media
 DELETE /api/v2/admin/users/{user_id}/login-sessions	non-media
 GET /api/v2/admin/users/{user_id}/login-sessions	non-media
 DELETE /api/v2/admin/users/{user_id}/login-sessions/{session_id}	non-media
@@ -1653,6 +1660,9 @@ POST /api/v2/auth/device/cancel	non-media
 GET /api/v2/auth/device/capability	non-media
 POST /api/v2/auth/device/deny	non-media
 POST /api/v2/auth/device/poll	non-media
+GET /api/v2/auth/device/preapprovals	non-media
+DELETE /api/v2/auth/device/preapprovals/{id}	non-media
+POST /api/v2/auth/device/preapprove	non-media
 POST /api/v2/auth/device/start	non-media
 GET /api/v2/auth/external-sign-in/capabilities	non-media
 POST /api/v2/auth/impersonation/end	non-media

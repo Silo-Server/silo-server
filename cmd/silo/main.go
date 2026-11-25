@@ -3343,6 +3343,8 @@ func main() {
 	// The Quick Connect code budget per account follows the same rule, and
 	// the native approval routes and Jellyfin's Authorize share it.
 	deps.QuickConnectCodeAttempts = ratelimit.NewQuickConnectCodeAttemptLimiter(apiRedisClient)
+	// So does the wrong-secret budget of each pre-approved device sign-in.
+	deps.DevicePreapprovalAttempts = ratelimit.NewDevicePreapprovalAttemptLimiter(apiRedisClient)
 	// The per-name password sign-in budget follows the same rule. One
 	// limiter serves the native, Jellyfin and Audiobookshelf auth services,
 	// so no listener gets its own allowance.
