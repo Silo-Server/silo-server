@@ -95,6 +95,25 @@ func TestKeyCreatingRoutesNeedVerifiedMainProfile(t *testing.T) {
 	}
 }
 
+// A session that may not manage keys (a TV's, another app's, one with no
+// record of how it opened) is told so whatever profile it names. Were the
+// profile checked first, it would be sent to switch profile and prove a PIN,
+// and then be refused anyway.
+func TestKeyCreatingRoutesRefuseTheSessionBeforeTheProfile(t *testing.T) {
+	secondary := with(bearer(householdToken), "X-Profile-Id", "p-kid")
+	for _, route := range keyCreatingRoutes() {
+		t.Run(route.path, func(t *testing.T) {
+			keys := &fakeAppKeys{enabled: true, manageErr: auth.ErrSessionNotAllowed}
+			for _, headers := range []map[string]string{secondary, bearer(householdToken)} {
+				requireProblem(t, do(t, NewHandler(appKeyDeps(keys)), route.method, Prefix+route.path, route.body, headers), TypePermissionDenied)
+			}
+			if keys.calls != 0 {
+				t.Fatal("the service ran for a refused session")
+			}
+		})
+	}
+}
+
 // The route checks the main profile before the operation's transaction, so
 // it hands the operation the profile it checked, to be checked again under
 // the account lock. A request that named no profile hands over none. An

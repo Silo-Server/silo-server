@@ -253,8 +253,9 @@ locks the account, then the key, then the approving session, and re-checks
 under those locks that the account is still an enabled administrator, the key
 is still waiting, unrevoked, inside its 24 hours and on this account, and the
 approving session is still live. The device's next `sign-in` opens a session
-and runs the provider checks then. Approving an active key changes nothing;
-an unknown, denied, revoked or expired one is 404. `POST
+and runs the provider checks then. Approving an active key changes nothing
+(from the session that key itself opened it is refused, 403); an unknown,
+denied, revoked or expired one is 404. `POST
 /auth/keys/pending/{id}/deny` marks the key `denied`: its next `sign-in`
 answers `key_denied`, and neither list shows it. Both decisions are recorded
 as domain audit actions on the account (`user.device_key_approved`,
@@ -268,9 +269,9 @@ key as the main profile. The second is allowed on purpose: the person proved
 who they are to the server on that device, which is all an approval from
 another device proves. A waiting key can't approve itself, because it opens
 no session: its `sign-in` answers `approval_required` or 429 until someone
-approves it. (The service also refuses a session that names the key that
-opened it. That key is always active, so the refusal decides nothing; it is
-not what keeps a waiting device from approving itself.)
+approves it, or `key_denied` once it is denied or 24 hours old. (The service
+also refuses a session that names the key that opened it. That key is always
+active, so this is not what keeps a waiting device from approving itself.)
 
 **A cap on waiting keys.** Whoever holds an administrator's person key can call
 `introduce` again and again, and each call leaves a waiting row. An account

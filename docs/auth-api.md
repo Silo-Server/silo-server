@@ -1040,7 +1040,7 @@ them apart by the problem type, never by the detail text:
 
 | Problem | Meaning | What the app does |
 | --- | --- | --- |
-| `permission_denied` | This session may not do this, whatever profile it names: a TV's session, another app's, an API key, or one opened before the server recorded how sessions open. On approve, also an account that is no longer an administrator. | Sign in again on this device. |
+| `permission_denied` | This session may not do this, whatever profile it names: a TV's session, another app's, an API key, or one opened before the server recorded how sessions open. The session is checked before the profile, so such a session never gets one of the other two. On approve it is also the answer for an account that is not an administrator, which is checked last and can follow a correct profile. | Sign in again on this device. |
 | `main_profile_required` | The request names a profile that isn't the main one, or names none where one is needed. | Switch to the main profile and send it again. |
 | `profile_verification_required` | The main profile has a PIN the request didn't prove, or the profile changed while the request ran. | Verify the PIN (`verifyProfilePIN`) and send it again. |
 

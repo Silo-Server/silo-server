@@ -53,7 +53,7 @@ func (k *profileSetKeys) VerifyProfileSet(context.Context, auth.KeyRequest) (*au
 	return &auth.ProfileSetAuthority{UserID: 1, Set: []byte(`{"version":1,"items":[]}`)}, nil
 }
 
-func (k *profileSetKeys) ProfileSetSessionAllowed(context.Context, *auth.Claims) error {
+func (k *profileSetKeys) SessionMayManageKeys(context.Context, *auth.Claims) error {
 	return k.sessionErr
 }
 

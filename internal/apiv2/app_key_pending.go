@@ -51,6 +51,9 @@ func mainProfileOnly(op Operation) Operation {
 // (handlers.AuthHandler.ActsAsVerifiedMainProfile); the app key service and
 // the device login service both carry it.
 type mainProfileChecker interface {
+	// SessionMayManageKeys refuses a session that may not do this whatever
+	// profile it names.
+	SessionMayManageKeys(context.Context, *auth.Claims) error
 	ActsAsVerifiedMainProfile(ctx context.Context, userID int, activeProfileID string, verify func(*userstore.Profile) error) (bool, auth.ActingProfile, error)
 }
 
@@ -65,6 +68,11 @@ func (reg *Registry) requireVerifiedMainProfile(ctx context.Context, svc mainPro
 	claims := claimsFrom(ctx)
 	if !claims.IsOwnLoginSession() {
 		return none, appKeyProblem(auth.ErrSessionNotAllowed)
+	}
+	// The session before the profile: one that may not do this is told so,
+	// not sent to switch profile and prove a PIN for nothing.
+	if err := svc.SessionMayManageKeys(ctx, claims); err != nil {
+		return none, appKeyProblem(err)
 	}
 	acted, acting, err := svc.ActsAsVerifiedMainProfile(ctx, claims.UserID, profileFrom(ctx), verifyHouseholdProfile(ctx))
 	if errors.Is(err, access.ErrProfileUnverified) {

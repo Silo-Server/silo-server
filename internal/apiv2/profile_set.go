@@ -395,7 +395,7 @@ func (reg *Registry) profileSetSessionAllowed(ctx context.Context, claims *auth.
 	if err != nil {
 		return err
 	}
-	if err := svc.ProfileSetSessionAllowed(ctx, claims); err != nil {
+	if err := svc.SessionMayManageKeys(ctx, claims); err != nil {
 		return appKeyProblem(err)
 	}
 	return nil
