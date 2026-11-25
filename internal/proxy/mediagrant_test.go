@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -283,6 +284,51 @@ func TestProxyGrantTranscodeRelaysToTheNodeWithAProxyMintedToken(t *testing.T) {
 	}
 	if relayPath != "/transcode/session-hls-plan-a/segment/seg_00001.m4s" {
 		t.Fatalf("segment relay path = %q", relayPath)
+	}
+}
+
+// A replan can move the session to a new transport under the same session id.
+// Requests from the superseded playlist name the old transport, and must be
+// refused here rather than relayed to the transport the grant now names.
+func TestProxyGrantTranscodeRefusesASupersededTransport(t *testing.T) {
+	relayed := false
+	node := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		relayed = true
+		_, _ = w.Write([]byte("#EXTM3U\n"))
+	}))
+	defer node.Close()
+	srv := newGrantProxyServer(t, map[string]playback.RecipeCard{
+		"session-hls": {
+			SessionID: "session-hls", UserID: 7, ProfileID: "profile-1", MediaFileID: 42,
+			PlayMethod: playback.PlayTranscode, TranscodeNodeURL: node.URL,
+			TranscodeTransportID: "session-hls-plan-b", InputPath: "/media/movie.mkv", TargetCodecVideo: "h264",
+		},
+	})
+	for _, path := range []string{
+		"/stream/v3/session-hls/master.m3u8?" + playback.TransportQueryParam + "=plan-a",
+		"/stream/v3/session-hls/segment/seg_00072.m4s?" + playback.TransportQueryParam + "=plan-a",
+	} {
+		rr := grantRequest(t, srv, http.MethodGet, path, grantAccessToken(t, 7, "login-1"))
+		if rr.Code != http.StatusNotFound || !strings.Contains(rr.Body.String(), "playback_transport_superseded") {
+			t.Fatalf("%s: status = %d, body = %s, want 404 playback_transport_superseded", path, rr.Code, rr.Body.String())
+		}
+		if relayed {
+			t.Fatalf("%s: a superseded transport's request reached the node", path)
+		}
+	}
+	current := grantRequest(t, srv, http.MethodGet, "/stream/v3/session-hls/master.m3u8?"+playback.TransportQueryParam+"=plan-b", grantAccessToken(t, 7, "login-1"))
+	if current.Code != http.StatusOK || !relayed {
+		t.Fatalf("current transport: status = %d, relayed = %v, body = %s", current.Code, relayed, current.Body.String())
+	}
+
+	// A replan away from HLS replaces the grant with one that names no
+	// transport; the last HLS playlist's requests are superseded all the same.
+	direct := newGrantProxyServer(t, map[string]playback.RecipeCard{
+		"session-hls": {SessionID: "session-hls", UserID: 7, ProfileID: "profile-1", MediaFileID: 42, PlayMethod: playback.PlayDirect, InputPath: "/media/movie.mkv"},
+	})
+	rr := grantRequest(t, direct, http.MethodGet, "/stream/v3/session-hls/segment/seg_00072.m4s?"+playback.TransportQueryParam+"=plan-b", grantAccessToken(t, 7, "login-1"))
+	if rr.Code != http.StatusNotFound || !strings.Contains(rr.Body.String(), "playback_transport_superseded") {
+		t.Fatalf("after a move to direct play: status = %d, body = %s, want 404 playback_transport_superseded", rr.Code, rr.Body.String())
 	}
 }
 

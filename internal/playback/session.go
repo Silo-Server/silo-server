@@ -60,8 +60,14 @@ type Session struct {
 
 	TranscodeNodeURL     string // URL of assigned transcode node (empty = local/integrated)
 	TranscodeTransportID string // remote node process identity; empty means session ID
-	PlanID               string // committed v3 plan ID that produced this live route snapshot
-	AudioTrackIndex      int
+	// TransportGeneration identifies the HLS transport the session's current
+	// plan published (see TransportQueryParam). A replan that starts a new
+	// transport replaces it; a seek restart or an executor move keeps it, since
+	// the client's playlist stays valid across both. Empty for sessions that
+	// predate it and for non-HLS deliveries.
+	TransportGeneration string
+	PlanID              string // committed v3 plan ID that produced this live route snapshot
+	AudioTrackIndex     int
 
 	// RoutingNetworkProvider is the validated access path selected when preparing
 	// playback: nil means unknown, an empty value means the default network.
@@ -181,6 +187,7 @@ type SessionStreamState struct {
 	TranscodeNodeURL              string
 	TranscodeTransportID          string
 	PlanID                        string
+	TransportGeneration           string
 	TranscodeRouteSet             bool
 	RoutingNetworkProvider        *string
 	RoutingWorkload               string
@@ -1288,6 +1295,7 @@ func applySessionStreamStateLocked(s *Session, state SessionStreamState) {
 		s.TranscodeNodeURL = state.TranscodeNodeURL
 		s.TranscodeTransportID = state.TranscodeTransportID
 		s.PlanID = state.PlanID
+		s.TransportGeneration = state.TransportGeneration
 		s.RoutingNetworkProvider = state.RoutingNetworkProvider
 		s.RoutingWorkload = state.RoutingWorkload
 		s.RoutingExecution = state.RoutingExecution
@@ -1341,6 +1349,7 @@ func snapshotSessionStreamStateLocked(s *Session) SessionStreamState {
 		TranscodeNodeURL:              s.TranscodeNodeURL,
 		TranscodeTransportID:          s.TranscodeTransportID,
 		PlanID:                        s.PlanID,
+		TransportGeneration:           s.TransportGeneration,
 		TranscodeRouteSet:             true,
 		RoutingNetworkProvider:        s.RoutingNetworkProvider,
 		RoutingWorkload:               s.RoutingWorkload,
@@ -1387,6 +1396,7 @@ func restoreSessionStreamStateLocked(s *Session, state SessionStreamState) {
 	s.TranscodeNodeURL = state.TranscodeNodeURL
 	s.TranscodeTransportID = state.TranscodeTransportID
 	s.PlanID = state.PlanID
+	s.TransportGeneration = state.TransportGeneration
 	s.RoutingNetworkProvider = state.RoutingNetworkProvider
 	s.RoutingWorkload = state.RoutingWorkload
 	s.RoutingExecution = state.RoutingExecution
