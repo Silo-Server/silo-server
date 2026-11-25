@@ -343,6 +343,114 @@ like any device.
 hourly retention step that clears challenges deletes it. By then every process
 refuses the grant by its `exp`.
 
+## App codes
+
+An app code is how a server's web page hands the Silo app what it needs to
+enroll its keys: base64url of 32 random bytes, good once for ten minutes. Only
+its SHA-256 is stored (`auth_app_codes`). The page opens the app with one link
+built by one function, `appkeys.JoinLink` on the server and `buildJoinLink`
+on the web:
+
+```
+silo://join#v1.<base64url of the server address>.<app code>
+https://siloserver.org/join#v1.<base64url of the server address>.<app code>
+```
+
+Both carry the code in the fragment, so the link page's host never receives
+it. The server address comes from the answer that issued the code
+(`server_address`): `server.public_url`, in its canonical server address form,
+when the request arrived on that address's canonical origin, so a path prefix a
+reverse proxy adds survives; otherwise the request's own canonical origin. The
+older `silo://invite?server=&token=` link, which hands released Android builds
+the raw invitation token, is unchanged.
+
+There are two kinds:
+
+- **Join** (`POST /invitations/app-code`, public): the invite page's "Join
+  with the Silo app". It checks the invitation exactly as accepting it does,
+  checks the account name and email are free, and reserves the name. The
+  invitation stays open and nothing else is created. A second code from one
+  invitation replaces the first. The reservation is advisory: a partial unique
+  index on the reserved name among unspent codes stops two joins choosing one
+  name, and the account insert at redeem decides, so a name an administrator
+  creates in between refuses the redeem with `conflict`. An emailed
+  invitation's account takes its address as name and email, as accept gives
+  it; for an invitation with no address the person chooses a username, and an
+  email is optional.
+- **Session** (`POST /auth/app-codes`): "Open in Silo" for a signed-in browser.
+  It is a key-creating operation: only a session that may manage keys
+  (`ActionManageKeys`), acting as the household's verified main profile,
+  rechecked under the account lock. The code records the session and its
+  provider binding. The keys it enrolls take that binding, and a code whose
+  session ended before it is redeemed no longer works.
+
+**Redeem** (`POST /auth/app-codes/redeem`, public, `key_sign_in` budget). The
+body is `{ person_key, message }`, a `redeem` envelope signed with
+`person_key`'s private half, with `device_sig`, on a challenge, the code in
+its payload. The challenge is spent once the signature verifies. Then:
+
+- A join runs in one transaction, locking the invitation before the code
+  (issuing a code takes them in that order): it spends the code, claims the
+  invitation through the same claim accept uses (re-checked: it may have been
+  revoked, resent or expired since), creates the account with no password and
+  the invitation's role, libraries, access group and first-profile choice,
+  enrolls the person key and the device key, marks the invitation accepted and
+  opens the device key's session. A code nobody redeems leaves the invitation
+  open and no account.
+- A session code locks the account, spends the code, and enrolls the device
+  key. The account's person key is enrolled when it has none and replaced when
+  it has a different one: the old key is revoked, devices waiting on it are
+  refused, devices already enrolled keep their keys. The issuing session's row
+  is read last; one that ended rolls the redeem back.
+
+Keys from a code start active, also on an administrator's account: the code
+came from the account's own session, or the invitation an administrator made
+(an invitation may grant the administrator role, as accept allows). The sealed
+plaintext is the usual `signed_in` answer plus `username` and `person_key`
+(`enrolled` or `replaced`). An unknown, spent or expired code, and one whose
+invitation or session can no longer be used, is `app_code_invalid` (404). Of
+two redemptions of one code, on any API processes, exactly one succeeds.
+
+**Retention.** The hourly step that clears challenges deletes codes past their
+expiry, spent or not. Codes are left out of backups.
+
+### Accounts with no password
+
+A join creates an account with no password: `password_hash` NULL and
+`local_password_login_enabled` false. Its keys are its way in. One helper,
+`models.User.HasLocalPassword`, answers whether an account has a usable local
+password (a stored hash and local sign-in on for the account), and every
+reader of that fact uses it: password sign-in, password change, reset links,
+the administrator's account view. `createUser` stores NULL, never an empty
+string, for a blank email or username, so two accounts with no email don't
+collide on a unique constraint. A password sign-in to an account with no
+stored password compares the placeholder hash, so the time does not tell a
+stranger which accounts have one.
+
+### Local passwords off
+
+No join may create an account whose only credential is keys. While
+`auth.local_password_login` is off, `POST /invitations/app-code` answers
+`provider_sign_in_required` (409), and a redeem refuses a join code the same
+way if the setting changed in between: the claim checks it under the settings
+lock, as accept does. On such a server a person gets the app by signing in with
+the provider on the server's site and using "Open in Silo"
+(`POST /auth/app-codes`), so the keys enroll against that identity. Creating
+and resending invitations stays refused while local passwords are off.
+
+### Sessions that can't manage keys
+
+`GET /auth/keys/session` answers what the caller's session may do:
+`list` (`ActionReadKeys`), `manage` (`ActionManageKeys`), `approve` (manage,
+and the request acts as the verified main profile) and `sign_in_again`. The
+last is true only for a session refused for how it was opened (device sign-in,
+or no record of how) whose account has another way into a browser: a local
+password the server accepts for it, or a sign-in provider account. A person
+with neither only ever gets a browser session by device sign-in, so "sign in
+again" would be a dead end; the page says to manage devices in the Silo app
+instead. It is false for an administrator acting as the account, an API key, a
+remote-playback session and a grant-enrolled app's session.
+
 ## Who decides
 
 The operations on keys check how the calling session was opened
@@ -530,7 +638,9 @@ TLS connection covers all of it.
 ## Rate limits
 
 `createAppKeyChallenge` spends the per-address `key_challenge` budget;
-`introduce`, `sign-in`, `enroll` and grant redemption spend `key_sign_in`. Both default to 60 a
+`introduce`, `sign-in`, `enroll`, grant redemption, app code redemption and
+`createAppCode` spend `key_sign_in`. `createInvitationAppCode` spends the
+invitation lookup's `invitation` budget. Both default to 60 a
 minute with a burst of 20, enough for a few waiting devices behind one address
 (each asks every five seconds). Neither budget can be spent per key before the
 signature verifies; the challenge is what makes each signed request single
@@ -538,7 +648,7 @@ use.
 
 ## Multi-node rules
 
-Nothing about app keys lives in a node's memory. Challenges, used grants, keys,
+Nothing about app keys lives in a node's memory. Challenges, used grants, app codes, keys,
 waiting keys' last tries and sessions are Postgres rows, so a challenge issued by one
 API process is spent once on any of them, and a revocation on one ends the
 sessions every node checks. The switch and the local-password setting are read
@@ -551,8 +661,9 @@ rate limiter's backend (cluster-wide with Redis).
 server-wide. It is read from `server_settings` on each request, so a change on
 any node applies at once. While it is off, `getAppKeyCapability` reports
 `disabled`, and the challenge, `introduce`, `sign-in`, `enroll`, grant
-redemption, `PUT /auth/keys/person` and `pending/{id}/approve` answer
-`capability_disabled`. A person's own key list and its deletes, the pending
+redemption, both app code issues and app code redemption,
+`PUT /auth/keys/person` and `pending/{id}/approve` answer
+`capability_disabled`; the invitation lookup reports `app_join: false`. A person's own key list and its deletes, the pending
 list and `deny` stay open, so keys can be reviewed, revoked and refused; sessions keys
 opened before are not ended by the switch. Backups classify it as an access setting: a restore keeps the
 stricter of the live and the backed-up value.

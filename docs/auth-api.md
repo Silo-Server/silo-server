@@ -723,12 +723,16 @@ operation contract.
 
 | Operation | Credential | Notes |
 | --- | --- | --- |
-| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `protocol` is `silo-sync-v1` and `server_id` is the identity every signed payload names. `introduce`, `sign_in`, `enroll` and `grants` are `true`; `app_codes`, `sign_in_links` and `profile_set` are `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
+| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `protocol` is `silo-sync-v1` and `server_id` is the identity every signed payload names. `introduce`, `sign_in`, `enroll`, `app_codes` and `grants` are `true`; `sign_in_links` and `profile_set` are `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
 | `POST /auth/keys/challenge` (`createAppKeyChallenge`) | none | Body `{}`. Answers `challenge` (base64url of 32 bytes), `expires_in` (120), `server_id` and `server_time` (Unix seconds). A challenge works for one signed request within two minutes, on any API process. |
 | `POST /auth/keys/introduce` (`introduceAppKey`) | an `introduce` envelope signed by the account's person key, with `device_sig` | Enrolls the payload's `device_key` and opens a session. For an administrator's account the key is stored waiting and the sealed answer is `approval_required`. An account holds at most 10 waiting keys inside their 24 hours: one more is 409 `conflict`, after the challenge is spent. A waiting key past its 24 hours doesn't count, and a retention task later revokes it. |
 | `POST /auth/keys/sign-in` (`signInWithAppKey`) | a `sign-in` envelope signed by an enrolled device key, without `device_sig` | Opens a session. A waiting key answers `approval_required`; see below. |
 | `POST /auth/keys/enroll` (`enrollAppKeys`) | the account's own login session acting as the household's main profile (see below), and `{ "person_key", "message" }` where `message` is an `enroll` envelope signed with that person key, with `device_sig` | Registers the person key when the account has none, taking the session's provider binding; when `person_key` is already the account's person key it is reused as it is, binding unchanged. Enrolls the device key, which takes the session's provider binding, then opens a session bound to it. A different person key on the account, or a device key already enrolled on this server, is 409 `conflict`. The sealed plaintext adds `person_key_id` (the person key's `kid`); the client drops the session it called with. A malformed payload field is 422 at `body.message.payload`. |
 | `POST /auth/grants/redeem` (`redeemAppKeyGrant`) | a `grant-redeem` envelope signed by the app's own key (the grant's `app_key`), without `device_sig` | Enrolls another app's key with a grant the account's person key signed, and opens the app's session. The key is listed with `kind` `app`, `enrolled_by` `grant` and `allowed_by`. Refused for an administrator's account. See "Grants" below. |
+| `POST /invitations/app-code` (`createInvitationAppCode`) | none; the invitation `token` in the body | Body `{ "token", "username", "email" }`. Starts a join through the Silo app and answers `{ "code", "expires_in", "server_address" }`; see "App codes" below. |
+| `POST /auth/app-codes` (`createAppCode`) | the account's own login session acting as the household's main profile | Body `{}`. Answers `{ "code", "expires_in", "server_address" }` for "Open in Silo"; see "App codes" below. |
+| `POST /auth/app-codes/redeem` (`redeemAppCode`) | `{ "person_key", "message" }` where `message` is a `redeem` envelope signed with that person key, with `device_sig`, the app code in its payload | Enrolls both keys and opens the device key's session. The sealed plaintext adds `username` and `person_key` (`enrolled` or `replaced`). 404 `app_code_invalid` for an unknown, used or expired code. |
+| `GET /auth/keys/session` (`getAppKeySessionAccess`) | any login session | `{ "list", "manage", "approve", "sign_in_again" }`: what this session may do with the account's keys, and whether signing in again would help. Answers while the switch is off. |
 | `GET /auth/keys` (`listAppKeys`) | the account's own login session, opened by password, provider or the person's own device key | `person_key` (`kid`, `enrolled_at`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `last_used_at`), newest first. Revoked and denied keys are left out, and so is a waiting key older than 24 hours, without anyone denying or revoking it. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
 | `DELETE /auth/keys/devices/{id}` (`revokeAppDeviceKey`) | the account's own login session | 204. Revokes the key and ends every session it opened. A device may revoke its own key, which ends the session making the request. 404 for a key that isn't the account's. |
 | `PUT /auth/keys/person` (`replacePersonKey`) | the account's own login session acting as the household's main profile | Body `{ "person_key" }`, unsigned. Answers `{ "person_key_id": "<kid>" }`. The old person key is revoked; devices already enrolled keep their keys, and a device the old key introduced that is still waiting for approval is denied with it. Sending the current key again changes nothing. |
@@ -854,11 +858,11 @@ account is 403 `permission_denied`.
 | Route | Password, provider, own device key | Device sign-in (a TV) | Another app's key (grant) | No record of how it opened | Admin acting as the account, API key, remote playback |
 | --- | --- | --- | --- | --- | --- |
 | `GET /auth/keys`, `GET /auth/keys/pending`, `POST /auth/keys/pending/{id}/deny` | allowed | refused | refused | refused | refused |
-| `POST /auth/keys/enroll`, `PUT /auth/keys/person`, `POST /auth/keys/pending/{id}/approve`, `POST /auth/device/preapprove` | main profile only | refused | refused | refused | refused |
+| `POST /auth/keys/enroll`, `PUT /auth/keys/person`, `POST /auth/app-codes`, `POST /auth/keys/pending/{id}/approve`, `POST /auth/device/preapprove` | main profile only | refused | refused | refused | refused |
 | `DELETE /auth/keys/devices/{id}` | allowed | refused | its own key only | refused | refused |
 
 **The household's main profile.** `enroll`, `PUT /auth/keys/person`,
-`pending/{id}/approve` and `POST /auth/device/preapprove` create lasting access
+`POST /auth/app-codes`, `pending/{id}/approve` and `POST /auth/device/preapprove` create lasting access
 to the account every profile shares, so only the household's main profile may
 call them. Approving a device sign-in that is waiting now keeps no profile
 rule. `X-Profile-Id` must
@@ -872,21 +876,66 @@ with several profiles, or a PIN, names its main profile and sends its token
 like any other account. Otherwise the request is 403 `permission_denied`, also
 for a one-profile account that isn't an administrator. The other key routes have no profile rule.
 
-Each of the four checks the named profile a second time once it holds the
+Each of these checks the named profile a second time once it holds the
 account, and answers 403 `profile_verification_required` if the profile's PIN
 changed in between, the profile is no longer the main one, or another write to
 the profile is in progress. Nothing was changed, and the request can be made
 again. For `enroll` that means a new challenge and a newly signed envelope:
-the first challenge is spent once its signature verifies. The other three are
+the first challenge is spent once its signature verifies. The others are
 sent again as they were. If the second try gets `profile_verification_required`
 too, verify the profile's PIN again for a new `X-Profile-Token`; if it gets
 `permission_denied`, the profile is no longer the main one. A profile without
 a PIN can get the first answer too, when a PIN was added or the profile was
 being written at that moment.
 
+**App codes.** A server's web page hands the Silo app a one-time code, and
+the app redeems it to enroll its keys (`docs/architecture/app-keys.md`, "App
+codes"). A code is base64url of 32 random bytes, good once for ten minutes, and
+never past its invitation's expiry. `server_address` is what the page puts in
+the link that opens the app, `silo://join#v1.<base64url of server_address>.<code>`
+or the same fragment after `https://siloserver.org/join`: `server.public_url`
+when the request arrived on that address's origin, otherwise the address the
+request arrived on.
+
+- `POST /invitations/app-code` is the invite page's "Join with the Silo app". It
+  checks the invitation as `acceptInvitationLink` does (404 `not_found` for an
+  unknown, used, revoked or expired one) and reserves the account name; the
+  invitation stays open, and a second code from it replaces the first. An
+  emailed invitation's account takes its address as name and email; for one
+  with no address `username` is required (422 at `body.username`) and `email`
+  optional (422 at `body.email` when malformed). A name or email already held,
+  or reserved by another unspent code, is 409 `conflict`. While local password
+  sign-in is off it is 409 `provider_sign_in_required`: an invitation never
+  creates an account whose only way in is its keys. Spends the `invitation`
+  budget.
+- `POST /auth/app-codes` is "Open in Silo". Refused (403 `permission_denied`)
+  for an API key, an administrator acting as the account, a remote-playback
+  session, a session opened by device sign-in or by another app's key, and a
+  session older than the record of how sessions open. The keys take this
+  session's provider identity, so it works with local password sign-in off
+  from a provider sign-in. A code whose session ends before it is redeemed is
+  `app_code_invalid`.
+- `POST /auth/app-codes/redeem`, for a join code, creates the account with no
+  password (`password_hash` NULL, local password sign-in off for the account),
+  enrolls both keys and marks the invitation accepted in one transaction;
+  409 `conflict` if the name was taken since, 409 `provider_sign_in_required`
+  if local password sign-in was turned off since, 404 `app_code_invalid` if the
+  invitation was revoked, replaced or accepted since. For a session code it
+  enrolls the device key on that account, enrolling `person_key` when the
+  account has none and replacing a different one (the old one is revoked,
+  devices already enrolled keep their keys). Keys from a code start active,
+  also on an administrator's account. Of two redemptions of one code exactly
+  one succeeds.
+
+The invitation lookup (`lookupInvitationLink`) reports `password_join` (a
+password claim works here: local password sign-in is on) and `app_join` (a
+Silo app claim works here: app key sign-in and local password sign-in are both
+on), so the page offers only what works.
+
 **Switch.** While `auth.app_key_sign_in` is off the challenge, `introduce`,
-`sign-in`, `enroll`, `POST /auth/grants/redeem`, `PUT /auth/keys/person` and
-`pending/{id}/approve` answer 409 `capability_disabled`. The capability,
+`sign-in`, `enroll`, `POST /auth/grants/redeem`, both app code issues, app
+code redemption, `PUT /auth/keys/person` and `pending/{id}/approve` answer 409
+`capability_disabled`, and the invitation lookup reports `app_join: false`. The capability,
 `GET /auth/keys` and its deletes, `GET /auth/keys/pending` and
 `pending/{id}/deny` stay open. A server in demo
 mode (`demo.enabled`) behaves as if the switch were off, for administrators
@@ -896,8 +945,8 @@ there, so no key is enrolled on it and none signs in. For the same reason
 an administrator, and the device login capability reports `preapprove: false`.
 
 **Rate limits.** `createAppKeyChallenge` spends the per-address
-`key_challenge` budget and `introduce`, `sign-in`, `enroll` and grant redemption the
-`key_sign_in` budget, each 60 a minute with a burst of 20 by default
+`key_challenge` budget and `introduce`, `sign-in`, `enroll`, grant redemption,
+`createAppCode` and app code redemption the `key_sign_in` budget, each 60 a minute with a burst of 20 by default
 (`ratelimit.auth.key_challenge.*`, `ratelimit.auth.key_sign_in.*`).
 
 Server setting: `auth.app_key_sign_in` (default `true`). It is read on each
