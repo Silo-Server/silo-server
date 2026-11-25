@@ -259,9 +259,11 @@ with its own key to `POST /auth/grants/redeem` (`AppKeySignIn.RedeemGrant`).
 
 The checks, in order:
 
-1. The outer envelope's signature verifies by the grant's `app_key`, so only
-   the app the person allowed can redeem it; a `kid` that isn't that key's ID
-   is `app_grant_invalid`. The challenge is spent once this signature verifies.
+1. The outer envelope's signature verifies by the grant's `app_key` and its
+   `kid` is that key's ID, so only the app the person allowed can redeem it.
+   A redeemer that doesn't hold that key is `signature_invalid` however it
+   shows, a failed signature or another `kid`; `app_grant_invalid` is about
+   the grant itself. The challenge is spent once this check passes.
 2. The grant verifies by the live person key of the account it names, and both
    envelopes name this server. A person key that was replaced or revoked, or
    is provider-bound to an identity no longer on the account, signs no grant.

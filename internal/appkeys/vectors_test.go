@@ -203,6 +203,12 @@ func checkSignedMessage(c vectorCase) {
 		}
 	}
 	if !c.valid() {
+		// Every refusal of a signed message is a code this package
+		// answers, compared by name: a code renamed here without the
+		// vectors, or the reverse, fails instead of passing on any refusal.
+		if want := Code(c.str("error")); !signedMessageCodes[want] {
+			c.t.Fatalf("the case's error %q is not a code this package answers", want)
+		}
 		c.expectRefusal(err, signedMessageCodes)
 		return
 	}
