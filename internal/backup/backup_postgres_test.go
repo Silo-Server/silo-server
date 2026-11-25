@@ -1617,13 +1617,13 @@ func TestEncryptedS3RoundTripDB(t *testing.T) {
 	}
 }
 
-// TestOtherConnectionsLetsClosingClientsLeaveDB: a restore counts the live
-// database's other clients right after its own short reads of that database
-// close, and the server lists a closed connection's backend until the
-// backend has exited. The count waits for a client that leaves, and still
-// reports one that stays. It catches a restore refusing to start because of
-// its own reads.
-func TestOtherConnectionsLetsClosingClientsLeaveDB(t *testing.T) {
+// TestOtherConnectionsCountsOnlyOtherClientsDB: a restore refuses a live
+// database that has other clients. Its own connections, which the server
+// lists for a moment after they close, carry its application name and are
+// not counted; every other client is, another restore's connections
+// included. It catches a restore refusing a database nothing else is using,
+// and one that stops counting a client that is really there.
+func TestOtherConnectionsCountsOnlyOtherClientsDB(t *testing.T) {
 	pool, dsn := backuptest.Database(t)
 	pool.Close()
 	ctx := t.Context()
@@ -1639,59 +1639,45 @@ func TestOtherConnectionsLetsClosingClientsLeaveDB(t *testing.T) {
 		t.Cleanup(func() { _ = ctl.Close(context.Background()) })
 		return ctl
 	}
-	ctl, observer := connect(), connect()
-	var counting uint32
-	if err := ctl.Conn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&counting); err != nil {
-		t.Fatal(err)
-	}
-
-	// A client that is connected when the count first looks, and leaves
-	// while it waits.
-	leaving, err := pgx.Connect(ctx, dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctl.closingGrace = time.Minute
-	counted := make(chan int, 1)
-	go func() {
+	restore, another := connect(), connect()
+	count := func(ctl *PGControl) int {
+		t.Helper()
 		n, err := ctl.OtherConnections(ctx, live)
 		if err != nil {
-			n = -1
-		}
-		counted <- n
-	}()
-	// The count has looked once when its connection's last query is the
-	// count; the client is still connected then.
-	for deadline := time.Now().Add(30 * time.Second); ; {
-		var looked bool
-		if err := observer.Conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-			WHERE pid = $1 AND query LIKE '%FROM pg_stat_activity WHERE datname%')`, counting).Scan(&looked); err != nil {
 			t.Fatal(err)
 		}
-		if looked {
-			break
+		return n
+	}
+	client := func(dbURL string) {
+		t.Helper()
+		conn, err := pgx.Connect(ctx, dbURL)
+		if err != nil {
+			t.Fatal(err)
 		}
+		t.Cleanup(func() { _ = conn.Close(context.Background()) })
+	}
+	// The pool closed above was a client like any other; start from none.
+	for deadline := time.Now().Add(30 * time.Second); count(restore) != 0; {
 		if time.Now().After(deadline) {
-			t.Fatal("the count never ran")
+			t.Fatalf("%d clients of the closed pool are still listed", count(restore))
 		}
-		time.Sleep(5 * time.Millisecond) //nolint:forbidigo // the count signals nothing but its query in pg_stat_activity
-	}
-	if err := leaving.Close(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if n := <-counted; n != 0 {
-		t.Fatalf("a client that left while the count waited: count = %d, want 0", n)
+		time.Sleep(10 * time.Millisecond) //nolint:forbidigo // a closed connection's backend signals nothing but its pg_stat_activity row going away
 	}
 
-	// A client that stays is reported once the wait ends.
-	staying, err := pgx.Connect(ctx, dsn)
+	own, err := WithApplicationName(dsn, restore.OwnApplicationName())
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() { _ = staying.Close(context.Background()) }()
-	ctl.closingGrace = 100 * time.Millisecond
-	if n, err := ctl.OtherConnections(ctx, live); err != nil || n != 1 {
-		t.Fatalf("a client that stays connected: count = %d, %v, want 1", n, err)
+	client(own)
+	if n := count(restore); n != 0 {
+		t.Fatalf("with one of the restore's own connections open: count = %d, want 0", n)
+	}
+	if n := count(another); n != 1 {
+		t.Fatalf("another restore counting that connection: count = %d, want 1", n)
+	}
+	client(dsn)
+	if n := count(restore); n != 1 {
+		t.Fatalf("with another client connected: count = %d, want 1", n)
 	}
 }
 

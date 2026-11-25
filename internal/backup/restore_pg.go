@@ -2,6 +2,8 @@ package backup
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -323,8 +325,9 @@ type PGControl struct {
 	// Like is the database whose encoding and locale a created
 	// database copies, so the restored catalog sorts as the live one did.
 	Like string
-	// closingGrace replaces closingClientGrace when set.
-	closingGrace time.Duration
+	// own is the application name of the restore's own connections, which
+	// OtherConnections does not count.
+	own string
 }
 
 // maintenanceDatabases are the databases the control connection may use,
@@ -362,10 +365,25 @@ func ConnectControl(ctx context.Context, databaseURL string) (*PGControl, error)
 			_ = conn.Close(context.WithoutCancel(ctx))
 			return nil, fmt.Errorf("the control connection reached %q, the live database: %w", on, err)
 		}
-		return &PGControl{Conn: conn, Like: live}, nil
+		own, err := ownApplicationName()
+		if err != nil {
+			_ = conn.Close(context.WithoutCancel(ctx))
+			return nil, err
+		}
+		return &PGControl{Conn: conn, Like: live, own: own}, nil
 	}
 	return nil, fmt.Errorf("a replace needs a maintenance database other than the live one (%s) that the role can connect to; "+
 		"grant it CONNECT on one, or use separate mode (--into): %w", strings.Join(maintenanceDatabases, " or "), errors.Join(failures...))
+}
+
+// ownApplicationName names one restore's connections. The random part keeps
+// another command's connections, a second restore's included, counted.
+func ownApplicationName() (string, error) {
+	var b [6]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("naming the restore's connections: %w", err)
+	}
+	return "silo-restore-" + hex.EncodeToString(b[:]), nil
 }
 
 func ident(name string) string { return pgx.Identifier{name}.Sanitize() }
@@ -388,39 +406,28 @@ func (c *PGControl) NameOf(ctx context.Context, oid uint32) (string, bool, error
 	return name, err == nil, err
 }
 
-// closingClientGrace is how long OtherConnections waits for clients that are
-// already leaving. The server lists a closed connection's backend in
-// pg_stat_activity until that backend has exited, and a restore reads the
-// live database over short connections of its own (the server's identity,
-// whether it has accounts) just before it counts the others. Without the
-// wait it sometimes counted one of those and refused. A client that is
-// really connected is still there when the wait ends.
-const closingClientGrace = 5 * time.Second
-
-// OtherConnections counts sessions on name other than this command's. It
-// answers zero as soon as there are none, and otherwise the count that is
-// left after closingClientGrace.
+// OtherConnections counts client sessions on name that are neither this
+// command's control session nor a connection the restore opened itself.
+//
+// The restore reads and writes the live database over short connections of
+// its own, and the server lists a closed connection's backend in
+// pg_stat_activity until that backend has exited. Counted, one of those
+// refused a restore of a database nothing else was using. They carry the
+// restore's application name (OwnApplicationName), so they are left out by
+// name, without waiting for them to go: every other client is counted the
+// moment it is seen. Background workers, such as autovacuum on the database,
+// are not clients and are left out too.
 func (c *PGControl) OtherConnections(ctx context.Context, name string) (int, error) {
-	grace := closingClientGrace
-	if c.closingGrace > 0 {
-		grace = c.closingGrace
-	}
-	deadline := time.Now().Add(grace)
-	for {
-		var n int
-		err := c.Conn.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`, name).Scan(&n)
-		if err != nil || n == 0 || !time.Now().Before(deadline) {
-			return n, err
-		}
-		wait := time.NewTimer(50 * time.Millisecond)
-		select {
-		case <-ctx.Done():
-			wait.Stop()
-			return n, ctx.Err()
-		case <-wait.C:
-		}
-	}
+	var n int
+	err := c.Conn.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity
+		WHERE datname = $1 AND pid <> pg_backend_pid() AND backend_type = 'client backend'
+			AND ($2 = '' OR application_name <> $2)`, name, c.own).Scan(&n)
+	return n, err
 }
+
+// OwnApplicationName is the application name the restore gives its own
+// connections to the live database, unique to this control connection.
+func (c *PGControl) OwnApplicationName() string { return c.own }
 
 // CheckPrivileges: renaming needs CREATEDB and ownership, and ALLOW_CONNECTIONS
 // needs ownership; a superuser has both.
