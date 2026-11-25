@@ -1614,6 +1614,7 @@
 # Image cache queue metrics count future-deferred retries in queued depth while
 # reporting oldest queued age only for due rows (next_attempt_at <= NOW()).
 ./internal/workmetrics TestQueueSamplerImagesReportsDueQueuedAgeDB
+# A session opened by device sign-in is recorded as such and sees and ends only itself.
 ./internal/auth TestSessionsRecordDeviceSignInDB
 ./internal/auth TestFirstRunSessionRecordsNoDeviceSignInDB
 ./internal/auth TestDeviceSignInMigrationMarksKeptRequestsDB
