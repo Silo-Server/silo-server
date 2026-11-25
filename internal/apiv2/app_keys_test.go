@@ -42,8 +42,10 @@ type fakeAppKeys struct {
 	households userstore.UserStoreProvider
 	// acting is the checked profile the last key-creating call carried.
 	acting auth.ActingProfile
-	// sessionAccess answers AppKeySessionAccess.
+	// sessionAccess answers AppKeySessionAccess; appCodeErr answers
+	// IssueSessionAppCode.
 	sessionAccess auth.SessionKeyAccess
+	appCodeErr    error
 }
 
 // ActsAsVerifiedMainProfile runs the production rule against the fake
@@ -129,10 +131,10 @@ func (f *fakeAppKeys) ReplacePersonKey(_ context.Context, _ *auth.Claims, _ appk
 func (f *fakeAppKeys) IssueSessionAppCode(_ context.Context, _ *auth.Claims, acting auth.ActingProfile) (auth.IssuedAppCode, error) {
 	f.acting = acting
 	f.calls++
-	if f.err != nil {
-		return auth.IssuedAppCode{}, f.err
+	if f.appCodeErr != nil {
+		return auth.IssuedAppCode{}, f.appCodeErr
 	}
-	return auth.IssuedAppCode{Code: testAppCode, ExpiresAt: time.Now().Add(auth.AppCodeLifetime)}, nil
+	return testIssuedAppCode(), nil
 }
 
 func (f *fakeAppKeys) RedeemAppCode(context.Context, auth.KeyRedeemRequest) (*handlers.AppKeyAnswer, error) {
@@ -145,6 +147,12 @@ func (f *fakeAppKeys) AppKeySessionAccess(context.Context, *auth.Claims) (auth.S
 
 // testAppCode is a well-formed app code.
 const testAppCode = "q0yR3lbxN7D5mE4pTH2n6Qv8sK1aWcJfUgXoYdZiBtM"
+
+// testIssuedAppCode is a fresh code; the half second keeps expires_in at
+// 600 however long the request takes to answer.
+func testIssuedAppCode() auth.IssuedAppCode {
+	return auth.IssuedAppCode{Code: testAppCode, ExpiresAt: time.Now().Add(auth.AppCodeLifetime + 500*time.Millisecond)}
+}
 
 func (f *fakeAppKeys) SessionMayIssueCredential(context.Context, *auth.Claims) error {
 	return f.credentialErr

@@ -42,7 +42,7 @@ func (f *fakeInvitations) IssueAppCode(_ context.Context, in invitations.AppCode
 	if f.appCodeErr != nil {
 		return auth.IssuedAppCode{}, f.appCodeErr
 	}
-	return auth.IssuedAppCode{Code: testAppCode, ExpiresAt: time.Now().Add(auth.AppCodeLifetime)}, nil
+	return testIssuedAppCode(), nil
 }
 
 func fixtureInvitations() *fakeInvitations {

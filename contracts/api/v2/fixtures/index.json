@@ -5029,6 +5029,28 @@
       "body_file": "create_admin_user_identity_ok.json"
     },
     {
+      "name": "create_app_code_ok",
+      "operation_id": "createAppCode",
+      "scenario": "Open in Silo from a signed-in browser acting as the household's main profile.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/app-codes",
+        "headers": {
+          "Authorization": "Bearer tok-admin",
+          "X-Profile-Id": "p-owner"
+        },
+        "body": "{}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AppCode",
+      "body_file": "create_app_code_ok.json"
+    },
+    {
       "name": "create_app_key_challenge_ok",
       "operation_id": "createAppKeyChallenge",
       "scenario": "An app asks for a challenge to sign, and the server clock to stamp the payload's iat and exp from.",
@@ -5089,6 +5111,24 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/PersonalCollection",
       "body_file": "create_collection_with_description_ok.json"
+    },
+    {
+      "name": "create_invitation_app_code_ok",
+      "operation_id": "createInvitationAppCode",
+      "scenario": "The invite page starts a join through the Silo app for an invitation with no address: the name is reserved and the app code comes back with the server address the link carries.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/invitations/app-code",
+        "body": "{\"token\":\"invitation-token\",\"username\":\"sam\"}"
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "no-store",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AppCode",
+      "body_file": "create_invitation_app_code_ok.json"
     },
     {
       "name": "create_library_ok",
@@ -6927,6 +6967,26 @@
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AppKeyCapability",
       "body_file": "get_app_key_capability_ok.json"
+    },
+    {
+      "name": "get_app_key_session_access_ok",
+      "operation_id": "getAppKeySessionAccess",
+      "scenario": "A browser session opened by password: it may list and manage the account's app keys, and signing in again would change nothing.",
+      "request": {
+        "method": "GET",
+        "path": "/api/v2/auth/keys/session",
+        "headers": {
+          "Authorization": "Bearer tok-member"
+        }
+      },
+      "expected_status": 200,
+      "response_headers": {
+        "Cache-Control": "private, no-cache",
+        "Content-Type": "application/json"
+      },
+      "response_media_type": "application/json",
+      "schema": "#/components/schemas/AppKeySessionAccess",
+      "body_file": "get_app_key_session_access_ok.json"
     },
     {
       "name": "get_audio_preference_not_found",
