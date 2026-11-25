@@ -1617,6 +1617,84 @@ func TestEncryptedS3RoundTripDB(t *testing.T) {
 	}
 }
 
+// TestOtherConnectionsLetsClosingClientsLeaveDB: a restore counts the live
+// database's other clients right after its own short reads of that database
+// close, and the server lists a closed connection's backend until the
+// backend has exited. The count waits for a client that leaves, and still
+// reports one that stays. It catches a restore refusing to start because of
+// its own reads.
+func TestOtherConnectionsLetsClosingClientsLeaveDB(t *testing.T) {
+	pool, dsn := backuptest.Database(t)
+	pool.Close()
+	ctx := t.Context()
+	live, err := databaseName(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connect := func() *PGControl {
+		ctl, err := ConnectControl(ctx, dsn)
+		if err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = ctl.Close(context.Background()) })
+		return ctl
+	}
+	ctl, observer := connect(), connect()
+	var counting uint32
+	if err := ctl.Conn.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&counting); err != nil {
+		t.Fatal(err)
+	}
+
+	// A client that is connected when the count first looks, and leaves
+	// while it waits.
+	leaving, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctl.closingGrace = time.Minute
+	counted := make(chan int, 1)
+	go func() {
+		n, err := ctl.OtherConnections(ctx, live)
+		if err != nil {
+			n = -1
+		}
+		counted <- n
+	}()
+	// The count has looked once when its connection's last query is the
+	// count; the client is still connected then.
+	for deadline := time.Now().Add(30 * time.Second); ; {
+		var looked bool
+		if err := observer.Conn.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+			WHERE pid = $1 AND query LIKE '%FROM pg_stat_activity WHERE datname%')`, counting).Scan(&looked); err != nil {
+			t.Fatal(err)
+		}
+		if looked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("the count never ran")
+		}
+		time.Sleep(5 * time.Millisecond) //nolint:forbidigo // the count signals nothing but its query in pg_stat_activity
+	}
+	if err := leaving.Close(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := <-counted; n != 0 {
+		t.Fatalf("a client that left while the count waited: count = %d, want 0", n)
+	}
+
+	// A client that stays is reported once the wait ends.
+	staying, err := pgx.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = staying.Close(context.Background()) }()
+	ctl.closingGrace = 100 * time.Millisecond
+	if n, err := ctl.OtherConnections(ctx, live); err != nil || n != 1 {
+		t.Fatalf("a client that stays connected: count = %d, %v, want 1", n, err)
+	}
+}
+
 // TestFullRestoresAreSerializedDB: two full restores of one database cannot
 // run at once. Each control connection is on the maintenance database, so
 // neither preflight sees the other; the restore lock refuses the second

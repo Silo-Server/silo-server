@@ -323,6 +323,8 @@ type PGControl struct {
 	// Like is the database whose encoding and locale a created
 	// database copies, so the restored catalog sorts as the live one did.
 	Like string
+	// closingGrace replaces closingClientGrace when set.
+	closingGrace time.Duration
 }
 
 // maintenanceDatabases are the databases the control connection may use,
@@ -386,10 +388,38 @@ func (c *PGControl) NameOf(ctx context.Context, oid uint32) (string, bool, error
 	return name, err == nil, err
 }
 
+// closingClientGrace is how long OtherConnections waits for clients that are
+// already leaving. The server lists a closed connection's backend in
+// pg_stat_activity until that backend has exited, and a restore reads the
+// live database over short connections of its own (the server's identity,
+// whether it has accounts) just before it counts the others. Without the
+// wait it sometimes counted one of those and refused. A client that is
+// really connected is still there when the wait ends.
+const closingClientGrace = 5 * time.Second
+
+// OtherConnections counts sessions on name other than this command's. It
+// answers zero as soon as there are none, and otherwise the count that is
+// left after closingClientGrace.
 func (c *PGControl) OtherConnections(ctx context.Context, name string) (int, error) {
-	var n int
-	err := c.Conn.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`, name).Scan(&n)
-	return n, err
+	grace := closingClientGrace
+	if c.closingGrace > 0 {
+		grace = c.closingGrace
+	}
+	deadline := time.Now().Add(grace)
+	for {
+		var n int
+		err := c.Conn.QueryRow(ctx, `SELECT count(*) FROM pg_stat_activity WHERE datname = $1 AND pid <> pg_backend_pid()`, name).Scan(&n)
+		if err != nil || n == 0 || !time.Now().Before(deadline) {
+			return n, err
+		}
+		wait := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			wait.Stop()
+			return n, ctx.Err()
+		case <-wait.C:
+		}
+	}
 }
 
 // CheckPrivileges: renaming needs CREATEDB and ownership, and ALLOW_CONNECTIONS
