@@ -758,7 +758,7 @@ func (h *StreamHandler) SubtitleFonts(ctx context.Context, in SubtitleFontReques
 	if !playback.IsASS(file.SubtitleTracks[embeddedIndex].Codec) {
 		return nil, apiError(http.StatusBadRequest, "bad_request", "Subtitle font bundles are only available for ASS/SSA tracks")
 	}
-	fonts, err := playback.ExtractAttachedSubtitleFonts(ctx, file.FilePath, h.ffmpegPath())
+	fonts, err := playback.ExtractAttachedSubtitleFonts(ctx, file.FilePath, h.ffmpegPath(), embeddedIndex, h.SubtitleCache)
 	if err != nil {
 		slog.WarnContext(ctx, "subtitle font extraction failed", "component", "api",
 			"file_id", file.ID, "track", trackIndex, "error", err)
