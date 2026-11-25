@@ -22,6 +22,11 @@ export interface BarListProps {
   formatValue?: (value: number) => string;
   emptyLabel?: string;
   className?: string;
+  /**
+   * Value of a full-width bar, for a fixed scale such as 100 for
+   * percentages. Without it the largest value in the list fills the track.
+   */
+  max?: number;
 }
 
 function defaultFormatValue(value: number): string {
@@ -41,6 +46,7 @@ export function BarList({
   formatValue = defaultFormatValue,
   emptyLabel,
   className,
+  max: fixedMax,
 }: BarListProps) {
   const t = useT();
   if (items.length === 0) {
@@ -52,16 +58,18 @@ export function BarList({
   }
 
   const color = chartSeriesColor(seriesIndex);
-  const max = items.reduce(
-    (peak, item) => (Number.isFinite(item.value) ? Math.max(peak, item.value) : peak),
-    0,
-  );
+  const max =
+    fixedMax ??
+    items.reduce(
+      (peak, item) => (Number.isFinite(item.value) ? Math.max(peak, item.value) : peak),
+      0,
+    );
 
   return (
     <ol className={cn("space-y-1", className)}>
       {items.map((item, index) => {
         const value = Number.isFinite(item.value) ? Math.max(item.value, 0) : 0;
-        const ratio = max > 0 ? value / max : 0;
+        const ratio = max > 0 ? Math.min(value / max, 1) : 0;
         return (
           <li
             key={item.id}

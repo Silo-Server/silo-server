@@ -18,6 +18,7 @@ import { markAdminInsightsRefresh } from "@/hooks/queries/admin/insights";
 import { useAdminLibraries } from "@/hooks/queries/admin/libraries";
 import { useAdminUsers } from "@/hooks/queries/admin/users";
 import { adminKeys } from "@/hooks/queries/keys";
+import { edgeMask, useScrollStrip } from "@/hooks/useScrollStrip";
 import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { MessageKey } from "@/locales/keys";
@@ -25,6 +26,8 @@ import type { MessageKey } from "@/locales/keys";
 import { ActivityTab } from "./ActivityTab";
 import { BandwidthTab } from "./BandwidthTab";
 import { DevicesTab } from "./DevicesTab";
+import { InsightsDashboardPinsProvider } from "./InsightsDashboardPins";
+import { LibraryTab } from "./LibraryTab";
 import { PeopleTab } from "./PeopleTab";
 import { PersonDetailSheet } from "./PersonDetailSheet";
 import { TitleDetailSheet } from "./TitleDetailSheet";
@@ -169,9 +172,19 @@ export default function AdminInsights() {
     filters.userId !== undefined;
 
   const activeTab: InsightsTab = filters.tab;
+  // Six tabs don't fit a phone: the strip scrolls sideways there and keeps
+  // the active tab in view.
+  const {
+    ref: tabStrip,
+    edges: tabEdges,
+    measure: measureTabStrip,
+  } = useScrollStrip<HTMLDivElement>(`[role="tab"][data-state="active"]`, activeTab);
   const showLibraryFilter = activeTab !== "bandwidth";
   const showAccountFilter =
-    activeTab === "playback" || activeTab === "titles" || activeTab === "devices";
+    activeTab === "playback" ||
+    activeTab === "titles" ||
+    activeTab === "library" ||
+    activeTab === "devices";
   const showTimezoneFilter = activeTab !== "bandwidth";
   // The detail panels honor only the filters this tab shows: an account or
   // library chosen on another tab stays in the URL but is hidden here.
@@ -185,249 +198,277 @@ export default function AdminInsights() {
   );
 
   return (
-    <div className="space-y-6 pb-4 sm:pb-6">
-      <PageHeader
-        title={t("web.admin.insights.title")}
-        subtitle={t("web.admin.insights.subtitle")}
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/admin/activity">
-                <Activity className="h-3.5 w-3.5" />
-                {t("web.admin.insights.action.liveActivity")}
-              </Link>
-            </Button>
-            <Button variant="ghost" size="sm" asChild>
-              <Link to="/admin/history">
-                <History className="h-3.5 w-3.5" />
-                {t("web.admin.insights.action.history")}
-              </Link>
-            </Button>
-            {hasNonDefaultFilters ? (
-              <Button variant="ghost" size="sm" onClick={handleReset}>
-                <RotateCcw className="h-3.5 w-3.5" />
-                {t("web.admin.insights.filter.reset")}
-              </Button>
-            ) : null}
-            <Button
-              variant="outline"
-              size="sm"
-              className="min-w-[7.5rem] justify-center"
-              onClick={() => {
-                void handleRefresh();
-              }}
-              disabled={isRefreshing}
-              aria-busy={isRefreshing}
-            >
-              <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
-              {isRefreshing
-                ? t("web.admin.insights.filter.refreshing")
-                : t("web.admin.insights.filter.refresh")}
-            </Button>
-          </div>
-        }
-      />
-
-      <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-5">
-        <div className="border-border/70 border-b">
-          <TabsList variant="line" className="h-auto gap-2 pb-1">
-            <TabsTrigger value="playback">{t("web.admin.insights.tabs.activity")}</TabsTrigger>
-            <TabsTrigger value="titles">{t("web.admin.insights.tabs.titles")}</TabsTrigger>
-            <TabsTrigger value="people">{t("web.admin.insights.tabs.people")}</TabsTrigger>
-            <TabsTrigger value="devices">{t("web.admin.insights.tabs.devices")}</TabsTrigger>
-            <TabsTrigger value="bandwidth">{t("web.admin.insights.tabs.bandwidth")}</TabsTrigger>
-          </TabsList>
-        </div>
-
-        {/* Shared filter toolbar */}
-        <div className="surface-panel flex flex-wrap items-center gap-2.5 rounded-2xl border-0 p-3">
-          <div
-            role="group"
-            aria-label={t("web.admin.insights.filter.rangeLabel")}
-            className="border-border/60 bg-muted/25 inline-flex flex-wrap items-center gap-0.5 rounded-lg border p-0.5"
-          >
-            {INSIGHTS_RANGES.map((preset) => {
-              const active = filters.range === preset;
-              return (
-                <button
-                  key={preset}
-                  type="button"
-                  aria-pressed={active}
-                  onClick={() => handleRangeChange(preset)}
-                  className={cn(
-                    "cursor-pointer rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-                    "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
-                    active
-                      ? "bg-primary/15 text-foreground shadow-xs"
-                      : "text-muted-foreground hover:text-foreground hover:bg-muted/60",
-                  )}
-                >
-                  {t(RANGE_LABELS[preset])}
-                </button>
-              );
-            })}
-          </div>
-
-          {filters.range === "custom" ? (
+    <InsightsDashboardPinsProvider>
+      <div className="space-y-6 pb-4 sm:pb-6">
+        <PageHeader
+          title={t("web.admin.insights.title")}
+          subtitle={t("web.admin.insights.subtitle")}
+          actions={
             <div className="flex flex-wrap items-center gap-2">
-              <Input
-                type="date"
-                aria-label={t("web.admin.insights.filter.fromDate")}
-                value={filters.fromDate}
-                max={filters.toDate}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  updateParams((next) => {
-                    next.set("range", "custom");
-                    if (val) next.set("from", val);
-                  });
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/admin/activity">
+                  <Activity className="h-3.5 w-3.5" />
+                  {t("web.admin.insights.action.liveActivity")}
+                </Link>
+              </Button>
+              <Button variant="ghost" size="sm" asChild>
+                <Link to="/admin/history">
+                  <History className="h-3.5 w-3.5" />
+                  {t("web.admin.insights.action.history")}
+                </Link>
+              </Button>
+              {hasNonDefaultFilters ? (
+                <Button variant="ghost" size="sm" onClick={handleReset}>
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {t("web.admin.insights.filter.reset")}
+                </Button>
+              ) : null}
+              <Button
+                variant="outline"
+                size="sm"
+                className="min-w-[7.5rem] justify-center"
+                onClick={() => {
+                  void handleRefresh();
                 }}
-                className="h-8 w-[145px] text-xs"
-              />
-              <span className="text-muted-foreground text-xs" aria-hidden="true">
-                {RANGE_SEPARATOR}
-              </span>
-              <Input
-                type="date"
-                aria-label={t("web.admin.insights.filter.toDate")}
-                value={filters.toDate}
-                min={filters.fromDate}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  updateParams((next) => {
-                    next.set("range", "custom");
-                    if (val) next.set("to", val);
-                  });
-                }}
-                className="h-8 w-[145px] text-xs"
-              />
+                disabled={isRefreshing}
+                aria-busy={isRefreshing}
+              >
+                <RefreshCw className={cn("h-3.5 w-3.5", isRefreshing && "animate-spin")} />
+                {isRefreshing
+                  ? t("web.admin.insights.filter.refreshing")
+                  : t("web.admin.insights.filter.refresh")}
+              </Button>
             </div>
-          ) : null}
+          }
+        />
 
-          {showLibraryFilter || showAccountFilter || showTimezoneFilter ? (
-            <div className="ms-auto flex flex-wrap items-center gap-2">
-              {showLibraryFilter ? (
-                <Select
-                  value={filters.libraryId ? String(filters.libraryId) : ALL_VALUE}
-                  onValueChange={(value) => {
-                    updateParams((next) => {
-                      if (value === ALL_VALUE) {
-                        next.delete("library_id");
-                      } else {
-                        next.set("library_id", value);
-                      }
-                    });
-                  }}
-                >
-                  <SelectTrigger className="h-8 max-w-[14rem] min-w-[8.5rem] text-xs">
-                    <SelectValue placeholder={t("web.admin.insights.filter.allLibraries")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL_VALUE}>
-                      {t("web.admin.insights.filter.allLibraries")}
-                    </SelectItem>
-                    {libraries.map((lib) => (
-                      <SelectItem key={lib.id} value={String(lib.id)}>
-                        {lib.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : null}
+        <Tabs value={activeTab} onValueChange={handleTabChange} className="space-y-5">
+          <div
+            ref={tabStrip}
+            onScroll={measureTabStrip}
+            className={cn(
+              "border-border/70 -mx-1 overflow-x-auto border-b px-1 max-lg:[scrollbar-width:none] max-lg:[&::-webkit-scrollbar]:hidden",
+              edgeMask(tabEdges),
+            )}
+          >
+            <TabsList
+              variant="line"
+              className="h-auto w-max min-w-full flex-nowrap justify-start gap-2 pb-1"
+            >
+              <TabsTrigger value="playback" className="flex-none">
+                {t("web.admin.insights.tabs.activity")}
+              </TabsTrigger>
+              <TabsTrigger value="titles" className="flex-none">
+                {t("web.admin.insights.tabs.titles")}
+              </TabsTrigger>
+              <TabsTrigger value="library" className="flex-none">
+                {t("web.admin.insights.tabs.library")}
+              </TabsTrigger>
+              <TabsTrigger value="people" className="flex-none">
+                {t("web.admin.insights.tabs.people")}
+              </TabsTrigger>
+              <TabsTrigger value="devices" className="flex-none">
+                {t("web.admin.insights.tabs.devices")}
+              </TabsTrigger>
+              <TabsTrigger value="bandwidth" className="flex-none">
+                {t("web.admin.insights.tabs.bandwidth")}
+              </TabsTrigger>
+            </TabsList>
+          </div>
 
-              {showAccountFilter ? (
-                <Select
-                  value={filters.userId ? String(filters.userId) : ALL_VALUE}
-                  onValueChange={(value) => {
-                    updateParams((next) => {
-                      if (value === ALL_VALUE) {
-                        next.delete("user_id");
-                      } else {
-                        next.set("user_id", value);
-                      }
-                    });
-                  }}
-                >
-                  <SelectTrigger className="h-8 max-w-[14rem] min-w-[8.5rem] text-xs">
-                    <SelectValue placeholder={t("web.admin.insights.filter.allAccounts")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL_VALUE}>
-                      {t("web.admin.insights.filter.allAccounts")}
-                    </SelectItem>
-                    {users.map((u) => (
-                      <SelectItem key={u.id} value={String(u.id)}>
-                        {u.username}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : null}
-
-              {showTimezoneFilter ? (
-                <Select
-                  value={filters.tz}
-                  onValueChange={(value) => {
-                    updateParams((next) => {
-                      if (value === browserTz) {
-                        next.delete("tz");
-                      } else {
-                        next.set("tz", value);
-                      }
-                    });
-                  }}
-                >
-                  <SelectTrigger
-                    aria-label={t("web.admin.insights.filter.timezone")}
-                    className="h-8 max-w-full min-w-[7.5rem] text-xs"
+          {/* Shared filter toolbar */}
+          <div className="surface-panel flex flex-wrap items-center gap-2.5 rounded-2xl border-0 p-3">
+            <div
+              role="group"
+              aria-label={t("web.admin.insights.filter.rangeLabel")}
+              className="border-border/60 bg-muted/25 inline-flex flex-wrap items-center gap-0.5 rounded-lg border p-0.5"
+            >
+              {INSIGHTS_RANGES.map((preset) => {
+                const active = filters.range === preset;
+                return (
+                  <button
+                    key={preset}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => handleRangeChange(preset)}
+                    className={cn(
+                      "cursor-pointer rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
+                      "focus-visible:ring-ring focus-visible:ring-2 focus-visible:outline-none",
+                      active
+                        ? "bg-primary/15 text-foreground shadow-xs"
+                        : "text-muted-foreground hover:text-foreground hover:bg-muted/60",
+                    )}
                   >
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {timezoneOptions.map((tzOpt) => (
-                      <SelectItem key={tzOpt} value={tzOpt}>
-                        {tzOpt === "UTC"
-                          ? t("web.admin.insights.filter.timezoneUtc")
-                          : tzOpt === browserTz
-                            ? t("web.admin.insights.filter.timezoneBrowser", { tz: tzOpt })
-                            : tzOpt}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : null}
+                    {t(RANGE_LABELS[preset])}
+                  </button>
+                );
+              })}
             </div>
-          ) : null}
-        </div>
 
-        <TabsContent value="playback" className="mt-0 space-y-5">
-          {activeTab === "playback" ? <ActivityTab filters={filters} /> : null}
-        </TabsContent>
-        <TabsContent value="titles" className="mt-0 space-y-5">
-          {activeTab === "titles" ? <TitlesTab filters={filters} /> : null}
-        </TabsContent>
-        <TabsContent value="people" className="mt-0 space-y-5">
-          {activeTab === "people" ? <PeopleTab filters={filters} /> : null}
-        </TabsContent>
-        <TabsContent value="devices" className="mt-0 space-y-5">
-          {activeTab === "devices" ? <DevicesTab filters={filters} /> : null}
-        </TabsContent>
-        <TabsContent value="bandwidth" className="mt-0 space-y-5">
-          {activeTab === "bandwidth" ? <BandwidthTab filters={filters} /> : null}
-        </TabsContent>
-      </Tabs>
+            {filters.range === "custom" ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  type="date"
+                  aria-label={t("web.admin.insights.filter.fromDate")}
+                  value={filters.fromDate}
+                  max={filters.toDate}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateParams((next) => {
+                      next.set("range", "custom");
+                      if (val) next.set("from", val);
+                    });
+                  }}
+                  className="h-8 w-[145px] text-xs"
+                />
+                <span className="text-muted-foreground text-xs" aria-hidden="true">
+                  {RANGE_SEPARATOR}
+                </span>
+                <Input
+                  type="date"
+                  aria-label={t("web.admin.insights.filter.toDate")}
+                  value={filters.toDate}
+                  min={filters.fromDate}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateParams((next) => {
+                      next.set("range", "custom");
+                      if (val) next.set("to", val);
+                    });
+                  }}
+                  className="h-8 w-[145px] text-xs"
+                />
+              </div>
+            ) : null}
 
-      <TitleDetailSheet
-        titleId={detail.titleId}
-        person={detail.person}
-        filters={detailFilters}
-        onClose={detail.person ? closeTitle : closeDetail}
-      />
-      <PersonDetailSheet
-        person={detail.titleId ? undefined : detail.person}
-        filters={detailFilters}
-        onClose={closeDetail}
-      />
-    </div>
+            {showLibraryFilter || showAccountFilter || showTimezoneFilter ? (
+              <div className="ms-auto flex flex-wrap items-center gap-2">
+                {showLibraryFilter ? (
+                  <Select
+                    value={filters.libraryId ? String(filters.libraryId) : ALL_VALUE}
+                    onValueChange={(value) => {
+                      updateParams((next) => {
+                        if (value === ALL_VALUE) {
+                          next.delete("library_id");
+                        } else {
+                          next.set("library_id", value);
+                        }
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="h-8 max-w-[14rem] min-w-[8.5rem] text-xs">
+                      <SelectValue placeholder={t("web.admin.insights.filter.allLibraries")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_VALUE}>
+                        {t("web.admin.insights.filter.allLibraries")}
+                      </SelectItem>
+                      {libraries.map((lib) => (
+                        <SelectItem key={lib.id} value={String(lib.id)}>
+                          {lib.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
+
+                {showAccountFilter ? (
+                  <Select
+                    value={filters.userId ? String(filters.userId) : ALL_VALUE}
+                    onValueChange={(value) => {
+                      updateParams((next) => {
+                        if (value === ALL_VALUE) {
+                          next.delete("user_id");
+                        } else {
+                          next.set("user_id", value);
+                        }
+                      });
+                    }}
+                  >
+                    <SelectTrigger className="h-8 max-w-[14rem] min-w-[8.5rem] text-xs">
+                      <SelectValue placeholder={t("web.admin.insights.filter.allAccounts")} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_VALUE}>
+                        {t("web.admin.insights.filter.allAccounts")}
+                      </SelectItem>
+                      {users.map((u) => (
+                        <SelectItem key={u.id} value={String(u.id)}>
+                          {u.username}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
+
+                {showTimezoneFilter ? (
+                  <Select
+                    value={filters.tz}
+                    onValueChange={(value) => {
+                      updateParams((next) => {
+                        if (value === browserTz) {
+                          next.delete("tz");
+                        } else {
+                          next.set("tz", value);
+                        }
+                      });
+                    }}
+                  >
+                    <SelectTrigger
+                      aria-label={t("web.admin.insights.filter.timezone")}
+                      className="h-8 max-w-full min-w-[7.5rem] text-xs"
+                    >
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {timezoneOptions.map((tzOpt) => (
+                        <SelectItem key={tzOpt} value={tzOpt}>
+                          {tzOpt === "UTC"
+                            ? t("web.admin.insights.filter.timezoneUtc")
+                            : tzOpt === browserTz
+                              ? t("web.admin.insights.filter.timezoneBrowser", { tz: tzOpt })
+                              : tzOpt}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
+              </div>
+            ) : null}
+          </div>
+
+          <TabsContent value="playback" className="mt-0 space-y-5">
+            {activeTab === "playback" ? <ActivityTab filters={filters} /> : null}
+          </TabsContent>
+          <TabsContent value="titles" className="mt-0 space-y-5">
+            {activeTab === "titles" ? <TitlesTab filters={filters} /> : null}
+          </TabsContent>
+          <TabsContent value="library" className="mt-0 space-y-5">
+            {activeTab === "library" ? <LibraryTab filters={filters} /> : null}
+          </TabsContent>
+          <TabsContent value="people" className="mt-0 space-y-5">
+            {activeTab === "people" ? <PeopleTab filters={filters} /> : null}
+          </TabsContent>
+          <TabsContent value="devices" className="mt-0 space-y-5">
+            {activeTab === "devices" ? <DevicesTab filters={filters} /> : null}
+          </TabsContent>
+          <TabsContent value="bandwidth" className="mt-0 space-y-5">
+            {activeTab === "bandwidth" ? <BandwidthTab filters={filters} /> : null}
+          </TabsContent>
+        </Tabs>
+
+        <TitleDetailSheet
+          titleId={detail.titleId}
+          person={detail.person}
+          filters={detailFilters}
+          onClose={detail.person ? closeTitle : closeDetail}
+        />
+        <PersonDetailSheet
+          person={detail.titleId ? undefined : detail.person}
+          filters={detailFilters}
+          onClose={closeDetail}
+        />
+      </div>
+    </InsightsDashboardPinsProvider>
   );
 }

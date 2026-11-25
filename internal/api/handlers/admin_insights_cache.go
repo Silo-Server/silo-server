@@ -27,6 +27,7 @@ type AdminInsightsProvider struct {
 	devices   *cache.TTLCache[*AdminInsightsDevices]
 	bandwidth *cache.TTLCache[*AdminInsightsBandwidth]
 	titles    *cache.TTLCache[*AdminInsightsTitles]
+	library   *cache.TTLCache[*AdminInsightsLibrary]
 	ttl       time.Duration
 	fillMu    sync.Mutex
 	fills     map[string]*insightsFillCall // guarded by fillMu
@@ -45,6 +46,7 @@ func NewAdminInsightsProvider(ctx context.Context, pool *pgxpool.Pool, bus cache
 		devices:   cache.NewTTLCache[*AdminInsightsDevices](),
 		bandwidth: cache.NewTTLCache[*AdminInsightsBandwidth](),
 		titles:    cache.NewTTLCache[*AdminInsightsTitles](),
+		library:   cache.NewTTLCache[*AdminInsightsLibrary](),
 		ttl:       adminInsightsCacheTTL,
 	}
 	if bus == nil || ctx == nil {
@@ -87,6 +89,9 @@ func (p *AdminInsightsProvider) Invalidate() {
 	if p.titles != nil {
 		p.titles.InvalidatePrefix(adminInsightsCacheKeyPrefix)
 	}
+	if p.library != nil {
+		p.library.InvalidatePrefix(adminInsightsCacheKeyPrefix)
+	}
 }
 
 func (p *AdminInsightsProvider) generation() uint64 {
@@ -114,6 +119,9 @@ func (p *AdminInsightsProvider) Close() {
 	}
 	if p.titles != nil {
 		p.titles.Close()
+	}
+	if p.library != nil {
+		p.library.Close()
 	}
 }
 
@@ -296,5 +304,18 @@ func (p *AdminInsightsProvider) Titles(ctx context.Context, q AdminInsightsTitle
 	key := fmt.Sprintf("%stitles:%s:s=%s:n=%d", adminInsightsCacheKeyPrefix, insightsScopeKey(q.AdminInsightsWindowQuery), normalizeInsightsTitlesSort(q.Sort), clampInsightsTitlesLimit(q.Limit))
 	return cachedInsightsRead(ctx, p, p.titles, key, func(ctx context.Context) (*AdminInsightsTitles, error) {
 		return queryAdminInsightsTitles(ctx, p.pool, q)
+	})
+}
+
+func (p *AdminInsightsProvider) Library(ctx context.Context, q AdminInsightsWindowQuery) (*AdminInsightsLibrary, error) {
+	if p == nil || p.pool == nil {
+		return nil, ErrAdminDashboardUnavailable
+	}
+	if !insightsWindowCacheable(q.Range) {
+		return queryAdminInsightsLibrary(ctx, p.pool, q)
+	}
+	key := adminInsightsCacheKeyPrefix + "library:" + insightsScopeKey(q)
+	return cachedInsightsRead(ctx, p, p.library, key, func(ctx context.Context) (*AdminInsightsLibrary, error) {
+		return queryAdminInsightsLibrary(ctx, p.pool, q)
 	})
 }

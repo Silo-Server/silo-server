@@ -5262,32 +5262,6 @@ export interface AdminPlaybackActivity {
   profiles_active_24h: number;
 }
 
-// GET /admin/stats/top-activity. Episodes are rolled up to their series, so a
-// title's media_item_id is a series content id for TV.
-export interface AdminTopTitle {
-  media_item_id: string;
-  title: string;
-  media_type: string;
-  plays: number;
-  total_seconds: number;
-}
-
-export interface AdminTopProfile {
-  user_id: string | number; // v2 IDs are opaque strings; bridge fixtures retain numbers.
-  username: string;
-  profile_id: string;
-  profile_name: string;
-  plays: number;
-  total_seconds: number;
-}
-
-export interface AdminTopActivity {
-  days: number;
-  limit: number;
-  titles: AdminTopTitle[];
-  profiles: AdminTopProfile[];
-}
-
 // GET /admin/stats/timeseries. One point per sampled minute; minutes the
 // sampler missed are absent rather than zero, so charts draw them as gaps.
 export interface AdminTimeseriesPoint {

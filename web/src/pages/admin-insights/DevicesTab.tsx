@@ -30,6 +30,7 @@ import {
   formatShortCalendarDate,
   type InsightsFilterState,
 } from "./insightsHelpers";
+import { DevicesUsageSections } from "./DevicesUsageSections";
 import { InsightKpiCard, InsightNoticeBanner, InsightSectionError } from "./insightsShared";
 
 type SampleThreshold = "5" | "1";
@@ -553,6 +554,8 @@ export function DevicesTab({ filters }: { filters: InsightsFilterState }) {
           </section>
         </CardContent>
       </Card>
+
+      <DevicesUsageSections data={data} />
     </div>
   );
 }

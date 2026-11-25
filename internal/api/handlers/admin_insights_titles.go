@@ -19,12 +19,17 @@ const (
 	// insightsTitlesKindLibrary marks library rows in the leaderboard query;
 	// title rows carry itemTypeMovie or itemTypeSeries.
 	insightsTitlesKindLibrary = "library"
+	// insightsTitlesListLeastFinished marks the least-finished ranking's rows.
+	insightsTitlesListLeastFinished = "least_finished"
+	// insightsLeastFinishedMinPlays keeps a title with one or two abandoned
+	// plays off the least-finished list, where its rate says little.
+	insightsLeastFinishedMinPlays = 3
 )
 
 // ---- Titles leaderboard ----------------------------------------------------
 
-// queryAdminInsightsTitles ranks the window's movies, series and libraries.
-// Episodes roll up to their series. Only titles and libraries with at least
+// queryAdminInsightsTitles ranks the window's movies, series and libraries,
+// and lists the least-finished titles. Episodes roll up to their series. Only titles and libraries with at least
 // one play rank; viewers are distinct profiles with a play. A library row
 // takes plays by the library of each play's first session and watch time by
 // each session's library (insightsLibraryOfRowSQL).
@@ -49,7 +54,7 @@ func queryAdminInsightsTitles(ctx context.Context, pool *pgxpool.Pool, q AdminIn
 	out := &AdminInsightsTitles{
 		From: win.From, To: win.To, TZ: win.TZ, Sort: sortKey,
 		Movies: make([]AdminInsightsTitleRow, 0), Shows: make([]AdminInsightsTitleRow, 0),
-		Libraries: make([]AdminInsightsLibraryRow, 0),
+		Libraries: make([]AdminInsightsLibraryRow, 0), LeastFinished: make([]AdminInsightsTitleRow, 0),
 	}
 
 	if err := queryInsightsTitlesRanking(ctx, tx, newInsightsPlaysScope(win, q.AdminInsightsWindowQuery), sortKey, clampInsightsTitlesLimit(q.Limit), out); err != nil {
@@ -81,8 +86,8 @@ func resolveInsightsPlaysWindow(ctx context.Context, tx pgx.Tx, q AdminInsightsW
 func queryInsightsTitlesRanking(ctx context.Context, tx pgx.Tx, scope insightsPlaysScope, sortKey string, limit int, out *AdminInsightsTitles) error {
 	var args []any
 	with, counted := scope.viewingRowsSQL(&args)
-	args = append(args, limit)
-	limitParam := len(args)
+	args = append(args, limit, insightsLeastFinishedMinPlays)
+	limitParam, minPlaysParam := len(args)-1, len(args)
 	rows, err := tx.Query(ctx, with+fmt.Sprintf(`,
 		counted AS (
 			SELECT vr.*, %[1]s AS is_play,
@@ -113,28 +118,33 @@ func queryInsightsTitlesRanking(ctx context.Context, tx pgx.Tx, scope insightsPl
 			GROUP BY library_id
 		),
 		ranked AS (
-			SELECT t.*, ROW_NUMBER() OVER (PARTITION BY t.kind ORDER BY %[4]s, t.id) AS rn
+			SELECT t.kind AS list, t.*, ROW_NUMBER() OVER (PARTITION BY t.kind ORDER BY %[4]s, t.id) AS rn
 			FROM totals t WHERE t.plays > 0
+			UNION ALL
+			SELECT '%[6]s', t.*, ROW_NUMBER() OVER (
+				ORDER BY t.completed_plays::double precision / t.plays, t.plays DESC, t.watch_seconds DESC, t.id) AS rn
+			FROM totals t WHERE t.kind <> 'library' AND t.plays >= $%[7]d AND t.completed_plays < t.plays
 		)
-		SELECT r.kind, r.id, COALESCE(mi.title, lib.name, ''), mi.year,
+		SELECT r.list, r.kind, r.id, COALESCE(mi.title, lib.name, ''), mi.year,
 			r.plays, r.viewers, r.completed_plays, r.episodes, r.watch_seconds, r.last_played_at
 		FROM ranked r
 		LEFT JOIN media_items mi ON r.kind <> 'library' AND mi.content_id = r.id
 		LEFT JOIN media_folders lib ON r.kind = 'library' AND lib.id::text = r.id
 		WHERE r.rn <= $%[5]d
-		ORDER BY r.kind, r.rn
-	`, insightsIsPlaySQL("vr"), insightsLibraryOfRowSQL("vr"), counted, insightsTitlesOrderSQL(sortKey, "t"), limitParam), args...)
+		ORDER BY r.list, r.rn
+	`, insightsIsPlaySQL("vr"), insightsLibraryOfRowSQL("vr"), counted, insightsTitlesOrderSQL(sortKey, "t"), limitParam,
+		insightsTitlesListLeastFinished, minPlaysParam), args...)
 	if err != nil {
 		return fmt.Errorf("querying insights titles: %w", err)
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var kind, id, title string
+		var list, kind, id, title string
 		var year *int
 		var plays, viewers, completed, episodes int64
 		var watchSec float64
 		var lastPlayed *time.Time
-		if err := rows.Scan(&kind, &id, &title, &year, &plays, &viewers, &completed, &episodes, &watchSec, &lastPlayed); err != nil {
+		if err := rows.Scan(&list, &kind, &id, &title, &year, &plays, &viewers, &completed, &episodes, &watchSec, &lastPlayed); err != nil {
 			return fmt.Errorf("scanning insights titles: %w", err)
 		}
 		watch := int64(math.Round(watchSec))
@@ -150,9 +160,12 @@ func queryInsightsTitlesRanking(ctx context.Context, tx pgx.Tx, scope insightsPl
 			ContentID: id, Kind: kind, Title: title, Year: year, Plays: plays, Viewers: viewers,
 			CompletedPlays: completed, Episodes: episodes, WatchSeconds: watch, LastPlayedAt: normalizeTimePtrUTC(lastPlayed),
 		}
-		if kind == itemTypeSeries {
+		switch {
+		case list == insightsTitlesListLeastFinished:
+			out.LeastFinished = append(out.LeastFinished, row)
+		case kind == itemTypeSeries:
 			out.Shows = append(out.Shows, row)
-		} else {
+		default:
 			out.Movies = append(out.Movies, row)
 		}
 	}

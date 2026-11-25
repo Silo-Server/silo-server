@@ -1,0 +1,104 @@
+{
+  "from": "2025-12-04T03:04:05.678Z",
+  "to": "2026-01-02T03:04:05.678Z",
+  "tz": "UTC",
+  "oldest_history_at": "2025-07-02T03:04:05.678Z",
+  "summary": {
+    "titles": 420,
+    "played_titles": 63,
+    "played_share": 0.15,
+    "never_started": 210,
+    "added_titles": 12,
+    "added_played": 7,
+    "median_days_to_first_play": 2.5
+  },
+  "libraries": [
+    {
+      "library_id": "1",
+      "name": "Movies",
+      "titles": 300,
+      "played_titles": 41,
+      "played_share": 0.1367,
+      "never_started": 160,
+      "added_titles": 9
+    },
+    {
+      "library_id": "2",
+      "name": "TV Shows",
+      "titles": 120,
+      "played_titles": 22,
+      "played_share": 0.1833,
+      "never_started": 50,
+      "added_titles": 3
+    }
+  ],
+  "genres": [
+    {
+      "key": "Drama",
+      "plays": 40,
+      "titles": 22
+    },
+    {
+      "key": "Science Fiction",
+      "plays": 18,
+      "titles": 7
+    }
+  ],
+  "decades": [
+    {
+      "key": "1990",
+      "plays": 6,
+      "titles": 4
+    },
+    {
+      "key": "2020",
+      "plays": 51,
+      "titles": 38
+    }
+  ],
+  "content_ratings": [
+    {
+      "key": "PG-13",
+      "plays": 25,
+      "titles": 14
+    },
+    {
+      "key": "TV-MA",
+      "plays": 20,
+      "titles": 9
+    }
+  ],
+  "time_to_first_play": [
+    {
+      "key": "day",
+      "sessions": 3
+    },
+    {
+      "key": "week",
+      "sessions": 3
+    },
+    {
+      "key": "month",
+      "sessions": 1
+    },
+    {
+      "key": "later",
+      "sessions": 0
+    },
+    {
+      "key": "not_yet",
+      "sessions": 5
+    }
+  ],
+  "recently_added_unplayed": [
+    {
+      "content_id": "movie-9",
+      "kind": "movie",
+      "title": "Civil War",
+      "year": 2024,
+      "added_at": "2025-12-31T03:04:05.678Z",
+      "library_id": "1",
+      "library_name": "Movies"
+    }
+  ]
+}

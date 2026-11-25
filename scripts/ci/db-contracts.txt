@@ -1599,13 +1599,14 @@
 # Deep playback analytics: daily metric archive & lock-fenced pruning, atomic
 # route-fact snapshots on playback history finalization and their ordering,
 # Insights queries plus rich history filters, the viewing rule that turns
-# sessions into plays, the read gate the playback stop path stays out of, and
-# node references on a backup restore.
+# sessions into plays, the Insights breakdowns and Library read, the read gate
+# the playback stop path stays out of, and node references on a backup restore.
 ./internal/dashmetrics TestDownsampleCompletedDaysAndPruneDB
 ./internal/api/handlers TestAdminPlaybackHistoryRouteFactsDB
 ./internal/api/handlers TestAdminPlaybackHistoryRouteFactsOrderDB
 ./internal/api/handlers TestAdminInsightsQueriesAndHistoryFiltersDB
 ./internal/api/handlers TestAdminInsightsPlayGroupingDB
+./internal/api/handlers TestAdminInsightsBreakdownsDB
 ./internal/api/handlers TestPlaybackHistoryEntrySkipsTheReadGateDB
 ./internal/backup TestCarryCredentialsReconcilesRestoredStreamNodesDB
 ./internal/backup TestCarryCredentialsKeepsNodeSamplesWithoutDailyArchiveDB

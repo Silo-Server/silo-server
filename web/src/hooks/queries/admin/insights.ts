@@ -7,6 +7,11 @@ import {
   type ProfileRequestContextSnapshot,
 } from "@/api/client";
 import { v2, type V2Query, type V2Result } from "@/api/v2/request";
+import type { WidgetRange } from "@/components/admin/dashboard/types";
+import {
+  detectBrowserTimezone,
+  widgetRangeToInsightsRange,
+} from "@/pages/admin-insights/insightsHelpers";
 import { adminKeys } from "../keys";
 
 export type AdminInsightsCapabilities = V2Result<"GET /api/v2/admin/insights/capabilities">;
@@ -16,6 +21,7 @@ export type AdminInsightsDevices = V2Result<"GET /api/v2/admin/insights/devices"
 export type AdminInsightsBandwidth = V2Result<"GET /api/v2/admin/insights/bandwidth">;
 export type AdminInsightsTitles = V2Result<"GET /api/v2/admin/insights/titles">;
 export type AdminInsightsTitle = V2Result<"GET /api/v2/admin/insights/titles/{content_id}">;
+export type AdminInsightsLibrary = V2Result<"GET /api/v2/admin/insights/library">;
 
 export type AdminInsightsActivityQuery = V2Query<"GET /api/v2/admin/insights/activity">;
 export type AdminInsightsPeopleQuery = V2Query<"GET /api/v2/admin/insights/people">;
@@ -23,6 +29,7 @@ export type AdminInsightsDevicesQuery = V2Query<"GET /api/v2/admin/insights/devi
 export type AdminInsightsBandwidthQuery = V2Query<"GET /api/v2/admin/insights/bandwidth">;
 export type AdminInsightsTitlesQuery = V2Query<"GET /api/v2/admin/insights/titles">;
 export type AdminInsightsTitleQuery = V2Query<"GET /api/v2/admin/insights/titles/{content_id}">;
+export type AdminInsightsLibraryQuery = V2Query<"GET /api/v2/admin/insights/library">;
 
 const INSIGHTS_STALE_TIME = 45_000;
 
@@ -77,6 +84,7 @@ function useAdminInsightQuery<T>(
   read: (profileContext: ProfileRequestContextSnapshot, signal: AbortSignal) => Promise<T>,
   enabled: boolean,
   staleTime = INSIGHTS_STALE_TIME,
+  refetchInterval: number | false = false,
 ) {
   const scope = insightsScope();
   return useQuery({
@@ -84,8 +92,85 @@ function useAdminInsightQuery<T>(
     queryFn: ({ signal }) => readInsight(scope, (profileContext) => read(profileContext, signal)),
     enabled,
     staleTime,
+    refetchInterval,
     retry: false,
   });
+}
+
+/**
+ * How often a dashboard widget re-reads its Insights window.
+ *
+ * The dashboard's own 60-second loop never touches Insights queries: a year or
+ * all-time read takes seconds on a large history, and re-running it every
+ * minute on every open dashboard would keep the read gate busy for numbers
+ * that barely move. Short windows refresh every 5 minutes, long ones every
+ * 15, and the dashboard's Refresh button marks them stale on demand. React
+ * Query pauses the interval while the tab is hidden.
+ */
+export function dashboardInsightsInterval(range: WidgetRange): number {
+  return range === "week" || range === "month" ? 5 * 60_000 : 15 * 60_000;
+}
+
+/**
+ * The server-wide window a dashboard widget reads, in the browser's timezone.
+ * Its shape matches the Insights page's unfiltered query, so a widget and the
+ * page showing the same window share one cache entry.
+ */
+export function dashboardInsightsWindow(range: WidgetRange) {
+  return { range: widgetRangeToInsightsRange(range), tz: detectBrowserTimezone() };
+}
+
+export function useDashboardInsightsActivity(range: WidgetRange) {
+  const query = dashboardInsightsWindow(range);
+  const interval = dashboardInsightsInterval(range);
+  return useAdminInsightQuery(
+    adminKeys.insightsActivity(query),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/activity", { query, profileContext, signal }),
+    true,
+    interval,
+    interval,
+  );
+}
+
+export function useDashboardInsightsTitles(range: WidgetRange, limit: number) {
+  const query = { ...dashboardInsightsWindow(range), sort: "plays" as const, limit };
+  const interval = dashboardInsightsInterval(range);
+  return useAdminInsightQuery(
+    adminKeys.insightsTitles(query),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/titles", { query, profileContext, signal }),
+    true,
+    interval,
+    interval,
+  );
+}
+
+export function useDashboardInsightsLibrary(range: WidgetRange) {
+  const query = dashboardInsightsWindow(range);
+  const interval = dashboardInsightsInterval(range);
+  return useAdminInsightQuery(
+    adminKeys.insightsLibrary(query),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/library", { query, profileContext, signal }),
+    true,
+    interval,
+    interval,
+  );
+}
+
+/** People with one account row: the widget reads only `top_profiles`. */
+export function useDashboardInsightsPeople(range: WidgetRange) {
+  const query = { ...dashboardInsightsWindow(range), limit: 1 };
+  const interval = dashboardInsightsInterval(range);
+  return useAdminInsightQuery(
+    adminKeys.insightsPeople(query),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/people", { query, profileContext, signal }),
+    true,
+    interval,
+    interval,
+  );
 }
 
 export function useAdminInsightsCapabilities(enabled = true) {
@@ -190,6 +275,19 @@ export function useAdminInsightsTitles(query: AdminInsightsTitlesQuery, enabled 
     adminKeys.insightsTitles(query as Record<string, unknown>),
     (profileContext, signal) =>
       v2("GET /api/v2/admin/insights/titles", {
+        query: withRefreshFlag(query),
+        profileContext,
+        signal,
+      }),
+    enabled,
+  );
+}
+
+export function useAdminInsightsLibrary(query: AdminInsightsLibraryQuery, enabled = true) {
+  return useAdminInsightQuery(
+    adminKeys.insightsLibrary(query as Record<string, unknown>),
+    (profileContext, signal) =>
+      v2("GET /api/v2/admin/insights/library", {
         query: withRefreshFlag(query),
         profileContext,
         signal,

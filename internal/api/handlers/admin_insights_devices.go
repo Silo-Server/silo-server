@@ -63,6 +63,8 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 		TopTranscoders:       make([]AdminInsightsTranscoderRow, 0),
 		SourceResolutions:    make([]AdminInsightsLabeledCount, 0), DeliveredResolutions: make([]AdminInsightsLabeledCount, 0),
 		ResolutionChanges: make([]AdminInsightsResolutionChange, 0),
+		BucketUnit:        win.BucketUnit, ClientVersions: make([]AdminInsightsClientVersionRow, 0),
+		ProtocolBuckets: make([]AdminInsightsProtocolBucket, 0),
 	}
 
 	if err := queryInsightsDevicesSummary(ctx, tx, whereSQL, whereArgs, out); err != nil {
@@ -78,6 +80,18 @@ func queryAdminInsightsDevices(ctx context.Context, pool *pgxpool.Pool, q AdminI
 		return nil, err
 	}
 	if err := queryInsightsResolutions(ctx, tx, whereSQL, whereArgs, out); err != nil {
+		return nil, err
+	}
+	if err := queryInsightsClientVersions(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
+		return nil, err
+	}
+	if err := queryInsightsProtocolBuckets(ctx, tx, win, q.LibraryID, whereSQL, whereArgs, out); err != nil {
+		return nil, err
+	}
+	if err := queryInsightsSubtitleUsage(ctx, tx, q.LibraryID, whereSQL, whereArgs, out); err != nil {
+		return nil, err
+	}
+	if err := queryInsightsAudioUsage(ctx, tx, whereSQL, whereArgs, out); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(ctx); err != nil {

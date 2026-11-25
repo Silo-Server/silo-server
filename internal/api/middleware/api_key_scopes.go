@@ -135,7 +135,7 @@ var apiKeyScopeRoutes = map[string][]scopeRoute{
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/playback-history$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/playback-history/capabilities$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/playback-history/[^/]+$`)},
-		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/insights/(capabilities|activity|people|devices|bandwidth|titles)$`)},
+		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/insights/(capabilities|activity|people|devices|bandwidth|titles|library)$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/insights/titles/[^/]+$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/stats/(timeseries|playback-activity|top-activity|downloads)$`)},
 		{http.MethodGet, regexp.MustCompile(`^/api/v2/admin/users$`)},

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"slices"
 	"testing"
 	"time"
 
@@ -121,6 +122,7 @@ func TestAdminInsightsPlayGroupingDB(t *testing.T) {
 	t.Run("profile filter stays within its account", func(t *testing.T) { assertPlayGroupingProfileFilterDB(t, h, s) })
 	t.Run("titles", func(t *testing.T) { assertPlayGroupingTitlesDB(t, h, s) })
 	t.Run("title detail", func(t *testing.T) { assertPlayGroupingTitleDetailDB(t, h, s) })
+	t.Run("active people, end reasons, least finished, top profiles", func(t *testing.T) { assertPlayGroupingBreakdownsDB(t, h, s) })
 }
 
 var playGroupingWeek = AdminInsightsWindowQuery{Range: InsightsRange7d, TZ: "UTC"}
@@ -243,6 +245,56 @@ func assertPlayGroupingTitleDetailDB(t *testing.T, h *AdminHandler, s playGroupi
 	}
 	if _, err := h.ReadAdminInsightsTitle(ctx, AdminInsightsTitleQuery{AdminInsightsWindowQuery: playGroupingWeek, ContentID: "nope"}); !errors.Is(err, ErrInsightsTitleNotFound) {
 		t.Fatalf("unknown id: err = %v", err)
+	}
+}
+
+// assertPlayGroupingBreakdownsDB checks the per-bucket active counts, the end
+// reasons, the least-finished list and People's top profiles over the seed.
+func assertPlayGroupingBreakdownsDB(t *testing.T, h *AdminHandler, s playGroupingSeed) {
+	ctx := t.Context()
+	act, err := h.ReadAdminInsightsActivity(ctx, playGroupingWeek, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Every account starts a session on the day; only bob comes back the next.
+	active := map[string][2]int64{}
+	for _, b := range act.Buckets {
+		active[b.LabelDate] = [2]int64{b.ActiveAccounts, b.ActiveProfiles}
+	}
+	if got := active[s.day.Format("2006-01-02")]; got != [2]int64{5, 5} {
+		t.Errorf("active on the day = %v, want [5 5]", got)
+	}
+	if got := active[s.day.AddDate(0, 0, 1).Format("2006-01-02")]; got != [2]int64{1, 1} {
+		t.Errorf("active the next day = %v, want [1 1]", got)
+	}
+	reasons := map[string]int64{}
+	for _, r := range act.EndReasons {
+		reasons[r.Key] = r.Sessions
+	}
+	if len(reasons) != 2 || reasons["replaced"] != 2 || reasons[insightsUnknownKey] != 17 {
+		t.Errorf("end reasons = %+v", act.EndReasons)
+	}
+
+	// M1 finished 4 of 7 plays, M2 2 of 3; S1's 2 plays are under the minimum.
+	titles, err := h.ReadAdminInsightsTitles(ctx, AdminInsightsTitlesQuery{AdminInsightsWindowQuery: playGroupingWeek}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(titles.LeastFinished) != 2 || titles.LeastFinished[0].ContentID != "M1" || titles.LeastFinished[1].ContentID != "M2" {
+		t.Errorf("least finished = %+v", titles.LeastFinished)
+	}
+
+	// Erin and alice tie on plays; erin watched longer. Dave outwatched carol.
+	people, err := h.ReadAdminInsightsPeople(ctx, AdminInsightsPeopleQuery{AdminInsightsWindowQuery: playGroupingWeek, Limit: 1}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var order []int
+	for _, p := range people.TopProfiles {
+		order = append(order, p.UserID)
+	}
+	if want := []int{s.erin, s.alice, s.bob, s.dave, s.carol}; !slices.Equal(order, want) {
+		t.Errorf("top profiles = %v, want %v", order, want)
 	}
 }
 

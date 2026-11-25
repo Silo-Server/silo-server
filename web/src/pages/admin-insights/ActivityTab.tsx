@@ -1,30 +1,36 @@
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useMemo, useState } from "react";
 
 import {
+  BarList,
   ChartEmptyState,
   LineChart,
-  StackedColumnChart,
+  type BarListItem,
   chartSeriesColor,
   type LineChartOverlay,
   type LineChartPoint,
   type LineChartStack,
-  type StackedColumnBucket,
 } from "@/components/admin/dashboard/charts";
 import { formatWatchTime } from "@/components/admin/dashboard/format";
 import { WidgetViewToggle } from "@/components/admin/dashboard/WidgetViewToggle";
 import { NEUTRAL_SERIES_COLOR } from "@/components/admin/dashboard/widgets/concurrentStreamsSeries";
+import { ActivePeopleChart } from "@/components/admin/insights/ActivePeopleChart";
+import { PlaysOverTimeChart } from "@/components/admin/insights/PlaysOverTimeChart";
+import { ViewingHeatmap } from "@/components/admin/insights/ViewingHeatmap";
+import { ViewingTimeChart } from "@/components/admin/insights/ViewingTimeChart";
+import type { ViewingTimeMetric } from "@/components/admin/insights/viewingTime";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useAdminInsightsActivity } from "@/hooks/queries/admin/insights";
-import { useAppLanguage, useT } from "@/i18n";
-import { formatLocale } from "@/lib/appLocale";
-import { cn } from "@/lib/utils";
-
 import {
-  buildActivityBucketGrid,
+  useAdminInsightsActivity,
+  type AdminInsightsActivity,
+} from "@/hooks/queries/admin/insights";
+import { useT, type MessageKey } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
+
+import { AddToDashboardButton } from "./InsightsDashboardPins";
+import {
   buildDailyUtcGrid,
   buildInsightsWindowQueryParams,
-  formatActivityBucketLabel,
   formatInsightsCount,
   formatRatePercentNumber,
   formatShortCalendarDate,
@@ -37,147 +43,14 @@ type VolumeMetric = "plays" | "watch_time";
 type VolumeSplit = "method" | "media";
 type PeakView = "lines" | "stacked" | "total";
 
-const HEATMAP_DAY_ANCHORS_UTC = [
-  "2024-01-01T12:00:00Z", // Mon
-  "2024-01-02T12:00:00Z", // Tue
-  "2024-01-03T12:00:00Z", // Wed
-  "2024-01-04T12:00:00Z", // Thu
-  "2024-01-05T12:00:00Z", // Fri
-  "2024-01-06T12:00:00Z", // Sat
-  "2024-01-07T12:00:00Z", // Sun
-] as const;
-
-const HEATMAP_LEVEL_CLASSES = [
-  "bg-muted/35",
-  "bg-primary/20",
-  "bg-primary/40",
-  "bg-primary/65",
-  "bg-primary/90",
-] as const;
-
-function heatmapLevel(plays: number, maxPlays: number): number {
-  if (plays <= 0 || maxPlays <= 0) return 0;
-  const ratio = plays / maxPlays;
-  if (ratio <= 0.25) return 1;
-  if (ratio <= 0.5) return 2;
-  if (ratio <= 0.75) return 3;
-  return 4;
-}
-
 export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
   const t = useT();
-  const language = useAppLanguage();
   const [volumeMetric, setVolumeMetric] = useState<VolumeMetric>("plays");
   const [volumeSplit, setVolumeSplit] = useState<VolumeSplit>("method");
   const [peakView, setPeakView] = useState<PeakView>("lines");
-  const [activeHeatmapCell, setActiveHeatmapCell] = useState<{ dow: number; hour: number }>({
-    dow: 0,
-    hour: 0,
-  });
-  const heatmapCellRefs = useRef<Array<HTMLDivElement | null>>([]);
-
-  function moveHeatmapFocus(dow: number, hour: number) {
-    setActiveHeatmapCell({ dow, hour });
-    heatmapCellRefs.current[dow * 24 + hour]?.focus();
-  }
-
-  function handleHeatmapKeyDown(event: KeyboardEvent<HTMLDivElement>, dow: number, hour: number) {
-    switch (event.key) {
-      case "ArrowRight":
-        event.preventDefault();
-        moveHeatmapFocus(dow, Math.min(23, hour + 1));
-        break;
-      case "ArrowLeft":
-        event.preventDefault();
-        moveHeatmapFocus(dow, Math.max(0, hour - 1));
-        break;
-      case "ArrowDown":
-        event.preventDefault();
-        moveHeatmapFocus(Math.min(6, dow + 1), hour);
-        break;
-      case "ArrowUp":
-        event.preventDefault();
-        moveHeatmapFocus(Math.max(0, dow - 1), hour);
-        break;
-      case "Home":
-        event.preventDefault();
-        moveHeatmapFocus(event.ctrlKey ? 0 : dow, 0);
-        break;
-      case "End":
-        event.preventDefault();
-        moveHeatmapFocus(event.ctrlKey ? 6 : dow, 23);
-        break;
-      default:
-        break;
-    }
-  }
-
   const queryParams = useMemo(() => buildInsightsWindowQueryParams(filters), [filters]);
   const query = useAdminInsightsActivity(queryParams);
   const data = query.data;
-
-  // Fill every quiet day/week/month bucket across [data.from, data.to) using
-  // the API's local calendar label_date anchored at UTC midnight so columns
-  // stay evenly spaced by time and never shift days in another browser TZ.
-  const volumeBuckets = useMemo<StackedColumnBucket[]>(() => {
-    // Buckets carry sessions too, so a window can have buckets but no plays.
-    const hasMetric =
-      volumeMetric === "watch_time"
-        ? data?.buckets.some((b) => b.watch_seconds > 0)
-        : data?.buckets.some((b) => b.plays > 0);
-    if (!data || !hasMetric) return [];
-    const byDate = new Map(data.buckets.map((b) => [b.label_date, b]));
-    const grid = buildActivityBucketGrid(data.from, data.to, data.tz, data.bucket_unit);
-    const dates = grid.length > 0 ? grid : data.buckets.map((b) => b.label_date);
-    return dates.map((labelDate) => {
-      const ts = Date.parse(`${labelDate}T00:00:00Z`);
-      const bucket = byDate.get(labelDate);
-      if (volumeMetric === "watch_time") {
-        return { t: ts, segments: [bucket?.watch_seconds ?? 0] };
-      }
-      if (volumeSplit === "media") {
-        return {
-          t: ts,
-          segments: [bucket?.movies ?? 0, bucket?.episodes ?? 0, bucket?.other_media ?? 0],
-        };
-      }
-      return {
-        t: ts,
-        segments: [bucket?.direct ?? 0, bucket?.remux ?? 0, bucket?.transcode ?? 0],
-      };
-    });
-  }, [data, volumeMetric, volumeSplit]);
-
-  const volumeSeriesLabels = useMemo<string[]>(() => {
-    if (volumeMetric === "watch_time") {
-      return [t("web.admin.insights.activity.volume.metricWatchTime")];
-    }
-    if (volumeSplit === "media") {
-      return [
-        t("web.admin.insights.activity.volume.seriesMovies"),
-        t("web.admin.insights.activity.volume.seriesEpisodes"),
-        t("web.admin.insights.activity.volume.seriesOther"),
-      ];
-    }
-    return [
-      t("web.admin.dashboard.widgets.playbackActivity.series.directPlay"),
-      t("web.admin.dashboard.widgets.playbackActivity.series.directStream"),
-      t("web.admin.dashboard.widgets.playbackActivity.series.transcode"),
-    ];
-  }, [t, volumeMetric, volumeSplit]);
-
-  const heatmapGrid = useMemo(() => {
-    const map = new Map<string, { plays: number; watchSeconds: number }>();
-    let maxPlays = 0;
-    for (const cell of data?.heatmap ?? []) {
-      map.set(`${cell.day_of_week}:${cell.hour}`, {
-        plays: cell.plays,
-        watchSeconds: cell.watch_seconds,
-      });
-      if (cell.plays > maxPlays) maxPlays = cell.plays;
-    }
-    return { map, maxPlays };
-  }, [data?.heatmap]);
 
   const peakSeries = useMemo(() => {
     const raw = data?.peak_streams ?? [];
@@ -253,20 +126,6 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
     }
     return { points, overlays: undefined, stacks: undefined, edgeLabels };
   }, [data?.peak_streams, peakView, t]);
-
-  const weekdayLabels = useMemo(() => {
-    const fmt = new Intl.DateTimeFormat(formatLocale(), { weekday: "short", timeZone: "UTC" });
-    return HEATMAP_DAY_ANCHORS_UTC.map((iso) => fmt.format(new Date(iso)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- language re-runs localized weekday names
-  }, [language]);
-
-  const hourLabels = useMemo(() => {
-    const fmt = new Intl.DateTimeFormat(formatLocale(), { hour: "numeric", timeZone: "UTC" });
-    return Array.from({ length: 24 }, (_, hour) =>
-      fmt.format(new Date(Date.UTC(2024, 0, 1, hour, 0, 0))),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- language re-runs localized hour labels
-  }, [language]);
 
   if (query.isLoading) {
     return (
@@ -374,6 +233,11 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
+            <AddToDashboardButton
+              widgetId="insights-plays"
+              range={filters.range}
+              chartName={t("web.admin.insights.activity.volume.title")}
+            />
             <WidgetViewToggle
               value={volumeMetric}
               options={[
@@ -411,127 +275,37 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
           </div>
         </CardHeader>
         <CardContent>
-          {volumeBuckets.length === 0 ? (
-            <ChartEmptyState message={t("web.admin.insights.activity.volume.empty")} />
-          ) : (
-            <StackedColumnChart
-              height={210}
-              buckets={volumeBuckets}
-              seriesLabels={volumeSeriesLabels}
-              formatBucket={(timeMs) => formatActivityBucketLabel(timeMs, data.bucket_unit)}
-              formatValue={
-                volumeMetric === "watch_time"
-                  ? (seconds) => formatWatchTime(seconds)
-                  : (v) => v.toLocaleString(formatLocale())
-              }
-              totalLabel={
-                volumeMetric === "watch_time"
-                  ? undefined
-                  : t("web.admin.insights.activity.volume.metricPlays")
-              }
-              ariaLabel={t("web.admin.insights.activity.volume.chartLabel")}
-            />
-          )}
+          <PlaysOverTimeChart
+            data={data}
+            view={volumeMetric === "watch_time" ? "watch_time" : volumeSplit}
+            height={210}
+          />
         </CardContent>
       </Card>
 
       {/* Viewing hours heatmap + Peak concurrent streams */}
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
         <Card className="surface-panel rounded-2xl border-0">
-          <CardHeader className="space-y-0.5">
-            <CardTitle className="text-sm font-bold">
-              {t("web.admin.insights.activity.heatmap.title")}
-            </CardTitle>
-            <p className="text-muted-foreground text-xs">
-              {t("web.admin.insights.activity.heatmap.subtitle", { tz: data.tz })}
-            </p>
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0">
+            <div className="space-y-0.5">
+              <CardTitle className="text-sm font-bold">
+                {t("web.admin.insights.activity.heatmap.title")}
+              </CardTitle>
+              <p className="text-muted-foreground text-xs">
+                {t("web.admin.insights.activity.heatmap.subtitle", { tz: data.tz })}
+              </p>
+            </div>
+            <AddToDashboardButton
+              widgetId="insights-viewing-hours"
+              range={filters.range}
+              chartName={t("web.admin.insights.activity.heatmap.title")}
+            />
           </CardHeader>
           <CardContent>
             {data.heatmap.length === 0 ? (
               <ChartEmptyState message={t("web.admin.insights.activity.heatmap.empty")} />
             ) : (
-              <div className="space-y-3">
-                <div className="overflow-x-auto">
-                  <div
-                    role="grid"
-                    aria-label={t("web.admin.insights.activity.heatmap.title")}
-                    dir="ltr"
-                    className="min-w-[440px] space-y-1"
-                  >
-                    <div
-                      role="row"
-                      className="grid grid-cols-[2.75rem_repeat(24,minmax(0,1fr))] items-center gap-1 pb-1"
-                    >
-                      <span role="columnheader" aria-hidden="true" />
-                      {hourLabels.map((label, hour) => (
-                        <span
-                          key={hour}
-                          role="columnheader"
-                          className="text-muted-foreground text-center text-[0.625rem] tabular-nums"
-                        >
-                          {hour % 6 === 0 ? label : ""}
-                        </span>
-                      ))}
-                    </div>
-                    {weekdayLabels.map((dayLabel, dow) => (
-                      <div
-                        key={dow}
-                        role="row"
-                        className="grid grid-cols-[2.75rem_repeat(24,minmax(0,1fr))] items-center gap-1"
-                      >
-                        <span
-                          role="rowheader"
-                          className="text-muted-foreground pe-1 text-end text-[0.6875rem] font-medium"
-                        >
-                          {dayLabel}
-                        </span>
-                        {hourLabels.map((hourLabel, hour) => {
-                          const cell = heatmapGrid.map.get(`${dow}:${hour}`);
-                          const plays = cell?.plays ?? 0;
-                          const watchSeconds = cell?.watchSeconds ?? 0;
-                          const level = heatmapLevel(plays, heatmapGrid.maxPlays);
-                          const isActive =
-                            activeHeatmapCell.dow === dow && activeHeatmapCell.hour === hour;
-                          const tooltip = t("web.admin.insights.activity.heatmap.cellTooltip", {
-                            day: dayLabel,
-                            hour: hourLabel,
-                            plays: t("web.admin.insights.playCount", {
-                              count: plays,
-                              count_text: plays.toLocaleString(formatLocale()),
-                            }),
-                            watch_time: formatWatchTime(watchSeconds),
-                          });
-                          return (
-                            <div
-                              key={hour}
-                              ref={(el) => {
-                                heatmapCellRefs.current[dow * 24 + hour] = el;
-                              }}
-                              tabIndex={isActive ? 0 : -1}
-                              role="gridcell"
-                              aria-label={tooltip}
-                              title={tooltip}
-                              onFocus={() => setActiveHeatmapCell({ dow, hour })}
-                              onKeyDown={(e) => handleHeatmapKeyDown(e, dow, hour)}
-                              className={cn(
-                                "focus-visible:ring-ring h-5 rounded-[4px] transition-transform hover:scale-110 focus-visible:ring-2 focus-visible:outline-none",
-                                HEATMAP_LEVEL_CLASSES[level],
-                              )}
-                            />
-                          );
-                        })}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="text-muted-foreground flex items-center justify-end gap-1.5 text-[0.6875rem]">
-                  <span>{t("web.admin.insights.activity.heatmap.less")}</span>
-                  {HEATMAP_LEVEL_CLASSES.map((cls, idx) => (
-                    <span key={idx} className={cn("h-3 w-3 rounded-[3px]", cls)} />
-                  ))}
-                  <span>{t("web.admin.insights.activity.heatmap.more")}</span>
-                </div>
-              </div>
+              <ViewingHeatmap cells={data.heatmap} />
             )}
           </CardContent>
         </Card>
@@ -597,6 +371,141 @@ export function ActivityTab({ filters }: { filters: InsightsFilterState }) {
           </CardContent>
         </Card>
       </div>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <ViewingTimeCard axis="weekday" data={data} filters={filters} />
+        <ViewingTimeCard axis="hour" data={data} filters={filters} />
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <Card className="surface-panel rounded-2xl border-0">
+          <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0">
+            <div className="space-y-0.5">
+              <CardTitle className="text-sm font-bold">
+                {t("web.admin.insights.activity.activePeople.title")}
+              </CardTitle>
+              <p className="text-muted-foreground text-xs">
+                {t("web.admin.insights.activity.activePeople.subtitle")}
+              </p>
+            </div>
+            <AddToDashboardButton
+              widgetId="insights-active-people"
+              range={filters.range}
+              chartName={t("web.admin.insights.activity.activePeople.title")}
+            />
+          </CardHeader>
+          <CardContent>
+            <ActivePeopleChart data={data} height={200} />
+          </CardContent>
+        </Card>
+        <EndReasonsCard reasons={data.end_reasons} />
+      </div>
     </div>
+  );
+}
+
+/** Plays or watch time by weekday or hour, with its own metric switch. */
+function ViewingTimeCard({
+  axis,
+  data,
+  filters,
+}: {
+  axis: "weekday" | "hour";
+  data: AdminInsightsActivity;
+  filters: InsightsFilterState;
+}) {
+  const t = useT();
+  const [metric, setMetric] = useState<ViewingTimeMetric>("plays");
+  const title =
+    axis === "weekday"
+      ? t("web.admin.insights.activity.weekday.title")
+      : t("web.admin.insights.activity.hour.title");
+  return (
+    <Card className="surface-panel rounded-2xl border-0">
+      <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-2 space-y-0">
+        <div className="space-y-0.5">
+          <CardTitle className="text-sm font-bold">{title}</CardTitle>
+          <p className="text-muted-foreground text-xs">
+            {t("web.admin.insights.activity.heatmap.subtitle", { tz: data.tz })}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <AddToDashboardButton
+            widgetId={axis === "weekday" ? "insights-weekday" : "insights-hour-of-day"}
+            range={filters.range}
+            chartName={title}
+          />
+          <WidgetViewToggle
+            value={metric}
+            options={[
+              {
+                value: "plays",
+                label: t("web.admin.insights.activity.volume.metricPlays"),
+                ariaLabel: t("web.admin.insights.activity.volume.metricPlays"),
+              },
+              {
+                value: "watch_time",
+                label: t("web.admin.insights.activity.volume.metricWatchTime"),
+                ariaLabel: t("web.admin.insights.activity.volume.metricWatchTime"),
+              },
+            ]}
+            onChange={setMetric}
+          />
+        </div>
+      </CardHeader>
+      <CardContent>
+        <ViewingTimeChart cells={data.heatmap} axis={axis} metric={metric} height={180} />
+      </CardContent>
+    </Card>
+  );
+}
+
+const END_REASON_LABELS: Record<string, MessageKey> = {
+  stopped: "web.admin.history.endReason.stopped",
+  terminated: "web.admin.history.endReason.terminated",
+  expired: "web.admin.history.endReason.expired",
+  aborted: "web.admin.history.endReason.aborted",
+  replaced: "web.admin.history.endReason.replaced",
+};
+
+/**
+ * Sessions by why they ended. A high share of timeouts points at clients that
+ * crash or lose their connection; "Ended by server" at missing media.
+ */
+function EndReasonsCard({ reasons }: { reasons: AdminInsightsActivity["end_reasons"] }) {
+  const t = useT();
+  const total = reasons.reduce((sum, reason) => sum + reason.sessions, 0);
+  const items: BarListItem[] = reasons.map((reason) => {
+    const labelKey = END_REASON_LABELS[reason.key];
+    return {
+      id: reason.key,
+      label: labelKey ? t(labelKey) : t("web.admin.insights.activity.endReasons.unknown"),
+      value: reason.sessions,
+      secondary: t("web.admin.insights.percent", {
+        value: formatRatePercentNumber(total > 0 ? reason.sessions / total : 0),
+      }),
+    };
+  });
+  return (
+    <Card className="surface-panel rounded-2xl border-0">
+      <CardHeader className="space-y-0.5">
+        <CardTitle className="text-sm font-bold">
+          {t("web.admin.insights.activity.endReasons.title")}
+        </CardTitle>
+        <p className="text-muted-foreground text-xs">
+          {t("web.admin.insights.activity.endReasons.subtitle")}
+        </p>
+      </CardHeader>
+      <CardContent>
+        <BarList
+          items={items}
+          seriesIndex={3}
+          formatValue={(sessions) =>
+            formatInsightsCount(t, "web.admin.insights.sessionCount", sessions)
+          }
+          emptyLabel={t("web.admin.insights.activity.volume.empty")}
+        />
+      </CardContent>
+    </Card>
   );
 }

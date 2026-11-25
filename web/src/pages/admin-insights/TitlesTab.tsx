@@ -7,7 +7,9 @@ import { WidgetViewToggle } from "@/components/admin/dashboard/WidgetViewToggle"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useAdminInsightsTitles, type AdminInsightsTitles } from "@/hooks/queries/admin/insights";
 import { useT } from "@/i18n";
+import { formatLocale } from "@/lib/appLocale";
 
+import { AddToDashboardButton } from "./InsightsDashboardPins";
 import {
   buildInsightsWindowQueryParams,
   formatInsightsCount,
@@ -94,6 +96,23 @@ export function TitlesTab({ filters }: { filters: InsightsFilterState }) {
     [data?.libraries, metricOf, searchParams, secondaryFor],
   );
 
+  // Least finished ranks by the share of plays left unfinished, whatever the
+  // sort, so a longer bar is a title more people gave up on.
+  const leastFinishedItems = useMemo<BarListItem[]>(
+    () =>
+      (data?.least_finished ?? []).map((row) => ({
+        id: row.content_id,
+        label: formatInsightsTitle(row, t),
+        value: row.plays > 0 ? Math.round((1 - row.completed_plays / row.plays) * 100) : 0,
+        secondary: t("web.admin.insights.activity.kpi.completionDetail", {
+          completed: row.completed_plays.toLocaleString(formatLocale()),
+          total: row.plays.toLocaleString(formatLocale()),
+        }),
+        to: insightsHrefWith(searchParams, { title: row.content_id, person: null, profile: null }),
+      })),
+    [data?.least_finished, searchParams, t],
+  );
+
   if (query.error) {
     return (
       <InsightSectionError
@@ -127,7 +146,12 @@ export function TitlesTab({ filters }: { filters: InsightsFilterState }) {
 
   return (
     <div className="space-y-5">
-      <div className="flex justify-end">
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <AddToDashboardButton
+          widgetId="top-titles"
+          range={filters.range}
+          chartName={t("web.admin.dashboard.widgetCatalog.topTitles.title")}
+        />
         <div role="group" aria-label={t("web.admin.insights.titles.sortLabel")}>
           <WidgetViewToggle value={sort} options={sortOptions} onChange={setSort} />
         </div>
@@ -164,20 +188,48 @@ export function TitlesTab({ filters }: { filters: InsightsFilterState }) {
         </Card>
       </div>
 
-      <Card className="surface-panel rounded-2xl border-0">
-        <CardHeader>
-          <CardTitle className="text-sm font-bold">
-            {t("web.admin.insights.titles.libraries.title")}
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {renderList(
-            data ? libraryItems : undefined,
-            2,
-            t("web.admin.insights.titles.libraries.empty"),
-          )}
-        </CardContent>
-      </Card>
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+        <Card className="surface-panel rounded-2xl border-0">
+          <CardHeader>
+            <CardTitle className="text-sm font-bold">
+              {t("web.admin.insights.titles.libraries.title")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {renderList(
+              data ? libraryItems : undefined,
+              2,
+              t("web.admin.insights.titles.libraries.empty"),
+            )}
+          </CardContent>
+        </Card>
+        <Card className="surface-panel rounded-2xl border-0">
+          <CardHeader className="space-y-0.5">
+            <CardTitle className="text-sm font-bold">
+              {t("web.admin.insights.titles.leastFinished.title")}
+            </CardTitle>
+            <p className="text-muted-foreground text-xs">
+              {t("web.admin.insights.titles.leastFinished.subtitle")}
+            </p>
+          </CardHeader>
+          <CardContent>
+            {!data ? (
+              <BarListSkeleton />
+            ) : (
+              <BarList
+                items={leastFinishedItems}
+                seriesIndex={3}
+                formatValue={(value) =>
+                  t("web.admin.insights.titles.leastFinished.unfinishedShare", {
+                    value: value.toLocaleString(formatLocale()),
+                  })
+                }
+                emptyLabel={t("web.admin.insights.titles.leastFinished.empty")}
+              />
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
 }

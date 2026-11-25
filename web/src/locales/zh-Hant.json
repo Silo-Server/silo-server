@@ -43136,7 +43136,7 @@
   "web.admin.insights.devices.subtitles.delivery.embedded": [
     {
       "type": 0,
-      "value": "串流內的音軌"
+      "value": "內嵌於串流中"
     }
   ],
   "web.admin.insights.devices.subtitles.delivery.hlsRendition": [

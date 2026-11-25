@@ -1,19 +1,54 @@
+import type { WidgetRange } from "@/components/admin/dashboard/types";
 import type { Translate } from "@/i18n";
 import { formatLocale } from "@/lib/appLocale";
 import { formatDateTime, preferredDateLocale } from "@/lib/datetime";
 import type { MessageKey } from "@/locales/keys";
 
-export const INSIGHTS_TABS = ["playback", "titles", "people", "devices", "bandwidth"] as const;
+export const INSIGHTS_TABS = [
+  "playback",
+  "titles",
+  "library",
+  "people",
+  "devices",
+  "bandwidth",
+] as const;
 export type InsightsTab = (typeof INSIGHTS_TABS)[number];
 
 export const INSIGHTS_RANGES = ["7d", "30d", "90d", "1y", "all", "custom"] as const;
 export type InsightsRange = (typeof INSIGHTS_RANGES)[number];
 
-/** Maps a Dashboard widget range (`hour`/`day`/`week`/`month`) to the closest Insights range preset. */
-export function widgetRangeToInsightsRange(
-  range: "hour" | "day" | "week" | "month",
-): InsightsRange {
-  return range === "month" ? "30d" : "7d";
+/** The Insights preset closest to a dashboard widget range; sub-week ranges open the 7-day view. */
+export function widgetRangeToInsightsRange(range: WidgetRange): Exclude<InsightsRange, "custom"> {
+  switch (range) {
+    case "month":
+      return "30d";
+    case "quarter":
+      return "90d";
+    case "year":
+      return "1y";
+    case "all":
+      return "all";
+    default:
+      return "7d";
+  }
+}
+
+/** The dashboard widget range for an Insights preset; a custom range has none. */
+export function insightsRangeToWidgetRange(range: InsightsRange): WidgetRange | undefined {
+  switch (range) {
+    case "7d":
+      return "week";
+    case "30d":
+      return "month";
+    case "90d":
+      return "quarter";
+    case "1y":
+      return "year";
+    case "all":
+      return "all";
+    default:
+      return undefined;
+  }
 }
 
 export interface InsightsFilterState {

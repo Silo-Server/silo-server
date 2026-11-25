@@ -132,17 +132,22 @@ type AdminInsightsActivitySummary struct {
 }
 
 // AdminInsightsActivityBucket is one day/week/month bar on the Activity chart.
+// ActiveAccounts and ActiveProfiles count the distinct accounts and profiles
+// with a session that started in the bucket, the summary's UniqueAccounts and
+// UniqueProfiles rule applied per bucket.
 type AdminInsightsActivityBucket struct {
-	BucketStart  time.Time
-	LabelDate    string // YYYY-MM-DD in requested TZ
-	Plays        int64
-	WatchSeconds int64
-	Direct       int64
-	Remux        int64
-	Transcode    int64
-	Movies       int64
-	Episodes     int64
-	OtherMedia   int64
+	BucketStart    time.Time
+	LabelDate      string // YYYY-MM-DD in requested TZ
+	Plays          int64
+	WatchSeconds   int64
+	Direct         int64
+	Remux          int64
+	Transcode      int64
+	Movies         int64
+	Episodes       int64
+	OtherMedia     int64
+	ActiveAccounts int64
+	ActiveProfiles int64
 }
 
 // AdminInsightsHeatmapCell is one non-zero (day_of_week, hour) cell in the
@@ -179,6 +184,10 @@ type AdminInsightsActivity struct {
 	Buckets     []AdminInsightsActivityBucket
 	Heatmap     []AdminInsightsHeatmapCell
 	PeakStreams []AdminInsightsPeakStreamsPoint
+	// EndReasons counts the window's sessions by why they ended (stopped,
+	// terminated, expired, aborted, replaced); "unknown" holds rows recorded
+	// before end reasons were.
+	EndReasons []AdminInsightsLabeledCount
 }
 
 // AdminInsightsPersonProfile is one household profile nested under an account.
@@ -234,6 +243,19 @@ type AdminInsightsPeople struct {
 	TotalWatchSeconds int64
 	Coverage          AdminInsightsCoverage
 	Accounts          []AdminInsightsPersonAccount
+	// TopProfiles ranks household profiles across all accounts by plays,
+	// whatever the account sort, search or page.
+	TopProfiles []AdminInsightsTopProfile
+}
+
+// AdminInsightsTopProfile is one profile in People's cross-account ranking.
+type AdminInsightsTopProfile struct {
+	UserID       int
+	Username     string
+	ProfileID    string
+	ProfileName  string
+	Plays        int64
+	WatchSeconds int64
 }
 
 // AdminInsightsDevicesSummary aggregates KPIs for Devices & Quality. Devices
@@ -316,6 +338,53 @@ type AdminInsightsDevices struct {
 	DeliveredResolutions []AdminInsightsLabeledCount
 	ResolutionChanges    []AdminInsightsResolutionChange
 	TopTranscoders       []AdminInsightsTranscoderRow
+	// BucketUnit is ProtocolBuckets' bucket size, chosen like Activity's.
+	BucketUnit      string
+	ClientVersions  []AdminInsightsClientVersionRow
+	ProtocolBuckets []AdminInsightsProtocolBucket
+	Subtitles       AdminInsightsSubtitleUsage
+	Audio           AdminInsightsAudioUsage
+}
+
+// AdminInsightsClientVersionRow is one reported client version: the sessions
+// it played in the window and when it was last seen.
+type AdminInsightsClientVersionRow struct {
+	ClientName       string
+	DevicePlatform   string
+	ClientVersion    string
+	IsJellyfinClient bool
+	Sessions         int64
+	LastSeenAt       *time.Time
+}
+
+// AdminInsightsProtocolBucket splits one day/week/month of sessions between
+// Silo's own clients and Jellyfin-protocol clients.
+type AdminInsightsProtocolBucket struct {
+	BucketStart      time.Time
+	LabelDate        string
+	NativeSessions   int64
+	JellyfinSessions int64
+}
+
+// AdminInsightsSubtitleUsage describes the subtitles sessions showed. It
+// covers sessions with route facts only: older rows cannot tell "no subtitle"
+// from "not recorded".
+type AdminInsightsSubtitleUsage struct {
+	Sessions                int64 // sessions with route facts
+	SubtitledSessions       int64
+	ForcedSessions          int64
+	HearingImpairedSessions int64
+	Languages               []AdminInsightsLabeledCount
+	Deliveries              []AdminInsightsLabeledCount
+}
+
+// AdminInsightsAudioUsage describes the audio sessions played, over sessions
+// with route facts (which record the played track and delivered channels).
+type AdminInsightsAudioUsage struct {
+	Sessions          int64 // sessions with route facts
+	Languages         []AdminInsightsLabeledCount
+	Decisions         []AdminInsightsLabeledCount
+	DeliveredChannels []AdminInsightsLabeledCount
 }
 
 // AdminInsightsTranscoderRow is a client and platform in the Devices tab's
@@ -417,6 +486,10 @@ type AdminInsightsTitles struct {
 	Movies    []AdminInsightsTitleRow
 	Shows     []AdminInsightsTitleRow
 	Libraries []AdminInsightsLibraryRow
+	// LeastFinished lists movies and series with at least
+	// insightsLeastFinishedMinPlays plays and one left unfinished, lowest
+	// completion rate first.
+	LeastFinished []AdminInsightsTitleRow
 }
 
 // AdminInsightsEpisodeRef identifies one episode of a series.
@@ -488,6 +561,65 @@ type AdminInsightsTitle struct {
 	EpisodesTruncated bool
 }
 
+// AdminInsightsLibrarySummary totals the catalog side of the Library tab over
+// distinct titles: a title in two libraries counts once.
+type AdminInsightsLibrarySummary struct {
+	Titles                int64
+	PlayedTitles          int64
+	PlayedShare           float64
+	NeverStarted          int64
+	AddedTitles           int64
+	AddedPlayed           int64
+	MedianDaysToFirstPlay *float64 // titles added in the window that have a play
+}
+
+// AdminInsightsLibraryCoverage is one library's movies or series and how many
+// of them were played.
+type AdminInsightsLibraryCoverage struct {
+	LibraryID    int
+	Name         string
+	Titles       int64
+	PlayedTitles int64
+	PlayedShare  float64
+	NeverStarted int64
+	AddedTitles  int64
+}
+
+// AdminInsightsLabeledPlays is a key with the plays and distinct titles behind
+// it (genres, decades, content ratings).
+type AdminInsightsLabeledPlays struct {
+	Key    string
+	Plays  int64
+	Titles int64
+}
+
+// AdminInsightsUnplayedTitle is a title added in the window without a play
+// since.
+type AdminInsightsUnplayedTitle struct {
+	ContentID   string
+	Kind        string // movie | series
+	Title       string
+	Year        *int
+	AddedAt     time.Time
+	LibraryID   int
+	LibraryName string
+}
+
+// AdminInsightsLibrary is the payload for GET /api/v2/admin/insights/library.
+type AdminInsightsLibrary struct {
+	From                  time.Time
+	To                    time.Time
+	TZ                    string
+	OldestHistoryAt       *time.Time
+	Summary               AdminInsightsLibrarySummary
+	Libraries             []AdminInsightsLibraryCoverage
+	Genres                []AdminInsightsLabeledPlays
+	Decades               []AdminInsightsLabeledPlays
+	ContentRatings        []AdminInsightsLabeledPlays
+	TimeToFirstPlay       []AdminInsightsLabeledCount // keys: day, week, month, later, not_yet; counts are titles
+	RecentlyAddedUnplayed []AdminInsightsUnplayedTitle
+}
+
 // AdminInsightsSource provides cached or freshly queried Insights payloads.
 type AdminInsightsSource interface {
 	Activity(ctx context.Context, q AdminInsightsWindowQuery) (*AdminInsightsActivity, error)
@@ -495,6 +627,7 @@ type AdminInsightsSource interface {
 	Devices(ctx context.Context, q AdminInsightsDevicesQuery) (*AdminInsightsDevices, error)
 	Bandwidth(ctx context.Context, q AdminInsightsBandwidthQuery) (*AdminInsightsBandwidth, error)
 	Titles(ctx context.Context, q AdminInsightsTitlesQuery) (*AdminInsightsTitles, error)
+	Library(ctx context.Context, q AdminInsightsWindowQuery) (*AdminInsightsLibrary, error)
 	Invalidate()
 }
 
@@ -563,6 +696,19 @@ func (h *AdminHandler) ReadAdminInsightsTitles(ctx context.Context, q AdminInsig
 		return nil, ErrAdminDashboardUnavailable
 	}
 	return queryAdminInsightsTitles(ctx, h.pool, q)
+}
+
+func (h *AdminHandler) ReadAdminInsightsLibrary(ctx context.Context, q AdminInsightsWindowQuery, refresh bool) (*AdminInsightsLibrary, error) {
+	if h.InsightsSource != nil {
+		if refresh {
+			h.InsightsSource.Invalidate()
+		}
+		return h.InsightsSource.Library(ctx, q)
+	}
+	if h.pool == nil {
+		return nil, ErrAdminDashboardUnavailable
+	}
+	return queryAdminInsightsLibrary(ctx, h.pool, q)
 }
 
 // ReadAdminInsightsTitle reads one title's detail. It is small and keyed by an
