@@ -28,10 +28,29 @@ func (h *AuthHandler) WithUserStore(provider userstore.UserStoreProvider) *AuthH
 	return h
 }
 
+// hasPassword reports whether a password signs the account in here: its own
+// local password, or a directory (LDAP) that takes its name. An account
+// without one (it signs in with app keys or a sign-in provider) uses Quick
+// Connect instead.
+func (h *AuthHandler) hasPassword(ctx context.Context, userID int) (bool, error) {
+	if h.passwordSignIn == nil {
+		return true, nil
+	}
+	signIn, err := h.passwordSignIn.PasswordSignInFor(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return signIn.Local || signIn.Directory, nil
+}
+
 func configurationKey(profileID string) string { return "jellycompat:configuration:" + profileID }
 
 func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (userDTOResponse, error) {
-	dto := h.userDTO(session)
+	hasPassword, err := h.hasPassword(ctx, session.StreamAppUserID)
+	if err != nil {
+		return userDTOResponse{}, err
+	}
+	dto := h.userDTO(session, hasPassword)
 	if h.storeProvider == nil {
 		return dto, nil
 	}

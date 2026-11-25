@@ -353,6 +353,7 @@
 ./internal/auth TestJellyfinSessionDeleteFailureRollsBackRevocationPostgres
 ./internal/jellycompat TestApplyListFileFieldsDB
 ./internal/jellycompat TestLoginAccountNameWithHashDB
+./internal/jellycompat TestPasswordlessAccountSignsInWithQuickConnectDB
 ./internal/jellycompat TestRevokedCompatSessionStaysDeletedPostgres
 ./internal/jellycompat TestDeletedProfileCompatSessionsEndPostgres
 ./internal/jellycompat TestSignInRacingProfileDeleteKeepsNoSessionPostgres
