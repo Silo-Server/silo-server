@@ -44,6 +44,13 @@ func (h *AuthHandler) SignInWithAppKey(ctx context.Context, req auth.KeyRequest)
 	return h.appKeyAnswer(ctx, result, err)
 }
 
+// RedeemAppKeyGrant enrolls another app's key with a grant the person key
+// signed.
+func (h *AuthHandler) RedeemAppKeyGrant(ctx context.Context, req auth.KeyRequest) (*AppKeyAnswer, error) {
+	result, err := h.appKeys.RedeemGrant(ctx, req)
+	return h.appKeyAnswer(ctx, result, err)
+}
+
 // EnrollAppKeys enrolls a person key and a device key from a login session.
 func (h *AuthHandler) EnrollAppKeys(ctx context.Context, req auth.KeyEnrollRequest) (*AppKeyAnswer, error) {
 	result, err := h.appKeys.Enroll(ctx, req)

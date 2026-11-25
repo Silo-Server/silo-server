@@ -27,6 +27,18 @@
       "allowed_by": null,
       "enrolled_at": "2026-01-02T03:04:05.678Z",
       "last_used_at": null
+    },
+    {
+      "id": "9e0b6c1d-3f2a-4b7e-8c5d-1a2b3c4d5e6f",
+      "kid": "Qm9vay1wbGF5ZXIta2V5MQ",
+      "kind": "app",
+      "name": "Example Player",
+      "platform": "android",
+      "status": "active",
+      "enrolled_by": "grant",
+      "allowed_by": "sam",
+      "enrolled_at": "2026-01-02T03:04:05.678Z",
+      "last_used_at": "2026-01-02T04:04:05.678Z"
     }
   ]
 }

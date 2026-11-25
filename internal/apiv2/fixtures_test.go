@@ -1810,13 +1810,17 @@ func appKeyFixtureCases() []fixtureCase {
 			method:   http.MethodPost, path: "/api/v2/auth/keys/challenge", body: `{}`,
 			status: http.StatusOK, assertHeaders: []string{"Content-Type", "Cache-Control"}, schema: "#/components/schemas/AppKeyChallenge"},
 		{name: "list_app_keys_ok", operationID: "listAppKeys",
-			scenario: "A person lists their own keys: the person key, a device signed in by introduce, and an administrator's device waiting for approval.",
+			scenario: "A person lists their own keys: the person key, a device signed in by introduce, an administrator's device waiting for approval, and another app the person allowed with a grant.",
 			method:   http.MethodGet, path: "/api/v2/auth/keys", headers: bearer(memberToken),
 			status: http.StatusOK, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/AppKeyList"},
 		{name: "sign_in_with_app_key_signature_invalid", operationID: "signInWithAppKey",
 			scenario: "A key sign-in whose signature does not verify: the problem identifier apps branch on.",
 			method:   http.MethodPost, path: "/api/v2/auth/keys/sign-in", body: `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln"}`,
 			status: http.StatusUnauthorized, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/Problem"},
+		{name: "redeem_app_key_grant_invalid", operationID: "redeemAppKeyGrant",
+			scenario: "Another app presents a grant that was already used: the problem identifier it branches on.",
+			method:   http.MethodPost, path: "/api/v2/auth/grants/redeem", body: `{"kid":"zT321tSgcB7emUH9k0B0oA","payload":"eyJ9","sig":"c2ln"}`,
+			status: http.StatusForbidden, assertHeaders: []string{"Content-Type"}, schema: "#/components/schemas/Problem"},
 	}
 }
 
@@ -1824,13 +1828,15 @@ func appKeyFixtureCases() []fixtureCase {
 func fixtureAppKeys() *fakeAppKeys {
 	created := fixedTime()
 	used := created.Add(time.Hour)
-	return &fakeAppKeys{enabled: true, err: auth.ErrKeySignatureInvalid, keys: auth.OwnAppKeys{
+	return &fakeAppKeys{enabled: true, err: auth.ErrKeySignatureInvalid, grantErr: auth.ErrGrantInvalid, keys: auth.OwnAppKeys{
 		Person: &models.AppPersonKey{KeyID: "PgujdSfBbNNyXngLWCsOgw", CreatedAt: created},
 		Devices: []*models.AppDeviceKey{
 			{ID: "0c5f1a52-7e0c-4f0e-9f43-2f1f6f0c7d11", KeyID: "zT321tSgcB7emUH9k0B0oA", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPhone", Platform: "ios",
 				Status: models.DeviceKeyStatusActive, EnrolledVia: models.AppKeyEnrolledIntroduce, CreatedAt: created, LastUsedAt: &used},
 			{ID: "5b1d7f0e-6a57-4d0c-8a59-0f3f3a0f4a10", KeyID: "iX--ofJySUkUOsEpPo17PQ", Kind: models.DeviceKeyKindDevice, Name: "Sam's iPad", Platform: "ipados",
 				Status: models.DeviceKeyStatusPending, EnrolledVia: models.AppKeyEnrolledAppCode, CreatedAt: created},
+			{ID: "9e0b6c1d-3f2a-4b7e-8c5d-1a2b3c4d5e6f", KeyID: "Qm9vay1wbGF5ZXIta2V5MQ", Kind: models.DeviceKeyKindApp, Name: "Example Player", Platform: "android",
+				Status: models.DeviceKeyStatusActive, EnrolledVia: models.AppKeyEnrolledGrant, CreatedAt: created, LastUsedAt: &used},
 		},
 		AllowedBy: "sam",
 	}}

@@ -20,6 +20,7 @@ type AppKeyService interface {
 	IntroduceAppKey(context.Context, auth.KeyRequest) (*handlers.AppKeyAnswer, error)
 	SignInWithAppKey(context.Context, auth.KeyRequest) (*handlers.AppKeyAnswer, error)
 	EnrollAppKeys(context.Context, auth.KeyEnrollRequest) (*handlers.AppKeyAnswer, error)
+	RedeemAppKeyGrant(context.Context, auth.KeyRequest) (*handlers.AppKeyAnswer, error)
 	ListOwnAppKeys(context.Context, *auth.Claims) (auth.OwnAppKeys, error)
 	RevokeOwnDeviceKey(ctx context.Context, claims *auth.Claims, id string) error
 	ReplacePersonKey(context.Context, *auth.Claims, appkeys.PublicKey) error
@@ -97,6 +98,7 @@ func (reg *Registry) getAppKeyCapability(ctx context.Context, _ *CapabilityInput
 			Introduce:         true,
 			SignIn:            true,
 			Enroll:            true,
+			Grants:            true,
 			SignatureSuites:   []string{appKeySignatureSuite},
 			SealedReplySuites: []string{appKeySealedReplySuite},
 		},

@@ -6881,7 +6881,7 @@
       "response_headers": {
         "Cache-Control": "private, no-cache",
         "Content-Type": "application/json",
-        "ETag": "\"a3c0cf4e29533ac8acbe0a5f868133ba008d416b273800bea3aac02d4fa6ffc6\""
+        "ETag": "\"de4aa9b672f28af1bc0935ff6d212d14ad189b2a535672d15a73219f1339028c\""
       },
       "response_media_type": "application/json",
       "schema": "#/components/schemas/AppKeyCapability",
@@ -10075,7 +10075,7 @@
     {
       "name": "list_app_keys_ok",
       "operation_id": "listAppKeys",
-      "scenario": "A person lists their own keys: the person key, a device signed in by introduce, and an administrator's device waiting for approval.",
+      "scenario": "A person lists their own keys: the person key, a device signed in by introduce, an administrator's device waiting for approval, and another app the person allowed with a grant.",
       "request": {
         "method": "GET",
         "path": "/api/v2/auth/keys",
@@ -14427,6 +14427,23 @@
       "response_media_type": "application/problem+json",
       "schema": "#/components/schemas/Problem",
       "body_file": "rate_limited.json"
+    },
+    {
+      "name": "redeem_app_key_grant_invalid",
+      "operation_id": "redeemAppKeyGrant",
+      "scenario": "Another app presents a grant that was already used: the problem identifier it branches on.",
+      "request": {
+        "method": "POST",
+        "path": "/api/v2/auth/grants/redeem",
+        "body": "{\"kid\":\"zT321tSgcB7emUH9k0B0oA\",\"payload\":\"eyJ9\",\"sig\":\"c2ln\"}"
+      },
+      "expected_status": 403,
+      "response_headers": {
+        "Content-Type": "application/problem+json"
+      },
+      "response_media_type": "application/problem+json",
+      "schema": "#/components/schemas/Problem",
+      "body_file": "redeem_app_key_grant_invalid.json"
     },
     {
       "name": "refresh_catalog_item_trailers_ok",
