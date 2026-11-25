@@ -1,5 +1,5 @@
 {
-  "revision": "e19af060f1908e1bae8d4a06735f0adbff3b73e49ed731ce1455d6e1b112638a",
+  "revision": "5f297ddccaa5c399edf4b814c2c5bfd3bccee0af245d6051be142b5981fc2086",
   "state": "available",
   "protocol": "silo-sync-v1",
   "server_id": "3f2a9d5e-6b1c-4c7e-9a0d-2f4b8c1e7a35",
@@ -7,7 +7,7 @@
   "sign_in": true,
   "enroll": true,
   "app_codes": false,
-  "grants": false,
+  "grants": true,
   "sign_in_links": false,
   "profile_set": true,
   "signature_suites": [

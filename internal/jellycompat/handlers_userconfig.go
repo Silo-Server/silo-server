@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -28,10 +29,36 @@ func (h *AuthHandler) WithUserStore(provider userstore.UserStoreProvider) *AuthH
 	return h
 }
 
+// hasPassword reports whether a password signs the account in here: its own
+// local password, or a directory (LDAP) that takes its name. An account
+// without one (it signs in with app keys or a sign-in provider) uses Quick
+// Connect instead.
+func (h *AuthHandler) hasPassword(ctx context.Context, userID int) (bool, error) {
+	if h.passwordSignIn == nil {
+		return true, nil
+	}
+	signIn, err := h.passwordSignIn.PasswordSignInFor(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+	return signIn.Local || signIn.Directory, nil
+}
+
 func configurationKey(profileID string) string { return "jellycompat:configuration:" + profileID }
 
 func (h *AuthHandler) resolvedUserDTO(ctx context.Context, session *Session) (userDTOResponse, error) {
-	dto := h.userDTO(session)
+	hasPassword, err := h.hasPassword(ctx, session.StreamAppUserID)
+	if err != nil {
+		// The member only decides whether a client offers a password box.
+		// A sign-in that has already opened its session, or a settings
+		// save, must not fail over it: answer as before the member was
+		// read, that there is a password.
+		if ctx.Err() == nil {
+			slog.WarnContext(ctx, "could not read whether the account has a password", "component", "jellycompat", "error", err)
+		}
+		hasPassword = true
+	}
+	dto := h.userDTO(session, hasPassword)
 	if h.storeProvider == nil {
 		return dto, nil
 	}

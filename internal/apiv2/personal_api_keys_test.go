@@ -76,6 +76,24 @@ func personalKeyHandler() (http.Handler, *fakePersonalAPIKeys) {
 	deps.PersonalAPIKeys = f
 	return NewHandler(deps), f
 }
+
+// A session another app opened with a grant is handed no API key: the key
+// would outlive revoking the app. Listing and revoking stay open.
+func TestGrantSessionCreatesNoPersonalAPIKey(t *testing.T) {
+	f := &fakePersonalAPIKeys{fakeAdminAPIKeys: fixtureAdminAPIKeys()}
+	deps := pilotDeps(nil, nil)
+	deps.PersonalAPIKeys = f
+	deps.AppKeys = &fakeAppKeys{enabled: true, credentialErr: auth.ErrSessionNotAllowed}
+	h := NewHandler(deps)
+	requireProblem(t, do(t, h, "POST", Prefix+"/api-keys", `{"label":"Script"}`, bearer(adminToken)), TypePermissionDenied)
+	if f.writes != 0 {
+		t.Fatal("a refused session created a key")
+	}
+	if listed := do(t, h, "GET", Prefix+"/api-keys", "", bearer(adminToken)); listed.Code != 200 {
+		t.Fatal(listed.Code, listed.Body.String())
+	}
+}
+
 func TestPersonalAPIKeysAccountAndSecrets(t *testing.T) {
 	h, f := personalKeyHandler()
 	created := do(t, h, "POST", Prefix+"/api-keys", `{"label":"Script"}`, bearer(adminToken))

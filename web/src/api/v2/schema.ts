@@ -6902,6 +6902,26 @@ export interface paths {
     patch?: never;
     trace?: never;
   };
+  "/api/v2/auth/grants/redeem": {
+    parameters: {
+      query?: never;
+      header?: never;
+      path?: never;
+      cookie?: never;
+    };
+    get?: never;
+    put?: never;
+    /**
+     * Enroll another app's key with a grant the person signed and open the app's login session.
+     * @description The body is a grant-redeem envelope signed with the app's own key, the app_key the grant inside it names, with no device_sig. The grant is a grant envelope signed by the account's person key away from this server: good for at most five minutes, for this server_id, and once. origin must be one of the grant's origins. The app's key is enrolled as kind app, enrolled_by grant, named device_name or else the grant's app_name, and takes the provider identity of the person key that signed the grant. A session it opens cannot enroll keys, replace the person key, approve a device sign-in or revoke any key but its own. 403 app_grant_invalid: the grant was already used, is for another server, app key or address, does not verify by the account's live person key, or names an administrator's or disabled account; a kid that is not the app key's ID is app_grant_invalid too. 403 app_grant_expired: the grant's own exp has passed (a grant-redeem envelope outside its own iat and exp is 401 signature_invalid). A public key already enrolled on this server is 409 conflict. Spends the per-address key_sign_in rate-limit budget. A body over 16 KiB is 413 payload_too_large. The response is a sealed reply: the answer encrypted to the payload's reply_key, salted with its challenge, so only the device that signed can read it. Its plaintext is {status: signed_in, device_id, account_id, tokens, local_route}, where tokens is the login token pair and local_route the pinned local route as getServerConnections gives it (left out when the listener has no TLS identity). Refusals are not sealed: 401 signature_invalid (bad signature, unknown or revoked key, wrong purpose or server_id, outside iat and exp), 401 challenge_invalid (unknown, used or expired challenge), 403 origin_mismatch (a signed origin this server knows is wrong for the address the request arrived on), 422 validation_failed (the envelope or a payload field is malformed), 409 capability_disabled while auth.app_key_sign_in is off, and 429 rate_limited. A key enrolled through the server's sign-in provider can also get 409 provider_sign_in_required (the person signs in with the provider once, then the key works again), 503 provider_unavailable (try again later) or 403 not_permitted (the provider refused the person).
+     */
+    post: operations["redeemAppKeyGrant"];
+    delete?: never;
+    options?: never;
+    head?: never;
+    patch?: never;
+    trace?: never;
+  };
   "/api/v2/auth/impersonation/end": {
     parameters: {
       query?: never;
@@ -101643,6 +101663,149 @@ export interface operations {
       /** @description Service Unavailable */
       503: {
         headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+    };
+  };
+  redeemAppKeyGrant: {
+    parameters: {
+      query?: never;
+      header?: {
+        /** @description The client's stable device identifier, recorded on the login session this sign-in opens */
+        "X-Silo-Device-Id"?: string;
+        /** @description Optional device name recorded on the login session (first 120 characters) */
+        "X-Silo-Device-Name"?: string;
+        /** @description Optional platform recorded on the login session (first 40 characters) */
+        "X-Silo-Device-Platform"?: string;
+      };
+      path?: never;
+      cookie?: never;
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AppKeyEnvelope"];
+      };
+    };
+    responses: {
+      /** @description OK */
+      200: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["SealedReply"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unauthorized */
+      401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Not Acceptable */
+      406: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Timeout */
+      408: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Request Entity Too Large */
+      413: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unsupported Media Type */
+      415: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Unprocessable Entity */
+      422: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          "Retry-After"?: string;
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Internal Server Error */
+      500: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
+        headers: {
+          /** @description Seconds to wait before asking again, on a fresh challenge. */
+          "Retry-After"?: string;
           [name: string]: unknown;
         };
         content: {

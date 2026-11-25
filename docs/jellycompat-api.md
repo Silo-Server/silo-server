@@ -57,6 +57,17 @@ format still send. Media-source IDs take the same form (see
 [Playback negotiation and media](#playback-negotiation-and-media)). Item,
 library, and server IDs keep the dashed form.
 
+`HasPassword` and `HasConfiguredPassword` are `true` when a password signs the
+account in here: its own Silo password, or a directory (LDAP) sign-in that takes
+its name (`auth.Service.PasswordSignInFor`, read once per response). They are
+`false` for an account with no password, such as one that signs in only with
+Silo app keys or an external provider, and while the account holds a temporary
+password. Jellyfin Web's sign-in screen opens a user without a password without
+asking for one; such an account signs in with [Quick Connect](#quick-connect).
+`HasConfiguredEasyPassword` stays `false`, `Configuration.EnableLocalPassword`
+stays `false`, and the policy's `AuthenticationProviderId` and
+`PasswordResetProviderId` stay `silo-local`.
+
 The user DTO carries `PrimaryImageTag` when the profile has an uploaded avatar
 and the caller signed in (a session for an `sa_` API key is never stored, so
 its avatar could not be served).
@@ -843,6 +854,12 @@ starting another.
 
 
 ## Sessions and socket
+
+A failed `AuthenticateByName` answers `401` with `Error: "InvalidUsernameOrPassword"`
+and the same message, "Invalid username or password. Accounts without a password
+sign in with Quick Connect.", whether the name has no account, the password is
+wrong, or the account has no password. All three take the same work, so neither
+the answer nor its timing tells a stranger which names exist or have a password. Refusals of the server's sign-in policy keep their own messages, below.
 
 Sign-in refuses an account holding a temporary password with `401` and a message to
 sign in to Silo first: Jellyfin clients cannot run the password change it requires

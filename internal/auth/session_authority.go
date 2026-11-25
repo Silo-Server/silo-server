@@ -27,6 +27,10 @@ const (
 	// ActionApproveDeviceSignIn: approving a device sign-in that is waiting
 	// now.
 	ActionApproveDeviceSignIn
+	// ActionIssueCredential: handing the account a credential that outlives
+	// the session asking for it, by a route older than app keys: a personal
+	// API key, or linking a sign-in provider account.
+	ActionIssueCredential
 )
 
 // SessionOrigin is how a login session was opened.
@@ -79,7 +83,9 @@ func (o SessionOrigin) Allows(action SessionAction) bool {
 	if o.GrantKey {
 		return false
 	}
-	if action == ActionApproveDeviceSignIn {
+	if action == ActionApproveDeviceSignIn || action == ActionIssueCredential {
+		// These predate the record of how sessions are opened: every
+		// other session keeps what the operation's own rule gives it.
 		return true
 	}
 	switch o.OpenedVia {
@@ -87,6 +93,25 @@ func (o SessionOrigin) Allows(action SessionAction) bool {
 		return true
 	}
 	return false
+}
+
+// SessionMayIssueCredential refuses ActionIssueCredential to a session a
+// grant-enrolled app opened: an API key or a linked sign-in would outlive
+// revoking the app's key. Every other caller is left to the operation's own
+// rule, which already keeps out API keys and administrators acting as the
+// account.
+func SessionMayIssueCredential(ctx context.Context, db rowQuerier, claims *Claims) error {
+	if !claims.IsOwnLoginSession() {
+		return nil
+	}
+	origin, err := ReadSessionOrigin(ctx, db, claims)
+	if err != nil {
+		return err
+	}
+	if !origin.Allows(ActionIssueCredential) {
+		return ErrSessionNotAllowed
+	}
+	return nil
 }
 
 // SessionAllows refuses the change unless the claims are the account's own

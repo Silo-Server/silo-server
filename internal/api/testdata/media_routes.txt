@@ -567,6 +567,7 @@ DELETE /api/v2/auth/device/preapprovals/{id}	non-media
 POST /api/v2/auth/device/preapprove	non-media
 POST /api/v2/auth/device/start	non-media
 GET /api/v2/auth/external-sign-in/capabilities	non-media
+POST /api/v2/auth/grants/redeem	non-media
 POST /api/v2/auth/impersonation/end	non-media
 GET /api/v2/auth/keys	non-media
 GET /api/v2/auth/keys/capability	non-media
@@ -1667,6 +1668,7 @@ DELETE /api/v2/auth/device/preapprovals/{id}	non-media
 POST /api/v2/auth/device/preapprove	non-media
 POST /api/v2/auth/device/start	non-media
 GET /api/v2/auth/external-sign-in/capabilities	non-media
+POST /api/v2/auth/grants/redeem	non-media
 POST /api/v2/auth/impersonation/end	non-media
 GET /api/v2/auth/keys	non-media
 GET /api/v2/auth/keys/capability	non-media

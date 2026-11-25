@@ -33,7 +33,7 @@ func TestLoginErrorMapsExternalSignInRefusals(t *testing.T) {
 		}
 	}
 	if status, _, message := mapLoginError(mapAuthError(auth.ErrInvalidCredentials)); status != http.StatusUnauthorized ||
-		message != "Invalid username or password" {
+		message != invalidCredentialsMessage {
 		t.Fatalf("invalid credentials = %d %q", status, message)
 	}
 }

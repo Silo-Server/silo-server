@@ -262,6 +262,11 @@ func registerPersonalAPIKeys(reg *Registry) {
 		// Listing and revocation stay open so an account can still see and
 		// revoke keys it already holds.
 		svc := reg.deps.PersonalAPIKeys
+		// An API key outlives the session that makes it, so a session
+		// another app opened with a grant makes none.
+		if p := reg.credentialSessionProblem(ctx, claimsFrom(ctx)); p != nil {
+			return nil, p
+		}
 		if claimsFrom(ctx).Role != models.RoleAdmin || in.Body.ProfileID != "" {
 			return reg.createUserAPIKey(ctx, userID, in)
 		}

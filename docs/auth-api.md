@@ -878,11 +878,12 @@ operation contract.
 
 | Operation | Credential | Notes |
 | --- | --- | --- |
-| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `protocol` is `silo-sync-v1` and `server_id` is the identity every signed payload names. `introduce`, `sign_in` and `enroll` are `true`; `profile_set` is `true` where profiles are kept in PostgreSQL ([The profile set](#the-profile-set)); `app_codes`, `grants` and `sign_in_links` are `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
+| `GET /auth/keys/capability` (`getAppKeyCapability`) | none | `state` is `available` while `auth.app_key_sign_in` is on, `disabled` while it is off, and `not_configured` on a server started without a database for app keys. `protocol` is `silo-sync-v1` and `server_id` is the identity every signed payload names. `introduce`, `sign_in`, `enroll` and `grants` are `true`; `profile_set` is `true` where profiles are kept in PostgreSQL ([The profile set](#the-profile-set)); `app_codes` and `sign_in_links` are `false` on this server. `signature_suites` is `["ES256"]` and `sealed_reply_suites` is `["P256-HKDF-SHA256-AES256GCM"]`. Conditional like every capability document (`ETag`, `If-None-Match`). |
 | `POST /auth/keys/challenge` (`createAppKeyChallenge`) | none | Body `{}`. Answers `challenge` (base64url of 32 bytes), `expires_in` (120), `server_id` and `server_time` (Unix seconds). A challenge works for one signed request within two minutes, on any API process. |
 | `POST /auth/keys/introduce` (`introduceAppKey`) | an `introduce` envelope signed by the account's person key, with `device_sig` | Enrolls the payload's `device_key` and opens a session. For an administrator's account the key is stored waiting and the sealed answer is `approval_required`. |
 | `POST /auth/keys/sign-in` (`signInWithAppKey`) | a `sign-in` envelope signed by an enrolled device key, without `device_sig` | Opens a session. A waiting key answers `approval_required`; see below. |
 | `POST /auth/keys/enroll` (`enrollAppKeys`) | the account's own login session, and `{ "person_key", "message" }` where `message` is an `enroll` envelope signed with that person key, with `device_sig` | Registers the person key when the account has none, taking the session's provider binding; when `person_key` is already the account's person key it is reused as it is, binding unchanged. Enrolls the device key, which takes the session's provider binding, then opens a session bound to it. A different person key on the account, or a device key already enrolled on this server, is 409 `conflict`. The sealed plaintext adds `person_key_id` (the person key's `kid`); the client drops the session it called with. A malformed payload field is 422 at `body.message.payload`. |
+| `POST /auth/grants/redeem` (`redeemAppKeyGrant`) | a `grant-redeem` envelope signed by the app's own key (the grant's `app_key`), without `device_sig` | Enrolls another app's key with a grant the account's person key signed, and opens the app's session. The key is listed with `kind` `app`, `enrolled_by` `grant` and `allowed_by`. Refused for an administrator's account. See "Grants" below. |
 | `GET /auth/keys` (`listAppKeys`) | the account's own login session | `person_key` (`kid`, `enrolled_at`; absent when the account has none) and `devices[]` (`id`, `kid`, `kind` `device`\|`app`, `name`, `platform`, `status` `active`\|`pending`, `enrolled_by` `introduce`\|`session`\|`app-code`\|`grant`, `allowed_by`, `enrolled_at`, `last_used_at`), newest first. Revoked and denied keys are left out. `last_used_at` is the last time the key opened a session: a key enrolled and not used since shows it equal to `enrolled_at`, and a key waiting for approval shows `null`. |
 | `DELETE /auth/keys/devices/{id}` (`revokeAppDeviceKey`) | the account's own login session | 204. Revokes the key and ends every session it opened. A device may revoke its own key, which ends the session making the request. 404 for a key that isn't the account's. |
 | `PUT /auth/keys/person` (`replacePersonKey`) | the account's own login session | Body `{ "person_key" }`, unsigned. Answers `{ "person_key_id": "<kid>" }`. The old person key is revoked; devices already enrolled keep their keys. Sending the current key again changes nothing. |
@@ -902,6 +903,33 @@ SHA-256. `origin` must already be in its canonical form: lower-case `http` or
 `https`, a lower-case ASCII host (an IPv6 host in brackets in its RFC 5952
 form), the port only when it is not the scheme's default, nothing after. A
 device stamps `iat` and `exp` from the challenge's `server_time`.
+
+**Grants.** A `grant` envelope is signed by the account's person key away
+from the server and never sent by its signer. Its payload has the common
+`purpose`, `server_id`, `iat` and `exp` (at most 300 seconds apart), plus
+`grant_id` (base64url of 16 random bytes), `account_id` (the account's `id`),
+`origins` (a non-empty array of canonical origins), `app_key` (the app's public
+key) and `app_name` (up to 128 characters); no challenge. A `grant-redeem`
+payload has `challenge`, `origin` (one of the grant's `origins`), `reply_key`,
+`grant` (the grant envelope as an object, `{ "kid", "payload", "sig" }`), and
+optional `device_name` (defaults to the grant's `app_name`) and
+`device_platform`. The server checks the outer signature against the grant's
+`app_key`, then the grant's against the live person key of `account_id`. A
+grant works once: its `grant_id` is recorded when the app's key is enrolled.
+The answer is a sealed reply with the usual `signed_in` plaintext. The key
+takes the provider binding of the person key that signed the grant. A session
+the app opens can't enroll keys, replace the person key, approve a device
+sign-in now or in advance, read the key list, or revoke any key but its own.
+It is also refused (403 `permission_denied`) on creating a personal API key
+(`createPersonalAPIKey`) and on the operations that link a sign-in provider
+account.
+
+| Refusal | Problem |
+| --- | --- |
+| The grant was already used; it names another server, or its `origins` leave out the redeem's `origin`; it doesn't verify by the account's live person key (unknown account, replaced or revoked person key); the account is an administrator's or disabled; the outer `kid` isn't the `app_key`'s ID | 403 `app_grant_invalid` |
+| The grant's own `exp` has passed | 403 `app_grant_expired` |
+| The outer signature doesn't verify by the `app_key`, or the `grant-redeem` envelope is outside its own `iat` and `exp` | 401 `signature_invalid` |
+| The `app_key` is already enrolled on this server | 409 `conflict` |
 
 **Sealed reply.** The routes that open a session answer
 `{ "epk", "nonce", "ciphertext" }`, the plaintext sealed to the payload's
@@ -973,12 +1001,13 @@ of how sessions are opened; `DELETE` refuses a device sign-in session, and lets
 another app's session revoke only its own key.
 
 **Switch.** While `auth.app_key_sign_in` is off the challenge, `introduce`,
-`sign-in`, `enroll`, `PUT /auth/keys/person` and the signed form of
-`PUT /api/v2/profiles/set` answer 409 `capability_disabled`. The capability, `GET /auth/keys` and its deletes stay
+`sign-in`, `enroll`, `POST /auth/grants/redeem`, `PUT /auth/keys/person` and the
+signed form of `PUT /api/v2/profiles/set` answer 409
+`capability_disabled`. The capability, `GET /auth/keys` and its deletes stay
 open.
 
 **Rate limits.** `createAppKeyChallenge` spends the per-address
-`key_challenge` budget and `introduce`, `sign-in` and `enroll` the
+`key_challenge` budget and `introduce`, `sign-in`, `enroll` and grant redemption the
 `key_sign_in` budget, each 60 a minute with a burst of 20 by default
 (`ratelimit.auth.key_challenge.*`, `ratelimit.auth.key_sign_in.*`).
 
