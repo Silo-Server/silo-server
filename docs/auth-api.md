@@ -764,6 +764,12 @@ provider redirect route), and `select_account` (the starts accept
 `getExternalSignInCapabilities` reports it. The flows are raw redirects; the rules behind them are in
 [external-sign-in.md](architecture/external-sign-in.md#oauth-flows).
 
+The three starts share the per-address `oauth_start` rate-limit budget, 40 requests per
+minute with a burst of 20. A start over it answers 429 `rate_limited` with `Retry-After`
+instead of a redirect, before the plugin is asked. A form-post start that bounces to
+`startOAuthLogin`, and a native start moved to the public URL, spend it twice. The
+callbacks spend no budget.
+
 | Operation | Credential | Notes |
 | --- | --- | --- |
 | `POST /auth/oauth/{install_id}/init` (`initOAuthLogin`) | none | Web form start. `next` is a site-relative return path. On another origin than the public URL it answers 303 to `startOAuthLogin` there. |

@@ -84,6 +84,14 @@ func oauthHandshakeResponses(statuses ...string) map[string]*huma.Response {
 // the form-post init answers 303 there on another origin.
 const oauthWebStartPath = "start"
 
+// bucketOAuthStart is the per-address budget the three flow starts share.
+// The gate spends it before the handler runs, so a refused start makes no
+// plugin call and stores no flow. The callback has no budget.
+const bucketOAuthStart = "oauth_start"
+
+// oauthStartRateLimitNote ends each start's description.
+const oauthStartRateLimitNote = " The three starts share the per-address oauth_start rate-limit budget; one over it answers 429 with a Problem document and Retry-After instead of a redirect."
+
 func registerOAuthHandshakes(reg *Registry) {
 	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/auth/oauth/capabilities", "getOAuthHandshakeCapabilities", oauthTag, "Discover browser and native-app OAuth handshake availability."), Class: ClassPublic, ServiceBacked: true}, func(_ context.Context, _ *CapabilityInput) (*OAuthHandshakeCapabilitiesOutput, error) {
 		out := new(OAuthHandshakeCapabilitiesOutput)
@@ -115,7 +123,7 @@ func registerOAuthHandshakes(reg *Registry) {
 			true, []string{"302", "400", "409", "500", "502"}},
 	}
 	for _, route := range starts {
-		op := Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + "/auth/oauth/{install_id}/" + route.path, OperationID: route.id, Summary: route.summary, Description: route.description, Tags: []string{oauthTag}, Parameters: oauthStartParams(route.native), Responses: oauthHandshakeResponses(route.responses...)}, Class: ClassPublic, ServiceBacked: true}
+		op := Operation{Operation: huma.Operation{Method: route.method, Path: Prefix + "/auth/oauth/{install_id}/" + route.path, OperationID: route.id, Summary: route.summary, Description: route.description + oauthStartRateLimitNote, Tags: []string{oauthTag}, Parameters: oauthStartParams(route.native), Responses: oauthHandshakeResponses(route.responses...)}, Class: ClassPublic, ServiceBacked: true, RateLimitBucket: bucketOAuthStart}
 		if route.method == http.MethodPost {
 			op.RetrySafety = RetrySafetyNonRetryable
 		}

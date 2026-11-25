@@ -6774,7 +6774,7 @@ export interface paths {
     put?: never;
     /**
      * Start a web OAuth sign-in from a form post.
-     * @description A browser on another origin than the public URL is sent (303) to startOAuthLogin there, so the flow's browser-binding cookie is set on the origin of the callback. A provider that cannot start the flow, or a missing public URL, sends the browser (302) to /login?error=oauth_failed&reason=provider_unavailable.
+     * @description A browser on another origin than the public URL is sent (303) to startOAuthLogin there, so the flow's browser-binding cookie is set on the origin of the callback. A provider that cannot start the flow, or a missing public URL, sends the browser (302) to /login?error=oauth_failed&reason=provider_unavailable. The three starts share the per-address oauth_start rate-limit budget; one over it answers 429 with a Problem document and Retry-After instead of a redirect.
      */
     post: operations["initOAuthLogin"];
     delete?: never;
@@ -6792,7 +6792,7 @@ export interface paths {
     };
     /**
      * Start an OAuth sign-in for a native app in the system browser.
-     * @description The app opens this start on its saved server base in ASWebAuthenticationSession or a Custom Tab: it appends native_start_path from listAuthProviders to its saved server base URL (an oauth provider without native_start_path offers no native sign-in), adds code_challenge, code_challenge_method=S256 and app_state, and never opens another origin. The server records the start origin, the origin the start arrived on (scheme://host[:port], scheme and host in lower case, default port omitted, IPv6 in brackets, no path or trailing slash), derived from the host a trusted proxy names in X-Forwarded-Host or else the Host header, and the scheme of the connection or the one a trusted proxy names. A start that arrives on another origin than the public URL is accepted only on the origin of a connected network access provider or on a local address: an IP literal in the loopback, private, link-local or 100.64.0.0/10 range, or a single-label, .local, .lan, .localdomain, .home.arpa or .internal host name; any other origin is a plain-text 400. An accepted start is kept on the server and the browser is sent (302) to this start on the public origin with only flow, the kept start's random single-use ID, valid two minutes; the flow sets its binding cookie there and goes to the provider. The flow ends on org.siloserver.silo:/auth/callback with code, state (the app_state), server (getServerIdentity's server_id) and iss, the start origin; a failure carries error=<reason> instead of code. Every app redirect of a sign-in or linking flow carries iss, success or failure. The app accepts the redirect only when iss equals the origin of its saved server base, and redeems the code only at that saved base; a server that redirects its start to another server gets that server's own origin as iss, which the app refuses. The Host header is chosen by whoever sends the start, so iss does not stop a hostile server on a local address that sends the app's start here itself; that is why other origins are refused. A start with a valid code_challenge and app_state whose provider cannot start the flow goes straight to the app redirect with error=provider_unavailable (login_failed for a server error); an unknown, used, expired or foreign link_ticket goes there with error=session_expired. An unknown, used, expired or foreign flow is a plain-text 400, as is a flow presented on another origin than the public URL, which leaves the kept start for the public origin. Redeem the code within 60 seconds with completeOAuthLogin and the code_verifier; a linking flow's code carries link=1 and is redeemed with completeAccountIdentityLink instead.
+     * @description The app opens this start on its saved server base in ASWebAuthenticationSession or a Custom Tab: it appends native_start_path from listAuthProviders to its saved server base URL (an oauth provider without native_start_path offers no native sign-in), adds code_challenge, code_challenge_method=S256 and app_state, and never opens another origin. The server records the start origin, the origin the start arrived on (scheme://host[:port], scheme and host in lower case, default port omitted, IPv6 in brackets, no path or trailing slash), derived from the host a trusted proxy names in X-Forwarded-Host or else the Host header, and the scheme of the connection or the one a trusted proxy names. A start that arrives on another origin than the public URL is accepted only on the origin of a connected network access provider or on a local address: an IP literal in the loopback, private, link-local or 100.64.0.0/10 range, or a single-label, .local, .lan, .localdomain, .home.arpa or .internal host name; any other origin is a plain-text 400. An accepted start is kept on the server and the browser is sent (302) to this start on the public origin with only flow, the kept start's random single-use ID, valid two minutes; the flow sets its binding cookie there and goes to the provider. The flow ends on org.siloserver.silo:/auth/callback with code, state (the app_state), server (getServerIdentity's server_id) and iss, the start origin; a failure carries error=<reason> instead of code. Every app redirect of a sign-in or linking flow carries iss, success or failure. The app accepts the redirect only when iss equals the origin of its saved server base, and redeems the code only at that saved base; a server that redirects its start to another server gets that server's own origin as iss, which the app refuses. The Host header is chosen by whoever sends the start, so iss does not stop a hostile server on a local address that sends the app's start here itself; that is why other origins are refused. A start with a valid code_challenge and app_state whose provider cannot start the flow goes straight to the app redirect with error=provider_unavailable (login_failed for a server error); an unknown, used, expired or foreign link_ticket goes there with error=session_expired. An unknown, used, expired or foreign flow is a plain-text 400, as is a flow presented on another origin than the public URL, which leaves the kept start for the public origin. Redeem the code within 60 seconds with completeOAuthLogin and the code_verifier; a linking flow's code carries link=1 and is redeemed with completeAccountIdentityLink instead. The three starts share the per-address oauth_start rate-limit budget; one over it answers 429 with a Problem document and Retry-After instead of a redirect.
      */
     get: operations["startNativeOAuthLogin"];
     put?: never;
@@ -6812,7 +6812,7 @@ export interface paths {
     };
     /**
      * Start a web OAuth sign-in.
-     * @description Sets an HttpOnly, SameSite=Lax browser-binding cookie scoped to the callback path, then redirects to the provider. A browser on another origin than the public URL is first sent (302) to the same start there. A link_ticket is refused with 400: the web links with startAccountIdentityLink. Malformed parameters are plain-text 400s; a provider that cannot start the flow, or a missing public URL, sends the browser (302) to /login?error=oauth_failed&reason=provider_unavailable (login_failed for a server error), where the login page does not redirect to the provider again.
+     * @description Sets an HttpOnly, SameSite=Lax browser-binding cookie scoped to the callback path, then redirects to the provider. A browser on another origin than the public URL is first sent (302) to the same start there. A link_ticket is refused with 400: the web links with startAccountIdentityLink. Malformed parameters are plain-text 400s; a provider that cannot start the flow, or a missing public URL, sends the browser (302) to /login?error=oauth_failed&reason=provider_unavailable (login_failed for a server error), where the login page does not redirect to the provider again. The three starts share the per-address oauth_start rate-limit budget; one over it answers 429 with a Problem document and Retry-After instead of a redirect.
      */
     get: operations["startOAuthLogin"];
     put?: never;
@@ -98853,6 +98853,15 @@ export interface operations {
           "text/plain": string;
         };
       };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Plain-text handshake failure. */
       500: {
         headers: {
@@ -98933,6 +98942,15 @@ export interface operations {
           "text/plain": string;
         };
       };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
       /** @description Plain-text handshake failure. */
       500: {
         headers: {
@@ -98996,6 +99014,15 @@ export interface operations {
         };
         content: {
           "text/plain": string;
+        };
+      };
+      /** @description Too Many Requests */
+      429: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
         };
       };
       /** @description Service Unavailable */
