@@ -8011,6 +8011,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kort"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Layout"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabel"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -49273,7 +49291,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Afspilningstendenser, populære titler, husstandens aktivitet, afspilning på enheder og båndbredde."
+      "value": "Livestreams, afspilningstendenser, populære titler, husstandens aktivitet, afspilning på enheder og båndbredde."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -81154,7 +81172,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Afspilningstendenser, populære titler, konti, enheder og båndbredde."
+      "value": "Livestreams, afspilningstendenser, populære titler, konti, enheder og båndbredde."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

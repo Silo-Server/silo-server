@@ -8019,6 +8019,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kaardid"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Paigutus"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabel"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -49713,7 +49731,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Vaatamistrendid, populaarsed pealkirjad, leibkonna tegevus, seadmete esitus ja ribalaius."
+      "value": "Aktiivsed vood, vaatamistrendid, populaarsed pealkirjad, leibkonna tegevus, seadmete esitus ja ribalaius."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -81906,7 +81924,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Vaatamistrendid, populaarsed pealkirjad, kontod, seadmed ja ribalaius."
+      "value": "Aktiivsed vood, vaatamistrendid, populaarsed pealkirjad, kontod, seadmed ja ribalaius."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

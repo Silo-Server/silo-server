@@ -124,7 +124,7 @@ export default function AdminSidebar({
     ) : undefined;
   const badges: Record<string, ReactNode> = {
     ...useBrokenSettingsBadges(),
-    "/admin/activity": activityBadge,
+    "/admin/insights": activityBadge,
     "/admin/requests": requestsBadge,
   };
   const sections = buildAdminNavSections({

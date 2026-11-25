@@ -7983,6 +7983,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Kártyák"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Elrendezés"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Táblázat"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -49089,7 +49107,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Megtekintési trendek, népszerű címek, háztartási tevékenység, lejátszás eszközönként és sávszélesség."
+      "value": "Élő streamek, megtekintési trendek, népszerű címek, háztartási tevékenység, lejátszás eszközönként és sávszélesség."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -81022,7 +81040,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Megtekintési trendek, népszerű címek, fiókok, eszközök és sávszélesség."
+      "value": "Élő streamek, megtekintési trendek, népszerű címek, fiókok, eszközök és sávszélesség."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

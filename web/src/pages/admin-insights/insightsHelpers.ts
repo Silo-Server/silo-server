@@ -5,6 +5,7 @@ import { formatDateTime, preferredDateLocale } from "@/lib/datetime";
 import type { MessageKey } from "@/locales/keys";
 
 export const INSIGHTS_TABS = [
+  "activity",
   "playback",
   "titles",
   "library",
@@ -13,6 +14,8 @@ export const INSIGHTS_TABS = [
   "bandwidth",
 ] as const;
 export type InsightsTab = (typeof INSIGHTS_TABS)[number];
+/** The live streams tab, which the page opens on when the URL names no tab. */
+export const DEFAULT_INSIGHTS_TAB: InsightsTab = "activity";
 
 export const INSIGHTS_RANGES = ["7d", "30d", "90d", "1y", "all", "custom"] as const;
 export type InsightsRange = (typeof INSIGHTS_RANGES)[number];
@@ -97,10 +100,9 @@ export function parseInsightsUrlState(
   defaultTz: string,
 ): InsightsFilterState {
   const rawTab = searchParams.get("tab");
-  const normalizedTab = rawTab === "activity" ? "playback" : rawTab;
-  const tab: InsightsTab = INSIGHTS_TABS.includes(normalizedTab as InsightsTab)
-    ? (normalizedTab as InsightsTab)
-    : "playback";
+  const tab: InsightsTab = INSIGHTS_TABS.includes(rawTab as InsightsTab)
+    ? (rawTab as InsightsTab)
+    : DEFAULT_INSIGHTS_TAB;
 
   const rawRange = searchParams.get("range");
   const range: InsightsRange = INSIGHTS_RANGES.includes(rawRange as InsightsRange)

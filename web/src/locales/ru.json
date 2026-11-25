@@ -8577,6 +8577,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Карточки"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Вид"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Таблица"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -61848,7 +61866,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Тенденции просмотра, популярные позиции, активность семьи, воспроизведение на устройствах и трафик."
+      "value": "Активные потоки, тенденции просмотра, популярные позиции, активность семьи, воспроизведение на устройствах и трафик."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -97155,7 +97173,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Тенденции просмотра, популярные позиции, аккаунты, устройства и трафик."
+      "value": "Активные потоки, тенденции просмотра, популярные позиции, аккаунты, устройства и трафик."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

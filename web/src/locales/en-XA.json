@@ -8411,6 +8411,24 @@
       "value": "~~~⟧"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "⟦Çåŕđš~~⟧"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "⟦Ļåýöûţ~~~⟧"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "⟦Ţåƀļé~~⟧"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -53973,7 +53991,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "⟦Ŵåţçĥ ţŕéñđš, ţöþ ţîţļéš, ĥöûšéĥöļđ åçţîṽîţý, đéṽîçé þļåýƀåçķ, åñđ ƀåñđŵîđţĥ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ļîṽé šţŕéåɱš, ŵåţçĥ ţŕéñđš, ţöþ ţîţļéš, ĥöûšéĥöļđ åçţîṽîţý, đéṽîçé þļåýƀåçķ, åñđ ƀåñđŵîđţĥ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -88338,7 +88356,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "⟦Ŵåţçĥ ţŕéñđš, ţöþ ţîţļéš, åççöûñţš, đéṽîçéš, åñđ ƀåñđŵîđţĥ.~~~~~~~~~~~~~~~~~~~~~~~~⟧"
+      "value": "⟦Ļîṽé šţŕéåɱš, ŵåţçĥ ţŕéñđš, ţöþ ţîţļéš, åççöûñţš, đéṽîçéš, åñđ ƀåñđŵîđţĥ.~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~⟧"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

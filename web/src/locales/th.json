@@ -7798,6 +7798,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "การ์ด"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "รูปแบบการแสดงผล"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "ตาราง"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -44367,7 +44385,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "แนวโน้มการรับชม ชื่อเรื่องยอดนิยม กิจกรรมในครัวเรือน การเล่นบนอุปกรณ์ และแบนด์วิดท์"
+      "value": "สตรีมสด แนวโน้มการรับชม ชื่อเรื่องยอดนิยม กิจกรรมในครัวเรือน การเล่นบนอุปกรณ์ และแบนด์วิดท์"
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -75063,7 +75081,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "แนวโน้มการรับชม ชื่อเรื่องยอดนิยม บัญชี อุปกรณ์ และแบนด์วิดท์"
+      "value": "สตรีมสด แนวโน้มการรับชม ชื่อเรื่องยอดนิยม บัญชี อุปกรณ์ และแบนด์วิดท์"
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

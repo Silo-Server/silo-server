@@ -8224,6 +8224,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Cartes"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Disposition"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tableau"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -54934,7 +54952,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendances de visionnage, titres populaires, activité du foyer, lecture par appareil et bande passante."
+      "value": "Flux en direct, tendances de visionnage, titres populaires, activité du foyer, lecture par appareil et bande passante."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -88268,7 +88286,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendances de visionnage, titres populaires, comptes, appareils et bande passante."
+      "value": "Flux en direct, tendances de visionnage, titres populaires, comptes, appareils et bande passante."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

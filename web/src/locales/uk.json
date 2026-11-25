@@ -8565,6 +8565,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Картки"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Макет"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Таблиця"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -60890,7 +60908,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Тенденції перегляду, популярні назви, активність домогосподарства, відтворення на пристроях і трафік."
+      "value": "Потоки наживо, тенденції перегляду, популярні назви, активність домогосподарства, відтворення на пристроях і трафік."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -95953,7 +95971,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Тенденції перегляду, популярні назви, облікові записи, пристрої та трафік."
+      "value": "Потоки наживо, тенденції перегляду, популярні назви, облікові записи, пристрої та трафік."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

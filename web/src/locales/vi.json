@@ -8011,6 +8011,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Thẻ"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Bố cục"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Bảng"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -49413,7 +49431,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Xu hướng xem, nội dung hàng đầu, hoạt động trong gia đình, phát trên thiết bị và băng thông."
+      "value": "Luồng đang phát, xu hướng xem, nội dung hàng đầu, hoạt động trong gia đình, phát trên thiết bị và băng thông."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -81546,7 +81564,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Xu hướng xem, nội dung hàng đầu, tài khoản, thiết bị và băng thông."
+      "value": "Luồng đang phát, xu hướng xem, nội dung hàng đầu, tài khoản, thiết bị và băng thông."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [

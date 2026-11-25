@@ -8224,6 +8224,24 @@
       "value": "id"
     }
   ],
+  "web.admin.activity.view.cards": [
+    {
+      "type": 0,
+      "value": "Cartões"
+    }
+  ],
+  "web.admin.activity.view.label": [
+    {
+      "type": 0,
+      "value": "Esquema"
+    }
+  ],
+  "web.admin.activity.view.table": [
+    {
+      "type": 0,
+      "value": "Tabela"
+    }
+  ],
   "web.admin.apiKeys.access.full": [
     {
       "type": 0,
@@ -55334,7 +55352,7 @@
   "web.admin.insights.subtitle": [
     {
       "type": 0,
-      "value": "Tendências de visualização, títulos populares, atividade do agregado, reprodução nos dispositivos e largura de banda."
+      "value": "Transmissões em direto, tendências de visualização, títulos populares, atividade do agregado, reprodução nos dispositivos e largura de banda."
     }
   ],
   "web.admin.insights.tabs.activity": [
@@ -88896,7 +88914,7 @@
   "web.admin.shell.nav.page.insights.description": [
     {
       "type": 0,
-      "value": "Tendências de visualização, títulos populares, contas, dispositivos e largura de banda."
+      "value": "Transmissões em direto, tendências de visualização, títulos populares, contas, dispositivos e largura de banda."
     }
   ],
   "web.admin.shell.nav.page.insights.label": [
