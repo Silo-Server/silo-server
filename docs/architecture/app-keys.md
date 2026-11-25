@@ -426,8 +426,7 @@ its payload. The challenge is spent once the signature verifies. Then:
   the claim revokes, then the new account's rows. Accepting with a password
   and issuing a code take the settings lock first too, before any invitation
   or code row, so all three run one after the other and the rows each locks
-  after it can't close a cycle. The hourly cleanup of expired codes never
-  waits: it skips a code row a request holds (`FOR UPDATE SKIP LOCKED`). It spends the code, claims the
+  after it can't close a cycle. The join spends the code, claims the
   invitation through the same claim accept uses (re-checked: it may have been
   revoked, resent or expired since), creates the account with no password and
   the invitation's role, libraries, access group and first-profile choice,
@@ -439,6 +438,10 @@ its payload. The challenge is spent once the signature verifies. Then:
   it has a different one: the old key is revoked, devices waiting on it are
   refused, devices already enrolled keep their keys. The issuing session's row
   is read last; one that ended rolls the redeem back.
+
+The hourly cleanup of expired codes never waits on any of these: it skips a
+code row a request holds (`FOR UPDATE SKIP LOCKED`) and deletes it on a later
+run.
 
 Keys from a code start active, also on an administrator's account: the code
 came from the account's own session, or the invitation an administrator made

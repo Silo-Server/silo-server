@@ -214,12 +214,7 @@
         "series_ids": ["s-101"]
       },
       "stored": [
-        {
-          "key": "playback.subtitle_language",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": "en"
-        },
+        { "key": "playback.subtitle_language", "scope": "profile", "profile_id": "p1", "value": "en" },
         {
           "key": "playback.subtitle_language",
           "scope": "profile_device",
@@ -257,12 +252,7 @@
         "series_ids": ["s-101"]
       },
       "stored": [
-        {
-          "key": "playback.subtitle_language",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": "en"
-        },
+        { "key": "playback.subtitle_language", "scope": "profile", "profile_id": "p1", "value": "en" },
         {
           "key": "playback.subtitle_language",
           "scope": "profile_device",
@@ -293,12 +283,7 @@
         "series_ids": ["s-101"]
       },
       "stored": [
-        {
-          "key": "playback.subtitle_language",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": "en"
-        },
+        { "key": "playback.subtitle_language", "scope": "profile", "profile_id": "p1", "value": "en" },
         {
           "key": "playback.subtitle_language",
           "scope": "profile_device",
@@ -322,12 +307,7 @@
         "series_ids": ["s-101"]
       },
       "stored": [
-        {
-          "key": "playback.subtitle_language",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": "en"
-        }
+        { "key": "playback.subtitle_language", "scope": "profile", "profile_id": "p1", "value": "en" }
       ],
       "expected": [{ "key": "playback.subtitle_language", "value": "en", "source": "profile" }]
     },
@@ -361,12 +341,7 @@
       "keys": ["playback.subtitle_language"],
       "context": { "profile_id": "p1" },
       "stored": [
-        {
-          "key": "playback.subtitle_language",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": "en"
-        },
+        { "key": "playback.subtitle_language", "scope": "profile", "profile_id": "p1", "value": "en" },
         {
           "key": "playback.subtitle_language",
           "scope": "profile_device",
@@ -383,12 +358,7 @@
       "keys": ["playback.subtitle_language"],
       "context": { "profile_id": "p1", "device_id": "d1", "series_ids": ["s-101"] },
       "stored": [
-        {
-          "key": "playback.subtitle_language",
-          "scope": "profile",
-          "profile_id": "p2",
-          "value": "xx"
-        },
+        { "key": "playback.subtitle_language", "scope": "profile", "profile_id": "p2", "value": "xx" },
         {
           "key": "playback.subtitle_language",
           "scope": "profile_device",
@@ -462,7 +432,11 @@
     {
       "name": "batch_resolves_each_key_independently",
       "description": "One batch, three keys, three different sources: a device override, a profile value, and a default.",
-      "keys": ["playback.preferred_quality", "playback.subtitle_mode", "playback.audio_language"],
+      "keys": [
+        "playback.preferred_quality",
+        "playback.subtitle_mode",
+        "playback.audio_language"
+      ],
       "context": { "profile_id": "p1", "device_id": "d1" },
       "stored": [
         {
@@ -472,12 +446,7 @@
           "device_id": "d1",
           "value": "1080p"
         },
-        {
-          "key": "playback.subtitle_mode",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": "always"
-        }
+        { "key": "playback.subtitle_mode", "scope": "profile", "profile_id": "p1", "value": "always" }
       ],
       "expected": [
         { "key": "playback.preferred_quality", "value": "1080p", "source": "profile_device" },
@@ -573,12 +542,7 @@
       "keys": ["playback.max_bitrate_kbps"],
       "context": { "profile_id": "p1" },
       "stored": [
-        {
-          "key": "playback.max_bitrate_kbps",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": null
-        }
+        { "key": "playback.max_bitrate_kbps", "scope": "profile", "profile_id": "p1", "value": null }
       ],
       "constraint_bindings": [
         {
@@ -629,12 +593,7 @@
       "keys": ["playback.max_bitrate_kbps"],
       "context": { "profile_id": "p1" },
       "stored": [
-        {
-          "key": "playback.max_bitrate_kbps",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": null
-        }
+        { "key": "playback.max_bitrate_kbps", "scope": "profile", "profile_id": "p1", "value": null }
       ],
       "constraint_bindings": [
         {
@@ -676,12 +635,7 @@
       "keys": ["catalog.metadata_language"],
       "context": { "profile_id": "p1" },
       "stored": [
-        {
-          "key": "catalog.metadata_language",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": "ja"
-        }
+        { "key": "catalog.metadata_language", "scope": "profile", "profile_id": "p1", "value": "ja" }
       ],
       "constraint_bindings": [
         {
@@ -708,12 +662,7 @@
       "keys": ["catalog.metadata_language"],
       "context": { "profile_id": "p1" },
       "stored": [
-        {
-          "key": "catalog.metadata_language",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": "fr"
-        }
+        { "key": "catalog.metadata_language", "scope": "profile", "profile_id": "p1", "value": "fr" }
       ],
       "constraint_bindings": [
         {
@@ -1136,191 +1085,115 @@
     {
       "name": "theme_music_is_opt_in",
       "keys": ["ui.theme_music_enabled", "ui.theme_music_loop"],
-      "context": { "profile_id": "p1", "device_id": "browser" },
+      "context": {"profile_id": "p1", "device_id": "browser"},
       "stored": [],
       "expected": [
-        { "key": "ui.theme_music_enabled", "value": false, "source": "default" },
-        { "key": "ui.theme_music_loop", "value": false, "source": "default" }
+        {"key": "ui.theme_music_enabled", "value": false, "source": "default"},
+        {"key": "ui.theme_music_loop", "value": false, "source": "default"}
       ]
     },
     {
       "name": "theme_music_device_overrides_profile",
       "keys": ["ui.theme_music_enabled"],
-      "context": { "profile_id": "p1", "device_id": "browser" },
+      "context": {"profile_id": "p1", "device_id": "browser"},
       "stored": [
-        { "key": "ui.theme_music_enabled", "scope": "profile", "profile_id": "p1", "value": true },
-        {
-          "key": "ui.theme_music_enabled",
-          "scope": "profile_device",
-          "profile_id": "p1",
-          "device_id": "browser",
-          "value": false
-        }
+        {"key": "ui.theme_music_enabled", "scope": "profile", "profile_id": "p1", "value": true},
+        {"key": "ui.theme_music_enabled", "scope": "profile_device", "profile_id": "p1", "device_id": "browser", "value": false}
       ],
-      "expected": [{ "key": "ui.theme_music_enabled", "value": false, "source": "profile_device" }]
+      "expected": [{"key": "ui.theme_music_enabled", "value": false, "source": "profile_device"}]
     },
     {
       "name": "title_art_follows_each_device",
       "description": "With no profile value, every device follows its own choice; a device that never chose shows title art.",
       "keys": ["ui.title_art"],
-      "context": { "profile_id": "p1", "device_id": "phone" },
+      "context": {"profile_id": "p1", "device_id": "phone"},
       "stored": [
-        {
-          "key": "ui.title_art",
-          "scope": "profile_device",
-          "profile_id": "p1",
-          "device_id": "phone",
-          "value": false
-        },
-        {
-          "key": "ui.title_art",
-          "scope": "profile_device",
-          "profile_id": "p1",
-          "device_id": "living-room",
-          "value": true
-        }
+        {"key": "ui.title_art", "scope": "profile_device", "profile_id": "p1", "device_id": "phone", "value": false},
+        {"key": "ui.title_art", "scope": "profile_device", "profile_id": "p1", "device_id": "living-room", "value": true}
       ],
-      "expected": [{ "key": "ui.title_art", "value": false, "source": "profile_device" }]
+      "expected": [{"key": "ui.title_art", "value": false, "source": "profile_device"}]
     },
     {
       "name": "title_art_profile_value_applies_to_all_devices",
       "description": "A profile value is the apply-to-all-devices choice, so it wins over the device's own value instead of being the fallback.",
       "keys": ["ui.title_art"],
-      "context": { "profile_id": "p1", "device_id": "phone" },
+      "context": {"profile_id": "p1", "device_id": "phone"},
       "stored": [
-        { "key": "ui.title_art", "scope": "profile", "profile_id": "p1", "value": true },
-        {
-          "key": "ui.title_art",
-          "scope": "profile_device",
-          "profile_id": "p1",
-          "device_id": "phone",
-          "value": false
-        }
+        {"key": "ui.title_art", "scope": "profile", "profile_id": "p1", "value": true},
+        {"key": "ui.title_art", "scope": "profile_device", "profile_id": "p1", "device_id": "phone", "value": false}
       ],
-      "expected": [{ "key": "ui.title_art", "value": true, "source": "profile" }]
+      "expected": [{"key": "ui.title_art", "value": true, "source": "profile"}]
     },
     {
       "name": "subtitle_sync_follows_profile",
       "description": "From revision 19 player.subtitle_sync_ms is also a profile value: a device with no offset of its own uses the profile's.",
       "keys": ["player.subtitle_sync_ms"],
-      "context": { "profile_id": "p1", "device_id": "another-device" },
-      "stored": [
-        { "key": "player.subtitle_sync_ms", "scope": "profile", "profile_id": "p1", "value": -750 }
-      ],
-      "expected": [{ "key": "player.subtitle_sync_ms", "value": -750, "source": "profile" }]
+      "context": {"profile_id": "p1", "device_id": "another-device"},
+      "stored": [{"key": "player.subtitle_sync_ms", "scope": "profile", "profile_id": "p1", "value": -750}],
+      "expected": [{"key": "player.subtitle_sync_ms", "value": -750, "source": "profile"}]
     },
     {
       "name": "subtitle_sync_device_wins",
       "description": "A device's own player.subtitle_sync_ms still wins over the profile offset on that device.",
       "keys": ["player.subtitle_sync_ms"],
-      "context": { "profile_id": "p1", "device_id": "d1" },
+      "context": {"profile_id": "p1", "device_id": "d1"},
       "stored": [
-        { "key": "player.subtitle_sync_ms", "scope": "profile", "profile_id": "p1", "value": -750 },
-        {
-          "key": "player.subtitle_sync_ms",
-          "scope": "profile_device",
-          "profile_id": "p1",
-          "device_id": "d1",
-          "value": 250
-        }
+        {"key": "player.subtitle_sync_ms", "scope": "profile", "profile_id": "p1", "value": -750},
+        {"key": "player.subtitle_sync_ms", "scope": "profile_device", "profile_id": "p1", "device_id": "d1", "value": 250}
       ],
-      "expected": [{ "key": "player.subtitle_sync_ms", "value": 250, "source": "profile_device" }]
+      "expected": [{"key": "player.subtitle_sync_ms", "value": 250, "source": "profile_device"}]
     },
     {
       "name": "buffering_quality_defaults_to_automatic",
       "keys": ["playback.buffering_quality_mode"],
-      "context": { "profile_id": "p1", "device_id": "browser" },
+      "context": {"profile_id": "p1", "device_id": "browser"},
       "stored": [],
-      "expected": [
-        { "key": "playback.buffering_quality_mode", "value": "always", "source": "default" }
-      ]
+      "expected": [{"key": "playback.buffering_quality_mode", "value": "always", "source": "default"}]
     },
     {
       "name": "buffering_quality_profile_applies_without_device_override",
       "keys": ["playback.buffering_quality_mode"],
-      "context": { "profile_id": "p1", "device_id": "browser" },
+      "context": {"profile_id": "p1", "device_id": "browser"},
       "stored": [
-        {
-          "key": "playback.buffering_quality_mode",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": "ask"
-        },
-        {
-          "key": "playback.buffering_quality_mode",
-          "scope": "profile_device",
-          "profile_id": "p1",
-          "device_id": "another-device",
-          "value": "never"
-        }
+        {"key": "playback.buffering_quality_mode", "scope": "profile", "profile_id": "p1", "value": "ask"},
+        {"key": "playback.buffering_quality_mode", "scope": "profile_device", "profile_id": "p1", "device_id": "another-device", "value": "never"}
       ],
-      "expected": [
-        { "key": "playback.buffering_quality_mode", "value": "ask", "source": "profile" }
-      ]
+      "expected": [{"key": "playback.buffering_quality_mode", "value": "ask", "source": "profile"}]
     },
     {
       "name": "buffering_quality_device_overrides_profile",
       "keys": ["playback.buffering_quality_mode"],
-      "context": { "profile_id": "p1", "device_id": "browser" },
+      "context": {"profile_id": "p1", "device_id": "browser"},
       "stored": [
-        {
-          "key": "playback.buffering_quality_mode",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": "ask"
-        },
-        {
-          "key": "playback.buffering_quality_mode",
-          "scope": "profile_device",
-          "profile_id": "p1",
-          "device_id": "browser",
-          "value": "never"
-        }
+        {"key": "playback.buffering_quality_mode", "scope": "profile", "profile_id": "p1", "value": "ask"},
+        {"key": "playback.buffering_quality_mode", "scope": "profile_device", "profile_id": "p1", "device_id": "browser", "value": "never"}
       ],
-      "expected": [
-        { "key": "playback.buffering_quality_mode", "value": "never", "source": "profile_device" }
-      ]
+      "expected": [{"key": "playback.buffering_quality_mode", "value": "never", "source": "profile_device"}]
     },
     {
       "name": "marker_provenance_device_overrides_profile",
       "description": "The two marker provenance toggles resolve independently: a device-scoped value wins where it is set, and the other key still follows the profile.",
       "keys": ["playback.show_marker_confidence", "playback.show_marker_source"],
-      "context": { "profile_id": "p1", "device_id": "browser" },
+      "context": {"profile_id": "p1", "device_id": "browser"},
       "stored": [
-        {
-          "key": "playback.show_marker_confidence",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": true
-        },
-        {
-          "key": "playback.show_marker_source",
-          "scope": "profile",
-          "profile_id": "p1",
-          "value": true
-        },
-        {
-          "key": "playback.show_marker_confidence",
-          "scope": "profile_device",
-          "profile_id": "p1",
-          "device_id": "browser",
-          "value": false
-        }
+        {"key": "playback.show_marker_confidence", "scope": "profile", "profile_id": "p1", "value": true},
+        {"key": "playback.show_marker_source", "scope": "profile", "profile_id": "p1", "value": true},
+        {"key": "playback.show_marker_confidence", "scope": "profile_device", "profile_id": "p1", "device_id": "browser", "value": false}
       ],
       "expected": [
-        { "key": "playback.show_marker_confidence", "value": false, "source": "profile_device" },
-        { "key": "playback.show_marker_source", "value": true, "source": "profile" }
+        {"key": "playback.show_marker_confidence", "value": false, "source": "profile_device"},
+        {"key": "playback.show_marker_source", "value": true, "source": "profile"}
       ]
     },
     {
       "name": "cellular_quality_defaults_to_auto_10mbps",
       "description": "From revision 30 the cellular quality pair defaults to Auto with a 10 Mbps cap, allowing direct play up to 10 Mbps on mobile data while still supporting profile and device overrides.",
       "keys": ["playback.cellular_preferred_quality", "playback.cellular_max_bitrate_kbps"],
-      "context": { "profile_id": "p1", "device_id": "phone" },
+      "context": {"profile_id": "p1", "device_id": "phone"},
       "stored": [],
       "expected": [
-        { "key": "playback.cellular_preferred_quality", "value": "auto", "source": "default" },
-        { "key": "playback.cellular_max_bitrate_kbps", "value": 10000, "source": "default" }
+        {"key": "playback.cellular_preferred_quality", "value": "auto", "source": "default"},
+        {"key": "playback.cellular_max_bitrate_kbps", "value": 10000, "source": "default"}
       ]
     }
   ]
