@@ -215,8 +215,15 @@
       "AccountIdentityCollection": {
         "additionalProperties": false,
         "properties": {
+          "can_link": {
+            "description": "Whether the caller may link another identity (createAccountIdentityLinkTicket, linkAccountIdentityWithCredentials, linkAccountIdentityWithNetwork): false for an API key or an impersonation session, and in demo mode for a caller that is not an administrator. listAuthProviders names the providers there are to link",
+            "examples": [
+              true
+            ],
+            "type": "boolean"
+          },
           "can_unlink": {
-            "description": "Whether deleteAccountIdentity would disconnect an identity now for the profile asking: that profile is the account's household manager (deleteAccountIdentity describes who is), and the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity",
+            "description": "Whether deleteAccountIdentity would disconnect an identity now for the profile asking: that profile is the account's household manager (deleteAccountIdentity describes who is), and the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity, and in demo mode for a caller that is not an administrator",
             "examples": [
               true
             ],
@@ -236,6 +243,7 @@
         },
         "required": [
           "can_unlink",
+          "can_link",
           "items"
         ],
         "type": "object"
@@ -43019,6 +43027,10 @@
             "description": "Opaque revision of this document",
             "type": "string"
           },
+          "revoke_other_sessions": {
+            "description": "Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, who may still revoke the current session",
+            "type": "boolean"
+          },
           "state": {
             "description": "Support and configuration state, not health",
             "enum": [
@@ -43034,6 +43046,7 @@
           "available",
           "last_seen",
           "admin_management",
+          "revoke_other_sessions",
           "revision",
           "state",
           "allowed"
@@ -64149,6 +64162,7 @@
           "account"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -64326,6 +64340,7 @@
           "account"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -64503,6 +64518,7 @@
           "account"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -64681,6 +64697,7 @@
           "account"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -64851,6 +64868,7 @@
           "account"
         ],
         "x-silo-class": "authenticated",
+        "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "non_retryable",
         "x-silo-service-backed": true
       }
@@ -65012,6 +65030,7 @@
           "account"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -65296,6 +65315,7 @@
           "account"
         ],
         "x-silo-class": "profile_scoped",
+        "x-silo-demo-restricted": true,
         "x-silo-retry-safety": "natural_idempotent",
         "x-silo-service-backed": true
       }
@@ -155360,6 +155380,7 @@
     },
     "/api/v2/auth/sessions/{id}": {
       "delete": {
+        "description": "In demo mode a caller that is not an administrator may revoke only the session making the request; any other session is 403 permission_denied. getLoginSessionCapabilities reports this as revoke_other_sessions.",
         "operationId": "deleteSession",
         "parameters": [
           {
@@ -155400,6 +155421,16 @@
               }
             },
             "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            },
+            "description": "Forbidden"
           },
           "404": {
             "content": {

@@ -221,6 +221,13 @@ func demoRestricted(ctx context.Context, settings apimw.DemoSettingsReader) bool
 	return claims == nil || claims.Role != models.RoleAdmin
 }
 
+// demoRestrictedProblem is demoGate's refusal, for an operation that demo
+// mode restricts only in part (deleteSession may still end the caller's own
+// session), so its handler decides.
+func demoRestrictedProblem() *Problem {
+	return NewProblem(TypePermissionDenied, "This action is not available in demo mode.")
+}
+
 // denialWriter buffers what a gate writes on denial. Nothing reaches the
 // client until problem() has translated it.
 type denialWriter struct {

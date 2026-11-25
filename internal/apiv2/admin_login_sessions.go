@@ -28,16 +28,20 @@ type LoginSessionCapabilities struct {
 	Available       bool `json:"available"`
 	LastSeen        bool `json:"last_seen" doc:"Real authenticated request activity is recorded, at most once per minute per session"`
 	AdminManagement bool `json:"admin_management" doc:"Admin login-session operations are served; normal administrator authorization and owner protection still apply"`
+	// RevokeOtherSessions is false in demo mode for a caller that is not an
+	// administrator: deleteSession then ends only the caller's own session.
+	RevokeOtherSessions bool `json:"revoke_other_sessions" doc:"Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, who may still revoke the current session"`
 }
 
 func registerLoginSessionCapabilities(reg *Registry) {
-	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/auth/sessions/capabilities", "getLoginSessionCapabilities", "auth", "Discover login-session listing, activity tracking and revocation support."), Class: ClassAuthenticated, ServiceBacked: true}, func(context.Context, *CapabilityInput) (*LoginSessionCapabilitiesOutput, error) {
+	Register(reg, Operation{Operation: humaOp(http.MethodGet, Prefix+"/auth/sessions/capabilities", "getLoginSessionCapabilities", "auth", "Discover login-session listing, activity tracking and revocation support."), Class: ClassAuthenticated, ServiceBacked: true}, func(ctx context.Context, _ *CapabilityInput) (*LoginSessionCapabilitiesOutput, error) {
 		available := reg.deps.Sessions != nil
 		state := StateUnsupported
 		if available {
 			state = StateAvailable
 		}
-		return &LoginSessionCapabilitiesOutput{Body: LoginSessionCapabilities{Capability: Capability{State: state}, Available: available, LastSeen: available, AdminManagement: reg.deps.AdminLoginSessions != nil && reg.deps.AdminLoginSessions.AdminLoginSessionsAvailable()}}, nil
+		return &LoginSessionCapabilitiesOutput{Body: LoginSessionCapabilities{Capability: Capability{State: state}, Available: available, LastSeen: available, AdminManagement: reg.deps.AdminLoginSessions != nil && reg.deps.AdminLoginSessions.AdminLoginSessionsAvailable(),
+			RevokeOtherSessions: available && !demoRestricted(ctx, reg.deps.DemoSettings)}}, nil
 	})
 }
 

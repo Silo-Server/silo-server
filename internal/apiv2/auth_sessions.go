@@ -213,7 +213,9 @@ func registerAuthSessions(reg *Registry) {
 	})
 	del := humaOp(http.MethodDelete, Prefix+"/auth/sessions/{id}", "deleteSession", "auth",
 		"Revoke one of the caller's login sessions.")
-	del.Errors = []int{http.StatusNotFound}
+	del.Description = "In demo mode a caller that is not an administrator may revoke only the session making the request; any other session is 403 permission_denied. getLoginSessionCapabilities reports this as revoke_other_sessions."
+	// 403: another session, refused in demo mode.
+	del.Errors = []int{http.StatusNotFound, http.StatusForbidden}
 	Register(reg, Operation{Operation: del, RetrySafety: RetrySafetyNaturalIdempotent, Class: ClassAuthenticated, ServiceBacked: true, Audited: true}, reg.deleteSession)
 	setup := humaOp(http.MethodPost, Prefix+"/auth/setup", "setupServer", "system",
 		"Create the first administrator account and open its session.")
@@ -381,6 +383,11 @@ func (reg *Registry) deleteSession(ctx context.Context, in *DeleteSessionInput) 
 	claims := claimsFrom(ctx)
 	if claims == nil {
 		return nil, NewProblem(TypeAuthenticationRequired, "Authentication is required.")
+	}
+	// Demo visitors share one account, so its other sessions are other
+	// visitors': they may sign themselves out, not each other.
+	if string(in.ID) != claims.SessionID && demoRestricted(ctx, reg.deps.DemoSettings) {
+		return nil, demoRestrictedProblem()
 	}
 	if err := reg.deps.Sessions.RevokeSession(ctx, string(in.ID), claims.UserID); err != nil {
 		return nil, serviceProblem(err)

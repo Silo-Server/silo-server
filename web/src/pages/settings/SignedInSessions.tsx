@@ -17,5 +17,5 @@ export default function SignedInSessions() {
     );
   if (!capabilities.data?.available)
     return <p role="status">{t("web.settings.signedInSessions.unavailable")}</p>;
-  return <LoginSessionsPanel />;
+  return <LoginSessionsPanel manageOthers={capabilities.data.revoke_other_sessions} />;
 }

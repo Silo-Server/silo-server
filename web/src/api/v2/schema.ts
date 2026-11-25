@@ -7131,7 +7131,10 @@ export interface paths {
     get?: never;
     put?: never;
     post?: never;
-    /** Revoke one of the caller's login sessions. */
+    /**
+     * Revoke one of the caller's login sessions.
+     * @description In demo mode a caller that is not an administrator may revoke only the session making the request; any other session is 403 permission_denied. getLoginSessionCapabilities reports this as revoke_other_sessions.
+     */
     delete: operations["deleteSession"];
     options?: never;
     head?: never;
@@ -14038,7 +14041,12 @@ export interface components {
     };
     AccountIdentityCollection: {
       /**
-       * @description Whether deleteAccountIdentity would disconnect an identity now for the profile asking: that profile is the account's household manager (deleteAccountIdentity describes who is), and the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity
+       * @description Whether the caller may link another identity (createAccountIdentityLinkTicket, linkAccountIdentityWithCredentials, linkAccountIdentityWithNetwork): false for an API key or an impersonation session, and in demo mode for a caller that is not an administrator. listAuthProviders names the providers there are to link
+       * @example true
+       */
+      can_link: boolean;
+      /**
+       * @description Whether deleteAccountIdentity would disconnect an identity now for the profile asking: that profile is the account's household manager (deleteAccountIdentity describes who is), and the account has another identity, or its local password still signs in (the account's password sign-in is on, and local password sign-in is on for the server or the account is break-glass). False with no identity, and in demo mode for a caller that is not an administrator
        * @example true
        */
       can_unlink: boolean;
@@ -30976,6 +30984,8 @@ export interface components {
       last_seen: boolean;
       /** @description Opaque revision of this document */
       revision: string;
+      /** @description Whether deleteSession may revoke the caller's sessions other than the one making the request. False in demo mode for a caller that is not an administrator, who may still revoke the current session */
+      revoke_other_sessions: boolean;
       /**
        * @description Support and configuration state, not health
        * @enum {string}
@@ -102066,6 +102076,15 @@ export interface operations {
       };
       /** @description Unauthorized */
       401: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/problem+json": components["schemas"]["Problem"];
+        };
+      };
+      /** @description Forbidden */
+      403: {
         headers: {
           [name: string]: unknown;
         };
