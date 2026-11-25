@@ -65,6 +65,11 @@ const (
 	// keeps refreshing a key, so background reads stop soon after the
 	// Insights page is closed.
 	adminInsightsKeepWarmFor = 5 * time.Minute
+	// adminInsightsMaxEntries caps the cached reads one server holds. Keys
+	// multiply across ranges, timezones, filters and parameters, and an
+	// admin:monitor API key can ask for any of them; the least recently read
+	// entry makes room for a new one.
+	adminInsightsMaxEntries = 128
 	// adminInsightsSweepInterval is how often the warm keys are checked.
 	adminInsightsSweepInterval = 15 * time.Second
 )
@@ -373,12 +378,27 @@ func (p *AdminInsightsProvider) publishLocked(key string, gen, dropGen uint64, s
 	if e != nil && e.filledAt.After(start) {
 		return
 	}
+	if e == nil && len(p.entries) >= adminInsightsMaxEntries {
+		p.evictLeastReadLocked()
+	}
 	// A refresh is no read: keeping lastRead lets an unread key expire.
 	lastRead := time.Now()
 	if e != nil {
 		lastRead = e.lastRead
 	}
 	p.entries[key] = &insightsEntry{val: val, gen: gen, filledAt: start, cost: time.Since(start), lastRead: lastRead, load: load}
+}
+
+// evictLeastReadLocked drops the entry read longest ago.
+func (p *AdminInsightsProvider) evictLeastReadLocked() {
+	var oldestKey string
+	var oldest time.Time
+	for key, e := range p.entries {
+		if oldestKey == "" || e.lastRead.Before(oldest) {
+			oldestKey, oldest = key, e.lastRead
+		}
+	}
+	delete(p.entries, oldestKey)
 }
 
 // startRefreshLocked starts a background refresh of key unless one is running.

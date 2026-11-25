@@ -3,6 +3,7 @@ package handlers
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -423,5 +424,31 @@ func TestAdminInsightsRefreshFailureAndEviction(t *testing.T) {
 				t.Fatal("a refresh brought back a key evicted while it ran")
 			}
 		})
+	})
+}
+
+// TestAdminInsightsCacheEvictsLeastReadAtCapacity pins the bound on cached
+// reads: a new key past adminInsightsMaxEntries evicts the entry read longest
+// ago, so a caller asking for many key variants can't grow the cache, or the
+// sweep's refreshes, without limit.
+func TestAdminInsightsCacheEvictsLeastReadAtCapacity(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		p := &AdminInsightsProvider{}
+		for i := range adminInsightsMaxEntries + 1 {
+			if _, err := cachedInsightsRead(t.Context(), p, fmt.Sprintf("k%d", i), func(context.Context) (int, error) {
+				return i, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			time.Sleep(time.Second) //nolint:forbidigo // synctest fake clock: sleeping advances time; nothing waits on the real clock.
+		}
+		p.mu.Lock()
+		defer p.mu.Unlock()
+		if n := len(p.entries); n != adminInsightsMaxEntries {
+			t.Fatalf("entries = %d, want %d", n, adminInsightsMaxEntries)
+		}
+		if _, ok := p.entries["k0"]; ok {
+			t.Fatal("the entry read longest ago stayed")
+		}
 	})
 }
