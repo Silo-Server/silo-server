@@ -774,10 +774,14 @@ account.
 
 | Refusal | Problem |
 | --- | --- |
-| The grant was already used; it names another server, or its `origins` leave out the redeem's `origin`; it doesn't verify by the account's live person key (unknown account, replaced or revoked person key); the account is an administrator's or disabled; the outer `kid` isn't the `app_key`'s ID | 403 `app_grant_invalid` |
+| The grant was already used; it names another server, or its `origins` leave out the redeem's `origin`; it doesn't verify by the account's live person key (unknown account, replaced or revoked person key); the account is an administrator's or disabled | 403 `app_grant_invalid` |
 | The grant's own `exp` has passed | 403 `app_grant_expired` |
-| The outer signature doesn't verify by the `app_key`, or the `grant-redeem` envelope is outside its own `iat` and `exp` | 401 `signature_invalid` |
+| The redeemer doesn't hold the grant's `app_key` (the outer signature doesn't verify by it, or the envelope's `kid` isn't that key's ID), or the `grant-redeem` envelope is outside its own `iat` and `exp` | 401 `signature_invalid` |
 | The `app_key` is already enrolled on this server | 409 `conflict` |
+
+A revoked app key is still enrolled: a public key is enrolled once on a server
+and can't be enrolled again. An app the person removed and then allows again
+makes a new key and asks for a new grant.
 
 **Sealed reply.** The routes that open a session answer
 `{ "epk", "nonce", "ciphertext" }`, the plaintext sealed to the payload's

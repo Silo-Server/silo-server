@@ -11,7 +11,7 @@
 #   scripts/sync-app-key-vectors --local <checkout>
 set -eu
 
-COMMIT=23e96727a97a1e595af4b0a4de8fbad4a6123b58
+COMMIT=bb96272d27674a6a643a6ad9c0fdb0d134792398
 FILES='signed-messages.json sealed-reply.json keys.json links.json'
 
 die() { echo "sync-app-key-vectors: $*" >&2; exit 1; }
