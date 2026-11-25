@@ -19,10 +19,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Silo-Server/silo-server/internal/adminjob"
+	"github.com/Silo-Server/silo-server/internal/appkeys/appkeystest"
 	"github.com/Silo-Server/silo-server/internal/auth"
 	"github.com/Silo-Server/silo-server/internal/backup/backuptest"
 	"github.com/Silo-Server/silo-server/internal/blobstore"
@@ -170,6 +172,14 @@ func seedRoundTrip(t *testing.T, pool *pgxpool.Pool, settings *serversettings.En
 	// live server.
 	exec(`INSERT INTO web_push_subscriptions (id, user_id, profile_id, endpoint, p256dh, auth, device_name, enabled, consecutive_failures, created_at, updated_at)
 		VALUES ($1, $2, $3, 'https://push.example.test/'||$1, 'key', 'auth', 'Browser', true, 0, now(), now())`, "push-"+suffix, userID, profileID)
+	// App keys of this passwordless account, which a separate restore
+	// leaves out and a full restore carries.
+	person, device := appkeystest.NewKey(t), appkeystest.NewKey(t)
+	personID := uuid.NewString()
+	exec(`INSERT INTO auth_person_keys (id, user_id, public_key, key_id, enrolled_via) VALUES ($1, $2, $3, $4, 'session')`,
+		personID, userID, person.Public().Bytes(), person.Public().KeyID())
+	exec(`INSERT INTO auth_device_keys (id, user_id, public_key, key_id, kind, name, enrolled_via, person_key_id)
+		VALUES ($1, $2, $3, $4, 'device', 'Phone', 'introduce', $5)`, uuid.NewString(), userID, device.Public().Bytes(), device.Public().KeyID(), personID)
 	seed.userID = userID
 	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM user_profiles WHERE id = $1`, profileID) })
 	// An uploaded subtitle, which the backup keeps with
@@ -296,6 +306,10 @@ func TestBackupRestoreRoundTripDB(t *testing.T) {
 		}
 		defer restoredPool.Close()
 		checkRestoredFiles(t, seed, blobsInto, restoredPool)
+		var keys int
+		if err := restoredPool.QueryRow(ctx, `SELECT (SELECT count(*) FROM auth_person_keys) + (SELECT count(*) FROM auth_device_keys)`).Scan(&keys); err != nil || keys != 0 {
+			t.Fatalf("the separate copy holds %d app keys (%v), want none", keys, err)
+		}
 		checkCredentials(t, loader, pool, dsn, into, restoredPool, seed.userID)
 		restoredSettings := serversettings.NewEncryptedSettingsRepo(serversettings.NewServerSettingsRepo(restoredPool), cipher)
 		if got, err := restoredSettings.Get(ctx, seed.secretKey); err != nil || got != seed.secretValue {
@@ -463,7 +477,7 @@ func checkCredentials(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn, in
 		t.Fatal(err)
 	}
 
-	carried, err := loader.CarryCredentials(ctx, into, dsn)
+	carried, err := loader.CarryCredentials(ctx, into, dsn, AppKeysKept)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -538,9 +552,10 @@ func checkAccountRollback(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn
 }
 
 // checkOtherDeployment: the restore reads this server's identity to tell its
-// own backups from another deployment's, and a carry for another deployment
-// (no live URL) leaves the restored database none of the carried rows, its
-// own copies included.
+// own backups from another deployment's. A full restore of another
+// deployment's backup (no live URL) leaves the restored database none of the
+// carried rows, its own copies included, but the backup's app keys; a
+// separate restore leaves none at all.
 func checkOtherDeployment(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn, into string, restored *pgxpool.Pool) {
 	t.Helper()
 	ctx := t.Context()
@@ -552,13 +567,30 @@ func checkOtherDeployment(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn
 	if got, err := loader.ServerID(ctx, dsn); err != nil || got != want || got == "" {
 		t.Fatalf("live server id = %q (%v), want %q", got, err, want)
 	}
-	if _, err := loader.CarryCredentials(ctx, into, ""); err != nil {
-		t.Fatal(err)
-	}
-	for _, table := range secretTablesHandled(secretCarried) {
+	count := func(table string) int {
+		t.Helper()
 		var n int
-		if err := restored.QueryRow(ctx, `SELECT count(*) FROM `+table.name).Scan(&n); err != nil || n != 0 {
-			t.Fatalf("a restore for another deployment kept %d %s rows (%v)", n, table.name, err)
+		if err := restored.QueryRow(ctx, `SELECT count(*) FROM `+table).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	kept := map[string]int{tableAuthPersonKeys: count(tableAuthPersonKeys), tableAuthDeviceKeys: count(tableAuthDeviceKeys)}
+	if kept[tableAuthDeviceKeys] == 0 {
+		t.Fatal("the restored database holds no app keys to keep")
+	}
+	for _, keys := range []AppKeyCarry{AppKeysKept, AppKeysLeftOut} {
+		if _, err := loader.CarryCredentials(ctx, into, "", keys); err != nil {
+			t.Fatal(err)
+		}
+		for _, table := range secretTablesHandled(secretCarried) {
+			want := 0
+			if keys == AppKeysKept && table.carry.restoredStay {
+				want = kept[table.name]
+			}
+			if n := count(table.name); n != want {
+				t.Fatalf("a restore for another deployment (app keys %d) kept %d %s rows, want %d", keys, n, table.name, want)
+			}
 		}
 	}
 }
@@ -663,7 +695,7 @@ func checkStricterFlags(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn, 
 		VALUES (987654321, 'removed', 'plex', 'http://plex.example', true) RETURNING id::text`).Scan(&history); err != nil {
 		t.Fatal(err)
 	}
-	carried, err := loader.CarryCredentials(ctx, into, dsn)
+	carried, err := loader.CarryCredentials(ctx, into, dsn, AppKeysKept)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -760,7 +792,7 @@ func checkLiveReleasesAndNodes(t *testing.T, loader PGLoader, pool *pgxpool.Pool
 		_, _ = pool.Exec(context.Background(), `DELETE FROM plugin_repositories WHERE id = $1`, catalogID)
 	})
 	exec(pool, `UPDATE plugin_installations SET repository_id = $2, version = '3.0.0' WHERE id = $1`, same, catalogID)
-	if _, err := loader.CarryCredentials(ctx, into, dsn); err != nil {
+	if _, err := loader.CarryCredentials(ctx, into, dsn, AppKeysKept); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := loader.CarryPluginReleases(ctx, into, dsn); err != nil {
@@ -773,7 +805,7 @@ func checkLiveReleasesAndNodes(t *testing.T, loader PGLoader, pool *pgxpool.Pool
 	}
 	exec(pool, `INSERT INTO stream_nodes (name, type, url, enabled) VALUES ('live-node', 'transcode', 'http://live.invalid', true)`)
 	exec(restored, `INSERT INTO stream_nodes (name, type, url, enabled) VALUES ('removed-node', 'transcode', 'http://removed.invalid', true)`)
-	if _, err := loader.CarryCredentials(ctx, into, dsn); err != nil {
+	if _, err := loader.CarryCredentials(ctx, into, dsn, AppKeysKept); err != nil {
 		t.Fatal(err)
 	}
 	var removed, liveNodes int
@@ -868,7 +900,7 @@ func checkOutboundConnections(t *testing.T, loader PGLoader, pool *pgxpool.Pool,
 	})
 	source(restored, kept, "https://then.invalid", "backup-token")
 	source(restored, gone, "https://gone.invalid", "gone-token")
-	carried, err := loader.CarryCredentials(ctx, into, dsn)
+	carried, err := loader.CarryCredentials(ctx, into, dsn, AppKeysKept)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -937,14 +969,14 @@ func checkCarryAutoProvision(t *testing.T, loader PGLoader, pool *pgxpool.Pool, 
 	limited := func(c CarriedCredentials) bool {
 		return slices.ContainsFunc(c.Limited, func(s string) bool { return strings.HasPrefix(s, fmt.Sprintf("sign-in provider %d (oidc)", binding)) })
 	}
-	carried, err := loader.CarryCredentials(ctx, into, dsn)
+	carried, err := loader.CarryCredentials(ctx, into, dsn, AppKeysKept)
 	if err != nil || !limited(carried) || provisions() {
 		t.Fatalf("carried %+v (%v), provisions %v; want the provider kept with account creation off", carried, err, provisions())
 	}
 	if _, err := restored.Exec(ctx, `UPDATE access_groups SET max_streams = 1 WHERE is_default`); err != nil {
 		t.Fatal(err)
 	}
-	if carried, err = loader.CarryCredentials(ctx, into, dsn); err != nil || limited(carried) || !provisions() {
+	if carried, err = loader.CarryCredentials(ctx, into, dsn, AppKeysKept); err != nil || limited(carried) || !provisions() {
 		t.Fatalf("carried %+v (%v), provisions %v; want account creation kept under the same policy", carried, err, provisions())
 	}
 }
@@ -980,13 +1012,13 @@ func checkCarryInvitation(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn
 	}
 	setStreams(pool, 1)
 	setStreams(restored, 0)
-	carried, err := loader.CarryCredentials(ctx, into, dsn)
+	carried, err := loader.CarryCredentials(ctx, into, dsn, AppKeysKept)
 	want := fmt.Sprintf("invitation %d", id)
 	if err != nil || !slices.Contains(carried.Dropped, want) || invited() != 0 {
 		t.Fatalf("carried %+v (%v), want %q dropped: its group had no stream cap in the backup", carried, err, want)
 	}
 	setStreams(restored, 1)
-	if carried, err = loader.CarryCredentials(ctx, into, dsn); err != nil || slices.Contains(carried.Dropped, want) || invited() != 1 {
+	if carried, err = loader.CarryCredentials(ctx, into, dsn, AppKeysKept); err != nil || slices.Contains(carried.Dropped, want) || invited() != 1 {
 		t.Fatalf("carried %+v (%v), want the invitation kept under the same policy", carried, err)
 	}
 	// The group stopped allowing the permissions a new account gets by
@@ -1006,11 +1038,11 @@ func checkCarryInvitation(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn
 	}
 	setPermissions(pool, []string{})
 	setPermissions(restored, auth.DefaultUserPermissions())
-	if carried, err = loader.CarryCredentials(ctx, into, dsn); err != nil || !slices.Contains(carried.Dropped, want) || invited() != 0 {
+	if carried, err = loader.CarryCredentials(ctx, into, dsn, AppKeysKept); err != nil || !slices.Contains(carried.Dropped, want) || invited() != 0 {
 		t.Fatalf("carried %+v (%v), want %q dropped: its group allowed more permissions in the backup", carried, err, want)
 	}
 	setPermissions(restored, []string{})
-	if carried, err = loader.CarryCredentials(ctx, into, dsn); err != nil || slices.Contains(carried.Dropped, want) || invited() != 1 {
+	if carried, err = loader.CarryCredentials(ctx, into, dsn, AppKeysKept); err != nil || slices.Contains(carried.Dropped, want) || invited() != 1 {
 		t.Fatalf("carried %+v (%v), want the invitation kept once the permissions match", carried, err)
 	}
 }
@@ -1026,7 +1058,7 @@ func checkCarryAuthority(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn,
 	if _, err := restored.Exec(ctx, `UPDATE users SET role = 'admin' WHERE id = $1`, userID); err != nil {
 		t.Fatal(err)
 	}
-	carried, err := loader.CarryCredentials(ctx, into, dsn)
+	carried, err := loader.CarryCredentials(ctx, into, dsn, AppKeysKept)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1048,7 +1080,7 @@ func checkCarryAuthority(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn,
 	if _, err := pool.Exec(ctx, `UPDATE users SET library_ids = ARRAY[$2::int] WHERE id = $1`, userID, library); err != nil {
 		t.Fatal(err)
 	}
-	if carried, err = loader.CarryCredentials(ctx, into, dsn); err != nil {
+	if carried, err = loader.CarryCredentials(ctx, into, dsn, AppKeysKept); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(carried.Dropped, demoted) {
@@ -1058,7 +1090,7 @@ func checkCarryAuthority(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn,
 	if _, err := restored.Exec(ctx, `UPDATE users SET library_ids = ARRAY[$2::int] WHERE id = $1`, userID, library); err != nil {
 		t.Fatal(err)
 	}
-	if carried, err = loader.CarryCredentials(ctx, into, dsn); err != nil {
+	if carried, err = loader.CarryCredentials(ctx, into, dsn, AppKeysKept); err != nil {
 		t.Fatal(err)
 	}
 	if slices.Contains(carried.Dropped, demoted) || carried.Kept["api_keys"] != liveKeys-1 {
@@ -1092,7 +1124,7 @@ func checkCarryAuthority(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn,
 	}
 	exec(restored, `INSERT INTO request_user_limits (user_id, limit_mode, approval_mode) VALUES ($1, 'unlimited', 'auto')
 		ON CONFLICT (user_id) DO UPDATE SET limit_mode = 'unlimited', approval_mode = 'auto'`, userID)
-	if carried, err = loader.CarryCredentials(ctx, into, dsn); err != nil {
+	if carried, err = loader.CarryCredentials(ctx, into, dsn, AppKeysKept); err != nil {
 		t.Fatal(err)
 	}
 	if !slices.Contains(carried.Dropped, demoted) {
@@ -1105,7 +1137,7 @@ func checkCarryAuthority(t *testing.T, loader PGLoader, pool *pgxpool.Pool, dsn,
 	exec(restored, `UPDATE request_user_limits SET limit_mode = 'blocked', approval_mode = 'inherit' WHERE user_id = $1`, userID)
 	keptAs := func(want bool, why string) {
 		t.Helper()
-		if carried, err = loader.CarryCredentials(ctx, into, dsn); err != nil {
+		if carried, err = loader.CarryCredentials(ctx, into, dsn, AppKeysKept); err != nil {
 			t.Fatal(err)
 		}
 		if slices.Contains(carried.Dropped, demoted) == want {
@@ -1689,7 +1721,7 @@ func TestServerSpecificSettingsComeFromTheLiveServerDB(t *testing.T) {
 			}
 		}
 	}
-	if _, err := (PGLoader{}).CarryServerSpecificSettings(ctx, restoredURL, liveURL); err != nil {
+	if _, err := (PGLoader{}).CarryServerSpecificSettings(ctx, restoredURL, liveURL, false); err != nil {
 		t.Fatal(err)
 	}
 	for i, key := range keys {
@@ -1836,7 +1868,7 @@ func TestCarryMatchesAProfileWithinItsAccountDB(t *testing.T) {
 	}
 	kidsMapping, defaultMapping := mapping("kids"), mapping("default")
 
-	carried, err := PGLoader{}.CarryCredentials(ctx, restoredURL, liveURL)
+	carried, err := PGLoader{}.CarryCredentials(ctx, restoredURL, liveURL, AppKeysKept)
 	if err != nil {
 		t.Fatal(err)
 	}

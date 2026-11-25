@@ -70,8 +70,8 @@ const (
 var excludedUserTables = map[string]string{
 	// Sessions, credentials, devices, and links to outside accounts.
 	"auth_sessions":                    "login sessions",
-	"auth_person_keys":                 "app person keys, left out like login sessions",
-	"auth_device_keys":                 "app device keys, left out like login sessions",
+	"auth_person_keys":                 "app keys: a full restore carries them; an account restored from a restore set enrolls again",
+	"auth_device_keys":                 "app keys: a full restore carries them; an account restored from a restore set enrolls again",
 	"auth_grant_uses":                  "IDs of grants another app redeemed, kept until each grant expires",
 	tableAPIKeys:                       "API keys",
 	"oauth_completions":                excludedSignIn,
